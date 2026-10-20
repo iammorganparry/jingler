@@ -147,7 +147,8 @@ export class FileChangeTracker {
   readonly #sessionId: string
   readonly #maxArtifactBytes: number
   readonly #shadowIndexRoot: string
-  #shadowIndex: ShadowIndex | null = null
+  // One shadow index per worktree: a session may switch checkout mid-run.
+  readonly #shadowIndexes = new Map<string, ShadowIndex>()
   #operations: Promise<void> = Promise.resolve()
   #disposed = false
 
@@ -173,10 +174,8 @@ export class FileChangeTracker {
 
   async #indexFor(cwd: string): Promise<ShadowIndex> {
     if (this.#disposed) throw new Error("file-change tracker is disposed")
-    if (this.#shadowIndex !== null) {
-      if (this.#shadowIndex.cwd !== cwd) throw new Error("file-change tracker cannot span worktrees")
-      return this.#shadowIndex
-    }
+    const existing = this.#shadowIndexes.get(cwd)
+    if (existing !== undefined) return existing
     const directory = await mkdtemp(join(this.#shadowIndexRoot, "jingler-index-"))
     const shadow = {
       cwd,
@@ -186,7 +185,7 @@ export class FileChangeTracker {
     try {
       const head = await gitMaybe(cwd, ["rev-parse", "--verify", "HEAD"])
       await git(cwd, head === null ? ["read-tree", "--empty"] : ["read-tree", "HEAD"], shadow.environment)
-      this.#shadowIndex = shadow
+      this.#shadowIndexes.set(cwd, shadow)
       return shadow
     } catch (cause) {
       await rm(directory, { recursive: true, force: true })
@@ -212,9 +211,9 @@ export class FileChangeTracker {
     return trackerEffect("Failed to dispose file-change tracker", () =>
       this.#serialized(async () => {
         this.#disposed = true
-        const shadow = this.#shadowIndex
-        this.#shadowIndex = null
-        if (shadow !== null) await rm(shadow.directory, { recursive: true, force: true })
+        const shadows = [...this.#shadowIndexes.values()]
+        this.#shadowIndexes.clear()
+        await Promise.all(shadows.map((shadow) => rm(shadow.directory, { recursive: true, force: true })))
       })
     )
   }

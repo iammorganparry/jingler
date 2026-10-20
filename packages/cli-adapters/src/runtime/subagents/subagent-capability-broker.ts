@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
+import { promisify } from "node:util"
 import {
   SUBAGENT_CAPABILITY_VERSION,
   SubagentJsonValue,
@@ -26,6 +28,7 @@ import {
 } from "effect"
 import type { AgentRuntimeContext } from "../agent/agent-runtime.js"
 import { executeRegistryTool } from "../agent/registry-tool-bridge.js"
+import { activeCheckoutCwd } from "../tools/checkout-tools.js"
 import type { ToolRegistry, ToolResultEnvelope, ToolRisk } from "../tools/tool-registry.js"
 
 const MAX_BODY_BYTES = 1024 * 1024
@@ -33,7 +36,9 @@ const PARENT_ONLY_TOOLS = new Set([
   "jingler_ask_question",
   "plannotator_submit_plan",
   "plannotator_update_plan",
-  "jingler_publish_explanation"
+  "jingler_publish_explanation",
+  // A child must never move the parent's active checkout out from under it.
+  "switch_checkout"
 ])
 const READ_ONLY_AGENTS = new Set(["advisor", "oracle", "reviewer"])
 const SAFE_AGENT_NAME = /^[a-z][a-z0-9-]*$/u
@@ -48,6 +53,8 @@ export interface SubagentParentSpec {
   readonly role: AgentRole
   readonly mode: RuntimeMode
   readonly targetCapabilities: { readonly targetId: string }
+  /** Parent checkout; a child cwd is honoured only inside a worktree of the same repo. */
+  readonly cwd?: string
 }
 
 interface RegisteredChild {
@@ -58,6 +65,7 @@ interface RegisteredChild {
   readonly grantedToolIds: ReadonlySet<string>
   readonly registry: ToolRegistry
   readonly context: AgentRuntimeContext
+  readonly parentCwd: () => string | undefined
   readonly supervisorState: () => SubagentSupervisorSnapshot
 }
 
@@ -149,13 +157,20 @@ export const subagentCapabilityTools = (
   SUPERVISOR_STATE_TOOL
 ]
 
-export const subagentCapabilityToolIds = (
+/**
+ * Tool ceiling for the shared on-disk agent profile. Every parent session
+ * rewrites the same profile file, so it must not depend on the parent's
+ * role/mode — otherwise a read-only parent strips write tools from every later
+ * child. Per-parent narrowing is enforced by the broker's grantedToolIds.
+ */
+export const subagentProfileToolIds = (
   registry: ToolRegistry,
-  spec: SubagentParentSpec,
   agent: string
 ): ReadonlyArray<string> => {
-  const profile = childExecutionProfile(spec, agent)
-  return subagentCapabilityTools(registry, profile.role, profile.mode).map(({ id }) => id)
+  const tools = READ_ONLY_AGENTS.has(agent)
+    ? subagentCapabilityTools(registry, "review", "read-only")
+    : subagentCapabilityTools(registry, "conversation", "auto")
+  return tools.map(({ id }) => id)
 }
 
 const readBody = (request: IncomingMessage): Effect.Effect<string, Error> =>
@@ -272,6 +287,8 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
               grantedToolIds: new Set(tools.map(({ id }) => id)),
               registry: input.registry,
               context: input.context,
+              parentCwd: () =>
+                input.context.checkouts === undefined ? input.spec.cwd : activeCheckoutCwd(input.context.checkouts),
               supervisorState: input.supervisorState
             })
             tokens.add(token)
@@ -312,6 +329,24 @@ export const SubagentCapabilityBrokerLive = Layer.scoped(
   Effect.acquireRelease(makeSubagentCapabilityBroker(), (broker) => broker.close)
 )
 
+const gitCommonDir = (cwd: string): Promise<string | null> =>
+  promisify(execFile)("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd })
+    .then(({ stdout }) => stdout.trim(), () => null)
+
+/**
+ * The cwd a child's tool call runs in: its own worktree when that shares the
+ * parent's git repo, the parent's checkout when it sent none (or the parent has
+ * no cwd), and `null` (forbidden) for any other path.
+ */
+export const resolveChildCwd = async (
+  parentCwd: string | undefined,
+  childCwd: string | undefined
+): Promise<string | undefined | null> => {
+  if (parentCwd === undefined || childCwd === undefined || childCwd === parentCwd) return undefined
+  const [parent, child] = await Promise.all([gitCommonDir(parentCwd), gitCommonDir(childCwd)])
+  return parent !== null && parent === child ? childCwd : null
+}
+
 function* executeCapabilityRequest(
   request: IncomingMessage,
   ref: Ref.Ref<BrokerState>,
@@ -342,6 +377,8 @@ function* executeCapabilityRequest(
   }
   const risk: ToolRisk | null = child.registry.riskFor(decoded.toolId)
   if (risk === null) return yield* writeJson(response, 403, { error: "unknown-tool" })
+  const cwd = yield* Effect.promise(() => resolveChildCwd(child.parentCwd(), decoded.cwd))
+  if (cwd === null) return yield* writeJson(response, 403, { error: "forbidden-cwd" })
   const result = yield* Effect.tryPromise(() => executeRegistryTool({
     registry: child.registry,
     spec: child,
@@ -351,7 +388,8 @@ function* executeCapabilityRequest(
     parameters: decoded.arguments,
     signal: undefined,
     allowed: true,
-    onUpdate: undefined
+    onUpdate: undefined,
+    ...(cwd === undefined ? {} : { cwd })
   }))
   yield* writeJson(response, 200, responseFrom(result.details))
 }

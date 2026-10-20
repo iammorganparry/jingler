@@ -6,6 +6,7 @@
 import type { Project, Session } from "@jingler/core"
 import { workspaceModeOf } from "@jingler/core"
 import { PullRequestView } from "@jingler/ui"
+import { CheckoutChecks } from "./checkout-checks.js"
 import { usePullRequest } from "./use-pull-request.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { usePublish } from "./use-publish.js"
@@ -82,6 +83,8 @@ export function PullRequestPane({
   } = useAdversarialReview(session, { connected })
 
   return (
+    <div className="flex h-full min-h-0 flex-col">
+    <CheckoutChecks session={session} />
     <PullRequestView
       pr={pr}
       connected={connected}
@@ -144,5 +147,6 @@ export function PullRequestPane({
         onArchiveWithoutCleanup: workflow.archiveWithoutCleanup
       }}
     />
+    </div>
   )
 }

@@ -1,5 +1,61 @@
 # @jingler/managed-runtime
 
+## 0.11.2
+
+### Patch Changes
+
+- Updated dependencies [128d57e]
+  - @jingler/core@0.11.2
+
+## 0.11.1
+
+### Patch Changes
+
+- @jingler/core@0.11.1
+
+## 0.11.0
+
+### Patch Changes
+
+- Updated dependencies [0148386]
+  - @jingler/core@0.11.0
+
+## 0.10.1
+
+### Patch Changes
+
+- @jingler/core@0.10.1
+
+## 0.10.0
+
+### Patch Changes
+
+- @jingler/core@0.10.0
+
+## 0.9.3
+
+### Patch Changes
+
+- @jingler/core@0.9.3
+
+## 0.9.2
+
+### Patch Changes
+
+- @jingler/core@0.9.2
+
+## 0.9.1
+
+### Patch Changes
+
+- @jingler/core@0.9.1
+
+## 0.9.0
+
+### Patch Changes
+
+- @jingler/core@0.9.0
+
 ## 0.8.0
 
 ### Patch Changes

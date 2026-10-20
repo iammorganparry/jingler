@@ -11,13 +11,13 @@ afterEach(() => {
 describe("McpImportPrompt", () => {
   it("discovers all sources, dedupes names, and imports by source once", async () => {
     const load = vi.fn(async (source: "claude" | "codex" | "opencode") => source === "claude"
-      ? [{ name: "linear", source, target: "npx linear", problem: null, needsSignIn: false, needsSecrets: false }]
+      ? [{ name: "linear", source, origin: "user" as const, target: "npx linear", problem: null, needsSignIn: false, needsSecrets: false }]
       : source === "codex"
         ? [
-            { name: "linear", source, target: "duplicate", problem: null, needsSignIn: false, needsSecrets: false },
-            { name: "docs", source, target: "https://docs.example/mcp", problem: null, needsSignIn: true, needsSecrets: false }
+            { name: "linear", source, origin: "user" as const, target: "duplicate", problem: null, needsSignIn: false, needsSecrets: false },
+            { name: "docs", source, origin: "user" as const, target: "https://docs.example/mcp", problem: null, needsSignIn: true, needsSecrets: false }
           ]
-        : [{ name: "broken", source, target: "", problem: "invalid", needsSignIn: false, needsSecrets: false }]
+        : [{ name: "broken", source, origin: "user" as const, target: "", problem: "invalid", needsSignIn: false, needsSecrets: false }]
     )
     const apply = vi.fn(async () => [])
 
@@ -56,6 +56,7 @@ describe("McpImportPrompt", () => {
       load={async (source) => [{
         name: "linear",
         source,
+        origin: "user" as const,
         target: "https://linear.example/mcp",
         problem: null,
         needsSignIn: false,

@@ -22,6 +22,7 @@ import type {
   GithubConfig,
   NotificationPermission,
   NotificationsConfig,
+  ObsidianExplanationsConfig,
   OffloadComputeSettings,
   DiffStat,
   Environment,
@@ -269,6 +270,11 @@ export interface JinglerAppProps {
   gitConfig?: GitConfig | null
   /** Persist git preferences (the "share checked-out branches" lever). */
   onSaveGitConfig?: (config: GitConfig) => Promise<void> | void
+  /** Obsidian explanation auto-save; absent means the default (off). */
+  obsidianExplanations?: ObsidianExplanationsConfig | null
+  onSaveObsidianExplanations?: (config: ObsidianExplanationsConfig) => Promise<void> | void
+  /** Whether any session has an Obsidian vault configured; hides the setting otherwise. */
+  obsidianVaultConfigured?: boolean
   /** Desktop-notification prefs; absent means the defaults, not "off". */
   notificationsConfig?: NotificationsConfig | null
   onSaveNotificationsConfig?: (
@@ -732,6 +738,9 @@ function getActiveTabContext(active: Session) {
               contextSessions={contextSessions}
               onSaveGithub={onSaveGithubConfig}
               onSaveGit={onSaveGitConfig}
+              obsidianExplanations={obsidianExplanations}
+              onSaveObsidianExplanations={onSaveObsidianExplanations}
+              obsidianVaultConfigured={obsidianVaultConfigured}
               notifications={notificationsConfig}
               onSaveNotifications={onSaveNotificationsConfig}
               notificationPermission={notificationPermission}
@@ -819,7 +828,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, subagentCounts, subagentAttentionCounts, subagentEntries, onOpenSubagent, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, notificationPermission, onOpenNotificationSystemSettings, offloadCompute, onSaveOffloadCompute, offloadStatus, onRetryOffload, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, planTemplate, onSavePlanTemplate, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView } = defaultProps(props, {
+const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, subagentCounts, subagentAttentionCounts, subagentEntries, onOpenSubagent, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, notificationPermission, onOpenNotificationSystemSettings, offloadCompute, onSaveOffloadCompute, offloadStatus, onRetryOffload, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, planTemplate, onSavePlanTemplate, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView, obsidianExplanations, onSaveObsidianExplanations, obsidianVaultConfigured } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],

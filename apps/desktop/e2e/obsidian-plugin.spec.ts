@@ -1,7 +1,7 @@
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs"
 import { mkdir, realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, type SeedSession, test } from "./fixtures.js"
 
 test("Obsidian previews a configured local vault and refreshes external edits", async ({ launchApp }) => {
   const { window, home } = await launchApp({ configured: true, withRepo: true, seed: ({ home }) => {
@@ -82,4 +82,76 @@ test("Obsidian previews a configured local vault and refreshes external edits", 
   await window.getByRole("button", { name: "Obsidian", exact: true }).click()
   await expect(window.getByLabel("Vault path")).toHaveValue(vault)
   await expect(preview.getByRole("heading", { name: "Known vault note" })).toBeVisible()
+})
+
+const explanationSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
+  id: "s_obsidian_explain",
+  repo: "widget",
+  repoPath,
+  branch: "main",
+  title: "Explain to Obsidian",
+  status: "idle",
+  connectionId: "jingler-e2e-connection",
+  providerId: "jingler-e2e",
+  modelId: "jingler-e2e/eval-model",
+  diff: { added: 0, removed: 0 },
+  prNumber: null,
+  costUsd: 0,
+  tokens: 0,
+  updatedAt: "2026-10-13T00:00:00.000Z",
+  worktreePath: repoPath,
+  workspaceMode: "direct",
+  chats: [{
+    id: "s_obsidian_explain_chat",
+    title: null,
+    createdAt: "2026-10-13T00:00:00.000Z",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+    mode: "accept-edits",
+    connectionId: "jingler-e2e-connection",
+    providerId: "jingler-e2e",
+    modelId: "jingler-e2e/eval-model"
+  }],
+  activeChatId: "s_obsidian_explain_chat"
+}]
+
+test("published explanations are saved to the Obsidian vault folder when the toggle is on", async ({ launchApp }) => {
+  const { window, home } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    piFixture: { scenarioId: "architecture-figure", authRoute: "api-key" },
+    seed: ({ home }) => { mkdirSync(join(home, "vault")) },
+    sessions: explanationSessions
+  })
+  const vault = await realpath(join(home, "vault"))
+  const folder = join(vault, "Jingler", "Explanations")
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByTestId("session-row-s_obsidian_explain").click()
+  await window.getByRole("button", { name: "Obsidian", exact: true }).click()
+  await window.getByLabel("Vault path").fill(vault)
+  await window.getByRole("button", { name: "Save vault" }).click()
+  await expect(window.getByText("Notes · 0")).toBeVisible()
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: "General" }).click()
+  const toggle = window.getByRole("switch", { name: "Save explanations to Obsidian" })
+  await expect(toggle).not.toBeChecked({ timeout: 15_000 })
+  await expect(window.getByLabel("Vault folder")).toHaveValue("Jingler/Explanations")
+  await toggle.click()
+  await expect(toggle).toBeChecked()
+  await window.getByRole("button", { name: "Close settings" }).click()
+
+  await window.getByTestId("session-row-s_obsidian_explain").click()
+  const composer = window.getByPlaceholder(/Message .+…/)
+  await composer.click()
+  await composer.fill("explain the checkout architecture")
+  await composer.press("Enter")
+
+  await expect.poll(() => existsSync(folder) && readdirSync(folder).filter((name) => name.endsWith(".md")).length, { timeout: 30_000 }).toBe(1)
+  const [name] = readdirSync(folder)
+  const note = readFileSync(join(folder, name ?? ""), "utf8")
+  expect(note).toContain("# Checkout architecture")
+  expect(note).toContain('project: "widget"')
 })

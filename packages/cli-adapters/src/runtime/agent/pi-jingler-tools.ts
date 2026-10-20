@@ -18,7 +18,8 @@ import {
   INTERACTIVE_TOOL_TIMEOUT_MS,
   ToolRegistry,
   type ToolDefinition,
-  type ToolRegistryOptions
+  type ToolRegistryOptions,
+  type WorkspaceCwd
 } from "../tools/tool-registry.js"
 import {
   registerWorkspaceInspectionTools,
@@ -27,6 +28,7 @@ import {
 import type { WebSearchServiceShape } from "../../web-search.js"
 import { registerCodeIntelligenceTools } from "../tools/code-intelligence-tools.js"
 import { registerStructuralCodeTools } from "../tools/structural-code-tools.js"
+import { registerCheckoutTool, toolCwd } from "../tools/checkout-tools.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 
 const roles = ["conversation", "plan", "plan-execution", "background"] as const
@@ -91,6 +93,9 @@ export const createJinglerControlTools = (
           Effect.runPromise(context.messagePeerAgent!(targetChatId, text))
       })
     )
+  }
+  if (context.checkouts !== undefined) {
+    registerCheckoutTool(registry, context.checkouts, context.publishEvent)
   }
   registry.register(
     controlTool({
@@ -199,7 +204,7 @@ export const registerWebSearchTool = (
 
 export interface JinglerToolRegistryInput {
   readonly context: AgentRuntimeContext
-  readonly cwd: string
+  readonly cwd: WorkspaceCwd
   readonly workspace?: WorkspaceInspectionPort
   readonly webSearch?: WebSearchServiceShape
   readonly mcp?: JinglerMcpAttachments
@@ -251,11 +256,12 @@ export const createJinglerTools = (
       input.context,
       new ToolRegistry(input.registryOptions)
     )
+    const cwd = toolCwd(input.cwd, input.context.checkouts)
     if (input.workspace) {
-      registerWorkspaceInspectionTools(registry, input.cwd, input.workspace)
+      registerWorkspaceInspectionTools(registry, cwd, input.workspace)
     }
-    registerCodeIntelligenceTools(registry, input.cwd)
-    registerStructuralCodeTools(registry, input.cwd)
+    registerCodeIntelligenceTools(registry, cwd)
+    registerStructuralCodeTools(registry, cwd)
     if (input.webSearch) {
       registerWebSearchTool(
         registry,

@@ -108,7 +108,10 @@ export const routeReviewToAgent = async (
   // Already routed for this head — the whole point of persisting the stamp.
   if (review.routedAt !== null) return
 
-  const guard = `${session.id}:${review.prNumber}:${review.headSha}`
+  // Keyed by the review itself (createdAt), not just the head: a forced re-run on
+  // an unchanged head is a new review, and an earlier run that routed nothing
+  // must not block it. Stale copies of one review share createdAt, so they still dedupe.
+  const guard = `${session.id}:${review.prNumber}:${review.headSha}:${review.createdAt}`
   if (claimed.has(guard)) return
   claimed.add(guard)
 

@@ -12,6 +12,9 @@ import { QuestionCard } from "../composites/question-card.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { StatusDot } from "../components/status-dot.js"
 import { SubagentMetaStrip } from "./subagent-meta-strip.js"
+import { Markdown } from "../components/markdown.js"
+
+const SUMMARY = "text-[12px] leading-[1.55]"
 
 const ACTIVE_STATUSES: ReadonlySet<SubagentFleetStatus> = new Set([
   "queued",
@@ -79,8 +82,8 @@ function LiveAgentActivity({ node }: { node: SubagentFleetNode }) {
           This agent is running. Its full transcript appears here once it records output.
         </p>
       ) : node.terminal?.summary ? (
-        <div data-testid="subagent-final-output" className="mt-3 whitespace-pre-wrap text-[12px] leading-[1.55] text-text-body">
-          {node.terminal.summary}
+        <div data-testid="subagent-final-output" className="mt-3">
+          <Markdown className={SUMMARY}>{node.terminal.summary}</Markdown>
         </div>
       ) : (
         <p className="mt-3 text-[11px] leading-[1.5] text-dim">
@@ -152,9 +155,9 @@ export function FleetAgentView({
             node?.nodeKind === "workflow" ? (
               <div className="space-y-2">
                 {node.terminal !== null && (
-                  <p data-testid="workflow-outcome" className="text-[12px] text-text-body">
-                    Workflow {node.terminal.reason}: {node.terminal.summary}
-                  </p>
+                  <div data-testid="workflow-outcome">
+                    <Markdown className={SUMMARY}>{`Workflow ${node.terminal.reason}: ${node.terminal.summary}`}</Markdown>
+                  </div>
                 )}
                 <EmptyState
                   title="This agent has no transcript (orchestrator)"
@@ -230,9 +233,7 @@ export function FleetAgentView({
           {messages.length > 0 && node?.terminal?.summary && (
             <section data-testid="subagent-final-output" className="rounded-xl border border-line bg-sunken px-4 py-3.5">
               <p className="mb-2 text-[10px] uppercase tracking-wide text-dim">Final output</p>
-              <div className="whitespace-pre-wrap text-[12px] leading-[1.55] text-text-body">
-                {node.terminal.summary}
-              </div>
+              <Markdown className={SUMMARY}>{node.terminal.summary}</Markdown>
             </section>
           )}
         </div>

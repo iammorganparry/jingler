@@ -17,6 +17,7 @@ import type {
   SubagentFleetSnapshot,
   UsageFact
 } from "@jingler/core"
+import type { CheckoutHost } from "../tools/checkout-tools.js"
 import { piEndpointId } from "@jingler/core"
 import { Context, Data, Effect, Layer, Stream } from "effect"
 import type { ToolRegistry } from "../tools/tool-registry.js"
@@ -76,6 +77,8 @@ export interface AgentRuntimeContext {
     targetChatId: string,
     text: string
   ) => Effect.Effect<PeerAgentMessageResult>
+  /** Multi-repo session state; enables `switch_checkout` and makes tool cwd follow the active checkout. */
+  readonly checkouts?: CheckoutHost
 }
 
 export interface AgentRuntimeOwner {

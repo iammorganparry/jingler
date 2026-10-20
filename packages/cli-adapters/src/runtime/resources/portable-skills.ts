@@ -5,11 +5,17 @@ import { Effect } from "effect"
 import type { AgentResourceServiceShape } from "./agent-resource-service.js"
 import { PONYTAIL_SKILLS_PATH, PONYTAIL_VERSION } from "./ponytail-resources.js"
 import { ToolError } from "../tools/tool-registry.js"
+import { ARCHITECTURE_ANATOMY_SKILL_BODY, EXPLAIN_SKILL_BODY } from "./builtin-skill-bodies.js"
 
 export const BUILTIN_SKILLS = [
   {
     name: "/explain",
     description: "Publish a focused visual explanation of the current technical topic.",
+    source: "skill" as const,
+  },
+  {
+    name: "/architecture-anatomy",
+    description: "Draw a software system as an isometric bench of real parts in the Explanation or Plan view.",
     source: "skill" as const,
   },
   {
@@ -61,7 +67,8 @@ export const loadPortableResource = (
   id: ManagedResourceId
 ) => {
   if (!available.has(id)) return Effect.fail(new ToolError("forbidden", `Managed resource "${id}" is unavailable for this target`))
-  if (id === "explain") return Effect.succeed("Publish a focused visual explanation using jingler_publish_explanation. Choose concise prose, tables, code, or diagrams to explain the requested technical topic.")
+  if (id === "explain") return Effect.succeed(EXPLAIN_SKILL_BODY)
+  if (id === "architecture-anatomy") return Effect.succeed(ARCHITECTURE_ANATOMY_SKILL_BODY)
   if (id === "ponytail-help") return Effect.succeed(`Ponytail in Jingler (bundled version ${PONYTAIL_VERSION})
 Use /ponytail lite|full|ultra|off to set this chat's mode; /ponytail status shows it.
 Use /ponytail default off|lite|full|ultra to set the default for new chats.

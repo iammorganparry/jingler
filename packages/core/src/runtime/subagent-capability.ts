@@ -65,7 +65,9 @@ export const SubagentToolRequest = Schema.Struct({
   parentRuntimeSessionId: Schema.String,
   callId: Schema.String,
   toolId: Schema.String,
-  arguments: SubagentJsonValue
+  arguments: SubagentJsonValue,
+  /** Child's actual working directory; the broker accepts it only when it is the parent root or a worktree of the same repo. */
+  cwd: Schema.optional(Schema.String)
 })
 export type SubagentToolRequest = Schema.Schema.Type<typeof SubagentToolRequest>
 

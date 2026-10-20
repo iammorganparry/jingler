@@ -1,5 +1,31 @@
 # @jingler/core
 
+## 0.11.2
+
+### Patch Changes
+
+- 128d57e: Subagent tool calls (file reads, edits and shell commands) now run in the subagent's own worktree instead of the parent session's checkout.
+
+## 0.11.1
+
+## 0.11.0
+
+### Minor Changes
+
+- 0148386: **New: work across several repositories in one session.** The agent can now switch to another repository mid-turn with `switch_checkout`. Jingler attaches an isolated worktree for it, follows its changes, and shows Changes, checks and the PR footer grouped by repository. An unregistered repo asks for your approval first, and approving registers it as a project. Subagents start in the parent's current repository, and a subagent switching repos never moves the parent.
+
+## 0.10.1
+
+## 0.10.0
+
+## 0.9.3
+
+## 0.9.2
+
+## 0.9.1
+
+## 0.9.0
+
 ## 0.8.0
 
 ## 0.7.3

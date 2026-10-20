@@ -11,6 +11,10 @@ import { Effect, Either, JSONSchema, Schema } from "effect"
 
 export const INTERACTIVE_TOOL_TIMEOUT_MS = 24 * 60 * 60_000
 
+/** A workspace root fixed at registration, or read per call because it moves when the agent switches checkout. */
+export type WorkspaceCwd = string | (() => string)
+export const cwdOf = (cwd: WorkspaceCwd): string => (typeof cwd === "function" ? cwd() : cwd)
+
 export type ToolRisk = "read" | "network" | "mutate" | "execute"
 export type ToolIdempotency = "safe" | "keyed" | "unsafe"
 
@@ -77,6 +81,8 @@ export class ToolError extends Error {
 
 export interface ToolExecutionContext {
   readonly workspaceEnvironment?: Readonly<Record<string, string>>
+  /** Per-call cwd override (e.g. a validated subagent child cwd); absent means the tool's registered default. */
+  readonly cwd?: string
   readonly signal: AbortSignal
   readonly idempotencyKey: string | null
   readonly progress: (progress: ToolProgress) => void
@@ -138,6 +144,8 @@ export interface ToolExecutionRequest {
   readonly idempotencyKey?: string | null
   readonly callId?: string
   readonly progress?: (progress: ToolProgress) => void
+  /** Per-call cwd override threaded into ToolExecutionContext.cwd; see there. */
+  readonly cwd?: string
 }
 
 export interface ToolExecutionObserver {
@@ -202,6 +210,46 @@ const withIntentProperty = (schema: ToolProviderInputSchema): ToolProviderInputS
   properties: { ...schema.properties, intent: INTENT_PROPERTY }
 })
 
+export type JsonSchemaNode = { readonly type?: unknown; readonly anyOf?: ReadonlyArray<JsonSchemaNode>; readonly properties?: Record<string, JsonSchemaNode> }
+
+const structuredTypes = (schema: JsonSchemaNode | undefined): ReadonlyArray<string> => {
+  if (schema === undefined) return []
+  const own = Array.isArray(schema.type) ? schema.type : [schema.type]
+  return [...own, ...(schema.anyOf ?? []).flatMap(structuredTypes)].filter(
+    (type): type is string => type === "array" || type === "object"
+  )
+}
+
+const parseStructured = (value: unknown, wanted: ReadonlyArray<string>): unknown => {
+  if (typeof value !== "string" || wanted.length === 0) return value
+  try {
+    const parsed: unknown = JSON.parse(value)
+    const kind = Array.isArray(parsed) ? "array" : typeof parsed === "object" && parsed !== null ? "object" : null
+    return kind !== null && wanted.includes(kind) ? parsed : value
+  } catch {
+    // Not JSON: a genuine string the validator should judge.
+    return value
+  }
+}
+
+/**
+ * Every runtime's tool calls settle here before decoding. Some models (Opus
+ * reliably, others occasionally) send an array/object argument as its JSON
+ * text instead of structured data (`questions: "[{...}]"`), which fails
+ * schema validation with "must be array" and can push the model to abandon
+ * the tool call and print the payload as assistant text instead. Parse a
+ * top-level string into its JSON value only when the tool's schema wants
+ * array/object there; anything that doesn't parse to that shape is left for
+ * the decoder to reject as before.
+ */
+export const normalizeStringifiedArguments = (schema: JsonSchemaNode, args: unknown): unknown => {
+  const properties = schema.properties
+  if (typeof args !== "object" || args === null || Array.isArray(args) || properties === undefined) return args
+  const entries = Object.entries(args).map(([key, value]) => [key, value, parseStructured(value, structuredTypes(properties[key]))] as const)
+  if (entries.every(([, before, after]) => before === after)) return args
+  return Object.fromEntries(entries.map(([key, , after]) => [key, after]))
+}
+
 const validateExecution = (
   tool: AnyToolDefinition,
   input: ToolExecutionRequest
@@ -216,7 +264,9 @@ const validateExecution = (
   if (!stripped.ok) {
     return { ok: false, result: errorEnvelope(new ToolError("invalid-input", "intent must be a string of at most 60 characters")) }
   }
-  const decoded = Schema.decodeUnknownEither(tool.input)(stripped.value)
+  const schema = (tool.providerInputSchema ?? JSONSchema.make(tool.input)) as JsonSchemaNode
+  const normalized = normalizeStringifiedArguments(schema, stripped.value)
+  const decoded = Schema.decodeUnknownEither(tool.input)(normalized)
   return Either.isLeft(decoded)
     ? { ok: false, result: errorEnvelope(new ToolError("invalid-input", "Tool input failed validation")) }
     : { ok: true, value: decoded.right }
@@ -302,7 +352,8 @@ const executeDefinition = async (
   const execution = tool.execute(value, {
     signal: controller.signal,
     idempotencyKey: input.idempotencyKey ?? null,
-    progress: input.progress ?? (() => undefined)
+    progress: input.progress ?? (() => undefined),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd })
   })
   try {
     const result = await Promise.race([

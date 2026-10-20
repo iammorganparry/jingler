@@ -12,6 +12,8 @@ import {
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import {
   AuthKind,
+  CLAUDE_CLI_API_ROUTE,
+  CLAUDE_CLI_SUBSCRIPTION_ROUTE,
   CURRENT_RUNTIME_CONTRACTS,
   ProviderConnection,
   ProviderId,
@@ -40,6 +42,8 @@ const E2ePiFixture = Schema.Struct({
   authRoute: AuthKind,
   reasoning: Schema.optional(Schema.Array(ReasoningEffort)),
   seedConnection: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /** A Claude CLI login billed per token (Enterprise): api route, no subscription windows. */
+  apiPriced: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   staleCertification: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   modelCount: Schema.optionalWith(Schema.Int.pipe(Schema.between(1, 100)), {
     default: () => 1
@@ -59,13 +63,16 @@ const READ_TOOL = "workspace_read_file"
 const WRITE_TOOL = "workspace_write"
 const RENAME_TOOL = "workspace_rename"
 const COMMAND_TOOL = "command_execute"
+const SWITCH_CHECKOUT_TOOL = "switch_checkout"
 const SUBAGENT_TOOL = "subagent"
 const SUPERVISOR_REVIEW_TASK = "Review the checkout flow against its acceptance criteria."
 const E2E_CONTEXT_WINDOW = 1_000_000
-const observedRouteFor = (authRoute: E2ePiFixture["authRoute"]): string =>
-  authRoute === "claude-setup-token"
-    ? "claude-cli:subscription"
-    : `e2e-${authRoute}`
+const observedRouteFor = (fixture: E2ePiFixture): string =>
+  fixture.authRoute === "claude-setup-token"
+    ? fixture.apiPriced ? CLAUDE_CLI_API_ROUTE : CLAUDE_CLI_SUBSCRIPTION_ROUTE
+    : `e2e-${fixture.authRoute}`
+const billsPerToken = (fixture: E2ePiFixture): boolean =>
+  fixture.authRoute === "api-key" || fixture.apiPriced
 const COMPACTION_THINKING = "context ".repeat(17_500)
 const DIGEST_REPLY = `\`\`\`json
 {
@@ -96,12 +103,12 @@ export const e2eProviderConnection = (fixture: E2ePiFixture) => {
     status: "authenticated",
     subscription: {
       entitlement: "active",
-      planLabel: fixture.authRoute === "api-key" ? null : "Test subscription",
+      planLabel: fixture.apiPriced ? "Enterprise · API pricing" : fixture.authRoute === "api-key" ? null : "Test subscription",
       expiresAt: null,
       quotaLabel: null,
       rateLimitLabel: null,
-      confirmedBillingRoute: fixture.authRoute === "api-key" ? "api" : "subscription",
-      observedRoute: observedRouteFor(fixture.authRoute)
+      confirmedBillingRoute: billsPerToken(fixture) ? "api" : "subscription",
+      observedRoute: observedRouteFor(fixture)
     },
     createdAt: "2026-08-10T00:00:00.000Z",
     updatedAt: "2026-08-10T00:00:00.000Z"
@@ -149,8 +156,8 @@ export const e2eCertification = (
   modelId,
   authRoute: {
     kind: fixture.authRoute,
-    observedRoute: observedRouteFor(fixture.authRoute),
-    subscription: fixture.authRoute !== "api-key",
+    observedRoute: observedRouteFor(fixture),
+    subscription: !billsPerToken(fixture),
     entitlementConfirmed: true,
     apiBillingFallbackObserved: false
   },
@@ -236,6 +243,7 @@ const backgroundKindFrom = (context: PiContext): E2eBackgroundKind | null => {
   if (prompt.includes("[[legacy-agent]]")) return "legacy-agent"
   if (prompt.includes("[[background-agent]]")) return "agent"
   if (prompt.includes("[[background-completes]]")) return "complete"
+  if (prompt.includes("[[background-wake]]")) return "wake"
   if (prompt.includes("[[background")) return "watch"
   return null
 }
@@ -255,6 +263,8 @@ const backgroundResponse = (
       ? "Delegated the survey to a background agent."
       : kind === "legacy-agent"
         ? "Delegated through the normalized compatibility path."
+        : kind === "wake"
+          ? "Delegated; results will arrive after this turn."
         : "Started a watcher in the background."
   )
 }
@@ -714,6 +724,53 @@ const richScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssis
   )
 }
 
+const ARCHITECTURE_FIGURE = {
+  title: "Checkout request path",
+  layers: [{ id: "app", label: "App" }, { id: "data", label: "Data" }],
+  components: [
+    { id: "api", label: "orders-api", layer: "app", shape: "service", detail: "Hono, 3 replicas" },
+    { id: "db", label: "Postgres", layer: "data", shape: "store", detail: "primary + replica" }
+  ],
+  links: [{ from: "api", to: "db", label: "INSERT", mode: "data" }],
+  lit: "api"
+}
+
+const ARCHITECTURE_PLAN = [
+  "# Checkout architecture",
+  "",
+  "```architecture",
+  JSON.stringify(ARCHITECTURE_FIGURE),
+  "```",
+  "",
+  "- [ ] Ship the orders API"
+].join("\n")
+
+// Publishes an architecture figure to the Explanation view, then adopts a plan
+// carrying the same figure as a ```architecture fence.
+const architectureFigureResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  const lastMessage = context.messages.at(-1)
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === UPDATE_PLAN_TOOL) {
+    return fauxAssistantMessage("Architecture figure published.")
+  }
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+    return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "architecture-plan-update")
+  }
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === "jingler_publish_explanation") {
+    return callTool(WRITE_TOOL, { path: "PLAN.md", content: ARCHITECTURE_PLAN }, "architecture-plan-write")
+  }
+  return callTool("jingler_publish_explanation", {
+    explanation: {
+      title: "Checkout architecture",
+      summary: "Orders flow from the API into Postgres.",
+      sections: [{
+        id: "system",
+        title: "System",
+        blocks: [{ kind: "architecture", id: "checkout", ...ARCHITECTURE_FIGURE }]
+      }]
+    }
+  }, "architecture-publish")
+}
+
 const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const prompt = latestOperatorText(context)
   if (prompt.includes("[[complete-session]]")) {
@@ -837,6 +894,8 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
       return Array.from({ length: 8 }, () => planScratchpadResponse)
     case "rich-plan-scratchpad":
       return Array.from({ length: 8 }, () => richScratchpadResponse)
+    case "architecture-figure":
+      return Array.from({ length: 8 }, () => architectureFigureResponse)
     case "managed-resources":
       return [
         fauxAssistantMessage(fauxToolCall("jingler_load_resource", { id: "managed-skill" }), {
@@ -972,7 +1031,22 @@ function offloadFixtureResponse(context: PiContext) {
   )
 }
 
+// `[[switch-repo=/abs/path]]`: switch to that repo mid-turn, then edit a file there.
+const switchRepoResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  const target = /\[\[switch-repo=([^\]]+)\]\]/u.exec(latestOperatorText(context))?.[1]
+  if (target === undefined) return null
+  if (recentToolResultCount(context, SWITCH_CHECKOUT_TOOL) === 0) {
+    return callTool(SWITCH_CHECKOUT_TOOL, { repoPath: target }, "switch-repo-1")
+  }
+  if (recentToolResultCount(context, WRITE_TOOL) === 0) {
+    return callTool(WRITE_TOOL, { path: "src/other-repo.ts", content: "export const otherRepo = true\n" }, "switch-repo-write-1")
+  }
+  return fauxAssistantMessage("Edited the second repository.")
+}
+
 function scenarioFixtureResponse(context: PiContext) {
+  const switchRepo = switchRepoResponse(context)
+  if (switchRepo !== null) return switchRepo
   const fileBrowser = fileBrowserResponse(context)
   if (fileBrowser !== null) return fileBrowser
   const supervisorSubagent = supervisorSubagentResponse(context)
@@ -986,6 +1060,9 @@ function scenarioFixtureResponse(context: PiContext) {
   }
   if (operatorText(context).some((text) => text.includes("[[plan]]"))) {
     return planModeResponse(context)
+  }
+  if (latestOperatorText(context).includes("arrived while you were idle")) {
+    return fauxAssistantMessage("Picked up the sub-agent results and continued.")
   }
   const backgroundKind = backgroundKindFrom(context)
   if (backgroundKind !== null) return backgroundResponse(context, backgroundKind)

@@ -293,6 +293,7 @@ export interface LaunchOptions {
       "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
     >;
     readonly seedConnection?: boolean;
+    readonly apiPriced?: boolean;
     readonly modelCount?: number;
     /** Codex OAuth login waits on cancellation instead of resolving, for Cancel-flow e2e coverage. */
     readonly codexLoginHangs?: boolean;

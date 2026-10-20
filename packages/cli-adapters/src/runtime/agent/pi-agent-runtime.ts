@@ -22,7 +22,7 @@ import { Effect, Queue, Stream } from "effect"
 import { describeCause } from "../auth/auth-broker.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
-import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
+import { createPiEventNormalizer, piProviderFailure, piSubagentProgress } from "./pi-events.js"
 import type { PiSubagentAsyncDelegate } from "./pi-subagent-rpc.js"
 import {
   retainedPiFleetHandlers,
@@ -170,14 +170,58 @@ const settleSession = (
   )
 }
 
+/**
+ * An async subagent spawn's ToolEnd reports "running" (see `pi-events.ts`'s
+ * `normalizeToolEnd`) because the workflow it launched keeps running
+ * detached. Remember its tool call id by the workflow's runId so the fleet
+ * root's own terminal status can settle that stuck chat row later.
+ */
+const trackAsyncSubagentSpawn = (
+  event: AgentSessionEvent,
+  pendingAsyncToolCalls: Map<string, string>
+): void => {
+  if (event.type !== "tool_execution_end") return
+  const progress = piSubagentProgress(event)
+  if (progress !== null && progress.settled === false) {
+    pendingAsyncToolCalls.set(progress.runId, event.toolCallId)
+  }
+}
+
+/** Settles a tool call tracked by `trackAsyncSubagentSpawn` once its root workflow node goes terminal. */
+const settlePendingAsyncToolEnd = (
+  event: StreamEvent,
+  pendingAsyncToolCalls: Map<string, string>,
+  sink: EventSink
+): void => {
+  if (event._tag !== "SubagentFleetChanged" || event.event._tag !== "Upsert") return
+  const node = event.event.node
+  if (node.parentId !== null || node.terminal === null) return
+  const toolCallId = pendingAsyncToolCalls.get(node.runId)
+  if (toolCallId === undefined) return
+  pendingAsyncToolCalls.delete(node.runId)
+  sink.emit({
+    _tag: "ToolEnd",
+    id: toolCallId,
+    status: node.terminal.reason === "completed" ? "success" : "error",
+    meta: null,
+    diff: null,
+    preview: null
+  })
+}
+
 const subscribeToSession = (
   handle: PiSessionHandle,
   sink: EventSink
 ): (() => void) => {
-  const unsubscribeFleet = handle.subscribeFleet((event) => sink.emit(event))
+  const pendingAsyncToolCalls = new Map<string, string>()
+  const unsubscribeFleet = handle.subscribeFleet((event) => {
+    sink.emit(event)
+    settlePendingAsyncToolEnd(event, pendingAsyncToolCalls, sink)
+  })
   const normalize = createPiEventNormalizer()
   const unsubscribeSession = handle.subscribe((event) => {
     emitVisibleAgentEvent(false, event, sink, normalize, handle)
+    trackAsyncSubagentSpawn(event, pendingAsyncToolCalls)
     if (event.type !== "agent_settled") return
     Effect.runFork(settleSession(handle, sink))
   })

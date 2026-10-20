@@ -28,6 +28,7 @@ import {
   NotificationKind,
   NotificationPermission,
   NotificationsConfig,
+  ObsidianExplanationsConfig,
   Issue,
   IssueAutomations,
   IssueComment,
@@ -912,6 +913,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /** Make another attached checkout the session's active one (cwd and scalar mirrors follow it). */
+  Rpc.make("Sessions.switchCheckout", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String, checkoutId: Schema.String }
+  }),
+
   /** Persist which chat is active for the session. */
   Rpc.make("Sessions.selectChat", {
     success: Session,
@@ -1009,7 +1017,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.diff", {
     success: SessionReviewDiff,
     error: GitError,
-    payload: { id: Schema.String }
+    payload: { id: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** Lightweight totals for badges and the Changes tab. */
@@ -1115,6 +1123,16 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Agent.chatBusy", {
     success: Schema.Boolean,
     payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /**
+   * Chats whose idle agent received results (sub-agent completions, control
+   * notices) that need a turn. The renderer answers each with a normal SEND, so
+   * the turn streams, persists, and can ask questions like any other.
+   */
+  Rpc.make("Agent.wakeups", {
+    success: Schema.Struct({ sessionId: Schema.String, chatId: Schema.String }),
+    stream: true
   }),
 
   /** Whether a persisted Plannotator review was interrupted by host restart. */
@@ -1293,7 +1311,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Mcp.importCandidates", {
     success: Schema.Array(McpImportCandidateView),
     error: ConfigError,
-    payload: { source: McpImportSourceId }
+    payload: {
+      source: McpImportSourceId,
+      /** Also run `claude mcp list` for claude.ai connectors and plugin servers (slow). */
+      connectors: Schema.optional(Schema.Boolean)
+    }
   }),
 
   /**
@@ -1308,7 +1330,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       source: McpImportSourceId,
       names: Schema.Array(Schema.String),
       /** Per-name conflict resolution; a conflicting name with no entry keeps the existing server. */
-      resolutions: Schema.optional(Schema.Record({ key: Schema.String, value: McpImportResolution }))
+      resolutions: Schema.optional(Schema.Record({ key: Schema.String, value: McpImportResolution })),
+      connectors: Schema.optional(Schema.Boolean)
     }
   }),
 
@@ -1467,6 +1490,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: GitConfig
+  }),
+
+  /** Persist the Obsidian explanation auto-save preferences. */
+  Rpc.make("Config.setObsidianExplanations", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: ObsidianExplanationsConfig
   }),
 
   /** Persist the user's desktop-notification preferences. */
@@ -1681,6 +1711,17 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /**
+   * Write the session's current explanation into its Obsidian vault when the
+   * setting is on. Resolves the vault-relative path, or null when nothing was
+   * written (setting off, no vault, no explanation).
+   */
+  Rpc.make("Explanation.saveToObsidian", {
+    success: Schema.NullOr(Schema.String),
+    error: ConfigError,
+    payload: { sessionId: Schema.String }
+  }),
+
   /** Stream replacement revisions of the session's focused explanation. */
   Rpc.make("Explanation.watch", {
     success: Schema.NullOr(ExplanationDocument),
@@ -1767,7 +1808,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.NullOr(PullRequest),
     error: GitHubApiError,
     /** `number` picks one layer of a stack; omitted reads the session's top PR. */
-    payload: { sessionId: Schema.String, number: Schema.optional(Schema.Number) }
+    payload: { sessionId: Schema.String, number: Schema.optional(Schema.Number), checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** Open PRs across every repository granted to the GitHub App. */
@@ -1897,7 +1938,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.NullOr(SessionPrStatus),
     error: GitHubApiError,
     /** `number` picks one layer of a stack; omitted reads the session's top PR. */
-    payload: { sessionId: Schema.String, number: Schema.optional(Schema.Number) }
+    payload: { sessionId: Schema.String, number: Schema.optional(Schema.Number), checkoutId: Schema.optional(Schema.String) }
   }),
 
   /**
@@ -1907,7 +1948,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.files", {
     success: Schema.Array(PrFileChange),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number) }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number), checkoutId: Schema.optional(Schema.String) }
   }),
 
   /**
@@ -1917,7 +1958,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.diff", {
     success: Schema.String,
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number) }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number), checkoutId: Schema.optional(Schema.String) }
   }),
 
   /**

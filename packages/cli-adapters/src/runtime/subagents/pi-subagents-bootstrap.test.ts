@@ -73,29 +73,98 @@ describe("managed pi-subagent profiles", () => {
     expect(fanout.ok).toBe(true)
     if (!(scout.ok && worker.ok && fanout.ok)) return
     expect(scout.contract.model).toBe("anthropic/claude-test:low")
-    expect(worker.contract.model).toBe("openai-codex/gpt-5.6-sol:high")
+    expect(worker.contract.model).toBe("openai-codex/gpt-5.6-sol:medium")
     expect(worker.contract.tools.requestedBuiltin).toEqual([
       "contact_supervisor",
       "workspace_read_file"
     ])
     expect(scout.contract.inheritProjectContext).toBe(false)
+    expect(await readFile(join(root, "agents", "worker.md"), "utf8"))
+      .toMatch(/^defaultContext: fresh$/m)
     expect(scout.contract.roots.outputPath).toContain(
       join("subagent-artifacts", "outputs", "preflight", "context.md")
     )
     expect(scout.contract.inheritSkills).toBe(false)
     expect(scout.contract.tools.fanoutAuthorized).toBe(false)
     expect(scout.contract.tools.disableAmbientExtensions).toBe(true)
+    // `extensions` and `subagentOnlyExtensions` both list the child extensions.
+    const childExtensions = [childTools, claudeProvider, PONYTAIL_EXTENSION_PATH]
     expect(scout.contract.tools.configuredExtensions).toEqual([
-      childTools,
-      claudeProvider,
-      PONYTAIL_EXTENSION_PATH
+      ...childExtensions,
+      ...childExtensions
     ])
     expect(scout.contract.tools.requestedBuiltin).toEqual(["contact_supervisor"])
+    // Foreground children load only the child-only list, so every profile must carry it.
+    for (const agent of [...JINGLER_SUBAGENT_NAMES]) {
+      const profile = await readFile(join(root, "agents", `${agent}.md`), "utf8")
+      expect(profile).toContain(
+        `subagentOnlyExtensions: ${childTools}, ${claudeProvider}, ${PONYTAIL_EXTENSION_PATH}`
+      )
+    }
+    for (const agent of ["worker", "oracle"]) {
+      const profile = await readFile(join(root, "agents", `${agent}.md`), "utf8")
+      expect(profile).toMatch(/^defaultContext: fresh$/m)
+    }
     expect(fanout.contract.tools.fanoutAuthorized).toBe(true)
     expect(fanout.contract.tools.requestedBuiltin).toEqual([
       "subagent",
       "contact_supervisor"
     ])
+  })
+
+  // Integration level: the e2e fixtures replace the child process, so they cannot see which
+  // extensions a foreground `delegate` actually launches with. This reads the launch plan.
+  it("launches a foreground delegate with the child-tools extension and command_execute", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-subagent-profiles-"))
+    roots.push(root)
+    const childTools = join(root, "jingler-child-tools.mjs")
+    await writeFile(childTools, "export default () => undefined\n")
+    await materializePiSubagentProfiles(root, childTools, "claude.mjs", {}, {
+      delegate: ["command_execute", "workspace_read_file"]
+    })
+    process.env.PI_CODING_AGENT_DIR = root
+    const delegate = await resolveAgent(root, "delegate")
+    expect(delegate.ok).toBe(true)
+    if (!delegate.ok) return
+    expect(delegate.contract.tools.extensionArgs).toContain(childTools)
+    expect(delegate.contract.tools.requestedBuiltin).toContain("command_execute")
+    expect(await readFile(join(root, "agents", "delegate.md"), "utf8"))
+      .toContain(`subagentOnlyExtensions: ${childTools},`)
+  })
+
+  it("drops command_inspect only where command_execute is offered", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-subagent-profiles-"))
+    roots.push(root)
+    await materializePiSubagentProfiles(root, "child.mjs", "claude.mjs", {}, {
+      worker: ["command_inspect", "command_execute", "workspace_edit"],
+      fanout: ["command_inspect", "command_execute"],
+      reviewer: ["command_inspect", "workspace_read_file"]
+    })
+    const toolsOf = async (agent: string) =>
+      (await readFile(join(root, "agents", `${agent}.md`), "utf8"))
+        .match(/^tools: (.*)$/m)?.[1]
+    expect(await toolsOf("worker")).toBe(
+      "contact_supervisor, command_execute, workspace_edit"
+    )
+    expect(await toolsOf("fanout")).toBe(
+      "subagent, contact_supervisor, command_execute"
+    )
+    expect(await toolsOf("reviewer")).toBe(
+      "contact_supervisor, command_inspect, workspace_read_file"
+    )
+  })
+
+  it("keeps the profile tool lists when a toolless host rewrites the profiles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-subagent-profiles-"))
+    roots.push(root)
+    await materializePiSubagentProfiles(root, "child.mjs", "claude.mjs", {}, {
+      worker: ["command_execute", "workspace_write", "workspace_edit"]
+    })
+    // The native-sidecar recovery host has an empty registry and passes no tools.
+    await materializePiSubagentProfiles(root, "child.mjs", "claude.mjs", {})
+    const tools = (await readFile(join(root, "agents", "worker.md"), "utf8"))
+      .match(/^tools: (.*)$/m)?.[1]
+    expect(tools).toBe("contact_supervisor, command_execute, workspace_write, workspace_edit")
   })
 
   it("does not admit a project-defined agent outside the agent ceiling", async () => {
@@ -126,5 +195,14 @@ describe("managed pi-subagent profiles", () => {
       .toContain(`extensions: ${childTools}, `)
     expect(await readFile(join(root, "agents", "worker.md"), "utf8"))
       .toContain(PONYTAIL_EXTENSION_PATH)
+  })
+
+  it("runs workers at medium thinking instead of the vendor's high", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-thinking-"))
+    roots.push(root)
+    await materializePiSubagentProfiles(root, "child.mjs", "claude.mjs")
+    const worker = await readFile(join(root, "agents", "worker.md"), "utf8")
+    expect(worker).toMatch(/^thinking: medium$/m)
+    expect(worker).not.toMatch(/^thinking: high$/m)
   })
 })

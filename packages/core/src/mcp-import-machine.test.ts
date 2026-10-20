@@ -6,6 +6,7 @@ import type { McpImportCandidateView } from "./mcp-config.js"
 const CANDIDATE: McpImportCandidateView = {
   name: "linear",
   source: "claude",
+  origin: "user",
   target: "https://linear.example/mcp",
   problem: null,
   needsSignIn: false,

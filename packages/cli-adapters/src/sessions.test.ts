@@ -1889,6 +1889,33 @@ describe("SessionStore", () => {
     expect(worktrees).not.toContain(worktreePath)
   })
 
+  it("remove deletes every worktree of a multi-repo session", async () => {
+    const otherRepo = initGitRepo(join(repos.dir, "other-app"))
+    const result = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Multi repo" }))
+        const second = yield* GitService.createDetachedWorktree({
+          repoPath: otherRepo, repoName: "other-app", slug: "multi-other", baseBranch: "main"
+        })
+        yield* SessionStore.setCheckouts(created.id, {
+          ...created,
+          checkouts: [
+            { id: "primary", repo: created.repo, repoPath: created.repoPath, worktreePath: created.worktreePath, workspaceMode: "worktree", branch: created.branch, baseBranch: created.baseBranch, prNumber: null },
+            { id: "co-other", repo: "other-app", repoPath: otherRepo, worktreePath: second.path, workspaceMode: "worktree", branch: second.branch, baseBranch: second.baseBranch, prNumber: null }
+          ],
+          activeCheckoutId: "co-other"
+        })
+        const paths = [created.worktreePath!, second.path]
+        yield* SessionStore.remove(created.id)
+        return paths
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    for (const path of result.value) expect(existsSync(path)).toBe(false)
+  })
+
   it("remove drops direct-session metadata without touching the repository", async () => {
     execFileSync("git", ["branch", "feature/direct-delete"], { cwd: repoPath })
     const created = await runExit(

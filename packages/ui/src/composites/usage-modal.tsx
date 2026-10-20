@@ -2,6 +2,7 @@ import { Spin } from "../components/spin.js"
 import type {
   AgentRuntimeId,
   ModelPerformanceSortKey,
+  ProviderSpend,
   ProviderUsage,
   Usage,
   UsageFact,
@@ -70,6 +71,30 @@ function WindowRow({ window: w }: { window: UsageWindow }) {
   )
 }
 
+const fmtTokens = (n: number): string =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
+
+/** API-priced plans bill per token, so usage is spend — there are no windows or percentage bars. */
+export function SpendRows({ spend }: { spend: ProviderSpend }) {
+  const rows = [
+    ["Last session", spend.lastSession],
+    ["Today", spend.today],
+    ["This month", spend.month]
+  ] as const
+  return (
+    <div data-testid="spend-rows">
+      {rows.map(([label, totals]) => (
+        <div key={label} className="flex items-center justify-between py-2">
+          <span className="text-[12.5px] text-text-body">{label}</span>
+          <span className="font-mono text-[11px] text-text-body">
+            {totals === null ? "—" : `$${totals.costUsd.toFixed(2)} · ${fmtTokens(totals.tokens)} tokens`}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
   const route = p.authKind ? providerAuthRouteLabel(p.authKind) : null
   return (
@@ -96,7 +121,9 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
           {[p.quotaLabel, p.rateLimitLabel].filter(Boolean).join(" · ")}
         </div>
       )}
-      {p.available ? (
+      {p.spend ? (
+        <SpendRows spend={p.spend} />
+      ) : p.available ? (
         p.windows.map((w) => <WindowRow key={w.label} window={w} />)
       ) : (
         <div className="text-[12px] text-muted-foreground">

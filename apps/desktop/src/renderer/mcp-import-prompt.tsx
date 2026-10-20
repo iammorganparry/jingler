@@ -1,3 +1,4 @@
+import { MCP_ORIGIN_LABELS } from "@jingler/ui"
 import type {
   McpImportCandidateView,
   McpImportResolution,
@@ -126,11 +127,11 @@ export function McpImportPrompt({
           ) : (
             <div className="max-h-64 overflow-auto rounded-xl border border-line bg-sunken">
               {candidates.map((candidate) => (
-                <div key={`${candidate.source}:${candidate.name}`} className="border-b border-line px-3.5 py-2.5 last:border-b-0">
+                <div key={`${MCP_ORIGIN_LABELS[candidate.origin ?? "user"]}:${candidate.name}`} className="border-b border-line px-3.5 py-2.5 last:border-b-0">
                   <div className="flex items-center justify-between gap-3">
                     <div className="truncate text-xs font-medium text-text-bright">{candidate.name}</div>
                     <div className="flex-none rounded-md border border-hairline bg-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-dim">
-                      {candidate.source}
+                      {MCP_ORIGIN_LABELS[candidate.origin ?? "user"]}
                     </div>
                   </div>
                   <div className="mt-0.5 truncate font-mono text-[10px] text-dim">{candidate.target}</div>

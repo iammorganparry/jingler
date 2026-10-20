@@ -202,28 +202,20 @@ export const isPromptFailureText = (text: string): boolean => text.startsWith(PR
 
 function MessageText({
   text,
-  markdown,
   streaming = false
 }: {
   text: string
-  markdown: boolean
   streaming?: boolean
 }) {
   const planDocument = useContext(PlanProgressContext)
   if (text.length === 0) return null
-  if (markdown && isPromptFailureText(text)) {
+  if (isPromptFailureText(text)) {
     return <InlineError message={text} className={WIDTH} />
   }
-  if (markdown) {
-    const progress = renderProgressMarkers(text, planDocument, streaming)
-    if (progress !== null) return progress
-  }
-  return markdown ? (
-    <StreamingText text={text} streaming={streaming} className={WIDTH} />
-  ) : (
-    <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
-      {text}
-    </p>
+  return (
+    renderProgressMarkers(text, planDocument, streaming) ?? (
+      <StreamingText text={text} streaming={streaming} className={WIDTH} />
+    )
   )
 }
 
@@ -485,7 +477,6 @@ const MergedThoughts = memo(function MergedThoughts({ parts }: { parts: Readonly
 
 const PartView = memo(function PartView({
   part,
-  markdown,
   onDecideGate,
   onSwitchToAuto,
   onForkOntoBranch,
@@ -493,7 +484,6 @@ const PartView = memo(function PartView({
   streamingText = false
 }: {
   part: ContentPart
-  markdown: boolean
   streamingText?: boolean
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onSwitchToAuto?: () => void
@@ -502,7 +492,7 @@ const PartView = memo(function PartView({
 }) {
   switch (part._tag) {
     case "Text": {
-      return <MessageText text={part.text} markdown={markdown} streaming={streamingText} />
+      return <MessageText text={part.text} streaming={streamingText} />
     }
     case "PlanTaskProgress":
       return <PlanTaskProgressChip progress={part} />
@@ -561,7 +551,6 @@ const PartView = memo(function PartView({
  */
 function renderParts(
   parts: ReadonlyArray<ContentPart>,
-  markdown: boolean,
   {
     onDecideGate,
     onSwitchToAuto,
@@ -657,7 +646,6 @@ function renderParts(
       <PartView
         key={i}
         part={part}
-        markdown={markdown}
         streamingText={i === streamingTextIndex}
         onDecideGate={onDecideGate}
         onSwitchToAuto={onSwitchToAuto}
@@ -764,7 +752,7 @@ function MessageTurnImpl({
           Show {hiddenParts} earlier steps
         </button>
       )}
-      {renderParts(visibleParts, isAssistant, {
+      {renderParts(visibleParts, {
         onDecideGate,
         onSwitchToAuto,
         onForkOntoBranch,

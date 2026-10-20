@@ -6,6 +6,7 @@ import type {
   GithubConfig,
   NotificationPermission,
   NotificationsConfig,
+  ObsidianExplanationsConfig,
   OffloadComputeSettings,
   ContextConfig,
   ContextSnapshot,
@@ -18,6 +19,7 @@ import {
   BUDGET_RANGE,
   DEFAULT_CONTEXT_CONFIG,
   NOTIFICATIONS_DEFAULT,
+  OBSIDIAN_EXPLANATIONS_DEFAULT,
   clampFontScale
 } from "@jingler/core"
 import { ContextMeter } from "./context-meter.js"
@@ -223,6 +225,11 @@ export interface SettingsViewProps {
   git?: GitConfig | null
   onSaveGithub?: (config: GithubConfig) => void
   onSaveGit?: (config: GitConfig) => void
+  /** Obsidian explanation auto-save; absent means the default (off). */
+  obsidianExplanations?: ObsidianExplanationsConfig | null
+  onSaveObsidianExplanations?: (config: ObsidianExplanationsConfig) => void | Promise<void>
+  /** Whether any session has an Obsidian vault configured; hides the setting otherwise. */
+  obsidianVaultConfigured?: boolean
   /** Desktop-notification prefs; absent means the defaults, not "off". */
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
@@ -301,6 +308,9 @@ export function SettingsView({
   git,
   onSaveGithub,
   onSaveGit,
+  obsidianExplanations,
+  onSaveObsidianExplanations,
+  obsidianVaultConfigured,
   notifications,
   onSaveNotifications,
   notificationPermission,
@@ -341,6 +351,9 @@ return (<NotificationsSection
 }
 case "general": {
 return (<GeneralSection
+          obsidianExplanations={obsidianExplanations}
+          onSaveObsidianExplanations={onSaveObsidianExplanations}
+          obsidianVaultConfigured={obsidianVaultConfigured}
           offloadCompute={offloadCompute}
           onSaveOffloadCompute={onSaveOffloadCompute}
           offloadStatus={offloadStatus}
@@ -1186,6 +1199,9 @@ function OffloadStatusRow({
  * review: each switch is independently meaningful and instantly reversible.
  */
 function GeneralSection({
+  obsidianExplanations,
+  onSaveObsidianExplanations,
+  obsidianVaultConfigured,
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
@@ -1200,6 +1216,9 @@ function GeneralSection({
   onSaveFontScale,
   webSearch
 }: {
+  obsidianExplanations?: ObsidianExplanationsConfig | null
+  onSaveObsidianExplanations?: (config: ObsidianExplanationsConfig) => void | Promise<void>
+  obsidianVaultConfigured?: boolean
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
@@ -1249,6 +1268,17 @@ function GeneralSection({
     () => setFontScaleDraft(clampFontScale(fontScale)),
     [fontScale]
   )
+  const [obsidianDraft, setObsidianDraft] = React.useState<ObsidianExplanationsConfig>(
+    obsidianExplanations ?? OBSIDIAN_EXPLANATIONS_DEFAULT
+  )
+  React.useEffect(
+    () => setObsidianDraft(obsidianExplanations ?? OBSIDIAN_EXPLANATIONS_DEFAULT),
+    [obsidianExplanations]
+  )
+  const saveObsidian = (next: ObsidianExplanationsConfig) => {
+    setObsidianDraft(next)
+    void onSaveObsidianExplanations?.(next)
+  }
   const toggle = (label: string, description: string, checked: boolean, onChange: (v: boolean) => void, disabled?: boolean) => (
     <GeneralToggleRow label={label} description={description} checked={checked} disabled={disabled} onChange={onChange} />
   )
@@ -1361,6 +1391,30 @@ function GeneralSection({
         </SettingsCard>
 
         {webSearch ? <WebSearchSettings {...webSearch} /> : null}
+
+        {obsidianVaultConfigured ? (
+          <SettingsCard title="Obsidian">
+            <GeneralToggleRow
+              label="Save explanations to Obsidian"
+              description="Write every explanation an agent publishes as a Markdown note in the session's vault. Publishing again updates the same note."
+              checked={obsidianDraft.enabled}
+              onChange={(enabled) => saveObsidian({ ...obsidianDraft, enabled })}
+            />
+            <label
+              htmlFor="obsidian-explanations-folder"
+              className="flex flex-col gap-2 py-2.5 text-[11px] font-medium text-muted-foreground"
+            >
+              Vault folder
+              <Input
+                id="obsidian-explanations-folder"
+                value={obsidianDraft.folder}
+                disabled={!obsidianDraft.enabled}
+                onChange={(event) => setObsidianDraft({ ...obsidianDraft, folder: event.target.value })}
+                onBlur={() => saveObsidian(obsidianDraft)}
+              />
+            </label>
+          </SettingsCard>
+        ) : null}
       </div>
     </div>
   )

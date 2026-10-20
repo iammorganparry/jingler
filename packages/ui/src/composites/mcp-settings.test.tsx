@@ -196,14 +196,14 @@ describe("McpSettings", () => {
   it("loads import candidates and applies the selection", async () => {
     const applyImport = vi.fn(async () => ["linear"])
     const importCandidates = vi.fn(async () => [
-      { name: "linear", source: "claude" as const, target: "npx -y linear-mcp", problem: null, needsSignIn: false, needsSecrets: false },
-      { name: "memory", source: "claude" as const, target: "", problem: "reserved", needsSignIn: false, needsSecrets: false }
+      { name: "linear", source: "claude" as const, origin: "user" as const, target: "npx -y linear-mcp", problem: null, needsSignIn: false, needsSecrets: false },
+      { name: "memory", source: "claude" as const, origin: "user" as const, target: "", problem: "reserved", needsSignIn: false, needsSecrets: false }
     ])
     render(<McpSettings {...props({ importCandidates, applyImport })} />)
     fireEvent.click(screen.getByText("Claude"))
     await screen.findByText("linear")
     // Only the importable candidate is preselected.
     fireEvent.click(screen.getByText("Import 1 server"))
-    await waitFor(() => expect(applyImport).toHaveBeenCalledWith("claude", ["linear"]))
+    await waitFor(() => expect(applyImport).toHaveBeenCalledWith("claude", ["linear"], undefined, false))
   })
 })

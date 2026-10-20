@@ -1171,3 +1171,16 @@ test("a blocked question shows an amber rail tick whose hover card jumps to it",
   await window.getByRole("button", { name: "Jump", exact: true }).click()
   await expect(window.getByText("[[ask]] migrate the store").first()).toBeVisible()
 })
+
+test("renders markdown in the operator's own message", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("Please **refactor** this:\n\n- one\n- two")
+  await composer.press("Enter")
+
+  const transcript = window.getByTestId("conversation-scroll")
+  await expect(transcript.locator("[data-streamdown=strong]", { hasText: "refactor" }).first()).toBeVisible({ timeout: 20_000 })
+  await expect(transcript.getByText("**refactor**")).toHaveCount(0)
+})
