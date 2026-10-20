@@ -7,7 +7,7 @@
 import { useCallback, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type { Session } from "@jingler/core"
-import { checkoutsOf, workspaceModeOf } from "@jingler/core"
+import { activeCheckoutOf, checkoutsOf, hasNoRepo, workspaceModeOf } from "@jingler/core"
 import { ChangedFilesExplorer, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
 import {
@@ -148,6 +148,14 @@ export function ChangesExplorerPanel({
   readonly onOpenPath: (path: string) => void
 }) {
   const checkouts = checkoutsOf(session)
+  // An Auto session with nothing attached yet has no repo to diff against.
+  if (checkouts.length < 2 && hasNoRepo(activeCheckoutOf(session))) {
+    return (
+      <p data-testid="changes-no-repo" className="px-3 py-6 text-center text-[12px] text-dim">
+        No repo
+      </p>
+    )
+  }
   if (checkouts.length < 2) {
     return (
       <CheckoutChangesList
