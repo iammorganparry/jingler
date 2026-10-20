@@ -389,12 +389,11 @@ test("the 'Needs you' palette group jumps to a session blocked on a question", a
 })
 
 /**
- * ⌘⇧N ("Go to next workspace that needs you") is the global binding the
- * palette's own "Needs you" action lists as its hint — provisional (#507),
- * but it is live now, so it must switch straight to the blocked session
- * without going through the palette at all.
+ * ⌘J ("Go to next workspace that needs you") is the global binding the
+ * palette's own "Needs you" action lists as its hint (#507); it must switch
+ * straight to the blocked session without going through the palette at all.
  */
-test("⌘⇧N switches to the session that needs you", async ({ launchApp }) => {
+test("⌘J switches to the session that needs you", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
@@ -414,7 +413,7 @@ test("⌘⇧N switches to the session that needs you", async ({ launchApp }) => 
   await sessionRow(window, "Session B").click()
   await expect(window.getByText("Agent needs your input")).toHaveCount(0)
 
-  await window.keyboard.press("Meta+Shift+n")
+  await window.keyboard.press("Meta+j")
 
   await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText(
     "Session A"

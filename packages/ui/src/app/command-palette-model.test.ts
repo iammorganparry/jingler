@@ -473,20 +473,19 @@ describe("matchNeedsYouChord", () => {
   const MAC = true
   const PC = false
 
-  it("matches ⌘⇧N on macOS and Ctrl+⇧N elsewhere", () => {
-    expect(matchNeedsYouChord(chord({ code: "KeyN", key: "n", metaKey: true, shiftKey: true }), MAC)).toBe(true)
-    expect(matchNeedsYouChord(chord({ code: "KeyN", key: "n", ctrlKey: true, shiftKey: true }), PC)).toBe(true)
+  it("matches ⌘J on macOS and Ctrl+J elsewhere", () => {
+    expect(matchNeedsYouChord(chord({ code: "KeyJ", key: "j", metaKey: true }), MAC)).toBe(true)
+    expect(matchNeedsYouChord(chord({ code: "KeyJ", key: "j", ctrlKey: true }), PC)).toBe(true)
   })
 
-  it("does not fire without Shift — that chord is plain New Workspace", () => {
-    expect(matchNeedsYouChord(chord({ code: "KeyN", key: "n", metaKey: true }), MAC)).toBe(false)
+  it("does not fire with Shift held, or on the old ⌘⇧N chord", () => {
+    expect(matchNeedsYouChord(chord({ code: "KeyJ", key: "j", metaKey: true, shiftKey: true }), MAC)).toBe(false)
+    expect(matchNeedsYouChord(chord({ code: "KeyN", key: "n", metaKey: true, shiftKey: true }), MAC)).toBe(false)
   })
 
   it("does not fire with Alt held, or on an already-handled event", () => {
-    expect(
-      matchNeedsYouChord(chord({ code: "KeyN", key: "n", metaKey: true, shiftKey: true, altKey: true }), MAC)
-    ).toBe(false)
-    const e = chord({ code: "KeyN", key: "n", metaKey: true, shiftKey: true, cancelable: true })
+    expect(matchNeedsYouChord(chord({ code: "KeyJ", key: "j", metaKey: true, altKey: true }), MAC)).toBe(false)
+    const e = chord({ code: "KeyJ", key: "j", metaKey: true, cancelable: true })
     e.preventDefault()
     expect(matchNeedsYouChord(e, MAC)).toBe(false)
   })
