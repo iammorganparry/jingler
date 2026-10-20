@@ -9,7 +9,7 @@ const interruptedSeedSession = (repoPath: string): SeedSession => ({
   id: INTERRUPTED_SESSION_ID,
   repo: "widget",
   branch: "jingler/interrupted-recovery",
-  title: "Interrupted recovery",
+  title: "Mid-run recovery",
   status: "idle",
   diff: { added: 0, removed: 0 },
   prNumber: null,
@@ -129,7 +129,7 @@ test("shows Interrupted after a kill mid-run and Resume continues the run", asyn
     sessions: ({ repoPath }) => [interruptedSeedSession(repoPath)]
   })
   await expect(appShell(first.window)).toBeVisible()
-  await sessionRow(first.window, "Interrupted recovery").click()
+  await sessionRow(first.window, "Mid-run recovery").click()
 
   // `[[queue-hold]]` parks the scripted turn on a tool call that sleeps for two
   // minutes — long enough to kill the app while the run is still "in flight",
@@ -154,9 +154,9 @@ test("shows Interrupted after a kill mid-run and Resume continues the run", asyn
     withRepo: true
   })
   await expect(appShell(resumed.window)).toBeVisible()
-  await expect(sessionRow(resumed.window, "Interrupted recovery")).toContainText("Interrupted")
+  await expect(sessionRow(resumed.window, "Mid-run recovery")).toContainText("Interrupted")
 
-  await sessionRow(resumed.window, "Interrupted recovery").click()
+  await sessionRow(resumed.window, "Mid-run recovery").click()
   const interruptedCard = resumed.window.getByRole("region", { name: "Interrupted run" })
   await expect(interruptedCard).toBeVisible()
   await interruptedCard.getByRole("button", { name: "Resume" }).click()
@@ -166,5 +166,5 @@ test("shows Interrupted after a kill mid-run and Resume continues the run", asyn
   // only true if the run actually continued rather than staying stuck.
   await expect(interruptedCard).toHaveCount(0)
   await expect(resumed.window.getByPlaceholder("Message the agent…")).toBeVisible({ timeout: 15_000 })
-  await expect(sessionRow(resumed.window, "Interrupted recovery")).not.toContainText("Interrupted")
+  await expect(sessionRow(resumed.window, "Mid-run recovery")).not.toContainText("Interrupted")
 })
