@@ -3,12 +3,10 @@ import type {
   AgentEndpointCatalog,
   AuthKind,
   CodexLoginMethod,
-  DetectedResourceCandidate,
   GitHubConnection,
   ProviderCatalog,
   ProviderLoginEvent,
-  Repo,
-  ResourceDetectionResult
+  Repo
 } from "@jingler/core"
 import { ArrowRight, GitBranch } from "lucide-react"
 import { Button } from "../components/button.js"
@@ -21,17 +19,15 @@ import { StatusDot } from "../components/status-dot.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
 import { ProjectsFolderStep } from "./setup/projects-folder-step.js"
 import { ProviderSetupStep } from "./setup/provider-setup-step.js"
-import { ResourceSetupStep } from "./setup/resource-setup-step.js"
 
 export interface SetupScreenProps {
-  step: "workspace" | "github" | "provider" | "resources" | "importSessions"
+  step: "workspace" | "github" | "provider" | "importSessions"
   github: GitHubConnection
   providerCatalog?: ProviderCatalog | null
   nativeEndpointLogin?: NativeEndpointLoginActions
   agentEndpointCatalog?: AgentEndpointCatalog | null
   providerLoginEvent?: ProviderLoginEvent | null
   providerPendingAuthKind?: AuthKind | null
-  resourceDetection?: ResourceDetectionResult | null
   error?: string | null
   repos?: ReadonlyArray<Repo>
   busy?: boolean
@@ -52,10 +48,6 @@ export interface SetupScreenProps {
   onSkipProvider: () => void
   onCancelAuth: () => void
   onRetryProvider: () => void
-  onImportResources: (candidates: ReadonlyArray<DetectedResourceCandidate>) => void
-  onSkipResources: () => void
-  onCancelResourceImport: () => void
-  onRetryResources: () => void
   onSkipImportSessions: () => void
   onContinueImportSessions: () => void
 }
@@ -88,7 +80,6 @@ export function SetupScreen({
   nativeEndpointLogin,
   providerLoginEvent = null,
   providerPendingAuthKind = null,
-  resourceDetection = null,
   error = null,
   repos = [],
   busy = false,
@@ -109,10 +100,6 @@ export function SetupScreen({
   onSkipProvider,
   onCancelAuth,
   onRetryProvider,
-  onImportResources,
-  onSkipResources,
-  onCancelResourceImport,
-  onRetryResources,
   onSkipImportSessions,
   onContinueImportSessions
 }: SetupScreenProps) {
@@ -244,15 +231,6 @@ case "importSessions": {
 return (renderImportSessionsSetup())
 }
 }
-           return (<ResourceSetupStep
-            detection={resourceDetection}
-            busy={busy}
-            error={error}
-            onImport={onImportResources}
-            onSkip={onSkipResources}
-            onCancel={onCancelResourceImport}
-            onRetry={onRetryResources}
-          />)
          }
 
   const shownRepos = repos.slice(0, 6)

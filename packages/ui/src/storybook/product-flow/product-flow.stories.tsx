@@ -272,7 +272,7 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
 
   const step = snapshot.matches("providerConnecting")
     ? "provider"
-    : snapshot.value as "workspace" | "github" | "provider" | "resources"
+    : snapshot.value as "workspace" | "github" | "provider"
   return (
     <SetupScreen
       step={step}
@@ -282,7 +282,6 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
       providerCatalog={catalog}
       providerPendingAuthKind={snapshot.context.providerPendingAuthKind}
       busy={snapshot.matches("providerConnecting")}
-      resourceDetection={FLOW_RESOURCE_DETECTION}
       onChooseDir={() => send({ type: "CHOOSE_WORKSPACE" })}
       onContinue={() => send({ type: "CONTINUE" })}
       onToggleRepo={noop}
@@ -307,10 +306,6 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
       onSkipProvider={() => send({ type: "SKIP_PROVIDER" })}
       onCancelAuth={noop}
       onRetryProvider={noop}
-      onImportResources={() => send({ type: "IMPORT_RESOURCES" })}
-      onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
-      onCancelResourceImport={noop}
-      onRetryResources={noop}
       onSkipImportSessions={noop}
       onContinueImportSessions={noop}
     />
@@ -369,10 +364,6 @@ export const WorkspaceScanFailed: Story = {
       onSkipProvider={noop}
       onCancelAuth={noop}
       onRetryProvider={noop}
-      onImportResources={noop}
-      onSkipResources={noop}
-      onCancelResourceImport={noop}
-      onRetryResources={noop}
       onSkipImportSessions={noop}
       onContinueImportSessions={noop}
     />
@@ -401,10 +392,6 @@ export const WorkspaceEmpty: Story = {
       onSkipProvider={noop}
       onCancelAuth={noop}
       onRetryProvider={noop}
-      onImportResources={noop}
-      onSkipResources={noop}
-      onCancelResourceImport={noop}
-      onRetryResources={noop}
       onSkipImportSessions={noop}
       onContinueImportSessions={noop}
     />
@@ -435,10 +422,6 @@ export const WorkspaceRepoList: Story = {
       onSkipProvider={noop}
       onCancelAuth={noop}
       onRetryProvider={noop}
-      onImportResources={noop}
-      onSkipResources={noop}
-      onCancelResourceImport={noop}
-      onRetryResources={noop}
       onSkipImportSessions={noop}
       onContinueImportSessions={noop}
     />
@@ -447,10 +430,6 @@ export const WorkspaceRepoList: Story = {
 
 export const ProviderOnboarding: Story = {
   render: () => frame(<ProductFlow startAt="provider" />)
-}
-
-export const ResourceImport: Story = {
-  render: () => frame(<ProductFlow startAt="resources" />)
 }
 
 export const ActivePiSession: Story = {

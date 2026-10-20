@@ -299,8 +299,9 @@ const authenticateProvider = async (
     ).toBeVisible({ timeout: 5 * 60_000 });
   }
   await window.getByRole("button", { name: "Continue" }).click();
+  // #487 removed the standalone resources onboarding step.
   await expect(
-    window.getByRole("heading", { name: "Import agent resources" }),
+    window.getByRole("heading", { name: "Import existing sessions?" }),
   ).toBeVisible({ timeout: 90_000 });
   await window.getByRole("button", { name: "Skip for now" }).click();
   await expect(appShell(window)).toBeVisible({ timeout: 30_000 });

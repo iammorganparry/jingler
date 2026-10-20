@@ -8,15 +8,12 @@ import type {
   AgentEndpointCatalog,
   AuthKind,
   CodexLoginMethod,
-  DetectedResourceCandidate,
   ProviderCatalog,
   ProviderConnection,
   ProviderConnectionId,
   ProviderLoginEvent,
   PublishCheckpoint,
   Repo,
-  ResourceDetectionResult,
-  ResourceImportResult,
   Session,
   WorkspaceConfig,
 } from "@jingler/core";
@@ -31,8 +28,6 @@ export interface AppContext {
   readonly agentEndpointCatalog: AgentEndpointCatalog | null;
   readonly providerLoginEvent: ProviderLoginEvent | null;
   readonly providerPendingAuthKind: AuthKind | null;
-  readonly resourceDetection: ResourceDetectionResult | null;
-  readonly selectedResourceCandidates: ReadonlyArray<DetectedResourceCandidate>;
   /** Paths of the scanned repositories ticked on onboarding step 1. */
   readonly selectedRepoPaths: ReadonlyArray<string>;
   readonly error: string | null;
@@ -219,20 +214,6 @@ const connectProvider = fromPromise<ProviderConnection, ProviderAuthInput>(
   },
 );
 
-const detectResources = fromPromise<ResourceDetectionResult>(async () =>
-  rpc.agentResourcesDetect(null),
-);
-
-const importResources = fromPromise<
-  ResourceImportResult,
-  ReadonlyArray<DetectedResourceCandidate>
->(async ({ input }) =>
-  rpc.agentResourcesImportFiles(null, input, {
-    kind: "portable",
-    allowedTargets: [],
-  }),
-);
-
 export const appMachine = setup({
   types: {
     context: {} as AppContext,
@@ -263,13 +244,6 @@ export const appMachine = setup({
       | { type: "ENDPOINT_CATALOG"; catalog: AgentEndpointCatalog }
       | { type: "RETRY_PROVIDER" }
       | { type: "PROVIDER_LOGIN_EVENT"; event: ProviderLoginEvent }
-      | {
-          type: "IMPORT_RESOURCES";
-          candidates: ReadonlyArray<DetectedResourceCandidate>;
-        }
-      | { type: "SKIP_RESOURCES" }
-      | { type: "CANCEL_RESOURCE_IMPORT" }
-      | { type: "RETRY_RESOURCES" }
       | { type: "SKIP_IMPORT_SESSIONS" }
       | { type: "CONTINUE_IMPORT_SESSIONS" }
       | { type: "SESSION_CREATED"; session: Session }
@@ -292,8 +266,6 @@ export const appMachine = setup({
     completeProviderSetup,
     watchProviderLoginEvents,
     connectProvider,
-    detectResources,
-    importResources,
   },
 }).createMachine({
   id: "app",
@@ -306,8 +278,6 @@ export const appMachine = setup({
     agentEndpointCatalog: null,
     providerLoginEvent: null,
     providerPendingAuthKind: null,
-    resourceDetection: null,
-    selectedResourceCandidates: [],
     selectedRepoPaths: [],
     error: null,
   },
@@ -515,7 +485,7 @@ export const appMachine = setup({
             completing: {
               invoke: {
                 src: "completeProviderSetup",
-                onDone: "#app.setup.resources",
+                onDone: "#app.setup.importSessions",
                 onError: {
                   target: "completionFailed",
                   actions: assign(({ event }) => ({
@@ -583,69 +553,6 @@ export const appMachine = setup({
               },
             },
             authFailed: { on: { RETRY_AUTH: "idle" } },
-          },
-        },
-        resources: {
-          initial: "detecting",
-          states: {
-            detecting: {
-              invoke: {
-                src: "detectResources",
-                onDone: {
-                  target: "reviewing",
-                  actions: assign(({ event }) => ({
-                    resourceDetection: event.output,
-                    selectedResourceCandidates: [],
-                    error: null,
-                  })),
-                },
-                onError: {
-                  target: "detectFailed",
-                  actions: assign(({ event }) => ({
-                    error: messageOf(event.error),
-                  })),
-                },
-              },
-            },
-            detectFailed: {
-              on: {
-                RETRY_RESOURCES: "detecting",
-                SKIP_RESOURCES: "#app.setup.importSessions",
-              },
-            },
-            reviewing: {
-              on: {
-                IMPORT_RESOURCES: {
-                  target: "importing",
-                  actions: assign(({ event }) => ({
-                    selectedResourceCandidates: event.candidates,
-                    error: null,
-                  })),
-                },
-                SKIP_RESOURCES: "#app.setup.importSessions",
-              },
-            },
-            importing: {
-              invoke: {
-                src: "importResources",
-                input: ({ context }) => context.selectedResourceCandidates,
-                onDone: "#app.setup.importSessions",
-                onError: {
-                  target: "importFailed",
-                  actions: assign(({ event }) => ({
-                    error: messageOf(event.error),
-                  })),
-                },
-              },
-              on: { CANCEL_RESOURCE_IMPORT: "reviewing" },
-            },
-            importFailed: {
-              on: {
-                RETRY_RESOURCES: "importing",
-                CANCEL_RESOURCE_IMPORT: "reviewing",
-                SKIP_RESOURCES: "#app.setup.importSessions",
-              },
-            },
           },
         },
         importSessions: {

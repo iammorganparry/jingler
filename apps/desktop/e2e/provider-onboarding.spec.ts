@@ -50,8 +50,10 @@ const finishProviderSetup = async (
     launched.window.getByRole("button", { name: "Open browser" }),
   ).toBeHidden();
   await launched.window.getByRole("button", { name: "Continue" }).click();
+  // #487 removed the standalone resources onboarding step; onboarding now
+  // continues straight to the import-sessions step.
   await expect(
-    launched.window.getByRole("heading", { name: "Import agent resources" }),
+    launched.window.getByRole("heading", { name: "Import existing sessions?" }),
   ).toBeVisible();
   await launched.window.getByRole("button", { name: "Skip for now" }).click();
   await expect(appShell(launched.window)).toBeVisible();

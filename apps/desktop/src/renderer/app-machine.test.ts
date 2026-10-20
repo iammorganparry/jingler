@@ -1,10 +1,7 @@
 import {
   ProviderCatalog as ProviderCatalogSchema,
-  type DetectedResourceCandidate,
   type ProviderCatalog,
   type ProviderConnection,
-  type ResourceDetectionResult,
-  type ResourceImportResult,
   type Session,
 } from "@jingler/core";
 import { Schema } from "effect";
@@ -61,8 +58,6 @@ const providerCatalog = Schema.decodeSync(ProviderCatalogSchema)({
   stale: false,
 });
 
-const emptyDetection: ResourceDetectionResult = { candidates: [], skipped: [] };
-const emptyImport: ResourceImportResult = { imported: [], skipped: [] };
 const authenticatedCatalogWithoutModels = Schema.decodeSync(
   ProviderCatalogSchema,
 )({
@@ -113,13 +108,6 @@ const unconfigured = () =>
         async () => providerCatalog.connections[0]!.connection,
       ),
       completeProviderSetup: fromPromise<void>(async () => undefined),
-      detectResources: fromPromise<ResourceDetectionResult>(
-        async () => emptyDetection,
-      ),
-      importResources: fromPromise<
-        ResourceImportResult,
-        ReadonlyArray<DetectedResourceCandidate>
-      >(async () => emptyImport),
     },
   });
 
@@ -256,14 +244,16 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
-  it("coordinates workspace, GitHub, provider auth, resources, and startup", async () => {
+  // Acceptance: onboarding completes with no resources step — CONTINUE_PROVIDER
+  // lands on importSessions directly, never on a "resources" state.
+  it("coordinates workspace, GitHub, provider auth, and startup with no resources step", async () => {
     const actor = createActor(unconfigured()).start();
     await reachProvider(actor);
     actor.send({ type: "CONTINUE_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
-    actor.send({ type: "SKIP_RESOURCES" });
+    expect(actor.getSnapshot().matches({ setup: "resources" } as never)).toBe(false);
     actor.send({ type: "SKIP_IMPORT_SESSIONS" });
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     actor.stop();
@@ -293,7 +283,7 @@ describe("appMachine first-run coordination", () => {
     actor.send({ type: "CONTINUE_PROVIDER" });
 
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
     expect(completeProviderSetup).toHaveBeenCalledOnce();
     actor.stop();
@@ -324,7 +314,7 @@ describe("appMachine first-run coordination", () => {
     );
     actor.send({ type: "SKIP_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
     actor.stop();
   });
@@ -384,32 +374,9 @@ describe("appMachine first-run coordination", () => {
     );
     actor.send({ type: "RETRY_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
     expect(attempts).toBe(2);
-    actor.stop();
-  });
-
-  it("skips resource import without mutating detected candidates", async () => {
-    const importSpy = vi.fn(async () => emptyImport);
-    const machine = unconfigured().provide({
-      actors: {
-        importResources: fromPromise<
-          ResourceImportResult,
-          ReadonlyArray<DetectedResourceCandidate>
-        >(importSpy),
-      },
-    });
-    const actor = createActor(machine).start();
-    await reachProvider(actor);
-    actor.send({ type: "CONTINUE_PROVIDER" });
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
-    );
-    actor.send({ type: "SKIP_RESOURCES" });
-    actor.send({ type: "SKIP_IMPORT_SESSIONS" });
-    await waitFor(actor, (snapshot) => snapshot.matches("ready"));
-    expect(importSpy).not.toHaveBeenCalled();
     actor.stop();
   });
 
@@ -477,9 +444,8 @@ describe("appMachine first-run coordination", () => {
     );
     actor.send({ type: "CONTINUE_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
-    actor.send({ type: "SKIP_RESOURCES" });
     actor.send({ type: "SKIP_IMPORT_SESSIONS" });
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     actor.stop();

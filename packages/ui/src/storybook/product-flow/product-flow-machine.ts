@@ -6,7 +6,6 @@ export type ProductFlowCheckpoint =
   | "workspace"
   | "github"
   | "provider"
-  | "resources"
   | "app"
 
 interface ProductFlowContext {
@@ -15,7 +14,6 @@ interface ProductFlowContext {
   readonly githubConnected: boolean
   readonly providerConnected: boolean
   readonly providerPendingAuthKind: AuthKind | null
-  readonly resourcesImported: boolean
 }
 
 type ProductFlowEvent =
@@ -27,8 +25,6 @@ type ProductFlowEvent =
   | { readonly type: "CONNECT_PROVIDER"; readonly authKind: AuthKind }
   | { readonly type: "PROVIDER_CONNECTED" }
   | { readonly type: "SKIP_PROVIDER" }
-  | { readonly type: "IMPORT_RESOURCES" }
-  | { readonly type: "SKIP_RESOURCES" }
   | { readonly type: "RESET" }
 
 export const productFlowMachine = setup({
@@ -42,7 +38,6 @@ export const productFlowMachine = setup({
     startsAtWorkspace: ({ context }) => context.startAt === "workspace",
     startsAtGithub: ({ context }) => context.startAt === "github",
     startsAtProvider: ({ context }) => context.startAt === "provider",
-    startsAtResources: ({ context }) => context.startAt === "resources",
     workspaceIsChosen: ({ context }) => context.workspaceChosen,
     providerIsConnected: ({ context }) => context.providerConnected
   },
@@ -56,8 +51,7 @@ export const productFlowMachine = setup({
     connectProvider: assign({
       providerConnected: true,
       providerPendingAuthKind: null
-    }),
-    importResources: assign({ resourcesImported: true })
+    })
   }
 }).createMachine({
   id: "storybookProductFlow",
@@ -65,10 +59,9 @@ export const productFlowMachine = setup({
   context: ({ input }) => ({
     startAt: input.startAt,
     workspaceChosen: input.startAt !== "auth" && input.startAt !== "workspace",
-    githubConnected: input.startAt === "provider" || input.startAt === "resources" || input.startAt === "app",
-    providerConnected: input.startAt === "resources" || input.startAt === "app",
-    providerPendingAuthKind: null,
-    resourcesImported: input.startAt === "app"
+    githubConnected: input.startAt === "provider" || input.startAt === "app",
+    providerConnected: input.startAt === "app",
+    providerPendingAuthKind: null
   }),
   states: {
     route: {
@@ -77,7 +70,6 @@ export const productFlowMachine = setup({
         { guard: "startsAtWorkspace", target: "workspace" },
         { guard: "startsAtGithub", target: "github" },
         { guard: "startsAtProvider", target: "provider" },
-        { guard: "startsAtResources", target: "resources" },
         { target: "app" }
       ]
     },
@@ -102,20 +94,14 @@ export const productFlowMachine = setup({
           target: "providerConnecting",
           actions: "beginProviderConnection"
         },
-        CONTINUE: { guard: "providerIsConnected", target: "resources" },
-        SKIP_PROVIDER: "resources"
+        CONTINUE: { guard: "providerIsConnected", target: "app" },
+        SKIP_PROVIDER: "app"
       }
     },
     providerConnecting: {
       after: { 900: { target: "provider", actions: "connectProvider" } },
       on: {
         PROVIDER_CONNECTED: { target: "provider", actions: "connectProvider" }
-      }
-    },
-    resources: {
-      on: {
-        IMPORT_RESOURCES: { target: "app", actions: "importResources" },
-        SKIP_RESOURCES: "app"
       }
     },
     app: {

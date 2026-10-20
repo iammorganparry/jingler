@@ -5680,6 +5680,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           source: candidate.source,
           target: mcpCandidateTarget(candidate),
           problem: candidate.problem,
+          needsSignIn:
+            candidate.entry?.type === "remote" && candidate.entry.auth?.type === "oauth",
         })),
       ),
     ),

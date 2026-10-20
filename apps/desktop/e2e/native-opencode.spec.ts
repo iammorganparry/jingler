@@ -45,5 +45,6 @@ test("detects connected OpenCode providers during onboarding", async ({ launchAp
   await launched.window.getByRole("button", { name: "Skip for now" }).click()
   await expect(launched.window.getByLabel("Detected agent runtimes")).toContainText("OpenCode CLI · ready")
   await launched.window.getByRole("button", { name: "Continue", exact: true }).click()
-  await expect(launched.window.getByRole("heading", { name: "Import agent resources" })).toBeVisible()
+  // #487 removed the standalone resources onboarding step.
+  await expect(launched.window.getByRole("heading", { name: "Import existing sessions?" })).toBeVisible()
 })

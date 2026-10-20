@@ -11,13 +11,13 @@ afterEach(() => {
 describe("McpImportPrompt", () => {
   it("discovers all sources, dedupes names, and imports by source once", async () => {
     const load = vi.fn(async (source: "claude" | "codex" | "opencode") => source === "claude"
-      ? [{ name: "linear", source, target: "npx linear", problem: null }]
+      ? [{ name: "linear", source, target: "npx linear", problem: null, needsSignIn: false }]
       : source === "codex"
         ? [
-            { name: "linear", source, target: "duplicate", problem: null },
-            { name: "docs", source, target: "https://docs.example/mcp", problem: null }
+            { name: "linear", source, target: "duplicate", problem: null, needsSignIn: false },
+            { name: "docs", source, target: "https://docs.example/mcp", problem: null, needsSignIn: true }
           ]
-        : [{ name: "broken", source, target: "", problem: "invalid" }]
+        : [{ name: "broken", source, target: "", problem: "invalid", needsSignIn: false }]
     )
     const apply = vi.fn(async () => [])
 
@@ -27,6 +27,8 @@ describe("McpImportPrompt", () => {
     expect(screen.getByText("linear")).toBeTruthy()
     expect(screen.getByText("docs")).toBeTruthy()
     expect(screen.queryByText("broken")).toBeNull()
+    // Acceptance: an OAuth server imports marked "Needs sign-in".
+    expect(screen.getByText(/Needs sign-in/)).toBeTruthy()
     fireEvent.click(screen.getByText("Import 2 servers"))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(apply.mock.calls).toEqual([
@@ -55,7 +57,8 @@ describe("McpImportPrompt", () => {
         name: "linear",
         source,
         target: "https://linear.example/mcp",
-        problem: null
+        problem: null,
+        needsSignIn: false
       }]}
       apply={async () => []}
     />)
