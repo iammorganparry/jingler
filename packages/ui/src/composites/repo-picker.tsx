@@ -18,16 +18,20 @@ import { ChipMenu, type ChipGroup } from "../components/chip-menu.js"
  * component is the field's trigger and the star toggle; the list behaviour is
  * inherited.
  */
+/** Value the picker reports for Auto: no repo chosen, no checkout until `switch_checkout`. */
+export const AUTO_REPO_VALUE = ""
+
 export function RepoPicker({
   repos,
   value,
   onChange,
   starredRepos = [],
   onToggleStar,
-  disabled = false
+  disabled = false,
+  allowAuto = false
 }: {
   repos: ReadonlyArray<Repo>
-  /** Absolute path of the selected repo, or "" when none is chosen. */
+  /** Absolute path of the selected repo, or "" when none is chosen (also Auto's value). */
   value: string
   onChange: (repoPath: string) => void
   /** Absolute paths of starred repos — surfaced in their own section, first. */
@@ -35,10 +39,16 @@ export function RepoPicker({
   /** Toggle a repo's starred state. Presence wires the per-row star button. */
   onToggleStar?: (repoPath: string) => void | Promise<void>
   disabled?: boolean
+  /**
+   * Offer "Auto" (no repo chosen, `""`) as the first option: the session
+   * starts in a scratch folder with no checkout until the agent attaches one
+   * via `switch_checkout`.
+   */
+  allowAuto?: boolean
 }) {
   const starredSet = React.useMemo(() => new Set(starredRepos), [starredRepos])
 
-  // Partitioned into two sections, preserving the caller's order within each.
+  // Partitioned into sections, preserving the caller's order within each.
   // Memoised on the inputs so `ChipMenu`'s own filter memo can actually hit.
   const groups: ReadonlyArray<ChipGroup<string>> = React.useMemo(() => {
     const toOption = (r: Repo) => ({
@@ -50,12 +60,16 @@ export function RepoPicker({
     })
     const starred = repos.filter((r) => starredSet.has(r.path))
     const rest = repos.filter((r) => !starredSet.has(r.path))
-    if (starred.length === 0) return [{ label: "All repos", options: rest.map(toOption) }]
+    const autoGroup: ReadonlyArray<ChipGroup<string>> = allowAuto
+      ? [{ label: "Auto", options: [{ value: AUTO_REPO_VALUE, label: "Auto", searchText: "auto no repo scratch" }] }]
+      : []
+    if (starred.length === 0) return [...autoGroup, { label: "All repos", options: rest.map(toOption) }]
     return [
+      ...autoGroup,
       { label: "Starred", options: starred.map(toOption) },
       { label: "All repos", options: rest.map(toOption) }
     ]
-  }, [repos, starredSet])
+  }, [repos, starredSet, allowAuto])
 
   const selected = repos.find((r) => r.path === value)
 
@@ -71,15 +85,18 @@ export function RepoPicker({
       // upward, intrinsically-sized default belongs to a chip in a composer.
       side="bottom"
       matchTriggerWidth
-      disabled={disabled || repos.length === 0}
+      disabled={disabled || (repos.length === 0 && !allowAuto)}
       renderTrailing={
         onToggleStar
-          ? (option) => (
-              <StarToggle
-                starred={starredSet.has(option.value)}
-                onToggle={() => void onToggleStar(option.value)}
-              />
-            )
+          ? (option) =>
+              option.value
+                ? (
+                    <StarToggle
+                      starred={starredSet.has(option.value)}
+                      onToggle={() => void onToggleStar(option.value)}
+                    />
+                  )
+                : null
           : undefined
       }
       trigger={({ open }) => (
@@ -88,11 +105,11 @@ export function RepoPicker({
           className={cn(
             "flex h-9 w-full items-center gap-2 rounded-lg border bg-sunken px-3 font-mono text-[12.5px] transition-colors",
             open ? "border-blue" : "border-line hover:border-line-strong",
-            selected ? "text-text-bright" : "text-dim"
+            selected || (allowAuto && value === AUTO_REPO_VALUE) ? "text-text-bright" : "text-dim"
           )}
         >
           <span className="min-w-0 flex-1 truncate text-left">
-            {selected?.name ?? (repos.length === 0 ? "No repositories" : "Select a repo")}
+            {selected?.name ?? (allowAuto ? "Auto" : repos.length === 0 ? "No repositories" : "Select a repo")}
           </span>
           <ChevronDown size={13} className="flex-none text-dim" />
         </span>

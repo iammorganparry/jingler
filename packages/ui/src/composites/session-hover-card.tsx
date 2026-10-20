@@ -1,5 +1,5 @@
 import type { Session, SessionActivity, SessionPrStatus } from "@jingler/core"
-import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
+import { activeCheckoutOf, activityLabel, displayStatusOf, hasNoRepo, UNTITLED_SESSION } from "@jingler/core"
 import { GitBranch } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
@@ -88,7 +88,7 @@ export function SessionHoverCard({
       <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-dim">
         <GitBranch size={11} className="flex-none text-cyan" />
         <span className="truncate">
-          {session.repo} · {session.branch}
+          {hasNoRepo(activeCheckoutOf(session)) ? "No repo" : `${session.repo} · ${session.branch}`}
         </span>
       </span>
 

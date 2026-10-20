@@ -3,6 +3,7 @@ import {
   activeCheckoutOf,
   agentCwdOf,
   checkoutsOf,
+  hasNoRepo,
   migrateSessionCheckouts,
   ownedWorktreePaths,
   PRIMARY_CHECKOUT_ID,
@@ -95,6 +96,13 @@ describe("Auto (zero-checkout) sessions", () => {
     const checkout = activeCheckoutOf(auto);
     expect(checkout.repoPath).toBeUndefined();
     expect(checkout.worktreePath).toBeUndefined();
+  });
+
+  it("hasNoRepo is true only for the placeholder checkout, false once a real repo is attached", () => {
+    expect(hasNoRepo(activeCheckoutOf(auto))).toBe(true);
+    expect(hasNoRepo(activeCheckoutOf(legacy))).toBe(false);
+    const attached = reduceCheckouts(auto, { type: "attach", checkout: web });
+    expect(hasNoRepo(activeCheckoutOf(attached))).toBe(false);
   });
 
   it("agentCwdOf falls back to the scratch folder with no checkouts, and to the checkout once attached", () => {

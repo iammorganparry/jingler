@@ -76,6 +76,14 @@ export const agentCwdOf = (session: CheckoutSession, scratchDir: string): string
   return active.worktreePath ?? active.repoPath ?? scratchDir;
 };
 
+/**
+ * True for the Auto placeholder checkout: no `repoPath`, so there is nowhere
+ * running `git` would resolve to. Once `switch_checkout` attaches a real
+ * checkout (which always carries `repoPath`), this is false again.
+ */
+export const hasNoRepo = (checkout: Pick<SessionCheckout, "repoPath">): boolean =>
+  checkout.repoPath === undefined;
+
 export type CheckoutAction =
   /** Attach a checkout and make it active; an existing one for the same repo is re-activated, never duplicated. */
   | { readonly type: "attach"; readonly checkout: SessionCheckout }

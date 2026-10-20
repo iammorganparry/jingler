@@ -1,6 +1,6 @@
 import * as React from "react"
 import type { Session } from "@jingler/core"
-import { UNTITLED_SESSION } from "@jingler/core"
+import { activeCheckoutOf, hasNoRepo, UNTITLED_SESSION } from "@jingler/core"
 import { Archive } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
@@ -41,7 +41,7 @@ function ArchivedRow({
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium text-text-bright">{title}</div>
         <div className="truncate font-mono text-[11px] text-dim">
-          {session.repo} · {session.branch}
+          {hasNoRepo(activeCheckoutOf(session)) ? "No repo" : `${session.repo} · ${session.branch}`}
           {when && ` · archived ${when}`}
         </div>
       </div>

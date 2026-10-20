@@ -128,17 +128,30 @@ const assertCheckpointSource = (context: NewWorkspaceContext): void => {
 }
 const checkpointCreationFields = (context: NewWorkspaceContext) => context.checkpointSafeMode ? { checkpointSafeMode: true } : {}
 
+/** The project-picker value for Auto: no repo chosen, no checkout until `switch_checkout`. */
+export const AUTO_PROJECT_ID = "auto"
+const isAutoProject = (context: NewWorkspaceContext): boolean => context.projectId === AUTO_PROJECT_ID
+
 const submitWorkspace = (
   context: NewWorkspaceContext,
   onProgress: (phase: SessionCreationPhase) => void
 ): Promise<void> => {
             assertCheckpointSource(context)
-            const project = context.resolvedProject
-            if (project === null) return Promise.reject(new Error("Select a project."))
             const canonical = canonicalWorkspaceModel(context)
             if (canonical === null) {
               return Promise.reject(new Error("Select a certified provider model."))
             }
+            if (isAutoProject(context)) {
+              const initialPrompt = context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}
+              return context.getDeps().onCreate({
+                ...canonical,
+                ...initialPrompt,
+                mode: context.mode,
+                reasoning: context.reasoning ?? null
+              }, context.attachments, onProgress)
+            }
+            const project = context.resolvedProject
+            if (project === null) return Promise.reject(new Error("Select a project."))
             const common = {
               projectId: project.id,
               ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
@@ -330,15 +343,18 @@ export const newWorkspaceMachine = setup({
   },
   guards: {
     sourceNeedsLoading: ({ event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source),
-    canSubmit: ({ context }) =>
-      context.resolvedProject !== null &&
-      context.baseBranch.length > 0 &&
-      context.runtimeId !== null &&
-      context.endpointId !== null &&
-      context.providerId !== null &&
-      context.modelId !== null &&
-      (context.source === "pr" ? context.selectedPr !== null :
-        context.source === "github" || context.source.startsWith("provider:") ? context.selectedIssue !== null : true)
+    canSubmit: ({ context }) => {
+      const hasModel = context.runtimeId !== null &&
+        context.endpointId !== null &&
+        context.providerId !== null &&
+        context.modelId !== null
+      if (isAutoProject(context)) return hasModel && context.source === "blank"
+      return context.resolvedProject !== null &&
+        context.baseBranch.length > 0 &&
+        hasModel &&
+        (context.source === "pr" ? context.selectedPr !== null :
+          context.source === "github" || context.source.startsWith("provider:") ? context.selectedIssue !== null : true)
+    }
   },
   actions: {
     seed: assign(({ context, event }) => {
