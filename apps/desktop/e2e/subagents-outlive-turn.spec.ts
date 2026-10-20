@@ -5,6 +5,7 @@ const askSeededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<Se
   {
     id: "s_subagents_ask",
     repo: "widget",
+    repoPath,
     branch: "chore/subagents-outlive-ask",
     title: "Sub-agent question session",
     status: "idle",
@@ -131,8 +132,14 @@ test("#509: a held subagent's question bumps the sidebar needs-you count and lig
   const projects = window.getByTestId("project-sidebar")
   await projects.getByRole("button", { name: "widget", exact: true }).click()
 
-  await window.getByPlaceholder("Message the agent…").fill("[[held-subagent-asks]] survey the app")
-  await window.getByPlaceholder("Message the agent…").press("Enter")
+  const composer = window.getByPlaceholder("Message the agent…")
+  // The rail needs two turns to render, so finish one turn before asking (see chat.spec.ts).
+  await composer.fill("Say hello")
+  await composer.press("Enter")
+  await expect(composer).toBeEnabled({ timeout: 30_000 })
+
+  await composer.fill("[[held-subagent-asks]] survey the app")
+  await composer.press("Enter")
   await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
 
   // Sidebar needs-you badge: viewing another project, the blocked one's tile carries the count.
