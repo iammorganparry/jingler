@@ -1,4 +1,9 @@
-import type { McpConfigEntry, McpImportSourceId, McpServerStatus } from "@jingler/core"
+import type {
+  McpConfigEntry,
+  McpImportResolution,
+  McpImportSourceId,
+  McpServerStatus
+} from "@jingler/core"
 import type { McpSettingsProps } from "@jingler/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
@@ -66,8 +71,12 @@ export function useMcpSettings(): McpSettingsProps {
     reveal: () => rpc.mcpReveal(),
     logTail: (name: string) => rpc.mcpLogTail(name),
     importCandidates: (source: McpImportSourceId) => rpc.mcpImportCandidates(source),
-    applyImport: async (source: McpImportSourceId, names: ReadonlyArray<string>) => {
-      const imported = await rpc.mcpApplyImport(source, names)
+    applyImport: async (
+      source: McpImportSourceId,
+      names: ReadonlyArray<string>,
+      resolutions?: Readonly<Record<string, McpImportResolution>>
+    ) => {
+      const imported = await rpc.mcpApplyImport(source, names, resolutions)
       await invalidate()
       return imported
     }

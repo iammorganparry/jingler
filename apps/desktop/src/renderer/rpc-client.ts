@@ -112,6 +112,7 @@ import type {
   DetectedResourceCandidate,
   McpConfigEntry,
   McpImportCandidateView,
+  McpImportResolution,
   McpImportSourceId,
   McpServer,
   ManagedResource,
@@ -414,9 +415,10 @@ export const rpc = {
     run((c) => c.Mcp.importCandidates({ source })),
   mcpApplyImport: (
     source: McpImportSourceId,
-    names: ReadonlyArray<string>
+    names: ReadonlyArray<string>,
+    resolutions?: Readonly<Record<string, McpImportResolution>>
   ): Promise<ReadonlyArray<string>> =>
-    run((c) => c.Mcp.applyImport({ source, names })),
+    run((c) => c.Mcp.applyImport({ source, names, resolutions })),
   appRevealLogs: (): Promise<void> => run((c) => c.App.revealLogs()),
   mcpReveal: (): Promise<void> => run((c) => c.Mcp.reveal()),
   agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>

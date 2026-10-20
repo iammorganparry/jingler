@@ -10,10 +10,8 @@ const ITEMS: ReadonlyArray<{ value: ConflictResolution; label: string }> = [
 
 /**
  * Import-review badge for a candidate whose name clashes with an existing
- * server. `onChange` is optional: when the apply RPC doesn't yet accept a
- * resolution (current state — see #487 follow-ups), omit it and the control
- * renders read-only, so the operator sees the conflict without a choice that
- * wouldn't do anything.
+ * server. `onChange` is optional so the control can also render read-only
+ * (e.g. a static example) when no resolution choice applies.
  */
 export function ConflictBadge({
   value,

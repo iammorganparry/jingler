@@ -1,5 +1,6 @@
 import type {
   McpImportCandidateView,
+  McpImportResolution,
   McpImportSourceId,
   McpServer
 } from "@jingler/core"
@@ -54,7 +55,8 @@ export function McpImportPrompt({
   readonly load: (source: McpImportSourceId) => Promise<ReadonlyArray<McpImportCandidateView>>
   readonly apply: (
     source: McpImportSourceId,
-    names: ReadonlyArray<string>
+    names: ReadonlyArray<string>,
+    resolutions?: Readonly<Record<string, McpImportResolution>>
   ) => Promise<ReadonlyArray<string>>
 }) {
   const started = useRef(false)
@@ -74,12 +76,12 @@ export function McpImportPrompt({
         }
         return [...found.values()]
       },
-      apply: async (candidates) => {
+      apply: async (candidates, resolutions) => {
         for (const source of SOURCES) {
           const names = candidates
             .filter((candidate) => candidate.source === source)
             .map((candidate) => candidate.name)
-          if (names.length > 0) await apply(source, names)
+          if (names.length > 0) await apply(source, names, resolutions)
         }
       }
     }
@@ -144,9 +146,12 @@ export function McpImportPrompt({
                   )}
                   {candidate.conflict && (
                     <div className="mt-1.5">
-                      {/* Read-only: Mcp.applyImport keeps the existing server and skips this
-                          name, so a chosen resolution would not take effect yet (#487 follow-up). */}
-                      <ConflictBadge value="keep-mine" />
+                      <ConflictBadge
+                        value={state.context.resolutions[candidate.name] ?? "keep-mine"}
+                        onChange={(resolution) =>
+                          send({ type: "RESOLVE", name: candidate.name, resolution })
+                        }
+                      />
                     </div>
                   )}
                 </div>

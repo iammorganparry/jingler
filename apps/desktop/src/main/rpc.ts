@@ -160,6 +160,8 @@ import {
   type McpConfigEntry,
   entryNeedsSecrets,
   WebSearchError,
+  applyImportResolutions,
+  type McpImportResolution,
 } from "@jingler/core";
 import type {
   BrowserBounds,
@@ -501,6 +503,7 @@ const mcpStartAuthorization = (name: string) =>
 const mcpApplyImport = (
   source: "claude" | "codex" | "opencode",
   names: ReadonlyArray<string>,
+  resolutions: Readonly<Record<string, McpImportResolution>>,
 ) =>
   Effect.gen(function* () {
     const requested = new Set(names);
@@ -510,12 +513,13 @@ const mcpApplyImport = (
     );
     const selected = candidates.filter(
       (candidate): candidate is McpImportCandidate & { entry: McpConfigEntry } =>
-        requested.has(candidate.name) && candidate.entry !== null && !existing.has(candidate.name),
+        requested.has(candidate.name) && candidate.entry !== null,
     );
+    const resolved = applyImportResolutions(selected, existing, resolutions);
     yield* McpConfigService.writeAll(
-      Object.fromEntries(selected.map((candidate) => [candidate.name, candidate.entry])),
+      Object.fromEntries(resolved.map((candidate) => [candidate.name, candidate.entry])),
     ).pipe(Effect.mapError((cause) => mcpError(cause.message, cause)));
-    return selected.map((candidate) => candidate.name);
+    return resolved.map((candidate) => candidate.name);
   });
 
 const mcpReveal = () =>
@@ -5688,7 +5692,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         })),
       ),
     ),
-  "Mcp.applyImport": ({ source, names }) => mcpApplyImport(source, names),
+  "Mcp.applyImport": ({ source, names, resolutions }) => mcpApplyImport(source, names, resolutions ?? {}),
   "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
 
   "Window.minimize": () => Effect.sync(() => appWindow()?.minimize()),
