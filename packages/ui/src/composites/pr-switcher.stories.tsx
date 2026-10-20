@@ -20,7 +20,16 @@ export const Default: Story = {
       setSelected((current) => LAYERS[LAYERS.findIndex((l) => l.number === current) + delta]?.number ?? current)
     return (
       <div className="bg-panel p-6">
-        <PrSwitcher layers={LAYERS} selected={selected} onSelect={setSelected} onStep={step} />
+        <PrSwitcher
+          layers={LAYERS}
+          selected={selected}
+          onSelect={setSelected}
+          onStep={step}
+          mergeState="idle"
+          merged={0}
+          mergeError={null}
+          onMergeStack={() => {}}
+        />
       </div>
     )
   }

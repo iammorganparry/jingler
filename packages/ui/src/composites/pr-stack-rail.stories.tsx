@@ -39,12 +39,18 @@ export const MergeStackIdle: Story = {
   )
 }
 
+const MERGING_LAYERS: ReadonlyArray<PrStackLayer> = [
+  { ...UNMERGED_LAYERS[0]!, state: "merged" },
+  UNMERGED_LAYERS[1]!,
+  UNMERGED_LAYERS[2]!
+]
+
 /** Merging: the base layer has landed, the CTA shows per-layer progress. */
 export const MergeStackMerging: Story = {
   render: () => (
     <div className="bg-panel p-6">
       <PrStackRail
-        layers={[{ ...UNMERGED_LAYERS[0], state: "merged" }, UNMERGED_LAYERS[1], UNMERGED_LAYERS[2]]}
+        layers={MERGING_LAYERS}
         selected={482}
         onSelect={() => {}}
         mergeState="merging"
@@ -61,7 +67,7 @@ export const MergeStackFailed: Story = {
   render: () => (
     <div className="bg-panel p-6">
       <PrStackRail
-        layers={[{ ...UNMERGED_LAYERS[0], state: "merged" }, UNMERGED_LAYERS[1], UNMERGED_LAYERS[2]]}
+        layers={MERGING_LAYERS}
         selected={482}
         onSelect={() => {}}
         mergeState="failed"
