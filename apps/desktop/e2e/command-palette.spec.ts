@@ -354,9 +354,10 @@ test("the 'Needs you' palette group jumps to a session blocked on a question", a
 }) => {
   const { window } = await launchApp({
     configured: true,
-    sessions: [
-      { ...seededSessions[0]!, id: "sess-a", title: "Session A" },
-      { ...seededSessions[1]!, id: "sess-b", title: "Session B" }
+    withRepo: true,
+    sessions: ({ repoPath }) => [
+      { ...seededSessions[0]!, id: "sess-a", title: "Session A", worktreePath: repoPath },
+      { ...seededSessions[1]!, id: "sess-b", title: "Session B", worktreePath: repoPath }
     ]
   })
   await expect(appShell(window)).toBeVisible()
@@ -396,9 +397,10 @@ test("the 'Needs you' palette group jumps to a session blocked on a question", a
 test("⌘⇧N switches to the session that needs you", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
-    sessions: [
-      { ...seededSessions[0]!, id: "sess-a", title: "Session A" },
-      { ...seededSessions[1]!, id: "sess-b", title: "Session B" }
+    withRepo: true,
+    sessions: ({ repoPath }) => [
+      { ...seededSessions[0]!, id: "sess-a", title: "Session A", worktreePath: repoPath },
+      { ...seededSessions[1]!, id: "sess-b", title: "Session B", worktreePath: repoPath }
     ]
   })
   await expect(appShell(window)).toBeVisible()
