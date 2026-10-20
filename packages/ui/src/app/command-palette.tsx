@@ -144,14 +144,14 @@ export function CommandPalette({
           if (event.key !== "Backspace" || query.length > 0) return
           send({ type: "BACKSPACE_EMPTY" })
         }}
-        prefix={
-          chip && (
+        prefixChip={
+          chip ? (
             <span data-testid="palette-prefix-chip">
               <Badge tone="blue" size="sm">
                 {chip.prefix} {chip.label}
               </Badge>
             </span>
-          )
+          ) : undefined
         }
       />
       {showScopes && !prefixActive && (
