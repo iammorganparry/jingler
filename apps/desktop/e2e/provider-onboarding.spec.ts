@@ -357,7 +357,7 @@ test("provider onboarding remains reachable at the minimum window height", async
   await expect(continueButton).toBeVisible();
   await continueButton.click();
   await expect(
-    launched.window.getByRole("heading", { name: "Import agent resources" }),
+    launched.window.getByRole("heading", { name: "Import existing sessions?" }),
   ).toBeVisible();
 });
 
@@ -379,7 +379,7 @@ test("skips provider setup and preserves that choice across restart", async ({
   ).toBeDisabled();
   await first.window.getByRole("button", { name: "Skip for now" }).click();
   await expect(
-    first.window.getByRole("heading", { name: "Import agent resources" }),
+    first.window.getByRole("heading", { name: "Import existing sessions?" }),
   ).toBeVisible();
   await first.window.getByRole("button", { name: "Skip for now" }).click();
   await expect(appShell(first.window)).toBeVisible();
@@ -400,66 +400,6 @@ test("skips provider setup and preserves that choice across restart", async ({
   ).toHaveCount(0);
 });
 
-test("imports every detected agent resource in one action", async ({
-  launchApp,
-}) => {
-  const launched = await launchApp({
-    withRepo: true,
-    isolateSystemHome: true,
-    piFixture: {
-      scenarioId: "onboarding-import-all",
-      authRoute: "api-key",
-      seedConnection: false,
-    },
-    seed: ({ home }) => {
-      const skills = join(home, ".agents", "skills");
-      for (const [id, description] of Array.from({ length: 12 }, (_, index) => [
-        `resource-${String(index + 1).padStart(2, "0")}`,
-        `Agent resource ${index + 1}`,
-      ] as const)) {
-        const directory = join(skills, id);
-        mkdirSync(directory, { recursive: true });
-        writeFileSync(
-          join(directory, "SKILL.md"),
-          `name: ${id}\ndescription: ${description}\n`,
-        );
-      }
-    },
-  });
-  await chooseFixtureRepo(launched);
-  await launched.window.getByRole("button", { name: "Skip for now" }).click();
-
-  const list = launched.window.getByTestId("resource-candidate-list");
-  await expect(list).toBeVisible();
-  expect(
-    await list.evaluate((element) => element.scrollHeight > element.clientHeight),
-  ).toBe(true);
-  const search = launched.window.getByRole("searchbox", {
-    name: "Search agent resources",
-  });
-  await search.fill("resource-12");
-  await expect(
-    launched.window.getByText("resource-12", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    launched.window.getByText("resource-01", { exact: true }),
-  ).toHaveCount(0);
-  await launched.window.getByRole("button", { name: "Import all" }).click();
-  await expect(appShell(launched.window)).toBeVisible();
-
-  await launched.window.getByRole("button", { name: "Account menu" }).click();
-  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
-  await launched.window
-    .getByRole("button", { name: "Agents & skills" })
-    .click();
-  await expect(
-    launched.window.getByText("resource-01", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    launched.window.getByText("resource-12", { exact: true }),
-  ).toBeVisible();
-});
-
 test("detects native Claude during onboarding without a PI connection", async ({ launchApp }) => {
   const launched = await launchApp({
     withRepo: true,
@@ -469,7 +409,7 @@ test("detects native Claude during onboarding without a PI connection", async ({
   await chooseFixtureRepo(launched)
   await expect(launched.window.getByText("Claude Code · ready", { exact: true })).toBeVisible()
   await launched.window.getByRole("button", { name: "Continue", exact: true }).click()
-  await expect(launched.window.getByRole("heading", { name: "Import agent resources" })).toBeVisible()
+  await expect(launched.window.getByRole("heading", { name: "Import existing sessions?" })).toBeVisible()
   await launched.window.getByRole("button", { name: "Skip for now" }).click()
   await expect(appShell(launched.window)).toBeVisible()
   await launched.window.reload()
