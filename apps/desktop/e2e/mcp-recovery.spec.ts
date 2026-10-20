@@ -82,3 +82,39 @@ test("a dismissed MCP reconnect card stays hidden after the window reloads", asy
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
   await expect(window.getByRole("region", { name: "MCP server recovery" })).toHaveCount(0)
 })
+
+test("a server's detail dialog shows the log tail and persists a tool toggle across reopen", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [session("s_mcp_detail", "Detail session")],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.example/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: "MCP servers", exact: true }).click()
+  await window.getByRole("button", { name: "Test connections" }).click()
+
+  await window.getByRole("button", { name: "Details" }).click()
+  const dialog = window.getByRole("dialog")
+  await expect(dialog.getByRole("log", { name: "Server log" })).toBeVisible()
+
+  const toggle = dialog.getByRole("switch", { name: "Enable tool tool-1" })
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", "false")
+
+  await window.keyboard.press("Escape")
+  await window.getByRole("button", { name: "Details" }).click()
+  await expect(window.getByRole("dialog").getByRole("switch", { name: "Enable tool tool-1" }))
+    .toHaveAttribute("aria-checked", "false")
+})
