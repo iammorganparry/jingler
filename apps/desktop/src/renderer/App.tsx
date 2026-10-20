@@ -40,6 +40,7 @@ import type {
 import type { SessionCreationPhase } from "@jingler/contracts";
 import {
   clampFontScale,
+  countNodesAwaitingAttention,
   DEFAULT_THEME_ID,
   normalizeHeaderViews,
   pendingQuestion,
@@ -1305,6 +1306,18 @@ function AuthedApp({
       ),
     [subagentTabs],
   );
+  // Fleet nodes with a pending attention request (e.g. a child asked a question) — feeds the
+  // rail/sidebar "needs you" count alongside NEEDS_YOU_KINDS.
+  const subagentAttentionCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(subagentTabs).map(([id, chats]) => [
+          id,
+          chats.reduce((total, chat) => total + countNodesAwaitingAttention(chat.active), 0),
+        ]),
+      ),
+    [subagentTabs],
+  );
   const subagentEntries = useMemo(
     () =>
       Object.fromEntries(
@@ -1619,6 +1632,7 @@ function AuthedApp({
         chatActivities={chatActivities}
         prStates={prStates}
         subagentCounts={subagentCounts}
+        subagentAttentionCounts={subagentAttentionCounts}
         subagentEntries={subagentEntries}
         onOpenSubagent={(sessionId, nodeId) => {
           const s = sessions.find(({ id }) => id === sessionId);

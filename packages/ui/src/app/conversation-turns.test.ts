@@ -26,4 +26,10 @@ describe("summarizeTurn", () => {
     expect(summarizeTurn([assistant(tool("error", "a.ts"))]).attention).toBe("failed")
     expect(summarizeTurn([assistant(tool("error", "a.ts"), tool("success", "a.ts"))]).attention).toBeUndefined()
   })
+
+  it("flags needs-you when a child subagent is awaiting attention", () => {
+    expect(summarizeTurn([assistant(tool("success", "a.ts"))], true).attention).toBe("needs-you")
+    expect(summarizeTurn([assistant(tool("success", "a.ts"))], false).attention).toBeUndefined()
+    expect(summarizeTurn([assistant(tool("success", "a.ts"))]).attention).toBeUndefined()
+  })
 })

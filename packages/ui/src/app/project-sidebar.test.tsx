@@ -235,6 +235,23 @@ describe("ProjectSidebar", () => {
   })
 })
 
+describe("ProjectSidebar subagent attention", () => {
+  it("counts a session with a pending subagent attention request toward needs-you, even with no live activity", () => {
+    render(
+      <ProjectSidebar
+        projects={projects}
+        sessions={sessions}
+        activeProjectId="alpha"
+        subagentAttentionCounts={{ "alpha-new": 1 }}
+        onSelect={() => {}}
+      />
+    )
+    expect(screen.getByTestId("project-needs-you-alpha").getAttribute("aria-label")).toBe(
+      "Alpha: 1 needs you"
+    )
+  })
+})
+
 describe("MissingFolderBanner", () => {
   it("renders a neutral BannerShell whose Locate action calls the handler", () => {
     const onLocate = vi.fn()
