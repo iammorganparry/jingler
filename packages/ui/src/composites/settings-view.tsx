@@ -76,10 +76,7 @@ import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { McpSettings, type McpSettingsProps } from "./mcp-settings.js"
 import { Input } from "../components/input.js"
-import {
-  EnvironmentDialog,
-  type EnvironmentDialogProps
-} from "./environment-dialog.js"
+import { PairingSheet, type PairingSheetProps } from "./pairing-sheet.js"
 import { AgentsSettings, type AgentsSettingsProps } from "./agents-settings.js"
 import { RuntimeInspector, type RuntimeInspectorProps } from "./runtime-inspector.js"
 import {
@@ -191,7 +188,7 @@ export interface SettingsViewProps {
     environments: ReadonlyArray<Environment>
     loading: boolean
     error?: string | null
-    dialog: EnvironmentDialogProps
+    dialog: PairingSheetProps
     /** Live workspaces; those on a device are listed before it can be revoked. */
     workspaces?: ReadonlyArray<Pick<Session, "id" | "title" | "environmentId">>
     onOpen: () => void
@@ -677,9 +674,20 @@ export function DevicesSection({
         )}
         <div className="overflow-hidden rounded-lg border border-line bg-panel">
           {environments.length === 0 ? (
-            <div className="px-4 py-10 text-center text-[12px] text-muted-foreground">
-              {loading ? "Loading devices…" : "No owned machines yet."}
-            </div>
+            loading ? (
+              <div className="px-4 py-10 text-center text-[12px] text-muted-foreground">
+                Loading devices…
+              </div>
+            ) : (
+              <EmptyState
+                title="No owned machines yet"
+                action={
+                  <Button size="sm" onClick={onOpen}>
+                    Pair a machine
+                  </Button>
+                }
+              />
+            )
           ) : (
             environments.map((environment) => (
               <div
@@ -742,7 +750,7 @@ export function DevicesSection({
           )}
         </div>
       </div>
-      <EnvironmentDialog {...dialog} />
+      <PairingSheet {...dialog} />
       <ConfirmDialog
         open={revokeTarget !== null}
         onOpenChange={(open) => {
