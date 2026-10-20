@@ -251,6 +251,7 @@ export const subagentPaletteItems = (
     label: subagent.agent,
     detail: subagent.task,
     group: PALETTE_GROUP.subagents,
+    scope: "chat",
     run: () => open(subagent.id)
   }))
 
@@ -264,6 +265,7 @@ export const viewPaletteItems = (
     kind: "tab",
     label: view.label,
     group: PALETTE_GROUP.views,
+    scope: "chat",
     icon: view.icon,
     run: () => open(view.id)
   }))

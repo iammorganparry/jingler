@@ -1240,6 +1240,7 @@ function getActiveTabContext(active: Session) {
           kind: "tab",
           label: `Go to ${tab.label}`,
           group: PALETTE_GROUP.tabs,
+          scope: "chat",
           icon: tab.icon,
           hint: tabShortcutHint(tab.id),
           run: () =>

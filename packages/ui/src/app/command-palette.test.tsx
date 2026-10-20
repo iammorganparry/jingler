@@ -145,7 +145,7 @@ describe("CommandPalette", () => {
 
   it("narrows to the chat's rows on the Chat scope and Tab cycles scopes", async () => {
     open({
-      items: [...ITEMS, item({ id: "tab-changes", label: "Go to Changes", group: "Go to tab", kind: "tab" })]
+      items: [...ITEMS, item({ id: "tab-changes", label: "Go to Changes", group: "Go to tab", kind: "tab", scope: "chat" })]
     })
     expect(screen.getByText("refactor auth")).toBeTruthy()
     fireEvent.click(screen.getByRole("tab", { name: "Chat" }))
