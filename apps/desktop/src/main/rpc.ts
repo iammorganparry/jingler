@@ -5692,7 +5692,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         })),
       ),
     ),
-  "Mcp.applyImport": ({ source, names, resolutions }) => mcpApplyImport(source, names, resolutions),
+  "Mcp.applyImport": ({ source, names, resolutions }) => mcpApplyImport(source, names, resolutions ?? {}),
   "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
 
   "Window.minimize": () => Effect.sync(() => appWindow()?.minimize()),

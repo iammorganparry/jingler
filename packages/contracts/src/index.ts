@@ -1308,9 +1308,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       source: McpImportSourceId,
       names: Schema.Array(Schema.String),
       /** Per-name conflict resolution; a conflicting name with no entry keeps the existing server. */
-      resolutions: Schema.optionalWith(Schema.Record({ key: Schema.String, value: McpImportResolution }), {
-        default: () => ({})
-      })
+      resolutions: Schema.optional(Schema.Record({ key: Schema.String, value: McpImportResolution }))
     }
   }),
 
