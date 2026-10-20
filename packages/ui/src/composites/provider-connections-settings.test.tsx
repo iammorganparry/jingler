@@ -120,6 +120,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
@@ -158,6 +160,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={onStartCodex}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
@@ -189,6 +193,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={onStartCodex}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
@@ -211,7 +217,9 @@ describe("ProviderConnectionsSettings", () => {
       onLogout: vi.fn(),
       onConnectClaude: vi.fn(),
       onStartCodex: vi.fn(),
-      onSetApiKey: vi.fn()
+      onSetApiKey: vi.fn(),
+      onCancelLogin: vi.fn(),
+      onSaveApiKey: vi.fn()
     }
     const view = render(
       <ProviderConnectionsSettings catalog={empty} {...props} />
@@ -242,6 +250,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={onConnectClaude}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
@@ -262,6 +272,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
     expect(screen.getAllByText("Claude CLI subscription").length).toBeGreaterThan(0)
@@ -285,6 +297,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
     expect(screen.queryByRole("button", { name: "Verify" })).toBeNull()
@@ -312,6 +326,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
     fireEvent.click(
@@ -335,6 +351,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
     expect(screen.queryByRole("button", { name: "Make default" })).toBeNull()
@@ -376,6 +394,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
