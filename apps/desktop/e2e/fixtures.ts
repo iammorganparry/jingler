@@ -295,6 +295,10 @@ export interface LaunchOptions {
     readonly seedConnection?: boolean;
     readonly apiPriced?: boolean;
     readonly modelCount?: number;
+    /** Codex OAuth login waits on cancellation instead of resolving, for Cancel-flow e2e coverage. */
+    readonly codexLoginHangs?: boolean;
+    /** When set, Provider.setApiKey/verifyModel fails with this message instead of succeeding. */
+    readonly rejectApiKey?: string;
   };
   /**
    * Relaunch against an EXISTING `~/jingler` (a previous launch's `home`) —
@@ -723,7 +727,7 @@ function seedFixtureWorkspace({
   piFixture: {
     readonly scenarioId: string; readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"; readonly reasoning?: ReadonlyArray<
       "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-    >; readonly seedConnection?: boolean; readonly modelCount?: number;
+    >; readonly seedConnection?: boolean; readonly modelCount?: number; readonly codexLoginHangs?: boolean; readonly rejectApiKey?: string;
   };
   repoPath: string;
   home: string;
@@ -771,7 +775,7 @@ function seedFixtureWorkspace({
 function seedFixtureRecords(jinglerDir: string, options: LaunchOptions, reused: boolean, reposDir: string, piFixture: {
   readonly scenarioId: string; readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"; readonly reasoning?: ReadonlyArray<
     "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-  >; readonly seedConnection?: boolean; readonly modelCount?: number;
+  >; readonly seedConnection?: boolean; readonly modelCount?: number; readonly codexLoginHangs?: boolean; readonly rejectApiKey?: string;
 }, repoPath: string) {
   const configPath = join(jinglerDir, "config.json");
   if (options.configured && !(reused && existsSync(configPath))) {
