@@ -300,9 +300,9 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   await launched.window.getByTestId("editor-tab-view-plan").getByRole("tab").first().click()
   await launched.window.getByTestId("plan-review")
     .getByRole("button", { name: "Approve", exact: true }).click()
-  await launched.window.getByRole("tab", {
-    name: "[[plan]] refactor auth to a TokenStore", exact: true
-  }).click()
+  // The Plan view opens in its own split editor group; the chat's group (now a
+  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
+  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect(
     launched.window.getByText("Implemented and verified the approved plan.").first()
   ).toBeVisible({ timeout: 30_000 })
