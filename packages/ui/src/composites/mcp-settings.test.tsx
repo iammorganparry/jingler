@@ -196,8 +196,8 @@ describe("McpSettings", () => {
   it("loads import candidates and applies the selection", async () => {
     const applyImport = vi.fn(async () => ["linear"])
     const importCandidates = vi.fn(async () => [
-      { name: "linear", source: "claude" as const, target: "npx -y linear-mcp", problem: null, needsSignIn: false },
-      { name: "memory", source: "claude" as const, target: "", problem: "reserved", needsSignIn: false }
+      { name: "linear", source: "claude" as const, target: "npx -y linear-mcp", problem: null, needsSignIn: false, needsSecrets: false },
+      { name: "memory", source: "claude" as const, target: "", problem: "reserved", needsSignIn: false, needsSecrets: false }
     ])
     render(<McpSettings {...props({ importCandidates, applyImport })} />)
     fireEvent.click(screen.getByText("Claude"))
