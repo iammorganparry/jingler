@@ -3,13 +3,14 @@
  * view shows, and the base-up layer list (live state shares the sidebar poll's
  * `pr-state` query cache). Returns `nav: undefined` for a single-PR session.
  */
-import { useEffect, useMemo } from "react"
-import { useQueries } from "@tanstack/react-query"
+import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useMachine } from "@xstate/react"
-import type { Session } from "@jingler/core"
+import type { PrMergeMethod, Session } from "@jingler/core"
 import type { PrStackNav } from "@jingler/ui"
 import { prStackMachine } from "./pr-stack-machine.js"
 import { prNumbersOf } from "./pr-sweep.js"
+import { prKey } from "./use-pull-request.js"
 import { rpc } from "./rpc-client.js"
 
 const PR_STATE_STALE_MS = 5 * 60_000
@@ -45,6 +46,35 @@ export function usePrStack(session: Session, connected: boolean): { selected: nu
     [key, session.prs, statuses]
   )
 
+  const qc = useQueryClient()
+  const layersRef = useRef(layers)
+  layersRef.current = layers
+
+  // Merge stack base-up: one `Github.mergeBySlug` call per unmerged layer (the
+  // existing per-PR merge path used by the PR inbox), sending LAYER_MERGED on
+  // success so the machine advances, or MERGE_FAILED to stop the run at the
+  // first failing layer. Lower layers are otherwise read-only — this is the
+  // only write path that touches them.
+  const onMergeStack = useCallback(() => {
+    const slug = session.githubSlug
+    if (!slug) return
+    send({ type: "MERGE_STACK" })
+    void (async () => {
+      for (const layer of layersRef.current) {
+        if (layer.state === "merged") continue
+        try {
+          await rpc.githubMergeBySlug(slug, layer.number, "merge" satisfies PrMergeMethod)
+          void qc.invalidateQueries({ queryKey: ["pr-state", session.id, layer.number] })
+          send({ type: "LAYER_MERGED" })
+        } catch (cause) {
+          send({ type: "MERGE_FAILED", message: (cause as { message?: string } | null)?.message ?? `Failed to merge #${layer.number}` })
+          return
+        }
+      }
+      void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    })()
+  }, [session.githubSlug, session.id, session.prNumber, qc, send])
+
   const nav = useMemo<PrStackNav | undefined>(
     () =>
       numbers.length > 1
@@ -52,11 +82,15 @@ export function usePrStack(session: Session, connected: boolean): { selected: nu
             layers,
             selected: snapshot.context.selected,
             onSelect: (number) => send({ type: "SELECT", number }),
-            onStep: (delta) => send({ type: delta === 1 ? "NEXT" : "PREV" })
+            onStep: (delta) => send({ type: delta === 1 ? "NEXT" : "PREV" }),
+            mergeState: snapshot.value as PrStackNav["mergeState"],
+            merged: snapshot.context.merged,
+            mergeError: snapshot.context.mergeError,
+            onMergeStack
           }
         : undefined,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key, layers, snapshot.context.selected, send]
+    [key, layers, snapshot.context.selected, snapshot.value, snapshot.context.merged, snapshot.context.mergeError, send, onMergeStack]
   )
   return { selected: snapshot.context.selected, nav }
 }

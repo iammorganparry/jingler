@@ -1,6 +1,8 @@
 import type { PrCheckStatus, PrState } from "@jingler/core"
 import { Check, X } from "lucide-react"
 import { Button } from "../components/button.js"
+import { Callout } from "../components/callout.js"
+import { Loader } from "../components/beui/loader.js"
 import { cn } from "../lib/cn.js"
 
 /** One layer of a PR stack. */
@@ -14,6 +16,9 @@ export interface PrStackLayer {
 
 export const PR_STATE_LABEL: Record<PrState, string> = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }
 
+/** `prStackMachine`'s state value while a "Merge stack" run is in flight. */
+export type PrStackMergeState = "idle" | "merging" | "failed" | "merged"
+
 /** Stack navigation handed to the PR view: switcher in the header, rail on Checks. */
 export interface PrStackNav {
   /** Ordered bottom layer first. */
@@ -22,6 +27,13 @@ export interface PrStackNav {
   readonly onSelect: (number: number) => void
   /** -1 = down the stack, 1 = up. */
   readonly onStep: (delta: -1 | 1) => void
+  /** Merge-stack progress, driven by `prStackMachine` in `use-pr-stack.ts`. */
+  readonly mergeState: PrStackMergeState
+  /** Layers merged so far in the current/last run. */
+  readonly merged: number
+  readonly mergeError: string | null
+  /** Merge every unmerged layer base-up, one RPC per layer; stops on the first failure. */
+  readonly onMergeStack: () => void
 }
 
 /** Node on the rail: a tick for merged, a cross for failing checks, otherwise a hollow ring. Red is the only colour. */
@@ -49,14 +61,24 @@ export function PrStackRail({
   layers,
   selected,
   onSelect,
+  mergeState = "idle",
+  merged = 0,
+  mergeError = null,
+  onMergeStack,
   className
 }: {
   /** Ordered bottom layer first. */
   layers: ReadonlyArray<PrStackLayer>
   selected: number | null
   onSelect: (number: number) => void
+  /** Merge-stack progress (omit to hide the CTA, e.g. a read-only rail). */
+  mergeState?: PrStackMergeState
+  merged?: number
+  mergeError?: string | null
+  onMergeStack?: () => void
   className?: string
 }) {
+  const everyLayerMerged = layers.length > 0 && layers.every((layer) => layer.state === "merged")
   return (
     <nav aria-label="Pull request stack" data-testid="pr-stack-rail" className={cn("relative flex w-[220px] flex-none flex-col", className)}>
       {/* The connector runs through the node centres (px-2 + half of size-3.5). */}
@@ -83,6 +105,35 @@ export function PrStackRail({
           </Button>
         )
       })}
+      {/*
+        Merge order is enforced by the driver (`use-pr-stack.ts`): it walks
+        `layers` base-up and stops at the first failure, so there is nothing to
+        disable here — only one button, one run. Lower layers stay read-only
+        (the session's own write actions target its linked PR, the top layer).
+      */}
+      {onMergeStack && !everyLayerMerged && (
+        <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="merge-stack-cta"
+            disabled={mergeState === "merging"}
+            onClick={onMergeStack}
+          >
+            {mergeState === "merging" && <Loader size={13} />}
+            {mergeState === "merging"
+              ? `Merging ${merged}/${layers.length}…`
+              : mergeState === "failed"
+                ? "Retry merge stack"
+                : "Merge stack"}
+          </Button>
+          {mergeState === "failed" && mergeError && (
+            <div data-testid="merge-stack-error">
+              <Callout tone="red">{mergeError}</Callout>
+            </div>
+          )}
+        </div>
+      )}
     </nav>
   )
 }

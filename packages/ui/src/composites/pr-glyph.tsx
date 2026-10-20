@@ -130,7 +130,11 @@ export function PrStatusGlyph({
   if (stack && stack.length > 1) {
     // A live worst-layer status from the caller beats the persisted layers, which may lack state.
     const worst = pr ?? worstPrOf(stack)
-    const { tone, label } = prGlyphOf(worst)
+    const { label } = prGlyphOf(worst)
+    // Spec §6 rule 3 ("no traffic-light colour lists"): the stack glyph stays
+    // neutral (--sb-dim via `text-dim`) and only earns colour for a failing
+    // layer, which is the one state worth interrupting for.
+    const tone = worst?.checks === "fail" ? "text-red" : "text-dim"
     return (
       <span
         data-testid="pr-glyph-stack"

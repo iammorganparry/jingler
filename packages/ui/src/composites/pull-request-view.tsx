@@ -706,7 +706,15 @@ function CheckEvidence({ pr, stack }: { pr: PullRequest; stack?: PrStackNav }) {
   if (!stack) return checks
   return (
     <div className="flex items-start gap-6">
-      <PrStackRail layers={stack.layers} selected={stack.selected} onSelect={stack.onSelect} />
+      <PrStackRail
+        layers={stack.layers}
+        selected={stack.selected}
+        onSelect={stack.onSelect}
+        mergeState={stack.mergeState}
+        merged={stack.merged}
+        mergeError={stack.mergeError}
+        onMergeStack={stack.onMergeStack}
+      />
       <div className="min-w-0 flex-1">{checks}</div>
     </div>
   )
