@@ -271,8 +271,10 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
       },
       connected: {},
       failed: {
+        // Resumes the same bootstrap step (pairSsh) with the host that
+        // failed, instead of dropping back to an editable form.
         on: {
-          RETRY: { target: "configuring" }
+          RETRY: { target: "enrolling", reenter: true }
         }
       }
     }
