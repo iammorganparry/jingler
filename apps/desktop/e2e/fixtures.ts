@@ -958,6 +958,10 @@ function fixtureLaunchEnvironment({
       JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ARCHIVE,
       JINGLER_SSH_DIR: join(home, ".ssh"),
       JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl"),
+      // Presence of this file fails the next `enroll` attempt once; see
+      // fake-ssh-host.ts. Tests write it to exercise the pairing sheet's
+      // failed step (log tail + Retry).
+      JINGLER_E2E_SSH_FAIL_MARKER: join(home, "ssh-fail-marker"),
     });
   }
   return launchEnv;

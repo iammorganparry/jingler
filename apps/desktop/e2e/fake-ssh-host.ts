@@ -39,6 +39,16 @@ if (!command.includes(" enroll ")) {
   process.stderr.write("unsupported fake SSH command\\n")
   process.exit(127)
 }
+// e2e-only failure injection: presence of this marker file fails the next
+// enroll attempt once, so a test can exercise bootstrap Retry. The marker is
+// consumed (deleted) so a subsequent attempt succeeds.
+const failMarker = process.env.JINGLER_E2E_SSH_FAIL_MARKER
+if (failMarker && fs.existsSync(failMarker)) {
+  fs.unlinkSync(failMarker)
+  process.stderr.write("ssh: connect to host buildbox port 22: Permission denied (publickey)\\n")
+  if (log) fs.appendFileSync(log, JSON.stringify({ injectedFailure: true }) + "\\n")
+  process.exit(255)
+}
 let credential = ""
 process.stdin.setEncoding("utf8")
 process.stdin.on("data", (chunk) => { credential += chunk })

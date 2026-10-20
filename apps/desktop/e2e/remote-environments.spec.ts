@@ -1,6 +1,6 @@
 import { nativeCliEndpointId, ProviderId, ProviderModelId, type AgentEndpointCatalog } from "@jingler/core"
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
 import { addProject, appShell, expect, sessionRow, test, type LaunchedApp, type SeedSession } from "./fixtures.js"
@@ -225,6 +225,22 @@ test("resumes a remote turn after relay interruption without duplicate execution
   app.deviceRelay?.interruptSession(sessionId)
   await app.window.waitForTimeout(1_000)
   expect(app.deviceRelay?.commandAdmissions(sessionId, "Agent.run")).toBe(1)
+})
+
+test("shows the failing bootstrap step with its log tail and resumes on Retry", async ({ launchApp }) => {
+  const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true })
+  const failMarker = join(app.home, "ssh-fail-marker")
+  writeFileSync(failMarker, "")
+  await expect(appShell(app.window)).toBeVisible()
+  await openDevices(app.window)
+  await app.window.getByRole("button", { name: "Add owned machine" }).click()
+  await expect(app.window.getByLabel("SSH host or alias")).toBeVisible()
+  await app.window.getByText("buildbox", { exact: true }).click()
+  await app.window.getByRole("button", { name: "Connect environment" }).click()
+  await expect(app.window.getByRole("alert")).toContainText("SSH authentication failed for buildbox", { timeout: 30_000 })
+  expect(existsSync(failMarker)).toBe(false)
+  await app.window.getByRole("button", { name: "Retry" }).click()
+  await expect(app.window.getByRole("status")).toContainText("buildbox", { timeout: 30_000 })
 })
 
 test("shows offline and incompatible account-owned environments", async ({ launchApp }) => {
