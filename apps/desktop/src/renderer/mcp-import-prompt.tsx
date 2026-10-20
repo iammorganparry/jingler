@@ -3,7 +3,8 @@ import type {
   McpImportCandidateView,
   McpImportResolution,
   McpImportSourceId,
-  McpServer
+  McpServer,
+  McpServerStatus
 } from "@jingler/core"
 import { mcpImportMachine } from "@jingler/core"
 import {
@@ -17,6 +18,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  McpImportResult,
+  McpServerDetailDialog,
+  type McpImportResultRow,
   NeedsSecretsRow,
   NeedsSignInRow
 } from "@jingler/ui"
@@ -49,7 +53,10 @@ export function McpImportPrompt({
   ready,
   servers,
   load,
-  apply
+  apply,
+  probe,
+  startAuthorization,
+  logTail
 }: {
   readonly ready: boolean
   readonly servers: ReadonlyArray<McpServer>
@@ -59,10 +66,18 @@ export function McpImportPrompt({
     names: ReadonlyArray<string>,
     resolutions?: Readonly<Record<string, McpImportResolution>>
   ) => Promise<ReadonlyArray<string>>
+  readonly probe: () => Promise<ReadonlyArray<McpServerStatus>>
+  readonly startAuthorization: (name: string) => Promise<void>
+  readonly logTail: (name: string) => Promise<{ readonly lines: ReadonlyArray<string> }>
 }) {
   const started = useRef(false)
   const serversRef = useRef(servers)
   serversRef.current = servers
+  const [rows, setRows] = useState<ReadonlyArray<McpImportResultRow>>([])
+  const [logName, setLogName] = useState<string | null>(null)
+  const [logLines, setLogLines] = useState<ReadonlyArray<string>>([])
+  const [logLoading, setLogLoading] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const [state, send] = useMachine(mcpImportMachine, {
     input: {
@@ -78,12 +93,21 @@ export function McpImportPrompt({
         return [...found.values()]
       },
       apply: async (candidates, resolutions) => {
+        const imported: string[] = []
         for (const source of SOURCES) {
           const names = candidates
             .filter((candidate) => candidate.source === source)
             .map((candidate) => candidate.name)
-          if (names.length > 0) await apply(source, names, resolutions)
+          if (names.length > 0) imported.push(...(await apply(source, names, resolutions)))
         }
+        // The import RPC returns only names; derive each row's status from the existing probe.
+        const statuses = await probe().catch(() => [] as ReadonlyArray<McpServerStatus>)
+        setRows(
+          imported.map((name) => {
+            const state = statuses.find((status) => status.name === name)?.state
+            return { name, status: state === "failed" ? "failed" : state === "needs-auth" ? "needs-auth" : "imported" }
+          })
+        )
       }
     }
   })
@@ -95,7 +119,23 @@ export function McpImportPrompt({
     send({ type: "START" })
   }, [ready, send])
 
-  const open = state.matches("reviewing") || state.matches("detectFailed") || state.matches("importing") || state.matches("importFailed")
+  const open = state.matches("reviewing") || state.matches("detectFailed") || state.matches("importing") || state.matches("importFailed") || state.matches("done")
+  const done = state.matches("done")
+
+  const viewLog = (name: string) => {
+    setLogName(name)
+    setLogLines([])
+    setLogLoading(true)
+    void logTail(name)
+      .then((result) => setLogLines(result.lines))
+      .finally(() => setLogLoading(false))
+  }
+  const connect = (name: string) => {
+    setActionError(null)
+    void startAuthorization(name).catch((cause) =>
+      setActionError(cause instanceof Error ? cause.message : "Could not start sign-in")
+    )
+  }
 
   const dismiss = () => {
     markCompleted()
@@ -110,8 +150,8 @@ export function McpImportPrompt({
             <ServerCog size={15} aria-hidden="true" />
           </div>
           <div className="min-w-0 space-y-1">
-            <DialogTitle className="text-[14px] leading-5">Import MCP servers</DialogTitle>
-            {!state.matches("detectFailed") && (
+            <DialogTitle className="text-[14px] leading-5">{done ? "Import complete" : "Import MCP servers"}</DialogTitle>
+            {!state.matches("detectFailed") && !done && (
               <DialogDescription>
                 Found {candidates.length} server{candidates.length === 1 ? "" : "s"} in Claude,
                 Codex/OpenAI, and OpenCode. Import them for on-demand use in local sessions.
@@ -124,6 +164,8 @@ export function McpImportPrompt({
             <div role="alert">
               <Callout tone="red">{state.context.error}</Callout>
             </div>
+          ) : done ? (
+            <McpImportResult rows={rows} onConnect={connect} onViewLog={viewLog} />
           ) : (
             <div className="max-h-64 overflow-auto rounded-xl border border-line bg-sunken">
               {candidates.map((candidate) => (
@@ -159,13 +201,14 @@ export function McpImportPrompt({
               ))}
             </div>
           )}
+          {actionError !== null ? <div role="alert" className="mt-3"><Callout tone="red">{actionError}</Callout></div> : null}
           {state.matches("importFailed") ? <div role="alert" className="mt-3"><Callout tone="red">{state.context.error}</Callout></div> : null}
         </DialogBody>
         <DialogFooter className="justify-between px-5">
-          <button type="button" onClick={dismiss} className="rounded-md px-2 py-1.5 text-xs text-dim outline-none transition-colors hover:text-text focus-visible:ring-2 focus-visible:ring-ring">
-            Not now
-          </button>
-          {state.matches("detectFailed") ? (
+          {done ? <span /> : <Button variant="ghost" size="sm" onClick={dismiss}>Not now</Button>}
+          {done ? (
+            <Button onClick={dismiss}>Done</Button>
+          ) : state.matches("detectFailed") ? (
             <Button onClick={() => send({ type: "RETRY" })}>Retry</Button>
           ) : state.matches("importFailed") ? (
             <Button onClick={() => send({ type: "RETRY" })}>Retry import</Button>
@@ -178,6 +221,15 @@ export function McpImportPrompt({
           )}
         </DialogFooter>
       </DialogContent>
+      <McpServerDetailDialog
+        server={servers.find((server) => server.name === logName) ?? null}
+        open={logName !== null}
+        onOpenChange={(next) => { if (!next) setLogName(null) }}
+        toolCount={null}
+        logLines={logLines}
+        logLoading={logLoading}
+        oauthAccount={null}
+      />
     </Dialog>
   )
 }

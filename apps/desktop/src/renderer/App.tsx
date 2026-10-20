@@ -2093,6 +2093,9 @@ function AuthedApp({
         servers={mcp.servers}
         load={mcp.importCandidates}
         apply={mcp.applyImport}
+        probe={async () => rpc.mcpStatus()}
+        startAuthorization={mcp.startAuthorization}
+        logTail={mcp.logTail}
       />
       <ArchiveConfirmation state={archiveState} send={sendArchive} />
       <Dialog open={importSessionsDialogOpen} onOpenChange={setImportSessionsDialogOpen}>
