@@ -74,11 +74,12 @@ const finishFreshOnboarding = async (
   const providerStep = window.getByRole("heading", {
     name: "Connect a model provider",
   });
-  const resourcesStep = window.getByRole("heading", {
-    name: "Import agent resources",
+  // #487 removed the standalone resources onboarding step.
+  const importSessionsStep = window.getByRole("heading", {
+    name: "Import existing sessions?",
   });
   const accountMenu = window.getByRole("button", { name: "Account menu" });
-  await expect(providerStep.or(resourcesStep).or(accountMenu)).toBeVisible({
+  await expect(providerStep.or(importSessionsStep).or(accountMenu)).toBeVisible({
     timeout: 30_000,
   });
   if (await providerStep.isVisible()) {
@@ -86,14 +87,14 @@ const finishFreshOnboarding = async (
     await startProviderAuthentication(window, model);
     const continueButton = window.getByRole("button", { name: "Continue" });
     await expect(
-      continueButton.or(resourcesStep).or(accountMenu),
+      continueButton.or(importSessionsStep).or(accountMenu),
     ).toBeVisible({ timeout: 30_000 });
     if (await continueButton.isVisible()) await continueButton.click();
-    await expect(resourcesStep.or(accountMenu)).toBeVisible({
+    await expect(importSessionsStep.or(accountMenu)).toBeVisible({
       timeout: 30_000,
     });
   }
-  if (await resourcesStep.isVisible()) {
+  if (await importSessionsStep.isVisible()) {
     await window.getByRole("button", { name: "Skip for now" }).click();
   }
   await expect(accountMenu).toBeVisible({ timeout: 10 * 60_000 });

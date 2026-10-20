@@ -2444,18 +2444,13 @@ function renderAppSetup(
     ? "github"
     : state.matches({ setup: "provider" })
       ? "provider"
-      : state.matches({ setup: "resources" })
-        ? "resources"
-        : state.matches({ setup: "importSessions" })
-          ? "importSessions"
-          : "workspace";
+      : state.matches({ setup: "importSessions" })
+        ? "importSessions"
+        : "workspace";
   const providerBusy =
     state.matches({ setup: { provider: "refreshing" } }) ||
     state.matches({ setup: { provider: "authenticating" } }) ||
     state.matches({ setup: { provider: "completing" } });
-  const resourcesBusy =
-    state.matches({ setup: { resources: "detecting" } }) ||
-    state.matches({ setup: { resources: "importing" } });
   return (
     <SetupWithCloneDialog onCloned={() => send({ type: "CONTINUE" })}>
       {(openClone) => (
@@ -2475,7 +2470,6 @@ function renderAppSetup(
       }}
       providerLoginEvent={state.context.providerLoginEvent}
       providerPendingAuthKind={state.context.providerPendingAuthKind}
-      resourceDetection={state.context.resourceDetection}
       error={state.context.error}
       repos={repos}
       reposDir={reposDir}
@@ -2483,8 +2477,7 @@ function renderAppSetup(
         state.matches({ setup: { workspace: "choosing" } }) ||
         github.busy ||
         state.matches({ setup: { workspace: "registering" } }) ||
-        providerBusy ||
-        resourcesBusy
+        providerBusy
       }
       selectedRepoPaths={state.context.selectedRepoPaths}
       onChooseDir={() => send({ type: "CHOOSE" })}
@@ -2538,12 +2531,6 @@ function renderAppSetup(
           send({ type: "RETRY_PROVIDER" });
         }
       }}
-      onImportResources={(candidates) =>
-        send({ type: "IMPORT_RESOURCES", candidates })
-      }
-      onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
-      onCancelResourceImport={() => send({ type: "CANCEL_RESOURCE_IMPORT" })}
-      onRetryResources={() => send({ type: "RETRY_RESOURCES" })}
       onSkipImportSessions={() => send({ type: "SKIP_IMPORT_SESSIONS" })}
       onContinueImportSessions={() => send({ type: "CONTINUE_IMPORT_SESSIONS" })}
     />

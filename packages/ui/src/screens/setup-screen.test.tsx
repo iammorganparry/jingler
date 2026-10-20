@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   AgentEndpointCatalog,
   ProviderCatalog,
-  ResourceDetectionResult,
   type GitHubConnection,
   type ProviderConnectionId,
 } from "@jingler/core";
@@ -115,38 +114,6 @@ const unconfirmedCatalog = Schema.decodeSync(ProviderCatalog)({
   stale: false,
 });
 
-const detectedResources = Schema.decodeSync(ResourceDetectionResult)({
-  candidates: [
-    {
-      id: "deploy",
-      kind: "skill",
-      name: "Deploy",
-      description: "Deploy the application.",
-      byteLength: 42,
-      provenance: {
-        origin: "shared",
-        sourceRoot: "/resources",
-        sourcePath: "/resources/deploy/SKILL.md",
-        importedAt: null,
-      },
-    },
-    {
-      id: "review",
-      kind: "prompt",
-      name: "Review",
-      description: "Review current changes.",
-      byteLength: 37,
-      provenance: {
-        origin: "claude",
-        sourceRoot: "/prompts",
-        sourcePath: "/prompts/review.md",
-        importedAt: null,
-      },
-    },
-  ],
-  skipped: [],
-});
-
 const props = (
   overrides: Partial<SetupScreenProps> = {},
 ): SetupScreenProps => ({
@@ -167,10 +134,6 @@ const props = (
   onSkipProvider: vi.fn(),
   onCancelAuth: vi.fn(),
   onRetryProvider: vi.fn(),
-  onImportResources: vi.fn(),
-  onSkipResources: vi.fn(),
-  onCancelResourceImport: vi.fn(),
-  onRetryResources: vi.fn(),
     onSkipImportSessions: vi.fn(),
     onContinueImportSessions: vi.fn(),
   ...overrides,
@@ -385,55 +348,15 @@ describe("SetupScreen", () => {
 
   it("renders the import-sessions step and skips it with its own handler", () => {
     const onSkipImportSessions = vi.fn();
-    const onSkipResources = vi.fn();
     render(
       <SetupScreen
-        {...props({ step: "importSessions", onSkipImportSessions, onSkipResources })}
+        {...props({ step: "importSessions", onSkipImportSessions })}
       />,
     );
 
     expect(screen.getByRole("heading", { name: "Import existing sessions?" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
     expect(onSkipImportSessions).toHaveBeenCalledOnce();
-    expect(onSkipResources).not.toHaveBeenCalled();
   });
 
-  it("imports every detected resource with one action", () => {
-    const onImportResources = vi.fn();
-    render(
-      <SetupScreen
-        {...props({
-          step: "resources",
-          resourceDetection: detectedResources,
-          onImportResources,
-        })}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Import all" }));
-    expect(onImportResources).toHaveBeenCalledWith(
-      detectedResources.candidates,
-    );
-  });
-
-  it("searches resources without discarding hidden selections", () => {
-    const onImportResources = vi.fn();
-    render(
-      <SetupScreen
-        {...props({
-          step: "resources",
-          resourceDetection: detectedResources,
-          onImportResources,
-        })}
-      />,
-    );
-
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search agent resources" }), {
-      target: { value: "review" },
-    });
-    expect(screen.queryByText("Deploy", { exact: true })).toBeNull();
-    expect(screen.getByText("Review", { exact: true })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Import selected" }));
-    expect(onImportResources).toHaveBeenCalledWith(detectedResources.candidates);
-  });
 });

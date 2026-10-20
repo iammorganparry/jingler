@@ -38,11 +38,8 @@ const finishProviderSetup = async (window: Page): Promise<void> => {
     window.getByRole("heading", { name: "Connect a model provider" })
   ).toBeVisible()
   await window.getByRole("button", { name: "Continue" }).click()
-  await expect(
-    window.getByRole("heading", { name: "Import agent resources" })
-  ).toBeVisible()
-  await window.getByRole("button", { name: "Skip for now" }).click()
-  // #613 added an optional "Import existing sessions?" step before the shell.
+  // #487 removed the standalone resources onboarding step; #613 added an
+  // optional "Import existing sessions?" step before the shell.
   await expect(
     window.getByRole("heading", { name: "Import existing sessions?" })
   ).toBeVisible()

@@ -156,7 +156,9 @@ export const McpImportCandidateView = Schema.Struct({
   /** Display summary — the URL or argv. */
   target: Schema.String,
   /** Why this candidate cannot be imported; null when it can. */
-  problem: Schema.NullOr(Schema.String)
+  problem: Schema.NullOr(Schema.String),
+  /** True when the source config already carries an OAuth server; it imports in `needs-auth`. */
+  needsSignIn: Schema.optionalWith(Schema.Boolean, { default: () => false })
 })
 export type McpImportCandidateView = Schema.Schema.Type<typeof McpImportCandidateView>
 

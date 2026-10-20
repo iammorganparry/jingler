@@ -12,7 +12,8 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
+  NeedsSignInRow
 } from "@jingler/ui"
 import { ServerCog } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -120,6 +121,11 @@ export function McpImportPrompt({
                   </div>
                 </div>
                 <div className="mt-0.5 truncate font-mono text-[10px] text-dim">{candidate.target}</div>
+                {candidate.needsSignIn && (
+                  <div className="mt-1">
+                    <NeedsSignInRow host={candidate.target} />
+                  </div>
+                )}
               </div>
             ))}
           </div>

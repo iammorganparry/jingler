@@ -71,6 +71,7 @@ test("native Codex device login unlocks onboarding through refreshed status", as
     await window.getByRole("button", { name: "Check Codex sign-in" }).click()
     await expect(window.getByText("Codex CLI · ready · desktop", { exact: false })).toBeVisible()
     await window.getByRole("button", { name: "Continue", exact: true }).click()
-    await expect(window.getByRole("heading", { name: "Import agent resources" })).toBeVisible()
+    // #487 removed the standalone resources onboarding step.
+    await expect(window.getByRole("heading", { name: "Import existing sessions?" })).toBeVisible()
   } finally { rmSync(codexHome, { recursive: true, force: true }) }
 })
