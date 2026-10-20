@@ -237,7 +237,7 @@ test("shows the failing bootstrap step with its log tail and resumes on Retry", 
   await expect(app.window.getByLabel("SSH host or alias")).toBeVisible()
   await app.window.getByText("buildbox", { exact: true }).click()
   await app.window.getByRole("button", { name: "Connect environment" }).click()
-  await expect(app.window.getByRole("alert")).toContainText("Permission denied", { timeout: 30_000 })
+  await expect(app.window.getByRole("alert")).toContainText("SSH authentication failed for buildbox", { timeout: 30_000 })
   expect(existsSync(failMarker)).toBe(false)
   await app.window.getByRole("button", { name: "Retry" }).click()
   await expect(app.window.getByRole("status")).toContainText("buildbox", { timeout: 30_000 })
