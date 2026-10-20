@@ -569,4 +569,30 @@ describe("pi file-change events", () => {
       })
     ).toMatchObject({ _tag: "ToolEnd", fileChanges })
   })
+
+  it("keeps a still-running async workflow ToolEnd from reporting success", () => {
+    // The tool call itself ends the instant the workflow detaches (the
+    // acknowledgment carries `asyncId` and no settled results) but the
+    // workflow keeps running. The chat row must not tick to "success"
+    // until the workflow actually settles.
+    expect(normalizePiEvent({
+      type: "tool_execution_end",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      result: {
+        content: [{ type: "text", text: "Async: scout [run-async-1]" }],
+        details: {
+          mode: "workflow",
+          runId: "run-async-1",
+          asyncId: "run-async-1",
+          asyncDir: "/tmp/async-subagent-runs/run-async-1",
+          results: []
+        }
+      },
+      isError: false
+    } as never)).toMatchObject({
+      _tag: "ToolEnd",
+      status: "running"
+    })
+  })
 })

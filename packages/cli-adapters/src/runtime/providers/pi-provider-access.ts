@@ -10,6 +10,8 @@ import {
   type ProviderResponse
 } from "@earendil-works/pi-ai"
 import {
+  CLAUDE_CLI_API_ROUTE,
+  CLAUDE_CLI_SUBSCRIPTION_ROUTE,
   ProviderId,
   ProviderModelId,
   type AuthKind,
@@ -240,14 +242,14 @@ export const probePiEntitlement = async (input: {
   readonly signal: AbortSignal
 }): Promise<EntitlementProbeResult> => {
   if (input.authKind === "claude-setup-token") {
-    await verifyLocalClaudeSubscription({ signal: input.signal })
+    const login = await verifyLocalClaudeSubscription({ signal: input.signal })
     return {
       entitlement: "active",
-      planLabel: "Claude subscription",
+      planLabel: login.planLabel,
       quotaLabel: null,
       rateLimitLabel: null,
-      billingRoute: "subscription",
-      observedRoute: "claude-cli:subscription"
+      billingRoute: login.route,
+      observedRoute: login.route === "api" ? CLAUDE_CLI_API_ROUTE : CLAUDE_CLI_SUBSCRIPTION_ROUTE
     }
   }
   const runtime = await ModelRuntime.create({

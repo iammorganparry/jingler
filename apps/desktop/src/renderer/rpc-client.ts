@@ -39,6 +39,7 @@ import type {
   GitHubRelayConnectionUpdate,
   GitHubRelayEvent,
   GitConfig,
+  ObsidianExplanationsConfig,
   NotificationKind,
   NotificationPermission,
   NotificationsConfig,
@@ -410,15 +411,17 @@ export const rpc = {
   mcpStartAuthorization: (name: string) =>
     run((c) => c.Mcp.startAuthorization({ name })),
   mcpImportCandidates: (
-    source: McpImportSourceId
+    source: McpImportSourceId,
+    connectors?: boolean
   ): Promise<ReadonlyArray<McpImportCandidateView>> =>
-    run((c) => c.Mcp.importCandidates({ source })),
+    run((c) => c.Mcp.importCandidates({ source, connectors })),
   mcpApplyImport: (
     source: McpImportSourceId,
     names: ReadonlyArray<string>,
-    resolutions?: Readonly<Record<string, McpImportResolution>>
+    resolutions?: Readonly<Record<string, McpImportResolution>>,
+    connectors?: boolean
   ): Promise<ReadonlyArray<string>> =>
-    run((c) => c.Mcp.applyImport({ source, names, resolutions })),
+    run((c) => c.Mcp.applyImport({ source, names, resolutions, connectors })),
   appRevealLogs: (): Promise<void> => run((c) => c.App.revealLogs()),
   mcpReveal: (): Promise<void> => run((c) => c.Mcp.reveal()),
   agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>
@@ -651,6 +654,8 @@ export const rpc = {
     run((c) => c.Sessions.delete({ sessionId, skipCleanup })),
   sessionsCreateChat: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.createChat({ sessionId })),
+  sessionsSwitchCheckout: (sessionId: string, checkoutId: string): Promise<Session> =>
+    run((c) => c.Sessions.switchCheckout({ sessionId, checkoutId })),
   sessionsSelectChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.selectChat({ sessionId, chatId })),
   sessionsRenameChat: (
@@ -686,8 +691,8 @@ export const rpc = {
     attachmentId: string
   ): Promise<string | null> =>
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),
-  sessionsDiff: (id: string): Promise<SessionReviewDiff> =>
-    run((c) => c.Sessions.diff({ id })),
+  sessionsDiff: (id: string, checkoutId?: string): Promise<SessionReviewDiff> =>
+    run((c) => c.Sessions.diff({ id, checkoutId })),
   sessionsDiffStat: (id: string): Promise<SessionDiffStat> =>
     run((c) => c.Sessions.diffStat({ id })),
   sessionsFileDiff: (id: string, path: string): Promise<SessionFileDiff> =>
@@ -867,6 +872,10 @@ export const rpc = {
     run((c) => c.Config.setGithub(github)),
   configSetGit: (git: GitConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setGit(git)),
+  configSetObsidianExplanations: (
+    config: ObsidianExplanationsConfig
+  ): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setObsidianExplanations(config)),
   configSetNotifications: (
     notifications: NotificationsConfig
   ): Promise<WorkspaceConfig> =>
@@ -950,10 +959,10 @@ export const rpc = {
     template: PlanTemplateConfig
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanTemplate({ template })),
-  githubPr: (sessionId: string, number?: number): Promise<PullRequest | null> =>
-    run((c) => c.Github.pr(number === undefined ? { sessionId } : { sessionId, number })),
-  githubPrState: (sessionId: string, number?: number): Promise<SessionPrStatus | null> =>
-    run((c) => c.Github.prState(number === undefined ? { sessionId } : { sessionId, number })),
+  githubPr: (sessionId: string, number?: number, checkoutId?: string): Promise<PullRequest | null> =>
+    run((c) => c.Github.pr({ sessionId, ...(number === undefined ? {} : { number }), ...(checkoutId === undefined ? {} : { checkoutId }) })),
+  githubPrState: (sessionId: string, number?: number, checkoutId?: string): Promise<SessionPrStatus | null> =>
+    run((c) => c.Github.prState({ sessionId, ...(number === undefined ? {} : { number }), ...(checkoutId === undefined ? {} : { checkoutId }) })),
   githubTeams: (): Promise<GitHubTeamDiscovery> => run((c) => c.Github.teams()),
   githubTeamPrs: (input: { accountId: string; organization: string; teamSlug: string; queue: GitHubTeamQueue; refresh: boolean }): Promise<GitHubTeamPrResult> =>
     run((c) => c.Github.teamPrs(input)),
@@ -995,10 +1004,10 @@ export const rpc = {
     run((c) => c.Github.closeIssue({ sessionId })),
   githubIssue: (sessionId: string): Promise<Issue | null> =>
     run((c) => c.Github.issue({ sessionId })),
-  githubFiles: (sessionId: string, prNumber?: number): Promise<ReadonlyArray<PrFileChange>> =>
-    run((c) => c.Github.files({ sessionId, ...(prNumber === undefined ? {} : { prNumber }) })),
-  githubDiff: (sessionId: string, prNumber?: number): Promise<string> =>
-    run((c) => c.Github.diff({ sessionId, ...(prNumber === undefined ? {} : { prNumber }) })),
+  githubFiles: (sessionId: string, prNumber?: number, checkoutId?: string): Promise<ReadonlyArray<PrFileChange>> =>
+    run((c) => c.Github.files({ sessionId, ...(prNumber === undefined ? {} : { prNumber }), ...(checkoutId === undefined ? {} : { checkoutId }) })),
+  githubDiff: (sessionId: string, prNumber?: number, checkoutId?: string): Promise<string> =>
+    run((c) => c.Github.diff({ sessionId, ...(prNumber === undefined ? {} : { prNumber }), ...(checkoutId === undefined ? {} : { checkoutId }) })),
   githubDetectPr: (sessionId: string): Promise<number | null> =>
     run((c) => c.Github.detectPr({ sessionId })),
   githubEvents: (
@@ -1018,6 +1027,22 @@ export const rpc = {
             })
           )
         )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
+  agentWakeups: (
+    onWake: (wake: { sessionId: string; chatId: string }) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = coreRuntime.runFork(
+        client.Agent.wakeups().pipe(Stream.runForEach((wake) => Effect.sync(() => onWake(wake))))
       )
     })
     return () => {
@@ -1299,6 +1324,8 @@ export const rpc = {
    */
   explanationCurrent: (sessionId: string): Promise<ExplanationDocument | null> =>
     run((c) => c.Explanation.current({ sessionId })),
+  explanationSaveToObsidian: (sessionId: string): Promise<string | null> =>
+    run((c) => c.Explanation.saveToObsidian({ sessionId })),
   explanationWatch: (
     sessionId: string,
     onDocument: (document: ExplanationDocument | null) => void

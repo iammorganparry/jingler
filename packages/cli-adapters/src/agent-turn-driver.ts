@@ -13,6 +13,7 @@ import type { AgentRunError } from "@jingler/core"
 import { Context, Effect, Layer } from "effect"
 import type { RuntimeRemoteMcpServer } from "./runtime/mcp/attachment.js"
 import type { JinglerMcpAttachments } from "./runtime/tools/mcp-tools.js"
+import type { CheckoutHost } from "./runtime/tools/checkout-tools.js"
 
 /**
  * A remote MCP attachment ready for an embedded pi run.
@@ -113,6 +114,8 @@ export interface AgentContext {
    * native compaction where direct input is temporarily unavailable.
    */
   readonly registerTurnSteer?: (steer: SteerTurn | null) => Effect.Effect<void>
+  /** Multi-repo checkout state for this turn; absent for sessions without a project registry. */
+  readonly checkouts?: CheckoutHost
 }
 
 /**

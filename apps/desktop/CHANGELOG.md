@@ -1,5 +1,86 @@
 # @jingler/desktop
 
+## 0.11.2
+
+### Patch Changes
+
+- @jingler/plannotator-ext@0.11.2
+
+## 0.11.1
+
+### Patch Changes
+
+- d2337d9: Run up to 10 background subagents at once (was 4).
+  - @jingler/plannotator-ext@0.11.1
+
+## 0.11.0
+
+### Minor Changes
+
+- 0148386: **New: work across several repositories in one session.** The agent can now switch to another repository mid-turn with `switch_checkout`. Jingler attaches an isolated worktree for it, follows its changes, and shows Changes, checks and the PR footer grouped by repository. An unregistered repo asks for your approval first, and approving registers it as a project. Subagents start in the parent's current repository, and a subagent switching repos never moves the parent.
+
+### Patch Changes
+
+- @jingler/plannotator-ext@0.11.0
+
+## 0.10.1
+
+### Patch Changes
+
+- ba1c46e: MCP import now includes servers from Claude's `~/.claude/settings.json` and managed `managed-mcp.json`, labelled "User settings" and "Managed".
+- 1df8441: Fixed a crash where a diff with a malformed hunk showed a global "parsePatchContent: Invalid hunk" error. Jingler now renders whatever part of the diff it can instead.
+- 62d67c4: Subagents on the Claude CLI route no longer fail at startup with `model_verification_failed`: agent profiles now always carry the concrete Claude model id.
+  - @jingler/plannotator-ext@0.10.1
+
+## 0.10.0
+
+### Minor Changes
+
+- 8f117e7: Importing MCP servers from Claude can now include your claude.ai connectors (including organisation-provisioned ones) and plugin MCPs. They are labelled by origin, import as remote servers that sign in through Jingler's own OAuth (no claude.ai tokens are copied), and work in Claude, Codex and Pi sessions and subagents. Entries that can't be imported explain why.
+
+### Patch Changes
+
+- @jingler/plannotator-ext@0.10.0
+
+## 0.9.3
+
+### Patch Changes
+
+- @jingler/plannotator-ext@0.9.3
+
+## 0.9.2
+
+### Patch Changes
+
+- 8a4c7fc: Fix Claude Enterprise / API-priced spend showing far too low. Each Claude Code run reports its own cost, so every turn is now kept and summed instead of only the last one.
+- 67780dd: Fix adversarial review findings not reaching the agent when a review is run again on the same PR head. Critical and major findings are now sent to the session's chat for every fresh review, not just the first.
+  - @jingler/plannotator-ext@0.9.2
+
+## 0.9.1
+
+### Patch Changes
+
+- 837ef23: Fix subagents such as `reviewer` failing with "child tools were unavailable". The parent's tool limit is now found under the session file id that subagents look it up by.
+  - @jingler/plannotator-ext@0.9.1
+
+## 0.9.0
+
+### Minor Changes
+
+- 610d01c: Explanations and plans can now draw a system as an interactive isometric figure: stores, queues, services and gateways on layer plinths, wired together, with the subject part lit. Agents use the new `architecture-anatomy` skill; plans use an `architecture` code fence.
+- 39ab665: Claude Enterprise and Console (API-priced) logins now run agents without a billing-route error, and the Usage & limits modal shows their spend (cost and tokens for the last session, today and this month) under an "Enterprise · API pricing" plan label instead of "not available".
+- 370e769: Save agent explanations to your Obsidian vault automatically: turn on "Save explanations to Obsidian" in Settings → General (shown once a vault is configured) and each published explanation is written as a Markdown note, updated in place when re-published.
+
+### Patch Changes
+
+- c64ebcc: Messages you send, sub-agent task prompts and sub-agent final outputs now render as Markdown (code blocks, bold, lists) instead of raw text.
+- d6af7ba: Stopping an agent that's stuck inside a tool no longer locks the chat. Before, every later message (including "Sub-agent results arrived") was refused with "This chat is already running" until the stuck run eventually died.
+- 749b71e: Sub-agents can now launch up to 64 times per session (was 16), run for up to an hour before timing out (was 30 minutes), and workers start with a fresh context instead of inheriting your conversation.
+- b7ad8d8: Sub-agents that can run shell commands no longer also get the read-only command tool, so they stop picking it by mistake and failing.
+- 87ac5a0: Sub-agent results that arrive after the main agent finished its turn now start a visible turn ("Sub-agent results arrived") instead of running hidden or being dropped, so you no longer have to reprompt.
+- 54e58d1: Claude subagents no longer fail model verification on non-subscription logins, and every subagent gets the tools its role needs.
+  - @jingler/plannotator-ext@0.9.0
+
 ## 0.8.0
 
 ### Minor Changes

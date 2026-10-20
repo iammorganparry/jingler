@@ -246,10 +246,18 @@ const normalizeToolEnd = (
   event: Extract<AgentSessionEvent, { readonly type: "tool_execution_end" }>
 ): StreamEvent => {
   const { fileChanges, output } = projectToolResult(event)
+  // A subagent tool call can END (the async spawn acknowledgment returns)
+  // while the workflow it launched keeps running: `settled` tracks the
+  // workflow, not the tool call framing. Report "running" until it settles
+  // so the chat row doesn't tick to success for a still-running async run.
+  const subagentProgress = event.toolName === "subagent"
+    ? decodeSubagentProgressResult(event.result, event, undefined)
+    : null
+  const unsettledAsync = subagentProgress !== null && !subagentProgress.settled
   return {
     _tag: "ToolEnd",
     id: event.toolCallId,
-    status: event.isError ? "error" : "success",
+    status: event.isError ? "error" : unsettledAsync ? "running" : "success",
     meta: null,
     diff: fileChanges?.totals ?? null,
     preview: fileChanges?.changes.find((change) => change.preview)?.preview ?? null,

@@ -54,12 +54,14 @@ interface RegistryToolExecution {
   readonly onUpdate:
     | ((result: RegistryToolResult) => void)
     | undefined
+  /** Per-call cwd override (e.g. a validated subagent child cwd); threaded into ToolExecutionRequest.cwd. */
+  readonly cwd?: string
 }
 
 const execute = async (
   input: RegistryToolExecution
 ): Promise<RegistryToolResult> => {
-  const { registry, spec, context, id, toolCallId, parameters, signal, allowed, onUpdate } =
+  const { registry, spec, context, id, toolCallId, parameters, signal, allowed, onUpdate, cwd } =
     input
   const risk = registry.riskFor(id)
   const request: ToolExecutionRequest = {
@@ -80,7 +82,8 @@ const execute = async (
           artifact: null,
           error: null
         }
-      })
+      }),
+    ...(cwd === undefined ? {} : { cwd })
   }
   if (!allowed) {
     const denied = await Effect.runPromise(registry.deny(request))

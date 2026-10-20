@@ -1,5 +1,77 @@
 # @jingler/device-agent
 
+## 0.11.2
+
+### Patch Changes
+
+- Updated dependencies [01c0f7d]
+- Updated dependencies [615f721]
+- Updated dependencies [128d57e]
+- Updated dependencies [6794599]
+- Updated dependencies [062e750]
+  - @jingler/cli-adapters@0.11.2
+  - @jingler/core@0.11.2
+
+## 0.11.1
+
+### Patch Changes
+
+- Updated dependencies [d2337d9]
+  - @jingler/cli-adapters@0.11.1
+  - @jingler/core@0.11.1
+
+## 0.11.0
+
+### Patch Changes
+
+- Updated dependencies [0148386]
+  - @jingler/cli-adapters@0.11.0
+  - @jingler/core@0.11.0
+
+## 0.10.1
+
+### Patch Changes
+
+- @jingler/cli-adapters@0.10.1
+- @jingler/core@0.10.1
+
+## 0.10.0
+
+### Patch Changes
+
+- @jingler/cli-adapters@0.10.0
+- @jingler/core@0.10.0
+
+## 0.9.3
+
+### Patch Changes
+
+- Updated dependencies [c3531bb]
+- Updated dependencies [28eefd7]
+  - @jingler/cli-adapters@0.9.3
+  - @jingler/core@0.9.3
+
+## 0.9.2
+
+### Patch Changes
+
+- @jingler/cli-adapters@0.9.2
+- @jingler/core@0.9.2
+
+## 0.9.1
+
+### Patch Changes
+
+- @jingler/cli-adapters@0.9.1
+- @jingler/core@0.9.1
+
+## 0.9.0
+
+### Patch Changes
+
+- @jingler/cli-adapters@0.9.0
+- @jingler/core@0.9.0
+
 ## 0.8.0
 
 ### Patch Changes

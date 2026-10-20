@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import {
+  PlanArchitectureBlock,
   PlanTestKind,
   type PlanBlock,
   type PlanDocument,
@@ -124,6 +125,7 @@ export const PlannotatorSectionBlock = Schema.Union(
     code: Schema.String
   }),
   Schema.Struct({ kind: Schema.Literal("diagram"), source: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("architecture"), source: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("change"), ...PlannotatorChange.fields })
 )
 export type PlannotatorSectionBlock = Schema.Schema.Type<typeof PlannotatorSectionBlock>
@@ -203,6 +205,20 @@ export const plannotatorProjectionToPlanDocument = (
   updatedBy: "agent"
 })
 
+const decodeArchitectureBlock = Schema.decodeUnknownOption(PlanArchitectureBlock)
+
+/** A ```architecture fence body → the figure block; null when it is not valid JSON or fails the schema. */
+const decodeArchitecture = (source: string, id: string): PlanBlock | null => {
+  try {
+    const parsed: unknown = JSON.parse(source)
+    if (typeof parsed !== "object" || parsed === null) return null
+    const decoded = decodeArchitectureBlock({ ...parsed, kind: "architecture", id })
+    return decoded._tag === "Some" ? decoded.value : null
+  } catch {
+    return null
+  }
+}
+
 const sectionBlockToPlanBlock = (
   block: PlannotatorSectionBlock,
   id: string
@@ -223,6 +239,8 @@ const sectionBlockToPlanBlock = (
       }
     case "diagram":
       return { kind: "diagram", id, source: block.source }
+    case "architecture":
+      return decodeArchitecture(block.source, id) ?? { kind: "code", id, language: "architecture", code: block.source }
     case "change":
       return { kind: "change", id, path: block.path, patch: block.patch }
   }

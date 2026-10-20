@@ -1,5 +1,91 @@
 # @jingler/cli-adapters
 
+## 0.11.2
+
+### Patch Changes
+
+- 01c0f7d: Fixed the subagent capability broker rejecting a child's cwd (403 `forbidden-cwd`) after the parent called `switch_checkout` to a different repo. The broker now resolves the parent's checkout per request instead of caching it once at registration.
+- 615f721: Find the Claude CLI when it's installed via Homebrew or hsclaude
+- 128d57e: Subagent tool calls (file reads, edits and shell commands) now run in the subagent's own worktree instead of the parent session's checkout.
+- 6794599: Subagent workers run at medium thinking instead of high, and Claude CLI turns that end in a tool call now record their token usage.
+- 062e750: Fix the SUBAGENTS panel staying empty while an async `workflowScript` run's children are running. A workflow child's first `subagent:async-started` event carries no `sessionId` (it is spawned inside the workflow's own detached process), only `parentWorkflowRunId` — this was rejected as not belonging to the parent session, so every workflow child was silently dropped from the Fleet projection.
+- Updated dependencies [128d57e]
+  - @jingler/core@0.11.2
+  - @jingler/themes@0.11.2
+  - @jingler/plannotator-ext@0.11.2
+
+## 0.11.1
+
+### Patch Changes
+
+- d2337d9: Run up to 10 background subagents at once (was 4).
+  - @jingler/core@0.11.1
+  - @jingler/plannotator-ext@0.11.1
+  - @jingler/themes@0.11.1
+
+## 0.11.0
+
+### Minor Changes
+
+- 0148386: **New: work across several repositories in one session.** The agent can now switch to another repository mid-turn with `switch_checkout`. Jingler attaches an isolated worktree for it, follows its changes, and shows Changes, checks and the PR footer grouped by repository. An unregistered repo asks for your approval first, and approving registers it as a project. Subagents start in the parent's current repository, and a subagent switching repos never moves the parent.
+
+### Patch Changes
+
+- Updated dependencies [0148386]
+  - @jingler/core@0.11.0
+  - @jingler/themes@0.11.0
+  - @jingler/plannotator-ext@0.11.0
+
+## 0.10.1
+
+### Patch Changes
+
+- @jingler/core@0.10.1
+- @jingler/plannotator-ext@0.10.1
+- @jingler/themes@0.10.1
+
+## 0.10.0
+
+### Patch Changes
+
+- @jingler/core@0.10.0
+- @jingler/plannotator-ext@0.10.0
+- @jingler/themes@0.10.0
+
+## 0.9.3
+
+### Patch Changes
+
+- c3531bb: **Fixed: a reviewer subagent stayed broken for a day after one connection error.** A single failed request made subagents skip that model for 24 hours ("skipped because of a cache exclusion"). Jingler now caps that skip at 5 minutes, and existing longer skips shrink to match on the next launch.
+- 28eefd7: **Fixed: agents failing to ask you a question.** Some models send a list argument (like the questions in an Ask card) as JSON text instead of a list, and the tool call failed with "must be array" until you nudged the agent. Jingler now reads that text as the list it was meant to be, for every tool.
+  - @jingler/core@0.9.3
+  - @jingler/plannotator-ext@0.9.3
+  - @jingler/themes@0.9.3
+
+## 0.9.2
+
+### Patch Changes
+
+- @jingler/core@0.9.2
+- @jingler/plannotator-ext@0.9.2
+- @jingler/themes@0.9.2
+
+## 0.9.1
+
+### Patch Changes
+
+- @jingler/core@0.9.1
+- @jingler/plannotator-ext@0.9.1
+- @jingler/themes@0.9.1
+
+## 0.9.0
+
+### Patch Changes
+
+- @jingler/core@0.9.0
+- @jingler/plannotator-ext@0.9.0
+- @jingler/themes@0.9.0
+
 ## 0.8.0
 
 ### Patch Changes

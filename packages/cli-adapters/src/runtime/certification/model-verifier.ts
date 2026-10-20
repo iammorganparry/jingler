@@ -78,7 +78,7 @@ const requireObservedRoute = (
   connection: ProviderConnection,
   observation: EntitlementProbeResult
 ): Effect.Effect<void, ModelVerificationError> => {
-  const expected = expectedBillingRouteForAuthKind(connection.authKind)
+  const expected = expectedBillingRouteForAuthKind(connection.authKind, connection.subscription.observedRoute)
   if (
     observation.entitlement !== "active" ||
     observation.billingRoute !== expected
@@ -209,10 +209,10 @@ export const evaluateProviderModelBehavior = (
         authRoute: {
           kind: input.connection.authKind,
           observedRoute: observation.observedRoute,
-          subscription: expectedBillingRouteForAuthKind(input.connection.authKind) === "subscription",
+          subscription: expectedBillingRouteForAuthKind(input.connection.authKind, input.connection.subscription.observedRoute) === "subscription",
           entitlementConfirmed: observation.entitlement === "active",
           apiBillingFallbackObserved:
-            expectedBillingRouteForAuthKind(input.connection.authKind) === "subscription" &&
+            expectedBillingRouteForAuthKind(input.connection.authKind, input.connection.subscription.observedRoute) === "subscription" &&
             observation.billingRoute === "api"
         },
         versions: CURRENT_RUNTIME_CONTRACTS,

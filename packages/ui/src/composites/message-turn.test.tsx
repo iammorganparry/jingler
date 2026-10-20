@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { Message, PlanDocument } from "@jingler/core"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { isSubagentSpawnMessage, MessageTurn, PlanProgressContext, SubagentEntryContext } from "./message-turn.js"
 
@@ -190,5 +190,18 @@ describe("MessageTurn subagent entry points", () => {
       </SubagentEntryContext.Provider>
     )
     expect(screen.queryByTestId("subagent-spawn-row")).toBeNull()
+  })
+})
+
+describe("MessageTurn user markdown", () => {
+  it("renders a fenced block in a user turn as code, not raw backticks", async () => {
+    const view = render(<MessageTurn message={assistant({
+      role: "user",
+      streaming: false,
+      parts: [{ _tag: "Text", text: "Report:\n\n```json\n{ \"ok\": true }\n```\n\n**done**" }]
+    })} />)
+    await waitFor(() => expect(view.container.querySelector("[data-streamdown=strong]")?.textContent).toBe("done"))
+    expect(view.container.querySelector("pre, [data-streamdown^=code]")).toBeTruthy()
+    expect(view.container.textContent).not.toContain("```")
   })
 })

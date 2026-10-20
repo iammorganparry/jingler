@@ -7,8 +7,8 @@
 import { useCallback, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type { Session } from "@jingler/core"
-import { workspaceModeOf } from "@jingler/core"
-import { ChangedFilesExplorer, ReviewSidebar, reviewTurnsOf } from "@jingler/ui"
+import { checkoutsOf, workspaceModeOf } from "@jingler/core"
+import { ChangedFilesExplorer, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
 import {
   setReviewFilter,
@@ -28,8 +28,8 @@ const deslopPrompt = (path: string): string =>
   `names, and simplify control flow — WITHOUT changing behaviour. If the file ` +
   `is already clean, say so rather than churning it.`
 
-export function useChangesReview(session: Session, connected: boolean) {
-  const review = useReview(session)
+export function useChangesReview(session: Session, connected: boolean, checkoutId?: string) {
+  const review = useReview(session, checkoutId)
   // Read-only: the adversarial review is *run* from the Pull Request tab; its
   // findings anchor to the PR diff wherever that diff renders.
   const adversarial = useAdversarialReview(session, { connected })
@@ -95,6 +95,47 @@ export function useReviewTurns(session: Session) {
   return { turns, turn, setTurn }
 }
 
+function CheckoutChangesList({
+  session,
+  connected,
+  checkoutId,
+  activePath,
+  onOpenPath
+}: {
+  readonly session: Session
+  readonly connected: boolean
+  readonly checkoutId?: string
+  readonly activePath: string | null
+  readonly onOpenPath: (path: string) => void
+}) {
+  const { review, adversarial, revertFile } = useChangesReview(session, connected, checkoutId)
+  const { turns, turn, setTurn } = useReviewTurns(session)
+  // The turn filter and Discard belong to the active checkout only.
+  const active = checkoutId === undefined
+  return (
+    <ChangedFilesExplorer
+      turns={active ? turns : []}
+      turnId={active ? (turn?.id ?? null) : null}
+      onTurnChange={setTurn}
+      files={review.files}
+      fileDiffs={review.fileDiffs}
+      omittedFiles={review.omittedFiles}
+      diffLineLimit={review.diffLineLimit}
+      drafts={review.drafts}
+      reviewThreads={review.reviewThreads}
+      // Adversarial findings belong to the active checkout's PR only.
+      review={review.source === "pr" && checkoutId === undefined ? adversarial.review : null}
+      activePath={activePath}
+      onSelectFile={onOpenPath}
+      onDiscardFile={active && review.source === "local" ? revertFile : undefined}
+      loading={review.loading}
+      error={review.error}
+      onRetry={review.retry}
+    />
+  )
+}
+
+/** Changes for the session; a multi-repo session lists one group per checkout. */
 export function ChangesExplorerPanel({
   session,
   connected,
@@ -106,27 +147,38 @@ export function ChangesExplorerPanel({
   readonly activePath: string | null
   readonly onOpenPath: (path: string) => void
 }) {
-  const { review, adversarial, revertFile } = useChangesReview(session, connected)
-  const { turns, turn, setTurn } = useReviewTurns(session)
+  const checkouts = checkoutsOf(session)
+  if (checkouts.length < 2) {
+    return (
+      <CheckoutChangesList
+        session={session}
+        connected={connected}
+        activePath={activePath}
+        onOpenPath={onOpenPath}
+      />
+    )
+  }
   return (
-    <ChangedFilesExplorer
-      turns={turns}
-      turnId={turn?.id ?? null}
-      onTurnChange={setTurn}
-      files={review.files}
-      fileDiffs={review.fileDiffs}
-      omittedFiles={review.omittedFiles}
-      diffLineLimit={review.diffLineLimit}
-      drafts={review.drafts}
-      reviewThreads={review.reviewThreads}
-      review={review.source === "pr" ? adversarial.review : null}
-      activePath={activePath}
-      onSelectFile={onOpenPath}
-      onDiscardFile={review.source === "local" ? revertFile : undefined}
-      loading={review.loading}
-      error={review.error}
-      onRetry={review.retry}
-    />
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+      {checkouts.map((checkout) => (
+        <section
+          key={checkout.id}
+          data-testid={`changes-checkout-${checkout.id}`}
+          className="flex min-h-[10rem] flex-1 flex-col border-b border-line"
+        >
+          <h3 className="px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-wide text-dim">
+            {checkoutLabel(checkout)}
+          </h3>
+          <CheckoutChangesList
+            session={session}
+            connected={connected}
+            checkoutId={checkout.id}
+            activePath={activePath}
+            onOpenPath={onOpenPath}
+          />
+        </section>
+      ))}
+    </div>
   )
 }
 

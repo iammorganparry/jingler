@@ -3,7 +3,7 @@ import type {
   CredentialInfo,
   CredentialStore
 } from "@earendil-works/pi-ai"
-import type { ProviderConnection } from "@jingler/core"
+import { isClaudeCliRoute, type ProviderConnection } from "@jingler/core"
 import { Effect } from "effect"
 import type {
   ProviderCredentialStore,
@@ -14,7 +14,7 @@ export const claudeCliRouteCredential = (
   connection: ProviderConnection
 ): StoredProviderCredential | null =>
   connection.authKind === "claude-setup-token" &&
-  connection.subscription.observedRoute === "claude-cli:subscription"
+  isClaudeCliRoute(connection.subscription.observedRoute)
     ? {
         connectionId: connection.id,
         authKind: "claude-setup-token",
@@ -50,7 +50,7 @@ export const toPiCredential = (
   if (
     connection.authKind === "claude-setup-token" && (
       credential.access !== "claude-cli" ||
-      connection.subscription.observedRoute !== "claude-cli:subscription"
+      !isClaudeCliRoute(connection.subscription.observedRoute)
     )
   ) throw new Error("Reauthentication required")
   return toPiCredentialValue(credential)

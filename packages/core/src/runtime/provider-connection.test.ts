@@ -74,4 +74,21 @@ describe("provider connection identity", () => {
       )
     ).toBe("authenticated")
   })
+
+  it("authenticates an API-priced Claude CLI login on the api route", () => {
+    expect(
+      expectedBillingRouteForAuthKind("claude-setup-token", "claude-cli:api")
+    ).toBe("api")
+    expect(
+      authStatusForObservedBillingRoute(
+        "claude-setup-token",
+        "active",
+        "api",
+        "claude-cli:api"
+      )
+    ).toBe("authenticated")
+    expect(
+      authStatusForObservedBillingRoute("claude-setup-token", "active", "api")
+    ).toBe("entitlement-unconfirmed")
+  })
 })

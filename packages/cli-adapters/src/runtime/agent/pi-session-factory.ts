@@ -1,3 +1,4 @@
+import { concreteClaudeModels } from "../providers/claude-cli-models.js"
 import { workspaceCheckpointMode } from "../../workspace-admission.js"
 import {
   createAgentSession,
@@ -15,9 +16,11 @@ import {
 import { createJiti } from "jiti"
 import type {
   RegisterSubagentCapabilityCeilingOptions,
+  SubagentCapabilityCeiling,
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
 import {
+  isClaudeCliRoute,
   JINGLER_SUBAGENT_NAMES,
   makeUsageFact
 } from "@jingler/core"
@@ -58,6 +61,7 @@ import { createPiTools } from "./pi-tool-bridge.js"
 import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { estimatePiContextBreakdown } from "./pi-context-breakdown.js"
 import { makePiSubagentAsyncDelegate } from "./pi-subagent-rpc.js"
+import { agentWakes, routeIdleTurnsToChat } from "./pi-idle-wake.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 import {
   preparePiSubagentsRuntime,
@@ -68,7 +72,7 @@ import {
   type PiChildCredentials
 } from "../subagents/pi-child-credentials.js"
 import {
-  subagentCapabilityToolIds,
+  subagentProfileToolIds,
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
 import {
@@ -159,6 +163,29 @@ const loadCapabilityCeiling = (): Promise<CapabilityCeilingModule> => {
   return capabilityCeilingModule
 }
 
+/**
+ * pi-subagents looks a parent's ceiling up by `resolveCurrentSessionId`, which
+ * prefers the session FILE over the session id. Registering under the id alone
+ * misses that lookup, and the child then requires every tool its shared profile
+ * lists, failing with "child tools were unavailable". Register under both.
+ */
+export const registerParentCapabilityCeiling = (
+  module: CapabilityCeilingModule,
+  sessionIds: ReadonlyArray<string | undefined>,
+  options: Omit<RegisterSubagentCapabilityCeilingOptions, "sessionId">
+): SubagentCapabilityCeilingHandle => {
+  const handles = [...new Set(sessionIds.filter((id): id is string => Boolean(id)))]
+    .map((sessionId) => module.registerSubagentCapabilityCeiling({ ...options, sessionId }))
+  return {
+    update: (ceiling) => {
+      for (const handle of handles) handle.update(ceiling)
+    },
+    dispose: () => {
+      for (const handle of handles) handle.dispose()
+    }
+  }
+}
+
 export interface PiSessionFactoryOptions {
   readonly agentDir: string
   readonly sessionsDir: string
@@ -203,7 +230,7 @@ export interface PiSessionFactoryOptions {
 const usesClaudeCli = (connection: ProviderConnection): boolean =>
   connection.providerId === "anthropic" &&
   connection.authKind === "claude-setup-token" &&
-  connection.subscription.observedRoute === "claude-cli:subscription"
+  isClaudeCliRoute(connection.subscription.observedRoute)
 
 const modelIdForProvider = (spec: AgentRunSpec, connection: ProviderConnection) => {
   const qualified = String(spec.modelId)
@@ -408,6 +435,12 @@ const createEmbeddedSession = (
         resources,
         sessionManager
       )
+      // A delegation-only sidecar serves a non-Pi parent; its turns are not chat turns.
+      if (!options.delegationOnly) {
+        routeIdleTurnsToChat(configured.result.session, () =>
+          agentWakes.publish({ sessionId: spec.sessionId, chatId: spec.chatId })
+        )
+      }
       return {
         result: configured.result,
         connection,
@@ -530,7 +563,9 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
         }
       : {}),
     prompt: (text, images) => session.prompt(text, {
-      images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType }))
+      images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType })),
+      // Pi throws on a prompt that lands mid-turn; queue it behind that turn instead.
+      streamingBehavior: "followUp"
     }),
     steer: (text) => session.steer(text),
     interrupt: () => session.abort(),
@@ -624,13 +659,15 @@ const createSessionHandle = (
           }))
         )
       : { enabled: true, models: {}, connections: [] }
-    const profileTools = Object.fromEntries(JINGLER_SUBAGENT_NAMES.map((agent) => [
-      agent,
-      subagentCapabilityToolIds(registry, spec, agent)
-    ])) as PiSubagentProfileTools
+    // A registry with only supervisor_state (the native-sidecar recovery host)
+    // must not overwrite the shared profiles with a toolless list.
+    const profileTools = Object.fromEntries(JINGLER_SUBAGENT_NAMES.flatMap((agent) => {
+      const ids = subagentProfileToolIds(registry, agent)
+      return ids.some((id) => id !== "supervisor_state") ? [[agent, ids]] : []
+    })) as PiSubagentProfileTools
     yield* preparePiSubagentsRuntime(
       options.agentDir,
-      subagentConfig.models,
+      concreteClaudeModels(subagentConfig.models),
       profileTools
     ).pipe(
       Effect.mapError(
@@ -753,6 +790,7 @@ function* bindSubagentCapabilities(
       )
     }
     let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
+    let ceiling: SubagentCapabilityCeiling | undefined
     if (nativeSubagentsEnabled && options.childCredentials && options.subagentBroker) {
       const capability = yield* options.subagentBroker.register({
         parentRuntimeSessionId,
@@ -787,19 +825,19 @@ function* bindSubagentCapabilities(
           }))
         ))
       )
-      subagentCeiling = capabilityCeiling.registerSubagentCapabilityCeiling({
-        sessionId: parentRuntimeSessionId,
-        source: "jingler-runtime",
-        ceiling: {
-          allowedTools: [
-            ...new Set(capability.flatMap(({ tools }) => tools.map(({ id }) => id))),
-            "contact_supervisor",
-            "subagent"
-          ],
-          allowedAgents: [...JINGLER_SUBAGENT_NAMES],
-          denyExtensions: false
-        }
-      })
+      ceiling = {
+        allowedTools: [
+          ...new Set(capability.flatMap(({ tools }) => tools.map(({ id }) => id))),
+          "contact_supervisor",
+          "subagent"
+        ],
+        allowedAgents: [...JINGLER_SUBAGENT_NAMES],
+        denyExtensions: false
+      }
+      subagentCeiling = registerParentCapabilityCeiling(capabilityCeiling, [
+        parentRuntimeSessionId,
+        embedded.result.session.sessionFile
+      ], { source: "jingler-runtime", ceiling })
       const childConnections = childProviderConnections(
         embedded.connection,
         assignedConnections
@@ -848,6 +886,13 @@ function* bindSubagentCapabilities(
         context
       }).pipe(Effect.onError(() => rollbackSession))
     : undefined
+  // Native Codex/OpenCode job profiles get per-binding names; the ceiling must allow them.
+  if (subagentCeiling && ceiling && nativeAsyncSubagents) {
+    subagentCeiling.update({
+      ...ceiling,
+      allowedAgents: [...JINGLER_SUBAGENT_NAMES, ...Object.values(nativeAsyncSubagents.agentNames)]
+    })
+  }
   return yield* observeSessionDiagnostics(
     spec,
     connection,

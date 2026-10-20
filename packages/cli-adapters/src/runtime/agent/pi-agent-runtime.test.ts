@@ -677,6 +677,100 @@ describe("PiAgentRuntime", () => {
       message: "pi prompt failed: offline"
     })
   })
+
+  it("settles a tool card stuck \"running\" on an async spawn once the workflow root reaches a terminal fleet status", async () => {
+    let fleetListener: ((event: import("@jingler/core").StreamEvent) => void) | null = null
+    const handle: PiSessionHandle = {
+      ...fleetSeams,
+      id: "pi-session-async",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribeFleet: (listener) => {
+        fleetListener = listener
+        return vi.fn()
+      },
+      subscribe: (next) => {
+        next({
+          type: "tool_execution_end",
+          toolCallId: "subagent-call",
+          toolName: "subagent",
+          result: {
+            content: [{ type: "text", text: "Async: scout [run-async-1]" }],
+            details: {
+              mode: "workflow",
+              runId: "run-async-1",
+              asyncId: "run-async-1",
+              asyncDir: "/tmp/async-subagent-runs/run-async-1",
+              results: []
+            }
+          },
+          isError: false
+        } as never)
+        fleetListener?.({
+          _tag: "SubagentFleetChanged",
+          event: {
+            _tag: "Upsert",
+            version: 2,
+            eventId: "complete:run-async-1:1",
+            occurredAt: 1,
+            node: {
+              id: "pi-parent/run-async-1",
+              subagentId: "run-async-1",
+              orchestrationRunId: "run-async-1",
+              nodeKind: "workflow",
+              registryRevision: 1,
+              childSequence: 1,
+              runId: "run-async-1",
+              parentId: null,
+              parentRuntimeSessionId: "pi-parent",
+              agent: "scout",
+              task: "scout",
+              model: null,
+              status: "completed",
+              health: "unknown",
+              phase: null,
+              blocking: null,
+              terminal: { reason: "completed", summary: "done", at: 1, retryable: false },
+              background: true,
+              sessionFile: null,
+              currentTool: null,
+              startedAt: 0,
+              updatedAt: 1,
+              completedAt: 1,
+              usage: {
+                inputTokens: 0,
+                outputTokens: 0,
+                totalTokens: 0,
+                costUsd: 0,
+                durationMs: 0,
+                toolCalls: 0
+              },
+              artifacts: [],
+              attention: null
+            }
+          }
+        } as never)
+        next({ type: "agent_settled" })
+        return vi.fn()
+      },
+      prompt: async () => undefined,
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      usage: () => ({ costUsd: 0, tokens: 0 })
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
+    const toolEnds = events.filter(
+      (event) => event._tag === "ToolEnd" && event.id === "subagent-call"
+    )
+    expect(toolEnds.map((event) => event._tag === "ToolEnd" ? event.status : null)).toEqual([
+      "running",
+      "success"
+    ])
+  })
 })
 
 describe("PiAgentRuntime reconciliation", () => {

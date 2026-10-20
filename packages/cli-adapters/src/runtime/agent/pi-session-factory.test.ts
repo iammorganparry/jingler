@@ -112,6 +112,7 @@ const fakeSession = (): AgentSession =>
     subscribe: vi.fn(() => vi.fn()),
     bindExtensions: vi.fn(async () => undefined),
     prompt: vi.fn(async () => undefined),
+    sendCustomMessage: vi.fn(async () => undefined),
     steer: vi.fn(async () => undefined),
     abort: vi.fn(async () => undefined),
     dispose: vi.fn(),
@@ -262,7 +263,8 @@ describe("pi session creation", () => {
       data: "aGVsbG8="
     }])
     expect(session.prompt).toHaveBeenCalledWith("Read this form", {
-      images: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }]
+      images: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+      streamingBehavior: "followUp"
     })
     await handle.dispose()
   })

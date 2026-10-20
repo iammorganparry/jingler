@@ -130,6 +130,12 @@ describe("parsePlanMarkdown", () => {
     expect(parsed.stages[0]?.notes).toEqual(["Use the existing path."])
   })
 
+  it("keeps architecture fences as raw source blocks", () => {
+    const body = '{"layers":[{"id":"app","label":"App"}]}'
+    const parsed = parsePlanMarkdown(`Overview.\n\n\`\`\`architecture\n${body}\n\`\`\`\n`)
+    expect(parsed.sections[0].blocks).toContainEqual({ kind: "architecture", source: body })
+  })
+
   it("parses diff path fences into change blocks", () => {
     const patch = "@@ -1 +1 @@\n-old\n+new"
     const plan = [
