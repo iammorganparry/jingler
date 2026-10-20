@@ -50,8 +50,9 @@ test("Auto: a session created with no repo shows \"No repo\" until the agent att
 
   await window.getByRole("button", { name: "Project", exact: true }).click()
   await window.getByRole("option", { name: "Auto" }).click()
-  await window.getByPlaceholder("Message the agent…").fill("[[switch-repo=" + repoPath + "]] work in the repo")
-  await window.getByPlaceholder("Message the agent…").press("Enter")
+  const composer = window.getByPlaceholder(/Message the agent/)
+  await composer.fill("[[switch-repo=" + repoPath + "]] work in the repo")
+  await composer.press("Enter")
   await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1, { timeout: 20_000 })
 
   // Before the agent attaches a repo: "No repo" everywhere repo/branch would show.

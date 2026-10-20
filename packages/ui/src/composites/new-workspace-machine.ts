@@ -132,6 +132,48 @@ const checkpointCreationFields = (context: NewWorkspaceContext) => context.check
 export const AUTO_PROJECT_ID = "auto"
 const isAutoProject = (context: NewWorkspaceContext): boolean => context.projectId === AUTO_PROJECT_ID
 
+const submitAuto = (
+  context: NewWorkspaceContext,
+  canonical: NonNullable<ReturnType<typeof canonicalWorkspaceModel>>,
+  onProgress: (phase: SessionCreationPhase) => void
+): Promise<void> =>
+  context.getDeps().onCreate({
+    ...canonical,
+    ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}),
+    mode: context.mode,
+    reasoning: context.reasoning ?? null
+  }, context.attachments, onProgress)
+
+const commonFields = (
+  context: NewWorkspaceContext,
+  project: NonNullable<NewWorkspaceContext["resolvedProject"]>,
+  canonical: NonNullable<ReturnType<typeof canonicalWorkspaceModel>>
+) => ({
+  projectId: project.id,
+  ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
+  repoPath: project.path,
+  repoName: project.name,
+  ...canonical,
+  mode: context.mode,
+  reasoning: context.reasoning ?? null
+})
+
+const submitFromRemote = (
+  context: NewWorkspaceContext,
+  common: ReturnType<typeof commonFields>,
+  initialPrompt: { initialPrompt?: string },
+  onProgress: (phase: SessionCreationPhase) => void
+): Promise<void> => {
+  if (context.source === "pr") {
+    const createFromPr = context.getDeps().onCreateFromPr
+    if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
+    return createFromPr({ ...common, ...initialPrompt, pr: context.selectedPr }, context.attachments, onProgress)
+  }
+  const createFromIssue = context.getDeps().onCreateFromIssue
+  if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
+  return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
+}
+
 const submitWorkspace = (
   context: NewWorkspaceContext,
   onProgress: (phase: SessionCreationPhase) => void
@@ -141,36 +183,13 @@ const submitWorkspace = (
             if (canonical === null) {
               return Promise.reject(new Error("Select a certified provider model."))
             }
-            if (isAutoProject(context)) {
-              const initialPrompt = context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}
-              return context.getDeps().onCreate({
-                ...canonical,
-                ...initialPrompt,
-                mode: context.mode,
-                reasoning: context.reasoning ?? null
-              }, context.attachments, onProgress)
-            }
+            if (isAutoProject(context)) return submitAuto(context, canonical, onProgress)
             const project = context.resolvedProject
             if (project === null) return Promise.reject(new Error("Select a project."))
-            const common = {
-              projectId: project.id,
-              ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
-              repoPath: project.path,
-              repoName: project.name,
-              ...canonical,
-              mode: context.mode,
-              reasoning: context.reasoning ?? null
-            }
+            const common = commonFields(context, project, canonical)
             const initialPrompt = context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}
-            if (context.source === "pr") {
-              const createFromPr = context.getDeps().onCreateFromPr
-              if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
-              return createFromPr({ ...common, ...initialPrompt, pr: context.selectedPr }, context.attachments, onProgress)
-            }
-            if (context.source === "github" || context.source.startsWith("provider:")) {
-              const createFromIssue = context.getDeps().onCreateFromIssue
-              if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
-              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
+            if (context.source !== "blank" && context.source !== "branch") {
+              return submitFromRemote(context, common, initialPrompt, onProgress)
             }
             return context.getDeps().onCreate({
               ...common,
