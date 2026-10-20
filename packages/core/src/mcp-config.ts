@@ -189,6 +189,10 @@ export const applyImportResolutions = (
   return out
 }
 
+/** Where a candidate was found: a config file, Claude's settings.json or managed-mcp.json, a claude.ai connector, or a Claude plugin. */
+export const McpImportOrigin = Schema.Literal("user", "user-settings", "managed", "claude.ai", "plugin")
+export type McpImportOrigin = Schema.Schema.Type<typeof McpImportOrigin>
+
 /**
  * Renderer-safe view of one import candidate: name + display target only.
  * Header/env VALUES from the source file never cross the RPC boundary; the
@@ -197,6 +201,7 @@ export const applyImportResolutions = (
 export const McpImportCandidateView = Schema.Struct({
   name: Schema.String,
   source: McpImportSourceId,
+  origin: McpImportOrigin,
   /** Display summary — the URL or argv. */
   target: Schema.String,
   /** Why this candidate cannot be imported; null when it can. */

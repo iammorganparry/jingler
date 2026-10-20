@@ -22,6 +22,7 @@ import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
  */
 import {
   EMPTY_REVIEW_DIFF,
+  agentWakes,
   AgentRunner,
   findInterruptedChats,
   AgentRuntime,
@@ -39,6 +40,7 @@ import {
   probeClaudeEndpoint,
   EnvironmentService,
   ExplanationStore,
+  saveExplanationToObsidian,
   RemoteSessionService,
   routeSessionOperation,
   GitHubApi,
@@ -78,6 +80,7 @@ import {
   runPublishMachineExclusive,
   UsageService,
   UsageFactStore,
+  withApiSpend,
   fetchPiProviderUsage,
   routePeerAgentMessage,
   adoptableChatIdentities,
@@ -99,7 +102,11 @@ import {
   McpConfigService,
   probeAll,
   mcpLogTail,
+  discoverClaudeConnectors,
   parseClaudeMcp,
+  managedMcpPaths,
+  dedupeCandidates,
+  readClaudeFileServers,
   parseCodexMcp,
   parseOpencodeMcp,
   type McpImportCandidate,
@@ -136,6 +143,8 @@ import {
   PluginError,
   SessionNotFoundError,
   workspaceModeOf,
+  reduceCheckouts,
+  sessionForCheckout,
   createWorkspaceProvisioningPlan,
   defaultModeFor,
   WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema,
@@ -421,7 +430,7 @@ const mcpImportSources: Record<
 };
 
 /** Parse one source file into full (secret-bearing) candidates. Main-only. */
-const mcpImportParse = (source: "claude" | "codex" | "opencode") =>
+const mcpImportFile = (source: "claude" | "codex" | "opencode") =>
   Effect.tryPromise({
     try: () => readFile(mcpImportSources[source].path(), "utf8"),
     catch: () =>
@@ -434,6 +443,58 @@ const mcpImportParse = (source: "claude" | "codex" | "opencode") =>
       }),
     ),
   );
+
+/**
+ * Servers Claude Code also loads from `~/.claude/settings.json` and enterprise
+ * `managed-mcp.json`. Missing or unreadable files are skipped silently. E2E
+ * homes get a home-rooted managed file so a real machine's never leaks in.
+ */
+const mcpClaudeExtraFiles = (): ReadonlyArray<{ path: string; origin: "user-settings" | "managed" }> => [
+  { path: resolve(mcpImportHome(), ".claude", "settings.json"), origin: "user-settings" },
+  ...(process.env.JINGLER_E2E === "1"
+    ? [resolve(mcpImportHome(), "managed-mcp.json")]
+    : managedMcpPaths(process.platform)
+  ).map((path) => ({ path, origin: "managed" as const })),
+];
+
+const mcpClaudeExtras = Effect.promise(() => readClaudeFileServers(mcpClaudeExtraFiles()));
+
+/**
+ * Last `claude mcp list` discovery. The listing health-checks every server
+ * (30-60s), so Apply reuses what the operator just saw instead of re-running it.
+ */
+let lastClaudeConnectors: ReadonlyArray<McpImportCandidate> = [];
+
+const mcpImportParse = (
+  source: "claude" | "codex" | "opencode",
+  connectors: boolean,
+  reuseConnectors = false,
+) =>
+  Effect.gen(function* () {
+    const fromFile =
+      source === "claude"
+        ? yield* Effect.gen(function* () {
+            const main = yield* Effect.either(mcpImportFile("claude"));
+            const extras = yield* mcpClaudeExtras;
+            // A missing ~/.claude.json is fine once another Claude file or connectors supply servers.
+            if (main._tag === "Left" && extras.length === 0 && !connectors) {
+              return yield* Effect.fail(main.left);
+            }
+            return dedupeCandidates(main._tag === "Right" ? main.right : [], extras);
+          })
+        : yield* mcpImportFile(source);
+    if (source !== "claude" || !connectors) return fromFile;
+    if (!reuseConnectors) {
+      const taken = new Set([
+        ...(yield* mcpList()).servers.map((server) => server.name),
+        ...fromFile.map((candidate) => candidate.name),
+      ]);
+      lastClaudeConnectors = yield* Effect.promise(() =>
+        discoverClaudeConnectors({ cwd: mcpImportHome(), taken }),
+      );
+    }
+    return [...fromFile, ...lastClaudeConnectors];
+  });
 
 const mcpCandidateTarget = (candidate: McpImportCandidate): string =>
   candidate.entry === null
@@ -504,10 +565,11 @@ const mcpApplyImport = (
   source: "claude" | "codex" | "opencode",
   names: ReadonlyArray<string>,
   resolutions: Readonly<Record<string, McpImportResolution>>,
+  connectors: boolean,
 ) =>
   Effect.gen(function* () {
     const requested = new Set(names);
-    const candidates = yield* mcpImportParse(source);
+    const candidates = yield* mcpImportParse(source, connectors, true);
     const existing = new Set(
       (yield* mcpList()).servers.map((server) => server.name),
     );
@@ -551,11 +613,9 @@ const mcpReveal = () =>
  * a broken worktree for a clean one.
  * Exported for tests.
  */
-export const sessionDiff = (id: string) =>
+export const sessionDiff = (id: string, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* SessionStore.get(id).pipe(
-      Effect.orElseSucceed(() => null),
-    );
+    const session = yield* resolveCheckoutSession(id, checkoutId);
     if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
     return yield* WorkspaceService.diff(session.worktreePath);
   });
@@ -581,6 +641,14 @@ export const sessionFileDiff = (id: string, path: string) =>
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
 const resolveSession = (sessionId: string) =>
   SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null));
+
+/** The session seen through one checkout (the active one when `checkoutId` is absent). */
+const resolveCheckoutSession = (sessionId: string, checkoutId?: string) =>
+  resolveSession(sessionId).pipe(
+    Effect.map((session) =>
+      session && checkoutId !== undefined ? sessionForCheckout(session, checkoutId) : session,
+    ),
+  );
 
 type SessionWithPr = Session & { readonly prNumber: number };
 
@@ -636,6 +704,37 @@ export const explanationWatch = (sessionId: string) =>
       const store = yield* ExplanationStore;
       return store.watch(session.worktreePath, session.id);
     }),
+  );
+
+/** `Explanation.saveToObsidian` handler: one stable note per explanation, in the session's vault. */
+export const explanationSaveToObsidian = (sessionId: string) =>
+  Effect.gen(function* () {
+    const config = yield* ConfigService.get();
+    const settings = config?.obsidianExplanations;
+    if (!settings?.enabled) return null;
+    const vault = yield* pluginStorageGet("obsidian", `vault:${sessionId}`);
+    if (typeof vault !== "string" || vault.length === 0) return null;
+    const session = yield* SessionStore.get(sessionId);
+    if (!session.worktreePath) return null;
+    const document = yield* ExplanationStore.read(session.worktreePath, session.id);
+    if (document === null) return null;
+    return yield* saveExplanationToObsidian({
+      config: settings,
+      vaultRoot: vault,
+      document,
+      sessionTitle: session.title,
+      project: session.repo,
+      branch: session.branch,
+    });
+  }).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof ConfigError
+        ? cause
+        : new ConfigError({
+            message: cause instanceof Error ? cause.message : "Could not save the explanation to Obsidian.",
+            cause,
+          }),
+    ),
   );
 
 /** Resolve a session only when it has an active pull request. */
@@ -1604,9 +1703,9 @@ const ownsPr = (
   number: number,
 ): boolean => number === session.prNumber || (session.prs ?? []).some((pr) => pr.number === number);
 
-export const githubPr = (sessionId: string, number?: number) =>
+export const githubPr = (sessionId: string, number?: number, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
+    const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath || session.prNumber === null) return null;
     if (number !== undefined && !ownsPr(session, number)) return null;
     return yield* GitHubApi.prView(session.worktreePath, number ?? session.prNumber);
@@ -1618,9 +1717,9 @@ export const githubPr = (sessionId: string, number?: number) =>
  * session's PR stack. Drives the PR sweep. Exported
  * for tests.
  */
-export const githubPrState = (sessionId: string, number?: number) =>
+export const githubPrState = (sessionId: string, number?: number, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
+    const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath || session.prNumber === null) return null;
     if (number !== undefined && !ownsPr(session, number)) return null;
     return yield* GitHubApi.prState(session.worktreePath, number ?? session.prNumber);
@@ -1922,9 +2021,9 @@ const layerPrNumber = (session: Session, requested: number | undefined): number 
 };
 
 /** `Github.files` handler — a PR layer's changed files (empty without a linked PR). */
-export const githubFiles = (sessionId: string, prNumber?: number) =>
+export const githubFiles = (sessionId: string, prNumber?: number, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
+    const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath) return [];
     const number = layerPrNumber(session, prNumber);
     if (number === null) return [];
@@ -1932,9 +2031,9 @@ export const githubFiles = (sessionId: string, prNumber?: number) =>
   });
 
 /** `Github.diff` handler — a PR layer's unified diff (empty without a linked PR). */
-export const githubDiff = (sessionId: string, prNumber?: number) =>
+export const githubDiff = (sessionId: string, prNumber?: number, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
+    const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath) return "";
     const number = layerPrNumber(session, prNumber);
     if (number === null) return "";
@@ -5051,6 +5150,19 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         Effect.fail(new GitError({ message: "Session not found", cause })),
       ),
     ),
+  "Sessions.switchCheckout": ({ sessionId, checkoutId }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId);
+      yield* SessionStore.setCheckouts(
+        sessionId,
+        reduceCheckouts(session, { type: "switch", checkoutId }),
+      );
+      return yield* SessionStore.get(sessionId);
+    }).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause })),
+      ),
+    ),
   "Sessions.selectChat": ({ sessionId, chatId }) =>
     SessionStore.selectChat(sessionId, chatId).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
@@ -5190,7 +5302,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }
       return null;
     }).pipe(Effect.orElseSucceed(() => null)),
-  "Sessions.diff": ({ id }) =>
+  "Sessions.diff": ({ id, checkoutId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(id);
       const remote = yield* RemoteSessionService;
@@ -5198,7 +5310,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Sessions.diff",
         {},
-        { execute: () => sessionDiff(id) },
+        { execute: () => sessionDiff(id, checkoutId) },
         {
           execute: () =>
             remote
@@ -5474,6 +5586,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const runner = yield* AgentRunner;
       return yield* runner.chatBusy(chatId);
     }),
+  "Agent.wakeups": () =>
+    interruptOnPageGone(
+      Stream.async<{ sessionId: string; chatId: string }>((emit) => {
+        const unsubscribe = agentWakes.subscribe((wake) => {
+          void emit.single(wake);
+        });
+        return Effect.sync(unsubscribe);
+      }),
+    ),
   "Agent.plannotatorRecoveryNeeded": ({ sessionId, chatId }) =>
     Effect.gen(function* () {
       const runner = yield* AgentRunner;
@@ -5677,12 +5798,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Mcp.setApiKey": ({ name, apiKey }) => mcpSetApiKey(name, apiKey),
   "Mcp.startAuthorization": ({ name }) => mcpStartAuthorization(name),
-  "Mcp.importCandidates": ({ source }) =>
-    mcpImportParse(source).pipe(
+  "Mcp.importCandidates": ({ source, connectors }) =>
+    mcpImportParse(source, connectors === true).pipe(
       Effect.map((candidates) =>
         candidates.map((candidate) => ({
           name: candidate.name,
           source: candidate.source,
+          origin: candidate.origin ?? "user",
           target: mcpCandidateTarget(candidate),
           problem: candidate.problem,
           needsSignIn:
@@ -5692,7 +5814,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         })),
       ),
     ),
-  "Mcp.applyImport": ({ source, names, resolutions }) => mcpApplyImport(source, names, resolutions ?? {}),
+  "Mcp.applyImport": ({ source, names, resolutions, connectors }) =>
+    mcpApplyImport(source, names, resolutions ?? {}, connectors === true),
   "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
 
   "Window.minimize": () => Effect.sync(() => appWindow()?.minimize()),
@@ -5734,6 +5857,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                   ),
             ),
           ),
+        ),
+      ),
+      Effect.flatMap((usage) =>
+        AppPaths.pipe(
+          Effect.flatMap((paths) =>
+            Effect.tryPromise(() => new UsageFactStore(join(paths.runJournalsDir, "usage-facts.json")).list()),
+          ),
+          Effect.map((facts) => withApiSpend(usage, facts)),
+          Effect.catchAll(() => Effect.succeed(usage)),
         ),
       ),
       Effect.catchAll(() => Effect.succeed({ providers: [], fetchedAt: null })),
@@ -5787,6 +5919,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "GitHub.disconnect": () => githubConnectionDisconnect(),
   "Config.setGithub": (github) => ConfigService.setGithub(github),
   "Config.setGit": (git) => ConfigService.setGit(git),
+  "Config.setObsidianExplanations": (config) =>
+    ConfigService.setObsidianExplanations(config),
   "Config.setNotifications": (notifications) =>
     ConfigService.setNotifications(notifications),
   "Config.setDefaultMode": ({ defaultMode }) =>
@@ -5901,8 +6035,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.issueBySlug": ({ repository, number }) => githubIssueBySlug(repository, number),
   "Github.issueCommentBySlug": (input) => githubIssueCommentBySlug(input),
   "Github.issueCloseBySlug": ({ repository, number }) => GitHubApi.issueCloseBySlug(repository, number),
-  "Github.pr": ({ sessionId, number }) => githubPr(sessionId, number),
-  "Github.prState": ({ sessionId, number }) => githubPrState(sessionId, number),
+  "Github.pr": ({ sessionId, number, checkoutId }) => githubPr(sessionId, number, checkoutId),
+  "Github.prState": ({ sessionId, number, checkoutId }) => githubPrState(sessionId, number, checkoutId),
   "Github.listPrs": ({ repoPath, githubSlug, mine, search }) =>
     githubSlug
       ? GitHubApi.listPrsBySlug(githubSlug, { mine, search })
@@ -5913,8 +6047,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       : GitHubApi.listIssues(repoPath, { mine, search }),
   "Github.closeIssue": ({ sessionId }) => githubCloseIssue(sessionId),
   "Github.issue": ({ sessionId }) => githubIssue(sessionId),
-  "Github.files": ({ sessionId, prNumber }) => githubFiles(sessionId, prNumber),
-  "Github.diff": ({ sessionId, prNumber }) => githubDiff(sessionId, prNumber),
+  "Github.files": ({ sessionId, prNumber, checkoutId }) => githubFiles(sessionId, prNumber, checkoutId),
+  "Github.diff": ({ sessionId, prNumber, checkoutId }) => githubDiff(sessionId, prNumber, checkoutId),
   "Github.detectPr": ({ sessionId }) => githubDetectPr(sessionId),
   "Explanation.current": ({ sessionId }) =>
     SessionStore.get(sessionId).pipe(
@@ -5925,6 +6059,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       ),
       Effect.orElseSucceed(() => null),
     ),
+  "Explanation.saveToObsidian": ({ sessionId }) =>
+    explanationSaveToObsidian(sessionId),
   "Explanation.watch": ({ sessionId }) =>
     interruptOnPageGone(explanationWatch(sessionId)),
   "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),

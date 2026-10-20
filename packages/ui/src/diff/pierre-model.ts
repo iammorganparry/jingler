@@ -263,7 +263,12 @@ export const createPierreFileDiff = (change: JinglerFileChange): FileDiffMetadat
     return emptyDiff({ change, normalized, cacheKey })
   }
 
-  const parsed = parseDiffFromFile(oldFile, newFile, undefined, true)
+  let parsed: ReturnType<typeof parseDiffFromFile>
+  try {
+    parsed = parseDiffFromFile(oldFile, newFile, undefined, true)
+  } catch {
+    parsed = parseDiffFromFile(oldFile, newFile, undefined, false)
+  }
   return {
     ...parsed,
     name: normalized.path,
@@ -276,9 +281,22 @@ export const createPierreFileDiff = (change: JinglerFileChange): FileDiffMetadat
   }
 }
 
+/**
+ * Strict first, so well-formed patches keep exact validation; a malformed hunk
+ * (from a harness, GitHub or a hand-edited patch) must degrade to whatever Pierre
+ * can recover, never throw out of a React render and take the whole app down.
+ */
+const parseLeniently = (patch: string, cachePrefix: string) => {
+  try {
+    return parsePatchFiles(patch, cachePrefix, true)
+  } catch {
+    return parsePatchFiles(patch, `${cachePrefix}:lenient`, false)
+  }
+}
+
 const patchFiles = (patch: string): FileDiffMetadata[] => {
   const cachePrefix = pierreCacheKey("patch", patch)
-  return parsePatchFiles(patch, cachePrefix, true).flatMap((parsed) =>
+  return parseLeniently(patch, cachePrefix).flatMap((parsed) =>
     parsed.files.map((file) =>
       // The same size gate as `createPierreFileDiff`, in the units a parsed
       // patch actually carries. Without it one lockfile hunk set tokenizes

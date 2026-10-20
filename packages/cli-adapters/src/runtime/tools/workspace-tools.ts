@@ -2,7 +2,7 @@ import { Command, CommandExecutor } from "@effect/platform"
 import type { AssetFileEntry } from "@jingler/core"
 import { Data, Effect, Schema, Stream } from "effect"
 import { AssetService } from "../../asset.js"
-import { ToolError, type ToolDefinition, type ToolExecutionContext, type ToolRegistry } from "./tool-registry.js"
+import { ToolError, cwdOf, type ToolDefinition, type ToolExecutionContext, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
 
 const roles = [
   "conversation",
@@ -185,7 +185,7 @@ const inspectionTool = <Input, Encoded>(
 
 export const registerWorkspaceInspectionTools = (
   registry: ToolRegistry,
-  cwd: string,
+  cwd: WorkspaceCwd,
   workspace: WorkspaceInspectionPort
 ): void => {
   registry.register(
@@ -195,7 +195,7 @@ export const registerWorkspaceInspectionTools = (
         "List tracked and untracked non-ignored files in the current workspace.",
       input: EmptyInput,
       providerInputSchema: EMPTY_PROVIDER_INPUT,
-      execute: () => Effect.runPromise(workspace.listFiles(cwd))
+      execute: (_input, context) => Effect.runPromise(workspace.listFiles(context.cwd ?? cwdOf(cwd)))
     })
   )
   registry.register(
@@ -204,8 +204,8 @@ export const registerWorkspaceInspectionTools = (
       description:
         "Read one bounded text file inside the current workspace. Paths outside the workspace and escaping symlinks are rejected.",
       input: Schema.Struct({ path: Schema.String.pipe(Schema.minLength(1)) }),
-      execute: ({ path }) =>
-        Effect.runPromise(workspace.readTextFile(cwd, path))
+      execute: ({ path }, context) =>
+        Effect.runPromise(workspace.readTextFile(context.cwd ?? cwdOf(cwd), path))
     })
   )
   registry.register(
@@ -218,7 +218,7 @@ export const registerWorkspaceInspectionTools = (
         args: Schema.Array(Schema.String).pipe(Schema.minItems(1))
       }),
       execute: ({ program, args }, context) =>
-        Effect.runPromise(workspace.executeReadOnly(cwd, program, args, context), {
+        Effect.runPromise(workspace.executeReadOnly(context.cwd ?? cwdOf(cwd), program, args, context), {
           signal: context.signal
         })
     })

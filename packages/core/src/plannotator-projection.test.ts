@@ -104,6 +104,44 @@ describe("Plannotator native projection", () => {
     expect(project(null).status).toBe("draft")
   })
 
+  it("decodes architecture fences into figures and falls back to code when invalid", () => {
+    const valid = JSON.stringify({
+      layers: [{ id: "app", label: "App" }],
+      components: [{ id: "api", label: "orders-api", layer: "app", shape: "service" }],
+      links: [],
+      lit: "api"
+    })
+    const dangling = JSON.stringify({
+      layers: [{ id: "app", label: "App" }],
+      components: [{ id: "api", label: "orders-api", layer: "app", shape: "service" }],
+      links: [{ from: "api", to: "db" }]
+    })
+    const document = plannotatorProjectionToPlanDocument(
+      {
+        phase: "planning",
+        planFilePath: "plans/arch.md",
+        review: null,
+        checklist: [],
+        sections: [{
+          title: null,
+          blocks: [
+            { kind: "architecture", source: valid },
+            { kind: "architecture", source: dangling },
+            { kind: "architecture", source: "{not json" }
+          ]
+        }]
+      },
+      "session-1",
+      "chat-1",
+      "2026-10-11T12:00:00.000Z"
+    )
+    const blocks = document.plan.sections[0]!.blocks
+    expect(blocks.map(({ kind }) => kind)).toEqual(["architecture", "code", "code"])
+    expect(blocks[0]).toMatchObject({ kind: "architecture", id: "plannotator-section-1-block-1", lit: "api" })
+    expect(blocks[2]).toMatchObject({ kind: "code", language: "architecture", code: "{not json" })
+    expect(() => Schema.decodeUnknownSync(PlanDocument)(document)).not.toThrow()
+  })
+
   it("keeps previous source on resubmission", () => {
     const base = {
       phase: "planning",

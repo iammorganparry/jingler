@@ -72,7 +72,9 @@ import type {
 import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { healedWorktreePath } from "./runtime/persistence/worktree-path.js"
-import { branchAt, ensureWorktreeLinked } from "./git.js"
+import { branchAt, defaultBranchOf, ensureWorktreeLinked, GitService } from "./git.js"
+import { ProjectService } from "./projects.js"
+import { makeCheckoutHost, type CheckoutHostDeps } from "./checkout-host.js"
 import { BrowserControlMcpService,
   type BrowserControlMcpAttachment
 } from "./browser-control-mcp-service.js"
@@ -85,6 +87,7 @@ import { UsageFactStore } from "./usage-facts.js"
 import { ExplanationStore } from "./explanation-store.js"
 import {
   appendSteeredReply,
+  type BoundedSteerResult,
   invokeSteer,
   makeSteeredReplyWaiter,
   type SteeredReplyWaiter
@@ -172,6 +175,12 @@ interface RunFiber {
    * fiber liveness, or a backgrounded task locks its chat for its whole lifetime.
    */
   readonly settled: Ref.Ref<boolean>
+  /**
+   * Settle the turn as stopped and fence off the run's later output. For a run
+   * that outlived `stop`'s grace (stuck unwinding inside a tool): without it the
+   * chat refuses every prompt as "already running" until the zombie dies.
+   */
+  readonly abandon: Effect.Effect<void>
 }
 
 /**
@@ -305,6 +314,69 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     const counter = yield* Ref.make(0)
     const nextId = Ref.updateAndGet(counter, (n) => n + 1)
 
+    /** Park on an operator gate before an unregistered repo is attached; true when approved. */
+    const requestRepoApproval = (
+      sessionId: string,
+      chatId: string,
+      repoPath: string,
+      emit: (event: StreamEvent) => Effect.Effect<void>
+    ) =>
+      Effect.gen(function* () {
+        const gateId = `g_${sessionId}_${yield* nextId}`
+        const gate = {
+          id: gateId,
+          kind: "command" as const,
+          title: "Attach an unregistered repository?",
+          detail: `The agent asked to work in ${repoPath}, which is not a registered project. Approving registers it as a project and attaches an isolated worktree.`,
+          command: `switch_checkout ${repoPath}`,
+          allowLabel: null,
+          status: "pending" as const
+        }
+        const decision = yield* approvals.awaitGate(
+          sessionId, chatId, gateId, gate, emit({ _tag: "GateRequested", gate })
+        )
+        return decision === "allow"
+      })
+
+    /**
+     * Multi-repo state for this turn. Optional services: a harness without a
+     * project registry or git (scripted tests) simply gets no `switch_checkout`.
+     * A healed worktree path wins over the stale stored one for legacy sessions.
+     */
+    const turnCheckoutHost = (
+      sessionId: string,
+      chatId: string,
+      session: CheckoutHostDeps["session"],
+      emit: (event: StreamEvent) => Effect.Effect<void>
+    ) =>
+      Effect.gen(function* () {
+        const env = yield* Effect.context<
+          SessionStore | CommandExecutor.CommandExecutor | FileSystem.FileSystem | Path.Path | AppPaths | SecretStore
+        >()
+        const projectService = yield* Effect.serviceOption(ProjectService)
+        const gitService = yield* Effect.serviceOption(GitService)
+        if (Option.isNone(projectService) || Option.isNone(gitService)) return {}
+        const runWithEnv = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
+        const checkouts = makeCheckoutHost({
+          session,
+          listProjects: () => runWithEnv(projectService.value.list().pipe(Effect.provide(env))),
+          registerProject: (repoPath) =>
+            runWithEnv(projectService.value.register({ path: repoPath }).pipe(Effect.provide(env))),
+          persist: (next) =>
+            runWithEnv(
+              SessionStore.setCheckouts(sessionId, next).pipe(
+                Effect.zipRight(SessionStore.get(sessionId)),
+                Effect.provide(env)
+              )
+            ),
+          createDetachedWorktree: (input) =>
+            runWithEnv(gitService.value.createDetachedWorktree(input).pipe(Effect.provide(env))),
+          defaultBranch: (repoPath) => runWithEnv(defaultBranchOf(repoPath).pipe(Effect.provide(env))),
+          approveRepo: (repoPath) => runWithEnv(requestRepoApproval(sessionId, chatId, repoPath, emit))
+        })
+        return { checkouts }
+      })
+
     const persistMode = (sessionId: string, chatId: string, mode: PermissionMode) =>
       SessionStore.setMode(sessionId, chatId, mode).pipe(Effect.ignore)
 
@@ -409,6 +481,20 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
      * entries, since the code that clears them sits after the `Deferred.await`
      * we'd have just killed.
      */
+    const interruptOrAbandon = (running: RunFiber, awaitTeardown: boolean) =>
+      Effect.gen(function* () {
+        const interrupt = Fiber.interrupt(running.fiber).pipe(Effect.asVoid)
+        if (awaitTeardown) return yield* interrupt
+        const landed = yield* interrupt.pipe(
+          Effect.timeout(INTERRUPT_GRACE),
+          Effect.as(true),
+          Effect.orElseSucceed(() => false)
+        )
+        // Still unwinding (stuck in a tool that ignores the abort): settle the
+        // turn ourselves so the chat accepts its next prompt.
+        if (!landed) yield* running.abandon
+      })
+
     const stop = (
       sessionId: string,
       requestedChatId?: string,
@@ -445,15 +531,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             if (running === undefined) return
             const current = (yield* Ref.get(fibers)).get(chatId)
             if (current?.token !== running.token) return
-            const interrupt = Fiber.interrupt(running.fiber).pipe(Effect.asVoid)
-            yield* (
-              awaitTeardown
-                ? interrupt
-                : interrupt.pipe(
-                    Effect.timeout(INTERRUPT_GRACE),
-                    Effect.ignore
-                  )
-            )
+            yield* interruptOrAbandon(running, awaitTeardown)
           })
         )
         // Kill any digest being prepared for this session too. It runs on a
@@ -680,6 +758,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * behaviour and cannot fail a run (`Effect.ignore` at the call site).
            */
           const sawTerminal = yield* Ref.make(false)
+          /** Set by `abandon`: the run outlived its stop, so nothing it emits may land. */
+          const detached = yield* Ref.make(false)
           const completionDeclared = yield* Ref.make(false)
           /** Unsettled background tasks belonging to this chat, right now. */
           const liveTasks = BackgroundTaskStore.liveFor(sessionId, chatId).pipe(
@@ -707,6 +787,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const transcriptDirty = yield* Ref.make(false)
           const flushScheduled = yield* Ref.make(false)
           const flushTranscript: Effect.Effect<void> = Effect.gen(function* () {
+            // A pending flush from a detached run would patch the NEXT turn's message.
+            if (yield* Ref.get(detached)) return
             yield* Ref.set(transcriptDirty, false)
             const current = yield* Ref.get(acc)
             yield* TranscriptStore.patchLast(chatId, () => current).pipe(Effect.ignore)
@@ -816,7 +898,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   //
                   // `Done` is the only point at which the transcript is coherent.
                   yield* observeTurnContext(chatId, event)
-                })).pipe(Effect.provide(env), Effect.asVoid)
+                }).pipe(Effect.unlessEffect(Ref.get(detached)))).pipe(Effect.provide(env), Effect.asVoid)
 
           const canUseTool = (req: PermissionRequest): Effect.Effect<PermissionDecision> =>
             Effect.gen(function* () {
@@ -896,21 +978,28 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     transcriptDirty,
                     nextId,
                     chatId,
-                    providerId: chat.providerId
+                    providerId: chat.providerId,
+                    detached
                   }, text, images,
                   captureReply
                 )).pipe(Effect.provide(env))
 
-          yield* Ref.update(active, (m) =>
-            new Map(m).set(chatId, {
-              steer,
-              clearReplyWaiter: (waiter) =>
-                Ref.update(steeredReply, (current) =>
-                  current === waiter ? null : current
-                ),
-              replyGate
-            })
-          )
+          const activeRun: ActiveRun = {
+            steer,
+            clearReplyWaiter: (waiter) =>
+              Ref.update(steeredReply, (current) =>
+                current === waiter ? null : current
+              ),
+            replyGate
+          }
+          yield* Ref.update(active, (m) => new Map(m).set(chatId, activeRun))
+          // Only ever drop OUR entry: an abandoned run unwinds after its successor registered.
+          const deactivate = Ref.update(active, (m) => {
+            if (m.get(chatId) !== activeRun) return m
+            const nextMap = new Map(m)
+            nextMap.delete(chatId)
+            return nextMap
+          })
 
           /** Identifies THIS run, so its cleanup can't evict a successor's fiber. */
           const token: RunToken = {}
@@ -998,7 +1087,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 console.error("Failed to persist execution usage", cause)
               }))
             )
+          const checkoutOption = yield* turnCheckoutHost(sessionId, chatId, { ...session, worktreePath }, emit)
           const adapterRun = adapter.run(chatId, spec, {
+            ...checkoutOption,
             emit,
             recordUsage,
             canUseTool,
@@ -1068,13 +1159,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 Effect.andThen(emit({ _tag: "Failed", message: describeRunFailure(cause) }))
               )
             }),
-            Effect.ensuring(
-              Ref.update(active, (m) => {
-                const nextMap = new Map(m)
-                nextMap.delete(chatId)
-                return nextMap
-              })
-            ),
+            Effect.ensuring(deactivate),
             Effect.ensuring(
               // Deregister THIS run only. A session's slot can already belong to a
               // NEWER run by the time this one finishes: "send now" interrupts the
@@ -1155,7 +1240,38 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             )
           )
           yield* Ref.update(fibers, (m) =>
-            new Map(m).set(chatId, { sessionId, chatId, fiber, token, settled: sawTerminal })
+            new Map(m).set(chatId, {
+              sessionId,
+              chatId,
+              fiber,
+              token,
+              settled: sawTerminal,
+              abandon: Effect.gen(function* () {
+                const stopped: StreamEvent = { _tag: "Failed", message: STOPPED_NOTE }
+                // Capped: a run wedged inside `emit` or a steer holds `turnMutation`,
+                // and `stop` calls this under the chat lock.
+                const emitted = yield* emit(stopped).pipe(
+                  Effect.timeout(INTERRUPT_GRACE),
+                  Effect.as(true),
+                  Effect.orElseSucceed(() => false)
+                )
+                yield* Ref.set(detached, true)
+                // ponytail: bypasses the permit, so a wedged emit that later lands mid-write
+                // could still race this patch; per-message versioning if that ever shows up.
+                if (!emitted && (yield* claimTurnTerminal(stopped, sawTerminal, turnSettled))) {
+                  const id = (yield* Ref.get(acc)).id
+                  yield* TranscriptStore.patchById(chatId, id, (m) => applyStreamEvent(m, stopped)).pipe(
+                    Effect.provide(env),
+                    Effect.ignore
+                  )
+                  yield* out.offer(stopped)
+                }
+                yield* deactivate
+                // The workspace lease stays held: the harness may still be touching the
+                // worktree, and it is released by the run's own `ensuring` when it exits.
+                yield* out.end
+              })
+            })
           )
 
           /**
@@ -1187,7 +1303,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           yield* Effect.addFinalizer(() =>
             Effect.gen(function* () {
               const decision = yield* fate(false)
-              if (decision.verdict === "end") yield* Fiber.interrupt(fiber)
+              // An abandoned run already got its interrupt; awaiting it again would
+              // hang this consumer on the very teardown `stop` gave up on.
+              if (decision.verdict === "end" && !(yield* Ref.get(detached))) yield* Fiber.interrupt(fiber)
               yield* out.end
             })
           )
@@ -1798,7 +1916,16 @@ interface ActiveTurnSteering {
   readonly nextId: Effect.Effect<number>
   readonly chatId: string
   readonly providerId: Session["chats"][number]["providerId"]
+  /** An abandoned run's steer must not touch the transcript its successor now owns. */
+  readonly detached: Ref.Ref<boolean>
 }
+
+/** Abandoned while the native call was out: `unsupported` replays it as a fresh turn. */
+const steerOutcome = (steered: BoundedSteerResult, detached: Ref.Ref<boolean>) =>
+  Effect.map(Ref.get(detached), (gone) =>
+    gone ? "unsupported" as const
+      : steered === "accepted" || steered === "unsupported" ? steered : "deferred" as const
+  )
 
 const steerActiveTurn = (
   state: ActiveTurnSteering,
@@ -1806,8 +1933,9 @@ const steerActiveTurn = (
   images: ReadonlyArray<Attachment>,
   captureReply: boolean
 ) => {
-  const { turnSteer, steeredReply, acc, transcriptDirty, nextId, chatId, providerId } = state
+  const { turnSteer, steeredReply, acc, transcriptDirty, nextId, chatId, providerId, detached } = state
   return Effect.gen(function* () {
+    if (yield* Ref.get(detached)) return { status: "unsupported" } as const
     const handler = yield* Ref.get(turnSteer)
     if (handler === null) {
       // No handle is a PHASE, not a verdict: the driver registers it a
@@ -1827,7 +1955,7 @@ const steerActiveTurn = (
     // can NEVER land on this run's channel (pi steering is text-only),
     // and only that status licenses "Send now" to stop and replay.
     // Timeouts and failures stay `deferred` — they may clear.
-    const outcome = steered === "accepted" || steered === "unsupported" ? steered : "deferred"
+    const outcome = yield* steerOutcome(steered, detached)
     if (outcome !== "accepted") {
       if (replyWaiter !== null) yield* Ref.set(steeredReply, null)
       return { status: outcome } as const

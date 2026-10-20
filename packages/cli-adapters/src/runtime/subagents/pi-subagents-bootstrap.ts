@@ -26,13 +26,17 @@ export type PiSubagentProfileTools = Partial<
   Record<JinglerSubagentName, ReadonlyArray<string>>
 >
 
+// command_inspect is a read-only subset of command_execute; offering both lets
+// write-capable children pick the restricted one and fail.
 const profileTools = (
   brokered: ReadonlyArray<string> = [],
   fanout = false
 ): string => [...new Set([
   ...(fanout ? ["subagent"] : []),
   "contact_supervisor",
-  ...brokered
+  ...(brokered.includes("command_execute")
+    ? brokered.filter((tool) => tool !== "command_inspect")
+    : brokered)
 ])].join(", ")
 
 const PiSubagentConfig = Schema.Struct({
@@ -46,6 +50,8 @@ const PiSubagentConfig = Schema.Struct({
   maxSubagentSpawnsPerRun: Schema.Number,
   maxSubagentSpawnsPerSession: Schema.Number,
   missions: Schema.Struct({ enabled: Schema.Boolean }),
+  modelExclusions: Schema.Struct({ defaultTtlMs: Schema.Number }),
+  timeoutMs: Schema.Number,
   toolDescriptionMode: Schema.Literal("compact")
 })
 
@@ -60,11 +66,16 @@ const CONFIG = {
   asyncWidget: false,
   fleetView: false,
   inlineToolDisplay: "summary",
-  globalConcurrencyLimit: 4,
-  maxActiveAsyncRunsPerSession: 4,
+  globalConcurrencyLimit: 10,
+  maxActiveAsyncRunsPerSession: 10,
   maxSubagentSpawnsPerRun: 8,
-  maxSubagentSpawnsPerSession: 16,
+  maxSubagentSpawnsPerSession: 64,
   missions: { enabled: false },
+  // pi-subagents bans a model for 24h after one retryable failure, so a single
+  // "Connection error" blip made every later child skip it until tomorrow.
+  // A configured TTL also shortens bans already on disk.
+  modelExclusions: { defaultTtlMs: 5 * 60_000 },
+  timeoutMs: 3_600_000,
   toolDescriptionMode: "compact"
 } as const
 
@@ -106,6 +117,18 @@ const writeConfig = async (path: string): Promise<void> => {
   }
 }
 
+// `extensions` disables ambient extensions; `subagentOnlyExtensions` is the
+// child-only list pi-subagents documents for foreground children, so both carry it.
+const CHILD_EXTENSIONS = (childToolsPath: string, claudeProviderPath: string): string =>
+  `${childToolsPath}, ${claudeProviderPath}, ${PONYTAIL_EXTENSION_PATH}`
+
+/**
+ * Vendor `worker.md` ships `thinking: high`, and a worker makes 60-100 tool
+ * calls per task, each a full model call at that effort. Medium is plenty for
+ * scoped implementation work and keeps parallel workers inside plan limits.
+ */
+const THINKING_OVERRIDES: Readonly<Record<string, string>> = { worker: "medium" }
+
 const rewriteAgentProfile = (
   source: string,
   childToolsPath: string,
@@ -115,9 +138,11 @@ const rewriteAgentProfile = (
 ): string => source
   .replace(/^tools:.*$/m, `tools: ${tools}`)
   .replace(/^inheritProjectContext:.*$/m, "inheritProjectContext: false")
+  .replace(/^defaultContext:.*$/m, "defaultContext: fresh")
+  .replace(/^defaultContext:.*$/m, "defaultContext: fresh")
   .replace(
     /^---\n/u,
-    `---\nextensions: ${childToolsPath}, ${claudeProviderPath}, ${PONYTAIL_EXTENSION_PATH}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`
+    `---\nextensions: ${CHILD_EXTENSIONS(childToolsPath, claudeProviderPath)}\nsubagentOnlyExtensions: ${CHILD_EXTENSIONS(childToolsPath, claudeProviderPath)}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`
   )
 
 /**
@@ -134,15 +159,25 @@ export const materializePiSubagentProfiles = async (
 ): Promise<void> => {
   const target = join(agentDir, "agents")
   await mkdir(target, { recursive: true, mode: 0o700 })
+  // A host that knows no tools (native-sidecar recovery) keeps the tool list a
+  // full host already wrote; the profile files are shared by every session.
+  const keptTools = async (agent: string): Promise<string | undefined> =>
+    readFile(join(target, `${agent}.md`), "utf8")
+      .then((existing) => existing.match(/^tools: (.*)$/m)?.[1], () => undefined)
   await Promise.all(BUILTIN_AGENTS.map(async (agent) => {
-    const source = await readFile(join(PI_SUBAGENTS_AGENT_DIR, `${agent}.md`), "utf8")
+    const vendor = await readFile(join(PI_SUBAGENTS_AGENT_DIR, `${agent}.md`), "utf8")
+    const source = agent in THINKING_OVERRIDES
+      ? vendor.replace(/^thinking:.*$/m, `thinking: ${THINKING_OVERRIDES[agent]}`)
+      : vendor
     await writeFile(
       join(target, `${agent}.md`),
       rewriteAgentProfile(
         source,
         childToolsPath,
         claudeProviderPath,
-        profileTools(tools[agent]),
+        tools[agent] === undefined
+          ? (await keptTools(agent)) ?? profileTools()
+          : profileTools(tools[agent]),
         models[agent]
       ),
       { encoding: "utf8", mode: 0o600 }
@@ -165,7 +200,9 @@ export const materializePiSubagentProfiles = async (
       ),
     childToolsPath,
     claudeProviderPath,
-    profileTools(tools.fanout, true),
+    tools.fanout === undefined
+      ? (await keptTools("fanout")) ?? profileTools(undefined, true)
+      : profileTools(tools.fanout, true),
     models.fanout
   )
   await writeFile(join(target, "fanout.md"), fanout, {

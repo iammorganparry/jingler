@@ -36,7 +36,8 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
   publishExplanation: (explanation: Parameters<NonNullable<AgentContext["publishExplanation"]>>[0]) =>
     context.publishExplanation?.(explanation) ?? Effect.void,
   listPeerAgents: context.listPeerAgents,
-  messagePeerAgent: context.messagePeerAgent
+  messagePeerAgent: context.messagePeerAgent,
+  ...(context.checkouts === undefined ? {} : { checkouts: context.checkouts })
 })
 
 const piSpec = (runId: string, spec: AgentTurnSpec) => {
@@ -55,7 +56,10 @@ const usageFactFor = (
 ): UsageFact | null => {
   if (event._tag !== "Done" && event._tag !== "Failed") return null
   return makeUsageFact({
-    id: `${runId}:parent`,
+    // runId is the chat id, so one fact per chat. pi reports running totals, so
+    // the latest replaces the rest; the Claude CLI reports each run's own cost
+    // and tokens, so every turn needs its own fact or earlier spend is lost.
+    id: spec.runtimeId === "claude" ? `${runId}:parent:${startedAt}` : `${runId}:parent`,
     runId,
     sessionId: spec.sessionId,
     chatId: spec.chatId,
@@ -68,7 +72,12 @@ const usageFactFor = (
     totalTokens: event._tag === "Done" ? event.tokens : null,
     // OpenCode reports message cost. PI can be API or subscription-backed, so
     // its generic terminal event cannot prove whether a numeric zero is known.
-    costUsd: event._tag === "Done" && spec.runtimeId === "opencode"
+    // The Claude CLI reports `total_cost_usd`, and Anthropic traffic is priced per token,
+    // so a positive figure is a known spend; zero stays unknown (subscription turns).
+    costUsd: event._tag === "Done" && (
+      spec.runtimeId === "opencode" ||
+      (event.costUsd > 0 && (spec.runtimeId === "claude" || spec.providerId === "anthropic"))
+    )
       ? event.costUsd
       : null,
     outcome: event._tag === "Done" ? "success" : "error",

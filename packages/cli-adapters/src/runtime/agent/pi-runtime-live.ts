@@ -49,6 +49,7 @@ import { McpConfigService } from "../../mcp-config-service.js"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
+import { activeCheckoutCwd, toolCwd } from "../tools/checkout-tools.js"
 import { makeMcpToolClientFactory, mcpClientIdentityForModel } from "../tools/mcp-tools.js"
 import {
   enabledPluginAgentToolsets,
@@ -523,7 +524,7 @@ export const makePiAgentRuntimeLive = (
                   }
                 : {}),
               observer: createMutationObserver({
-                cwd: spec.cwd,
+                cwd: toolCwd(spec.cwd, context.checkouts),
                 runId: spec.runId,
                 sessionId: spec.sessionId,
                 chatId: spec.chatId,
@@ -538,7 +539,7 @@ export const makePiAgentRuntimeLive = (
               registerManagedFileTools(registry, managedResources, managedFiles)
             )),
             Effect.tap((registry) => Effect.sync(() =>
-              registerWorkspaceMutationTools(registry, spec.cwd, mutations, {
+              registerWorkspaceMutationTools(registry, toolCwd(spec.cwd, context.checkouts), mutations, {
                 sessionId: spec.sessionId,
                 workspaceEnvironment: spec.workspaceEnvironment,
                 offload
@@ -720,7 +721,8 @@ export const makePiAgentRuntimeLive = (
         spec,
         foregroundDelegate ?? handle.delegateSubagent!,
         handle.spawnSubagent,
-        handle.subagentAgentNames
+        handle.subagentAgentNames,
+        context.checkouts === undefined ? undefined : () => activeCheckoutCwd(context.checkouts!)
       ))
       return registry
     })

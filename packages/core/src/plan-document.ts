@@ -229,6 +229,62 @@ export const PlanChangeBlock = Schema.Struct({
   patch: Schema.String
 })
 
+export const ArchitectureShape = Schema.Literal(
+  "client", "gateway", "service", "worker", "queue", "store", "cache", "external"
+)
+export type ArchitectureShape = Schema.Schema.Type<typeof ArchitectureShape>
+export const ArchitectureLinkMode = Schema.Literal("sync", "async", "data")
+export type ArchitectureLinkMode = Schema.Schema.Type<typeof ArchitectureLinkMode>
+
+const architectureIssues = (block: {
+  readonly layers: ReadonlyArray<{ readonly id: string }>
+  readonly components: ReadonlyArray<{ readonly id: string; readonly layer: string }>
+  readonly links: ReadonlyArray<{ readonly from: string; readonly to: string }>
+  readonly lit?: string | undefined
+}): string | true => {
+  const layers = new Set(block.layers.map(({ id }) => id))
+  const components = new Set(block.components.map(({ id }) => id))
+  if (layers.size !== block.layers.length) return "duplicate layer id"
+  if (components.size !== block.components.length) return "duplicate component id"
+  const badLayer = block.components.find(({ layer }) => !layers.has(layer))
+  if (badLayer) return `component "${badLayer.id}" is on unknown layer "${badLayer.layer}"`
+  const badLink = block.links.find(({ from, to }) => !components.has(from) || !components.has(to))
+  if (badLink) return `link ${badLink.from} -> ${badLink.to} points at an unknown component`
+  const selfLink = block.links.find(({ from, to }) => from === to)
+  if (selfLink) return `link ${selfLink.from} -> ${selfLink.to} points at itself`
+  if (block.lit !== undefined && !components.has(block.lit)) return `lit "${block.lit}" is not a component`
+  return true
+}
+
+/** A system drawn as an isometric bench of real parts; the agent sends the model, never SVG. */
+export const PlanArchitectureBlock = Schema.Struct({
+  kind: Schema.Literal("architecture"),
+  id: Schema.String,
+  title: Schema.optional(Schema.String),
+  layers: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String })).pipe(
+    Schema.minItems(1), Schema.maxItems(6)
+  ),
+  components: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      label: Schema.String,
+      layer: Schema.String,
+      shape: ArchitectureShape,
+      detail: Schema.optional(Schema.String)
+    })
+  ).pipe(Schema.minItems(1), Schema.maxItems(24)),
+  links: Schema.Array(
+    Schema.Struct({
+      from: Schema.String,
+      to: Schema.String,
+      label: Schema.optional(Schema.String),
+      mode: Schema.optional(ArchitectureLinkMode)
+    })
+  ).pipe(Schema.maxItems(40)),
+  lit: Schema.optional(Schema.String)
+}).pipe(Schema.filter(architectureIssues))
+export type PlanArchitectureBlock = Schema.Schema.Type<typeof PlanArchitectureBlock>
+
 /**
  * A structured content block. This union IS the generative-UI contract: each
  * `kind` maps to a maintained React component in `packages/ui`. New widget kinds
@@ -241,7 +297,8 @@ export const PlanBlock = Schema.Union(
   PlanCodeBlock,
   PlanTableBlock,
   PlanDiagramBlock,
-  PlanChangeBlock
+  PlanChangeBlock,
+  PlanArchitectureBlock
 )
 export type PlanBlock = Schema.Schema.Type<typeof PlanBlock>
 
@@ -433,6 +490,8 @@ export const planBlockText = (block: PlanBlock): string => {
       return [block.headers, ...block.rows].map((row) => row.join(" │ ")).join("\n")
     case "diagram":
       return ""
+    case "architecture":
+      return block.components.map(({ label }) => label).join("\n")
   }
 }
 

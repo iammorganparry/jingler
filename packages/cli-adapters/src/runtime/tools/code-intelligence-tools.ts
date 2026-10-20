@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { codeReadModes, codeReadRoles, codeWriteModes, codeWriteRoles } from "./tool-registry.js"
-import type { ToolDefinition, ToolRegistry } from "./tool-registry.js"
+import { cwdOf, type ToolDefinition, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
 import {
   codeDefinitions,
   codeDiagnostics,
@@ -28,7 +28,7 @@ const readTool = <Input, Encoded>(definition: Pick<ToolDefinition<Input, Encoded
   idempotency: "safe"
 })
 
-export const registerCodeIntelligenceTools = (registry: ToolRegistry, cwd: string): void => {
+export const registerCodeIntelligenceTools = (registry: ToolRegistry, cwd: WorkspaceCwd): void => {
   registry.register(readTool({
     id: "code_intelligence",
     description: "Use semantic intelligence for TypeScript definitions, references, diagnostics, and TypeScript or Java hover types. Prefer this over text search when tracing symbols.",
@@ -38,10 +38,10 @@ export const registerCodeIntelligenceTools = (registry: ToolRegistry, cwd: strin
     ),
     execute: (input, context) => {
       switch (input.action) {
-        case "definitions": return codeDefinitions(cwd, input.file, input.symbol, input.line, input.column, context.signal)
-        case "references": return semanticReferences(cwd, input.file, input.symbol, input.line, input.column, context.signal)
-        case "hover": return languageHover(cwd, input.file, input.symbol, input.line, input.column, undefined, context.signal)
-        case "diagnostics": return codeDiagnostics(cwd, input.file, context.signal)
+        case "definitions": return codeDefinitions(cwdOf(cwd), input.file, input.symbol, input.line, input.column, context.signal)
+        case "references": return semanticReferences(cwdOf(cwd), input.file, input.symbol, input.line, input.column, context.signal)
+        case "hover": return languageHover(cwdOf(cwd), input.file, input.symbol, input.line, input.column, undefined, context.signal)
+        case "diagnostics": return codeDiagnostics(cwdOf(cwd), input.file, context.signal)
       }
     }
   }))
@@ -58,6 +58,6 @@ export const registerCodeIntelligenceTools = (registry: ToolRegistry, cwd: strin
     cancellable: false,
     idempotency: "keyed",
     execute: ({ file, symbol, line, column, newName }, context) =>
-      semanticRename(cwd, file, symbol, line, column, newName, context.signal)
+      semanticRename(cwdOf(cwd), file, symbol, line, column, newName, context.signal)
   })
 }

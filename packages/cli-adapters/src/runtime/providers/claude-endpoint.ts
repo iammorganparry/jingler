@@ -1,4 +1,5 @@
 import { execFileText } from "../../child-registry.js"
+import { resolveClaudeBinary } from "../../claude-cli-resolver.js"
 import {
   nativeCliEndpointId,
   ProviderId,
@@ -93,7 +94,7 @@ const probeAuthentication = async (
 export const probeClaudeEndpoint = async (
   options: ClaudeEndpointProbeOptions = {}
 ): Promise<AgentEndpointCatalogEntry> => {
-  const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
+  const binary = await resolveClaudeBinary(options.binary)
   const environment = claudeCliEnvironment(options.environment ?? process.env)
   const targetId = options.targetId ?? "desktop"
   let version: string | null = null

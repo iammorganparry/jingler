@@ -84,6 +84,9 @@ jobs:
         with:
           dest: ${{ runner.temp }}/setup-pnpm
           version: 10.7.0
+          # Per-job: two runners share this host, and the default ~/setup-pnpm
+          # let one job's setup wipe the pnpm another job was running.
+          dest: ${{ runner.temp }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 24

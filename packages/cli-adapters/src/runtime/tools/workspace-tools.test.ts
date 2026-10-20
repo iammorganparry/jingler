@@ -74,6 +74,21 @@ describe("workspace inspection tools", () => {
     }
   })
 
+  it("runs a call in its per-call cwd override instead of the registered checkout", async () => {
+    const seen: string[] = []
+    const registry = new ToolRegistry()
+    registerWorkspaceInspectionTools(registry, "/parent", {
+      ...workspace,
+      listFiles: (cwd) => { seen.push(cwd); return Effect.succeed([]) },
+      readTextFile: (cwd, path) => { seen.push(cwd); return workspace.readTextFile(cwd, path) }
+    })
+    for (const [id, args] of [["workspace_list_files", {}], ["workspace_read_file", { path: "a.ts" }]] as const) {
+      await Effect.runPromise(registry.execute({ id, arguments: args, role: "conversation", mode: "ask", cwd: "/child" }))
+      await Effect.runPromise(registry.execute({ id, arguments: args, role: "conversation", mode: "ask" }))
+    }
+    expect(seen).toEqual(["/child", "/parent", "/child", "/parent"])
+  })
+
   it("uses one cwd-bound port for list and read", async () => {
     const registry = new ToolRegistry()
     registerWorkspaceInspectionTools(registry, "/repo", workspace)

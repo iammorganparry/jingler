@@ -19,6 +19,7 @@ import type {
   CreateSessionInput,
   ExecutionMode,
   GitConfig,
+  ObsidianExplanationsConfig,
   IssueIdentity,
   IssueSummary,
   GithubConfig,
@@ -154,6 +155,7 @@ import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
 import { useImportSessions } from "./use-import-sessions.js";
 import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js";
+import { CheckoutHeader } from "./checkout-header.js";
 import { WorkspaceWorkflowBar } from "./workspace-workflow-bar.js";
 import { useAutoUpdate } from "./use-auto-update.js";
 import { useReleaseNotes } from "./use-release-notes.js";
@@ -166,6 +168,7 @@ import {
   usePluginTabs,
 } from "./plugin-registry.js";
 import { usePlugins } from "./use-plugins.js";
+import { ObsidianSaveToast, useObsidianVaultConfigured } from "./obsidian-save-toast.js";
 import { useDebugSessions } from "./debug-session.js";
 import { repositoryAccess } from "./github-connection-machine.js";
 import { useGitHubConnection } from "./use-github-connection.js";
@@ -201,6 +204,9 @@ const subagentModelsFor = (
  * surface; a genuine outage outlasts it and does.
  */
 const RELAY_UNHEALTHY_GRACE_MS = 4_000;
+const AGENT_WAKE_NOTE = "Sub-agent results arrived";
+const AGENT_WAKE_CONTEXT =
+  "Background sub-agent results or notices arrived while you were idle; they are already in your context above. Review them and continue the work.";
 const delegationEnabled = (configured: boolean | undefined): boolean => configured !== false;
 const subagentAssignments = (config: WorkspaceConfig | null | undefined) =>
   config?.subagentModelsByProvider ?? {};
@@ -520,6 +526,7 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
+  const obsidianVaultConfigured = useObsidianVaultConfigured();
   const webSearchQuery = useQuery({
     queryKey: ["web-search-settings"],
     queryFn: () => rpc.webSearchGet(),
@@ -559,7 +566,7 @@ function AuthedApp({
     enabled: false,
   });
 
-  const { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId, defaultModelId } = appStoredPreferences(configQuery.data);
+  const { githubConfig, gitConfig, obsidianExplanations, notificationsConfig, persistedOffloadCompute, defaultConnectionId, defaultModelId } = appStoredPreferences(configQuery.data);
   useEffect(() => {
     if (persistedOffloadCompute !== null) {
       sendOffloadSettings({ type: "SYNC", settings: persistedOffloadCompute });
@@ -615,6 +622,10 @@ function AuthedApp({
     });
   const saveGitConfig = (config: GitConfig) =>
     rpc.configSetGit(config).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
+  const saveObsidianExplanations = (config: ObsidianExplanationsConfig) =>
+    rpc.configSetObsidianExplanations(config).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
   const saveNotificationsConfig = (config: NotificationsConfig) =>
@@ -1157,6 +1168,19 @@ function AuthedApp({
     };
   }, [appConnected, feedbackRouter, githubRelayAuthorizationVersion]);
 
+  // An idle agent received sub-agent results; give it a real, visible turn.
+  useEffect(
+    () => rpc.agentWakeups(({ sessionId, chatId }) => {
+      const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+      if (!session || session.archived) return;
+      const conversation = getConversationActor(session, chatId);
+      // Several results landing together need one turn, not one each.
+      if (conversation.getSnapshot().context.queued.some((queued) => queued.agentContext === AGENT_WAKE_CONTEXT)) return;
+      conversation.send({ type: "SEND", text: AGENT_WAKE_NOTE, agentContext: AGENT_WAKE_CONTEXT });
+    }),
+    [],
+  );
+
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
   // outlive a merged PR and open a replacement, so linked sessions stay in the
   // sweep. Read the latest sessions through a ref so ordinary session updates do
@@ -1567,6 +1591,7 @@ function AuthedApp({
           GitHub feedback is reconnecting. {relayError}
         </div>
       )}
+      <ObsidianSaveToast />
       {checkpointOwner && <WorkspaceCheckpointsView key={checkpointOwner.session.id} session={checkpointOwner.session} returnFocus={checkpointOwner.trigger} onSession={publishSessionUpdate} onClosed={() => setCheckpointOwner(null)} />}
       <SubagentLaneViewProvider>
       <AgentEditsMarkerContext.Provider value={renderAgentEditsMarker}>
@@ -1648,6 +1673,9 @@ function AuthedApp({
         onSaveGithubConfig={saveGithubConfig}
         gitConfig={gitConfig}
         onSaveGitConfig={saveGitConfig}
+        obsidianExplanations={obsidianExplanations}
+        onSaveObsidianExplanations={saveObsidianExplanations}
+        obsidianVaultConfigured={obsidianVaultConfigured}
         notificationsConfig={notificationsConfig}
         onSaveNotificationsConfig={saveNotificationsConfig}
         notificationPermission={notificationPermission.permission}
@@ -1882,6 +1910,7 @@ function AuthedApp({
         )}
         renderConversation={(session: Session, view, ctx) => (
           <div className="flex min-h-0 flex-1 flex-col">
+            <CheckoutHeader session={session} />
             <WorkspaceWorkflowBar
               session={session}
               project={projectController.projects.find((project) => project.id === session.projectId)}
@@ -2612,9 +2641,10 @@ function deleteSessionDescription(pendingDelete: Session | null) {
 function appStoredPreferences(config: Awaited<ReturnType<typeof rpc.configGet>> | undefined) {
   const githubConfig = config?.github ?? null;
   const gitConfig = config?.git ?? null;
+  const obsidianExplanations = config?.obsidianExplanations ?? null;
   const notificationsConfig = config?.notifications ?? null;
   const persistedOffloadCompute = config?.offloadCompute ?? null;
-  return { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId: config?.defaultConnectionId ?? null, defaultModelId: config?.defaultModelId ?? null };
+  return { githubConfig, gitConfig, obsidianExplanations, notificationsConfig, persistedOffloadCompute, defaultConnectionId: config?.defaultConnectionId ?? null, defaultModelId: config?.defaultModelId ?? null };
 }
 
 function hasEnabledDebugPlugin(catalog: ReturnType<typeof usePluginCatalog>): boolean {

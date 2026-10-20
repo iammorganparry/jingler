@@ -163,6 +163,23 @@ describe("Pierre file and patch models", () => {
     ).toThrow(/single-file/)
   })
 
+  it("renders what it can from a patch with a malformed hunk instead of throwing", () => {
+    const patch = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "+new",
+      "@@ not a hunk header @@",
+      "+stray",
+      ""
+    ].join("\n")
+    expect(() => createPierreCodeViewItemsFromPatch(patch)).not.toThrow()
+    expect(createPierreCodeViewItemsFromPatch(patch).map((item) => item.id)).toEqual(["src/a.ts"])
+    expect(() => createPierreFileDiffFromPatch(patch)).not.toThrow()
+  })
+
   it("keeps CodeView versions, cache keys, and Git statuses stable", () => {
     const file = createPierreFileContents({ path: "src/a.ts", contents: "a\n" })
     const item = createPierreCodeViewItem({ type: "file", file })

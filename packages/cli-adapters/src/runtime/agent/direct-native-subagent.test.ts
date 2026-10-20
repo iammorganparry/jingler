@@ -105,6 +105,21 @@ describe("direct native foreground subagents", () => {
     }))
   })
 
+  it("runs a child in the parent's current checkout, not the cwd captured when the delegate was built", async () => {
+    const seen: AgentRunSpec[] = []
+    const parent = spec("opencode")
+    const delegate = makeDirectNativeSubagentDelegate({
+      spec: parent,
+      context: context(),
+      models: { researcher: ProviderModelId.make("opencode/cheap-model") },
+      makeRuntime: () => runtime(seen)
+    })
+    // The parent switched checkouts after the delegate closure was built; the request now carries the new cwd.
+    await delegate({ ...request(), cwd: "/repo-b/worktree" }, new AbortController().signal)
+
+    expect(seen[0]).toMatchObject({ cwd: "/repo-b/worktree" })
+  })
+
   it("forces writable OpenCode children read-only when the parent is in plan mode", async () => {
     const seen: AgentRunSpec[] = []
     const delegate = makeDirectNativeSubagentDelegate({

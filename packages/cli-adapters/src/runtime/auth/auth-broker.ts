@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai"
 import {
   authStatusForObservedBillingRoute,
+  isClaudeCliRoute,
   ProviderConnectionId,
   ProviderId,
   type AuthKind,
@@ -160,7 +161,7 @@ const hasCurrentClaudeCliCredential = (
   connection.authKind !== "claude-setup-token" || (
     credential?.authKind === "claude-setup-token" &&
     credential.access === "claude-cli" &&
-    connection.subscription.observedRoute === "claude-cli:subscription"
+    isClaudeCliRoute(connection.subscription.observedRoute)
   )
 
 interface ConnectionInput {
@@ -450,7 +451,8 @@ class LiveAuthBroker implements AuthBrokerShape {
       status: authStatusForObservedBillingRoute(
         input.credential.authKind,
         result.entitlement,
-        result.billingRoute
+        result.billingRoute,
+        result.observedRoute
       ),
       subscription: {
         entitlement: result.entitlement,

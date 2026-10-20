@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 import {
   checkClaudeSubscription,
   claudeCliArguments,
+  readClaudeLogin,
   createClaudeCliStreamSimple
 } from "./claude-cli-provider.js"
 
@@ -96,6 +97,32 @@ console.log(JSON.stringify({loggedIn:true,authMethod:"api_key",apiProvider:"firs
     await expect(checkClaudeSubscription(api, process.env)).rejects.toThrow(
       "not authenticated with a subscription"
     )
+  })
+
+  it.each(["pro", "max", "team", "enterprise"])("accepts a %s subscription login", async (plan) => {
+    const login = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",apiProvider:"firstParty",subscriptionType:"${plan}"}))
+`)
+    await expect(checkClaudeSubscription(login, process.env)).resolves.toBeUndefined()
+  })
+
+  it("confirms the api billing route for Enterprise and Console logins instead of failing", async () => {
+    // Shape of `claude auth status` (Claude Code 2.1.x) for an Enterprise seat.
+    const enterprise = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",apiProvider:"firstParty",orgName:"Acme",subscriptionType:"enterprise"}))
+`)
+    await expect(readClaudeLogin(enterprise, process.env)).resolves.toEqual({
+      route: "api",
+      planLabel: "Enterprise · API pricing"
+    })
+    const consoleLogin = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"api_key",apiProvider:"firstParty",apiKeySource:"/login managed key"}))
+`)
+    await expect(readClaudeLogin(consoleLogin, process.env)).resolves.toMatchObject({ route: "api" })
+    const max = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",apiProvider:"firstParty",subscriptionType:"max"}))
+`)
+    await expect(readClaudeLogin(max, process.env)).resolves.toMatchObject({ route: "subscription" })
   })
 
   it("distinguishes a missing CLI from a signed-out CLI", async () => {
@@ -342,5 +369,27 @@ setInterval(() => {}, 1000)
     })
     const done = events.at(-1)
     expect(done?.type === "done" ? done.reason : null).toBe("toolUse")
+  })
+
+  it("records the request's usage on a turn that ends in a tool call", async () => {
+    const binary = await executable(`process.stdin.resume(); console.log(${JSON.stringify(JSON.stringify(JSON.parse('{"type":"stream_event","event":{"type":"message_delta","usage":{"input_tokens":9,"output_tokens":236,"cache_read_input_tokens":26773,"cache_creation_input_tokens":2968}}}')))}); setInterval(() => {}, 1000)`)
+    const stream = createClaudeCliStreamSimple({
+      binary,
+      checkAuth: async () => {},
+      startToolRelay: async () => ({
+        mcpConfigPath: "/tmp/mcp.json",
+        toolCall: new Promise((resolve) => setTimeout(() => resolve({
+          id: "call-1",
+          name: "workspace_read_file",
+          arguments: { path: "package.json" }
+        }), 2000)),
+        close: async () => {}
+      })
+    })(model, context)
+    const done = (await collect(stream)).at(-1)
+    expect(done?.type === "done" ? done.reason : null).toBe("toolUse")
+    expect(done?.type === "done" ? done.message.usage : null).toMatchObject({
+      input: 9, output: 236, cacheRead: 26773, cacheWrite: 2968, totalTokens: 29986
+    })
   })
 })

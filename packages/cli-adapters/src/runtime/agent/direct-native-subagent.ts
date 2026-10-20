@@ -18,7 +18,9 @@ export const directNativeChildSpec = (
   task: string,
   modelId: ProviderModelId,
   childContext: "fresh" | "fork" = "fresh",
-  thinking?: string
+  thinking?: string,
+  /** The checkout the child should run in; the parent's active checkout, not its stale spec.cwd. */
+  cwd: string = parent.cwd
 ): AgentRunSpec => {
   const readOnly = READ_ONLY_SUBAGENTS.has(agent) ||
     parent.mode === "plan" || parent.mode === "read-only"
@@ -29,6 +31,7 @@ export const directNativeChildSpec = (
   role: readOnly ? "review" : "background",
   mode: readOnly ? "read-only" : parent.mode,
   modelId,
+  cwd,
   prompt: task,
   priorMessages: childContext === "fork" ? parent.priorMessages : [],
   continuation: null,
@@ -100,7 +103,10 @@ export const makeDirectNativeSubagentDelegate = (input: {
     request.task,
     input.models[request.agent as keyof SubagentModelAssignments] ?? input.spec.modelId,
     request.context,
-    request.thinking
+    request.thinking,
+    // The parent's checkout at spawn time, resolved by the subagent tool (`activeCwd?.()`), not the
+    // possibly-stale cwd captured when this delegate closure was built.
+    request.cwd
   )
   assertSupportedChild(childSpec, request.agent)
   const startedAt = Date.now()

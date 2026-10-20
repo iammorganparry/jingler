@@ -62,6 +62,15 @@ export const branchAt = (
     Effect.map((branch) => (branch === null || branch === "HEAD" ? null : branch))
   )
 
+/** The repo's default branch: `origin/HEAD`, else the checked-out branch, else `main`. */
+export const defaultBranchOf = (
+  repoPath: string
+): Effect.Effect<string, never, CommandExecutor.CommandExecutor> =>
+  Effect.gen(function* () {
+    const originHead = yield* gitLine(repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    return originHead?.replace(/^origin\//, "") ?? (yield* branchAt(repoPath)) ?? "main"
+  })
+
 /**
  * Worktree paths whose link to their repo has already been checked this run.
  *

@@ -1,4 +1,4 @@
-import type { ProviderCatalog, ProviderId, ProviderUsage, Usage } from "@jingler/core"
+import { spendFromFacts, type ProviderCatalog, type ProviderId, type ProviderUsage, type Usage, type UsageFact } from "@jingler/core"
 import { Effect } from "effect"
 import type { ProviderUsageRead } from "./runtime/providers/pi-provider-usage.js"
 
@@ -52,6 +52,24 @@ const withLive = (
     windows: live.usage.windows
   }
 }
+
+/**
+ * API-priced connections (Enterprise / Console) have no rate-limit windows, so
+ * their usage is the spend recorded in per-turn usage facts for that provider.
+ */
+export const withApiSpend = (usage: Usage, facts: ReadonlyArray<UsageFact>, now: Date = new Date()): Usage => ({
+  ...usage,
+  providers: usage.providers.map((provider) =>
+    provider.billingRoute === "api" && provider.authKind === "claude-setup-token"
+      ? {
+          ...provider,
+          available: true,
+          unavailableReason: null,
+          spend: spendFromFacts(facts.filter((fact) => fact.providerId === provider.providerId), now)
+        }
+      : provider
+  )
+})
 
 /** Builds renderer-safe usage metadata from explicit provider connections. */
 export class UsageService extends Effect.Service<UsageService>()("@jingler/UsageService", {

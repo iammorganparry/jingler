@@ -13,6 +13,7 @@ Skip preamble. Pick the smallest representation that makes the key point clear:
 - a shallow file tree for responsibilities or refactors;
 - a diff-shaped code block when the point is what changes;
 - Mermaid for component interaction, state, sequence, or data flow;
-- a table for a compact comparison.
+- a table for a compact comparison;
+- an `architecture` block for how a system, service, or request path fits together (follow the `architecture-anatomy` skill).
 
 Keep only the calls, files, props, states, and boundaries needed for the current question. Place brief prose beside the visual it supports. Do not use arbitrary HTML, scripts, or styles.

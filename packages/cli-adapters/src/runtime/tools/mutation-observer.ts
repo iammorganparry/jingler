@@ -6,6 +6,8 @@ import type {
 import type { RunJournal } from "../journal/run-journal.js"
 import {
   ToolError,
+  cwdOf,
+  type WorkspaceCwd,
   type ToolExecutionRequest,
   type ToolExecutionObserver,
   type ToolResultEnvelope,
@@ -13,7 +15,7 @@ import {
 } from "./tool-registry.js"
 
 export interface MutationObserverOptions {
-  readonly cwd: string
+  readonly cwd: WorkspaceCwd
   readonly runId: string
   readonly sessionId: string
   readonly chatId: string
@@ -39,7 +41,7 @@ const startMutation = (
         new ToolError("invalid-input", "Mutation tool requires a call id")
       )
     }
-    const snapshot = yield* options.tracker.capture(options.cwd).pipe(
+    const snapshot = yield* options.tracker.capture(cwdOf(options.cwd)).pipe(
       Effect.mapError(
         (cause) => new ToolError("execution-failed", cause.message, false)
       )
@@ -76,7 +78,7 @@ const settleMutation = (
       )
     }
     const changes = yield* options.tracker
-      .compare(state, options.cwd, callId)
+      .compare(state, cwdOf(options.cwd), callId)
       .pipe(
         Effect.mapError(
           (cause) => new ToolError("execution-failed", cause.message, false)

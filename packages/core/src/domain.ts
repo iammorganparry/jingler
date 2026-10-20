@@ -597,6 +597,25 @@ export const PublishCheckpoint = Schema.Struct({
 });
 export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>;
 
+/**
+ * One repo checkout a session works in. A session owns one or more; the scalar
+ * `Session` fields (`repo`, `repoPath`, `worktreePath`, `branch`, `baseBranch`,
+ * `prNumber`, `githubSlug`, `projectId`, `workspaceMode`) mirror the ACTIVE one.
+ */
+export const SessionCheckout = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.optional(Schema.String),
+  repo: Schema.String,
+  repoPath: Schema.optional(Schema.String),
+  worktreePath: Schema.optional(Schema.String),
+  workspaceMode: Schema.optional(WorkspaceMode),
+  branch: Schema.String,
+  baseBranch: Schema.optional(Schema.String),
+  prNumber: Schema.NullOr(Schema.Number),
+  githubSlug: Schema.optional(Schema.String),
+});
+export type SessionCheckout = Schema.Schema.Type<typeof SessionCheckout>;
+
 export const Session = Schema.Struct({
   routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
   /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
@@ -727,6 +746,10 @@ export const Session = Schema.Struct({
   closedChats: Schema.optional(Schema.Array(Chat)),
   /** The chat restored when the session is next opened. */
   activeChatId: Schema.String,
+  /** Every checkout the session works in. Absent on legacy sessions (one implicit checkout). */
+  checkouts: Schema.optional(Schema.Array(SessionCheckout)),
+  /** The checkout the agent's cwd and the scalar mirrors currently follow. */
+  activeCheckoutId: Schema.optional(Schema.String),
   /** Absolute path to the checkout this session works in. */
   worktreePath: Schema.optional(Schema.String),
   /**
@@ -944,6 +967,22 @@ export const GitConfig = Schema.Struct({
 });
 export type GitConfig = Schema.Schema.Type<typeof GitConfig>;
 
+/** Auto-save of published agent explanations into the session's Obsidian vault. */
+export const ObsidianExplanationsConfig = Schema.Struct({
+  enabled: Schema.Boolean,
+  /** Vault-relative folder the notes are written into. */
+  folder: Schema.String,
+});
+export type ObsidianExplanationsConfig = Schema.Schema.Type<
+  typeof ObsidianExplanationsConfig
+>;
+
+/** Off until the operator opts in; the folder is pre-filled. */
+export const OBSIDIAN_EXPLANATIONS_DEFAULT: ObsidianExplanationsConfig = {
+  enabled: false,
+  folder: "Jingler/Explanations",
+};
+
 /**
  * What a desktop notification can be about.
  *
@@ -1057,6 +1096,8 @@ export const WorkspaceConfig = Schema.Struct({
   github: Schema.optional(GithubConfig),
   /** Git behaviour prefs; absent until configured (older configs lack it). */
   git: Schema.optional(GitConfig),
+  /** Obsidian explanation auto-save; absent means the DEFAULT (off). */
+  obsidianExplanations: Schema.optional(ObsidianExplanationsConfig),
   /**
    * Desktop-notification prefs. Absent on older configs, which means the
    * DEFAULTS apply (see `NOTIFICATIONS_DEFAULT`) rather than "off" — an operator
