@@ -5,6 +5,7 @@ import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { ProviderIcon } from "../components/provider-icon.js"
+import { toolCallLabel } from "../composites/tool-call.js"
 import { cn } from "../lib/cn.js"
 import { fmtElapsed } from "../lib/relative-time.js"
 
@@ -80,7 +81,7 @@ function UsageRow({ node }: { node: SubagentFleetNode }) {
   if (!node.currentTool && usage.length === 0 && !node.background) return null
   return (
     <Row testId="subagent-meta-usage">
-      <Grow className="font-mono text-text-body">{node.currentTool}</Grow>
+      <Grow className="font-mono text-text-body">{node.currentTool === null ? null : toolCallLabel({ toolName: node.currentTool }).title}</Grow>
       {usage.length > 0 && <Fixed className="text-dim">{usage.join(" · ")}</Fixed>}
       {node.background && <Badge tone="neutral" size="xs">Background</Badge>}
     </Row>

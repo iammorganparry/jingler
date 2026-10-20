@@ -1044,17 +1044,30 @@ const switchRepoResponse = (context: PiContext): ReturnType<typeof fauxAssistant
   return fauxAssistantMessage("Edited the second repository.")
 }
 
+// `[[intent-tool]]`: run one command with an agent-written `intent`, then finish.
+const intentToolResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  if (!latestOperatorText(context).includes("[[intent-tool]]")) return null
+  if (recentToolResultCount(context, COMMAND_TOOL) === 0) {
+    return callTool(COMMAND_TOOL, { command: "echo tests passed", intent: "Running tests" }, "intent-tool-1")
+  }
+  return fauxAssistantMessage("Ran the tests.")
+}
+
+// Marker scenarios, tried in order; the first that claims the turn answers it.
+const markerResponders = [
+  intentToolResponse,
+  switchRepoResponse,
+  fileBrowserResponse,
+  supervisorSubagentResponse,
+  heldSubagentAskResponse,
+  heldSubagentsResponse
+] as const
+
 function scenarioFixtureResponse(context: PiContext) {
-  const switchRepo = switchRepoResponse(context)
-  if (switchRepo !== null) return switchRepo
-  const fileBrowser = fileBrowserResponse(context)
-  if (fileBrowser !== null) return fileBrowser
-  const supervisorSubagent = supervisorSubagentResponse(context)
-  if (supervisorSubagent !== null) return supervisorSubagent
-  const heldSubagentAsk = heldSubagentAskResponse(context)
-  if (heldSubagentAsk !== null) return heldSubagentAsk
-  const heldSubagents = heldSubagentsResponse(context)
-  if (heldSubagents !== null) return heldSubagents
+  for (const responder of markerResponders) {
+    const response = responder(context)
+    if (response !== null) return response
+  }
   if (operatorText(context).some((text) => text.includes("adversarial code reviewer"))) {
     return reviewResponse(context)
   }

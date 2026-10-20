@@ -136,7 +136,7 @@ test("the subagent view shows the meta strip, Details, the quoted task and a rea
   const strip = window.getByTestId("subagent-meta-strip")
   await expect(strip.getByTestId("subagent-meta-identity")).toContainText("e2e/pi-fixture:high")
   await expect(strip.getByTestId("subagent-meta-identity")).toContainText("running")
-  await expect(strip.getByTestId("subagent-meta-usage")).toContainText("workspace_read_file")
+  await expect(strip.getByTestId("subagent-meta-usage")).toContainText("Read file")
   await expect(strip).not.toContainText("—")
   // Held fixture children share the parent checkout and have no PR.
   await expect(strip.getByTestId("subagent-meta-workspace")).toHaveText("Shared checkout")
@@ -196,4 +196,26 @@ test("subagent dropdown rows mark shared-checkout children", async ({ launchApp 
   await window.getByTestId("subagent-chip").first().click()
   const row = window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Survey the tab bar/ })
   await expect(row.getByTestId("subagent-chip-branch")).toHaveText("Shared checkout")
+})
+
+test("a tool call with an agent-written intent shows it as the row title", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[intent-tool]] run the tests")
+  await composer.press("Enter")
+
+  // The command may be gated; approve it so the turn finishes.
+  await expect.poll(async () => {
+    const allow = window.getByRole("button", { name: /Allow once/ }).first()
+    if (await allow.isVisible().catch(() => false)) await allow.click().catch(() => undefined)
+    return window.getByText("Ran the tests.").isVisible()
+  }, { timeout: 40_000 }).toBe(true)
+
+  const log = window.getByRole("region", { name: "Conversation" })
+  // The intent is the row title; the raw command drops to the second line.
+  const row = log.getByRole("button", { name: /^Running tests/ })
+  await expect(row).toBeVisible()
+  await expect(row).toContainText("echo tests passed")
 })
