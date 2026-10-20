@@ -1455,7 +1455,8 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
         type: "START",
         id: "pending-environment-session",
         title: cloudCreationTitle(input),
-        repo: input.repoName,
+        // Auto (no repo chosen yet) never targets a remote environment in this PR.
+        repo: input.repoName ?? "",
         environmentId: environment.id,
         environmentName: environment.name,
         environmentKind: environment.kind

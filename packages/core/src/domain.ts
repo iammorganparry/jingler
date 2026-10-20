@@ -2158,10 +2158,14 @@ export const CreateSessionInput = Schema.Struct({
   environmentId: Schema.optional(Schema.String),
   /** Registered project to resolve at the execution boundary. */
   projectId: Schema.optional(Schema.String),
-  /** Absolute path to the origin repo. */
-  repoPath: Schema.String,
-  /** The repo's folder name, used for grouping + the worktree directory. */
-  repoName: Schema.String,
+  /**
+   * Absolute path to the origin repo. Absent means Auto: the session starts in
+   * a scratch folder with no checkout until the agent attaches one via
+   * `switch_checkout`.
+   */
+  repoPath: Schema.optional(Schema.String),
+  /** The repo's folder name, used for grouping + the worktree directory. Absent for Auto. */
+  repoName: Schema.optional(Schema.String),
   /** Canonical owner/repository identity when known at creation time. */
   githubSlug: Schema.optional(Schema.String),
   /**
@@ -2187,11 +2191,15 @@ export const CreateSessionInput = Schema.Struct({
    * callers that expect the configured provider default to be applied.
    */
   reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
-  /** The branch to fork the worktree from, or check out for a direct session. */
-  baseBranch: Schema.String,
+  /**
+   * The branch to fork the worktree from, or check out for a direct session.
+   * Absent for Auto, which starts with no checkout at all.
+   */
+  baseBranch: Schema.optional(Schema.String),
   /**
    * Whether to create an isolated linked worktree. Omitted defaults to true so
    * existing callers and persisted RPC requests retain the current behaviour.
+   * Ignored for Auto (no `repoPath`), which never creates a worktree.
    */
   useWorktree: Schema.optional(Schema.Boolean),
   /** Continue the selected branch instead of creating a fresh semantic task branch. */

@@ -132,6 +132,21 @@ describe("SessionStore", () => {
     ...over
   })
 
+  it("creates an Auto session with no checkout, in a scratch folder under ~/jingler/sessions/<id>", async () => {
+    const created = await Effect.runPromise(
+      SessionStore.create({
+        title: "Auto workspace",
+        connectionId,
+        providerId,
+        modelId
+      } as CreateSessionInput).pipe(Effect.provide(services), Effect.provide(temp.layer))
+    )
+    expect(created.repoPath).toBeUndefined()
+    expect(created.checkouts).toEqual([])
+    expect(created.worktreePath).toBe(join(temp.root, "sessions", created.id))
+    expect(existsSync(created.worktreePath!)).toBe(true)
+  })
+
   it("reads legacy port assignments without losing session metadata or sibling sessions", async () => {
     const original = await Effect.runPromise(SessionStore.create(input({ title: "Legacy ports" })).pipe(Effect.provide(services), Effect.provide(temp.layer)))
     const file = join(temp.root, "sessions.json")

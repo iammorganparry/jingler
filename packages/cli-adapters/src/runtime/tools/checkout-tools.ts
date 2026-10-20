@@ -34,10 +34,16 @@ export interface CheckoutHost {
   }) => Promise<Worktree>
 }
 
-/** Directory the agent's tools operate in: the active checkout's worktree, else its repo. */
+/**
+ * Directory the agent's tools operate in: the active checkout's worktree,
+ * else its repo, else the session's scratch folder (Auto, before any
+ * `switch_checkout`) — `session().worktreePath` doubles as that scratch path
+ * for a zero-checkout session, same field `resolveTurnWorktree` resolves.
+ */
 export const activeCheckoutCwd = (host: CheckoutHost): string => {
-  const checkout = activeCheckoutOf(host.session())
-  const cwd = checkout.worktreePath ?? checkout.repoPath
+  const session = host.session()
+  const checkout = activeCheckoutOf(session)
+  const cwd = checkout.worktreePath ?? checkout.repoPath ?? session.worktreePath
   if (cwd === undefined) throw new ToolError("execution-failed", "Active checkout has no directory")
   return cwd
 }
