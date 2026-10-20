@@ -108,7 +108,7 @@ test("agent switches to a second registered repo mid-turn; Changes groups both; 
   await expect(window.getByTestId(`session-repos-${(session as unknown as { id: string }).id}`)).toContainText("2 repos")
 
   // Changes: both repos grouped by checkout.
-  await window.getByRole("button", { name: "Changes", exact: true }).last().click()
+  await window.getByRole("button", { name: /^Changes\b/ }).first().click()
   await expect(window.getByTestId(`changes-checkout-${first!.id}`)).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId(`changes-checkout-${second!.id}`).locator('[data-item-path="src/other-repo.ts"]')).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId(`changes-checkout-${first!.id}`).locator('[data-item-path="src/other-repo.ts"]')).toHaveCount(0)
