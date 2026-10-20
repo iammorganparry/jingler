@@ -72,6 +72,8 @@ export const McpConfigRemote = Schema.Struct({
   displayName: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
   iconUrl: Schema.optional(McpIconUrl),
   enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /** Tool names the operator has turned off for this server. Absent means none. */
+  disabledTools: Schema.optional(Schema.Array(Schema.String)),
   timeout: Schema.optional(Schema.Number.pipe(Schema.positive()))
 }).pipe(
   Schema.filter(
@@ -96,6 +98,8 @@ export const McpConfigLocal = Schema.Struct({
   displayName: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
   iconUrl: Schema.optional(McpIconUrl),
   enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /** Tool names the operator has turned off for this server. Absent means none. */
+  disabledTools: Schema.optional(Schema.Array(Schema.String)),
   timeout: Schema.optional(Schema.Number.pipe(Schema.positive()))
 })
 export type McpConfigLocal = Schema.Schema.Type<typeof McpConfigLocal>

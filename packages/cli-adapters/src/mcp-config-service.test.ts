@@ -70,7 +70,8 @@ describe("McpConfigService", () => {
         target: "https://mcp.context7.com/mcp",
         envKeys: [],
         headerKeys: ["Authorization"],
-        enabled: true
+        enabled: true,
+        disabledTools: []
       },
       {
         name: "local",
@@ -83,7 +84,8 @@ describe("McpConfigService", () => {
         target: "npx -y some-mcp",
         envKeys: ["API_KEY"],
         headerKeys: [],
-        enabled: true
+        enabled: true,
+        disabledTools: []
       }
     ])
   })
@@ -243,6 +245,52 @@ describe("McpConfigService", () => {
     const exit = await provided(McpConfigService.setAuth("legacy", { type: "oauth" }))
     expect(exit._tag).toBe("Failure")
     expect(onDisk().mcp.legacy.auth).toBeUndefined()
+  })
+
+  it("persists disabled tool names and survives reopening (re-reading the file)", async () => {
+    seed(JSON.stringify({
+      mcp: { api: { type: "remote", url: "https://example.com/mcp", headers: {} } }
+    }))
+    await provided(McpConfigService.setDisabledTools("api", ["dangerous_delete"]))
+    expect(onDisk().mcp.api.disabledTools).toEqual(["dangerous_delete"])
+    const relisted = await provided(McpConfigService.list())
+    expect(relisted._tag === "Success" && relisted.value[0]).toMatchObject({
+      disabledTools: ["dangerous_delete"]
+    })
+  })
+
+  it("setDisabledTools fails for a server that does not exist", async () => {
+    const exit = await provided(McpConfigService.setDisabledTools("missing", ["x"]))
+    expect(exit._tag).toBe("Failure")
+  })
+
+  it("signOut clears only the stored OAuth credential, leaving the server config untouched", async () => {
+    const secrets = await Effect.runPromise(makeInMemorySecretStore())
+    const auth = new McpAuthStore(secrets)
+    seed(JSON.stringify({
+      mcp: { api: { type: "remote", url: "https://example.com/mcp", auth: { type: "oauth" } } }
+    }))
+    const parsed = await provided(McpConfigService.parsed())
+    expect(parsed._tag).toBe("Success")
+    if (parsed._tag !== "Success" || parsed.value[0]?.credentialIdentity === undefined) return
+    const identity = parsed.value[0].credentialIdentity
+    await Effect.runPromise(auth.write("api", { type: "oauth", identity, tokens: { access_token: "tok", token_type: "bearer" } }))
+    expect(await Effect.runPromise(auth.read("api", identity))).not.toBeNull()
+
+    const exit = await provided(McpConfigService.signOut("api", secrets))
+    expect(exit._tag).toBe("Success")
+    expect(await Effect.runPromise(auth.read("api", identity))).toBeNull()
+    // The server config itself — not disabled, not removed — is untouched.
+    expect(onDisk().mcp.api).toMatchObject({ type: "remote", url: "https://example.com/mcp" })
+  })
+
+  it("signOut fails for a server that is not OAuth", async () => {
+    const secrets = await Effect.runPromise(makeInMemorySecretStore())
+    seed(JSON.stringify({
+      mcp: { api: { type: "remote", url: "https://example.com/mcp" } }
+    }))
+    const exit = await provided(McpConfigService.signOut("api", secrets))
+    expect(exit._tag).toBe("Failure")
   })
 
   it("refuses to mutate a malformed file rather than clobbering it", async () => {

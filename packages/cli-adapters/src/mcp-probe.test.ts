@@ -86,6 +86,7 @@ describe("probeServer — reachable states", () => {
       scope: "user",
       state: "connected",
       toolCount: 3,
+      toolNames: ["tool_0", "tool_1", "tool_2"],
       error: null,
       checkedAt: NOW
     })

@@ -1293,6 +1293,20 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { name: Schema.String, auth: McpRemoteAuth }
   }),
 
+  /** Persist the set of tool names disabled for one server; the runtime skips them on registration. */
+  Rpc.make("Mcp.setDisabledTools", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, disabledTools: Schema.Array(Schema.String) }
+  }),
+
+  /** Clear a server's stored OAuth credential only — the server config and other servers are untouched. */
+  Rpc.make("Mcp.signOut", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String }
+  }),
+
   /** Save or replace one API key in the encrypted device credential document. */
   Rpc.make("Mcp.setApiKey", {
     success: Schema.Void,

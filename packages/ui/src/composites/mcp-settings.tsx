@@ -44,6 +44,10 @@ export interface McpSettingsProps {
   readonly probe: () => void
   readonly setEnabled: (name: string, enabled: boolean) => Promise<void>
   readonly setAuth: (name: string, auth: McpRemoteAuth) => Promise<void>
+  /** Persist a per-tool toggle; the runtime skips disabled tools when registering MCP tools. */
+  readonly setDisabledTools: (name: string, disabledTools: ReadonlyArray<string>) => Promise<void>
+  /** Clears the server's stored OAuth credential only, not the server config. */
+  readonly signOut: (name: string) => Promise<void>
   readonly remove: (name: string) => Promise<void>
   readonly add: (name: string, entry: McpConfigEntry) => Promise<void>
   readonly setApiKey: (name: string, apiKey: string) => Promise<void>
@@ -562,6 +566,8 @@ export function McpSettings({
   probe,
   setEnabled,
   setAuth,
+  setDisabledTools,
+  signOut,
   remove,
   add,
   setApiKey,
@@ -716,12 +722,34 @@ export function McpSettings({
         open={detailServer !== null}
         onOpenChange={(open) => { if (!open) setDetailServer(null) }}
         toolCount={detailServer === null ? null : (statusFor(statuses, detailServer.name)?.toolCount ?? null)}
+        toolNames={detailServer === null ? [] : (statusFor(statuses, detailServer.name)?.toolNames ?? [])}
         logLines={logLines}
         logLoading={logLoading}
         oauthAccount={
           detailServer !== null && detailServer.authKind === "oauth" && detailServer.authState === "ready"
             ? detailServer.displayName
             : null
+        }
+        disabledTools={detailServer?.disabledTools ?? []}
+        onToggleTool={(toolName, enabled) => {
+          if (detailServer === null) return
+          const current = new Set(detailServer.disabledTools ?? [])
+          if (enabled) current.delete(toolName)
+          else current.add(toolName)
+          const next = [...current]
+          setDetailServer({ ...detailServer, disabledTools: next })
+          run(() => setDisabledTools(detailServer.name, next))
+        }}
+        onSignOut={
+          detailServer === null
+            ? undefined
+            : () => {
+                const target = detailServer
+                run(async () => {
+                  await signOut(target.name)
+                  setDetailServer(null)
+                })
+              }
         }
       />
     </div>
