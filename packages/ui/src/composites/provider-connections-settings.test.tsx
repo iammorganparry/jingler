@@ -261,6 +261,51 @@ describe("ProviderConnectionsSettings", () => {
     expect(screen.queryByPlaceholderText("Claude setup-token")).toBeNull()
   })
 
+  it("shows the real provider brand logo on each account row, not a letter tile", () => {
+    render(
+      <ProviderConnectionsSettings
+        catalog={catalog}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={vi.fn()}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
+      />
+    )
+    const row = screen.getAllByRole("button", { name: /Claude CLI subscription/u })[0]!
+    expect(row.querySelector("[data-provider-icon='claude']")).toBeTruthy()
+    expect(row.querySelector("[data-provider-fallback]")).toBeNull()
+  })
+
+  it("marks the default connection's row with a star and lets it sign out", () => {
+    const onLogout = vi.fn()
+    render(
+      <ProviderConnectionsSettings
+        catalog={catalog}
+        defaultConnectionId={"claude-max" as ProviderConnectionId}
+        defaultModelId={"anthropic/claude-test" as ProviderModelId}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={onLogout}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
+      />
+    )
+    expect(screen.getByLabelText("Default connection")).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sign out Claude CLI subscription connection" })
+    )
+    expect(onLogout).toHaveBeenCalledWith("claude-max")
+  })
+
   it("shows the pinned account, target, plan, and billing route", () => {
     render(
       <ProviderConnectionsSettings
@@ -332,7 +377,7 @@ describe("ProviderConnectionsSettings", () => {
     )
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Remove Claude CLI subscription connection"
+        name: "Sign out Claude CLI subscription connection"
       })
     )
     expect(onRemove).toHaveBeenCalledWith("claude-max")

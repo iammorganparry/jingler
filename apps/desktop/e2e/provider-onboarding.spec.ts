@@ -66,6 +66,24 @@ const finishProviderSetup = async (
   await expect(launched.window.getByText(SUBSCRIPTION_BILLING)).toBeVisible();
 };
 
+const PROVIDER_ICON_KIND: Record<string, string> = {
+  "Claude CLI subscription": "claude",
+  "ChatGPT Codex subscription": "codex",
+};
+
+const expectAccountRowLogo = async (
+  launched: LaunchedApp,
+  routeLabel: string,
+): Promise<void> => {
+  const kind = PROVIDER_ICON_KIND[routeLabel];
+  if (!kind) throw new Error(`no expected provider-icon kind for ${routeLabel}`);
+  const row = launched.window
+    .getByRole("button", { name: new RegExp(routeLabel) })
+    .first();
+  await expect(row.locator(`[data-provider-icon="${kind}"]`)).toBeVisible();
+  await expect(row.locator("[data-provider-fallback]")).toHaveCount(0);
+};
+
 test("connects the local Claude CLI subscription without collecting credentials", async ({
   launchApp,
 }) => {
@@ -82,6 +100,7 @@ test("connects the local Claude CLI subscription without collecting credentials"
   await launched.window.getByRole("button", { name: "Connect Claude through PI" }).click();
   await expect(launched.window.getByPlaceholder("Claude setup-token")).toHaveCount(0);
   await finishProviderSetup(launched, "Claude CLI subscription");
+  await expectAccountRowLogo(launched, "Claude CLI subscription");
 
   const metadata = readFileSync(
     join(launched.home, "jingler", "runtime", "provider-connections.json"),
@@ -413,7 +432,7 @@ test("rejects a duplicate provider connection from settings", async ({ launchApp
   ).toBeVisible();
   await expect(
     launched.window.getByRole("button", {
-      name: "Remove ChatGPT Codex subscription connection",
+      name: "Sign out ChatGPT Codex subscription connection",
     }),
   ).toHaveCount(1);
 });
