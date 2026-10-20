@@ -62,6 +62,7 @@ import {
   McpConfigEntry,
   McpRemoteAuth,
   McpImportCandidateView,
+  McpImportResolution,
   McpImportSourceId,
   McpServer,
   McpServerStatus,
@@ -1303,7 +1304,14 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Mcp.applyImport", {
     success: Schema.Array(Schema.String),
     error: ConfigError,
-    payload: { source: McpImportSourceId, names: Schema.Array(Schema.String) }
+    payload: {
+      source: McpImportSourceId,
+      names: Schema.Array(Schema.String),
+      /** Per-name conflict resolution; a conflicting name with no entry keeps the existing server. */
+      resolutions: Schema.optionalWith(Schema.Record({ key: Schema.String, value: McpImportResolution }), {
+        default: () => ({})
+      })
+    }
   }),
 
   /** Open the app's log folder in the file manager (crash screen "Open logs"). */

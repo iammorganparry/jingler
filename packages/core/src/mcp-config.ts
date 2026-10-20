@@ -145,6 +145,50 @@ export const mcpNameError = (name: string): string | null => {
 export const McpImportSourceId = Schema.Literal("claude", "codex", "opencode")
 export type McpImportSourceId = Schema.Schema.Type<typeof McpImportSourceId>
 
+/** Operator's choice for an import candidate whose name clashes with an existing server. */
+export const McpImportResolution = Schema.Literal("keep-mine", "replace", "keep-both")
+export type McpImportResolution = Schema.Schema.Type<typeof McpImportResolution>
+
+/** First `base`, then `base-2`, `base-3`, … — whichever isn't already in `taken`. Used by "keep both". */
+export const firstFreeName = (base: string, taken: ReadonlySet<string>): string => {
+  if (!taken.has(base)) return base
+  let suffix = 2
+  while (taken.has(`${base}-${suffix}`)) suffix++
+  return `${base}-${suffix}`
+}
+
+/**
+ * Apply per-name conflict resolutions to a requested import selection.
+ * No resolution for a conflicting name = current behaviour (skip, i.e. "keep mine").
+ */
+export const applyImportResolutions = (
+  selected: ReadonlyArray<{ readonly name: string; readonly entry: McpConfigEntry }>,
+  existingNames: ReadonlySet<string>,
+  resolutions: Readonly<Record<string, McpImportResolution>>
+): ReadonlyArray<{ readonly name: string; readonly entry: McpConfigEntry }> => {
+  const taken = new Set(existingNames)
+  const out: Array<{ name: string; entry: McpConfigEntry }> = []
+  for (const candidate of selected) {
+    const conflict = existingNames.has(candidate.name)
+    if (!conflict) {
+      out.push(candidate)
+      taken.add(candidate.name)
+      continue
+    }
+    const resolution = resolutions[candidate.name] ?? "keep-mine"
+    if (resolution === "keep-mine") continue
+    if (resolution === "replace") {
+      out.push(candidate)
+      taken.add(candidate.name)
+      continue
+    }
+    const freeName = firstFreeName(candidate.name, taken)
+    out.push({ name: freeName, entry: candidate.entry })
+    taken.add(freeName)
+  }
+  return out
+}
+
 /**
  * Renderer-safe view of one import candidate: name + display target only.
  * Header/env VALUES from the source file never cross the RPC boundary; the
