@@ -267,6 +267,15 @@ function SubagentSpawnRow() {
   )
 }
 
+/** A command card's title: the agent-written intent over the raw command, else the command. */
+const commandTitle = (tool: ToolCallModel, displayName: string): ReactNode =>
+  tool.intent ? (
+    <span className="flex min-w-0 flex-col">
+      <span className="truncate font-sans">{tool.intent}</span>
+      {tool.target && <span className="truncate font-mono text-[11px] text-dim">{tool.target}</span>}
+    </span>
+  ) : (tool.target ?? displayName)
+
 /** Command tools that can hang for minutes and so earn an inline stop button. */
 const isStoppableTool = (displayName: string): boolean =>
   /^(bash|shell|terminal|command)/i.test(displayName)
@@ -391,7 +400,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
     return (
       <BeUIToolResult
         tool={displayName}
-        title={tool.target ?? displayName}
+        title={commandTitle(tool, displayName)}
         meta={toolMeta(tool)}
         status={tool.status}
         kind="terminal"

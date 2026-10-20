@@ -310,7 +310,9 @@ describe("SubagentMetaStrip", () => {
     expect(identity).toContain("anthropic/claude-test")
     expect(identity).toContain("running · scanning")
     const usage = screen.getByTestId("subagent-meta-usage").textContent
-    expect(usage).toContain("workspace_read_file")
+    // The derived label, never the raw tool name.
+    expect(usage).toContain("Read file")
+    expect(usage).not.toContain("workspace_read_file")
     expect(usage).toContain("12.4k in / 900 out")
     expect(usage).toContain("7 tool calls")
     expect(usage).toContain("$0.42")
@@ -356,7 +358,7 @@ describe("SubagentMetaStrip", () => {
 
   it("truncates tool text but never the pills", () => {
     render(<FleetAgentView node={full} messages={[]} />)
-    expect(screen.getByText("workspace_read_file").className).toContain("truncate")
+    expect(screen.getByText("Read file").className).toContain("truncate")
     expect(screen.getByText("Background").closest(".whitespace-nowrap")).not.toBeNull()
   })
 })
