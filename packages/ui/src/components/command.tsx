@@ -81,13 +81,22 @@ CommandDialog.displayName = "CommandDialog"
 
 export const CommandInput = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Input>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
->(({ className, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input> & {
+    /**
+     * A chip rendered before the field, e.g. the active `>` / `@` / `#` prefix
+     * scope. Named `prefixChip` rather than `prefix` — the bare HTML
+     * `prefix` attribute is typed as `string` in React's DOM types, and an
+     * intersection with that collapses `ReactNode` into an unusable type.
+     */
+    prefixChip?: React.ReactNode
+  }
+>(({ className, prefixChip, ...props }, ref) => (
   <div
     className="mx-2 mt-2 flex h-10 items-center gap-2 rounded-lg border border-line bg-surface px-2"
     cmdk-input-wrapper=""
   >
     <Search size={15} className="flex-none text-muted-foreground" aria-hidden />
+    {prefixChip}
     <CommandPrimitive.Input
       ref={ref}
       className={cn(

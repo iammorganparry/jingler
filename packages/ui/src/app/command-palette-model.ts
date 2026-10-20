@@ -59,6 +59,17 @@ export interface PaletteItem {
    * A type-only import, same as `TabContribution.icon` — nothing here renders.
    */
   readonly icon?: LucideIcon
+  /**
+   * Which `PaletteScope` this row belongs to. Absent means **workspace** —
+   * the default for every row that is not specific to the active chat.
+   *
+   * Explicit rather than inferred from `group`: a group NAME is display text,
+   * not an identity, and matching against a fixed set of known headings (the
+   * old approach) silently drops any row — a plugin's, a future built-in's —
+   * whose group was never added to that set. Marking the row itself is the
+   * one place this can't drift out of sync with what the row actually is.
+   */
+  readonly scope?: PaletteScope
   readonly run: () => void
 }
 
@@ -240,6 +251,7 @@ export const subagentPaletteItems = (
     label: subagent.agent,
     detail: subagent.task,
     group: PALETTE_GROUP.subagents,
+    scope: "chat",
     run: () => open(subagent.id)
   }))
 
@@ -253,6 +265,7 @@ export const viewPaletteItems = (
     kind: "tab",
     label: view.label,
     group: PALETTE_GROUP.views,
+    scope: "chat",
     icon: view.icon,
     run: () => open(view.id)
   }))
@@ -321,28 +334,60 @@ export const needsYouPaletteItems = (
 
 /**
  * The palette's scope switch: **Workspace** is every row, **Chat** is the
- * subset about the active chat (its tabs, views and subagents). Chat narrows
- * Workspace, so the default scope never hides a row the palette had before.
+ * subset about the active chat (its tabs, views and subagents) — narrowed by
+ * an explicit `item.scope`, never by the row's group NAME. A group heading is
+ * display text a plugin is free to choose; matching against it is how a
+ * plugin's own tabs/views used to leak into or out of Chat depending on what
+ * it happened to call its heading. `commands`/`files`/`sessions` are the `>`
+ * `@` `#` prefix-chip scopes: typing the prefix as the first character of the
+ * query narrows to that row KIND, independent of the Workspace/Chat switch.
  */
-export type PaletteScope = "workspace" | "chat"
+export type PaletteScope = "workspace" | "chat" | "commands" | "files" | "sessions"
 
 export const PALETTE_SCOPES: ReadonlyArray<PaletteScope> = ["workspace", "chat"]
-
-const CHAT_GROUP_NAMES: ReadonlySet<string> = new Set([
-  PALETTE_GROUP.tabs,
-  PALETTE_GROUP.views,
-  PALETTE_GROUP.subagents
-])
 
 export const itemsInScope = (
   items: ReadonlyArray<PaletteItem>,
   scope: PaletteScope
-): ReadonlyArray<PaletteItem> =>
-  scope === "workspace" ? items : items.filter((item) => CHAT_GROUP_NAMES.has(item.group))
+): ReadonlyArray<PaletteItem> => {
+  switch (scope) {
+    case "workspace":
+      return items
+    case "chat":
+      return items.filter((item) => item.scope === "chat")
+    case "commands":
+      return items.filter((item) => item.kind === "action" || item.kind === "plugin")
+    case "files":
+      return items.filter((item) => item.kind === "file")
+    case "sessions":
+      return items.filter((item) => item.kind === "session")
+  }
+}
 
-/** Tab cycles scopes, wrapping. */
+/** Tab cycles the Workspace/Chat switch, wrapping; a prefix scope is not in this cycle. */
 export const nextScope = (scope: PaletteScope): PaletteScope =>
   PALETTE_SCOPES[(PALETTE_SCOPES.indexOf(scope) + 1) % PALETTE_SCOPES.length] ?? "workspace"
+
+/** One `>` / `@` / `#` prefix chip: the character typed, the scope it switches to, and its chip label. */
+export interface PalettePrefixScope {
+  readonly prefix: string
+  readonly scope: PaletteScope
+  readonly label: string
+}
+
+export const PALETTE_PREFIX_SCOPES: ReadonlyArray<PalettePrefixScope> = [
+  { prefix: ">", scope: "commands", label: "Commands" },
+  { prefix: "@", scope: "files", label: "Files" },
+  { prefix: "#", scope: "sessions", label: "Workspaces" }
+]
+
+/** The scope a typed prefix character switches to, or `null` for any other character. */
+export const scopeForPrefix = (char: string): PaletteScope | null =>
+  PALETTE_PREFIX_SCOPES.find((p) => p.prefix === char)?.scope ?? null
+
+/** The chip to show for a prefix scope, or `null` when `scope` is Workspace/Chat. */
+export const prefixChipFor = (scope: PaletteScope): PalettePrefixScope | null =>
+  PALETTE_PREFIX_SCOPES.find((p) => p.scope === scope) ?? null
 
 const BUILTIN_GROUP_NAMES: ReadonlySet<string> = new Set(Object.values(PALETTE_GROUP))
 

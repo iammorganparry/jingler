@@ -160,6 +160,18 @@ export const NothingToShow: Story = {
   args: { open: true, onOpenChange: noop, items: [] }
 }
 
+/** Typing `@` as the first character switches to the Files prefix scope and shows its chip. */
+export const PrefixScope: Story = {
+  args: { open: true, onOpenChange: noop, items: ITEMS },
+  play: async () => {
+    const input = document.querySelector<HTMLInputElement>("[cmdk-input]")
+    if (!input) return
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    setter?.call(input, "@")
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  }
+}
+
 /** Driven by a real toggle, so open/close and the query reset can be felt. */
 export const Interactive: Story = {
   args: { open: false, onOpenChange: noop, items: ITEMS },

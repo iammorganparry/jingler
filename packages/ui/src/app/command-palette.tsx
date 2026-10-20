@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useMachine } from "@xstate/react"
 import { ChevronRight, File, GitBranch, type LucideIcon, Plug, Zap } from "lucide-react"
 import {
   CommandDialog,
@@ -11,11 +12,13 @@ import {
 import { Kbd } from "../components/kbd.js"
 import { StatusDot } from "../components/status-dot.js"
 import { SegmentedControl } from "../components/segmented-control.js"
+import { Badge } from "../components/badge.js"
+import { commandPaletteMachine } from "./command-palette-machine.js"
 import {
   groupPaletteItems,
   itemKeywords,
   itemsInScope,
-  nextScope,
+  prefixChipFor,
   type PaletteItem,
   type PaletteItemKind,
   type PaletteScope,
@@ -70,18 +73,16 @@ export function CommandPalette({
   /** The Workspace · Chat switch and its Tab shortcut. Off for single-purpose pickers. */
   showScopes?: boolean
 }) {
-  const [query, setQuery] = React.useState("")
-  const [scope, setScope] = React.useState<PaletteScope>("workspace")
+  const [state, send] = useMachine(commandPaletteMachine)
+  const { query, scope, prefixActive } = state.context
+  const chip = prefixChipFor(scope)
 
   // The query is per-OPENING, not persistent. Reopening onto the last search is
   // the palette answering a question you asked a minute ago — and worse, the
   // first keystroke then appends to it rather than starting a new search.
   React.useEffect(() => {
-    if (!open) {
-      setQuery("")
-      setScope("workspace")
-    }
-  }, [open])
+    if (!open) send({ type: "RESET" })
+  }, [open, send])
 
   // cmdk mounts every item it is given and re-scores them all on each keystroke.
   // That is fine for a handful of commands but not for a repo's file list, where
@@ -132,18 +133,35 @@ export function CommandPalette({
       onKeyDown={(event) => {
         if (!showScopes || event.key !== "Tab" || event.shiftKey) return
         event.preventDefault()
-        setScope(nextScope)
+        send({ type: "CYCLE_SCOPE" })
       }}
     >
-      <CommandInput placeholder={placeholder} value={query} onValueChange={setQuery} />
-      {showScopes && (
+      <CommandInput
+        placeholder={chip ? `Search ${chip.label.toLowerCase()}…` : placeholder}
+        value={query}
+        onValueChange={(value) => send({ type: "QUERY_CHANGED", value })}
+        onKeyDown={(event) => {
+          if (event.key !== "Backspace" || query.length > 0) return
+          send({ type: "BACKSPACE_EMPTY" })
+        }}
+        prefixChip={
+          chip ? (
+            <span data-testid="palette-prefix-chip">
+              <Badge tone="blue" size="sm">
+                {chip.prefix} {chip.label}
+              </Badge>
+            </span>
+          ) : undefined
+        }
+      />
+      {showScopes && !prefixActive && (
         <div className="px-2 pt-2">
           <SegmentedControl
             aria-label="Palette scope"
             size="sm"
             fullWidth
             value={scope}
-            onChange={setScope}
+            onChange={(next) => send({ type: "SET_SCOPE", scope: next })}
             items={[
               { value: "workspace", label: "Workspace" },
               { value: "chat", label: "Chat" }
