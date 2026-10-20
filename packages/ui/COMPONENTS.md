@@ -35,6 +35,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator, CommandShortcut | `components/command.tsx` | cmdk primitives: Command, CommandDialog, Input, List, Item… | — | yes | — |
 | ConfirmDialog | `components/confirm-dialog.tsx` | Yes/no modal; neutral confirm by default, `destructive` = the only solid red button, Cancel focused first, Esc cancels. | open, onOpenChange, title, destructive, onConfirm | no | #375 (2.10) |
 | ContextMenu | `components/context-menu.tsx` | Right-click menu. | — | yes | — |
+| DeviceCodeBlock | `components/device-code-block.tsx` | OAuth device-code step: 20px mono user code, copy, expiry countdown, Reopen browser. | code, verificationUri, expiresInSeconds, onReopenBrowser | yes | #483 (10.4) |
 | Dialog, DialogTrigger, DialogPortal, DialogClose, DialogOverlay, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, DialogBody | `components/dialog.tsx` | Modal dialog primitives (Dialog, Header, Body, Footer…). | — | no | #373 (2.8) |
 | Drawer, DrawerTrigger, DrawerContent, DrawerClose, DrawerTitle, DrawerDescription | `components/drawer.tsx` | 480px right sheet on the Dialog primitive; full-window scrim, focus trap, Esc, focus return. | open, onOpenChange, defaultOpen | yes | #373 (2.8) |
 | DiffPeek | `components/diff-peek.tsx` | Single-file diff peek, virtualised for large patches. | — | no | — |
