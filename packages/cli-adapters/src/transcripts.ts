@@ -416,6 +416,11 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
         Effect.gen(function* () {
           const existing = yield* readIndex(chatId)
           if (existing !== null) return existing
+          const empty: TranscriptIndex = { version: 2, byteLength: 2, inode: 0, offsets: [] }
+          // Never create a transcript just by reading it: an empty <chatId>.json
+          // would make `adoptLegacy` skip the session-keyed history.
+          const fs = yield* FileSystem.FileSystem
+          if (!(yield* fs.exists(yield* fileFor(chatId)).pipe(Effect.orElseSucceed(() => false)))) return empty
           const messages = yield* readAll(chatId)
           yield* writeAll(chatId, messages)
           return (
