@@ -20,6 +20,7 @@ import { ProviderIcon } from "../components/provider-icon.js"
 import { cn } from "../lib/cn.js"
 import { providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
 import { ProviderAuthForms } from "./provider-auth-forms.js"
+import { ProviderConnectSheet } from "./provider-connect-sheet.js"
 import { providerConnectionsSettingsMachine } from "./provider-connections-settings-machine.js"
 
 const EMPTY_CONNECTIONS: ProviderCatalog["connections"] = []
@@ -217,6 +218,14 @@ export interface ProviderConnectionsSettingsProps {
     providerId: ProviderId,
     apiKey: string
   ) => void
+  /** Provider.cancelLogin for the reconnect `ProviderConnectSheet`'s OAuth-waiting Cancel button. */
+  onCancelLogin: (connectionId: ProviderConnectionId) => Promise<void>
+  /** Sets and verifies an API key from the reconnect `ProviderConnectSheet`; resolves ok or an error message. */
+  onSaveApiKey: (
+    connectionId: ProviderConnectionId,
+    providerId: ProviderId,
+    apiKey: string
+  ) => Promise<{ ok: true } | { ok: false; error: string }>
 }
 
 export function ProviderConnectionsSettings({
@@ -234,8 +243,11 @@ export function ProviderConnectionsSettings({
   onRemove,
   onConnectClaude,
   onStartCodex,
-  onSetApiKey
+  onSetApiKey,
+  onCancelLogin,
+  onSaveApiKey
 }: ProviderConnectionsSettingsProps) {
+  const [reconnectOpen, setReconnectOpen] = useState(false)
          type SelectedConnection = NonNullable<typeof selected>
   function renderConnectionHeading(selected: SelectedConnection) {
            return (<div className="flex items-start gap-3">
@@ -374,26 +386,59 @@ export function ProviderConnectionsSettings({
                   <Callout tone="blue">
                     Reauthentication required. Jingler has not retained usable credentials for this connection.
                   </Callout>
-                  <ProviderAuthForms
-                    busy={busy}
-                    mode="reconnect"
-                    pendingAuthKind={pendingAuthKind}
-                    authKinds={[selected.connection.authKind]}
-                    apiProviderId={selected.connection.providerId}
-                    onConnectClaude={(token) =>
-                      onConnectClaude(selected.connection.id, token)
-                    }
-                    onStartCodex={(method) =>
-                      onStartCodex(selected.connection.id, method)
-                    }
-                    onConnectApi={(_providerId, apiKey) =>
-                      onSetApiKey(
-                        selected.connection.id,
-                        selected.connection.providerId,
-                        apiKey
-                      )
-                    }
-                  />
+                  {selected.connection.authKind === "openai-codex-oauth" ||
+                  selected.connection.authKind === "api-key" ? (
+                    <>
+                      <Button variant="primary" disabled={busy} onClick={() => setReconnectOpen(true)}>
+                        Reconnect
+                      </Button>
+                      <ProviderConnectSheet
+                        open={reconnectOpen}
+                        onOpenChange={setReconnectOpen}
+                        providerId={selected.connection.providerId}
+                        providerLabel={providerAuthRouteLabel(selected.connection.authKind)}
+                        busy={busy}
+                        onStartOauth={async () => {
+                          onStartCodex(selected.connection.id, "browser")
+                          return selected.connection.id
+                        }}
+                        onStartDeviceCode={
+                          selected.connection.authKind === "openai-codex-oauth"
+                            ? async () => {
+                                onStartCodex(selected.connection.id, "device-code")
+                                return selected.connection.id
+                              }
+                            : undefined
+                        }
+                        onCancelLogin={() => onCancelLogin(selected.connection.id)}
+                        onReopenBrowser={() => {}}
+                        onSaveApiKey={(apiKey) =>
+                          onSaveApiKey(selected.connection.id, selected.connection.providerId, apiKey)
+                        }
+                      />
+                    </>
+                  ) : (
+                    <ProviderAuthForms
+                      busy={busy}
+                      mode="reconnect"
+                      pendingAuthKind={pendingAuthKind}
+                      authKinds={[selected.connection.authKind]}
+                      apiProviderId={selected.connection.providerId}
+                      onConnectClaude={(token) =>
+                        onConnectClaude(selected.connection.id, token)
+                      }
+                      onStartCodex={(method) =>
+                        onStartCodex(selected.connection.id, method)
+                      }
+                      onConnectApi={(_providerId, apiKey) =>
+                        onSetApiKey(
+                          selected.connection.id,
+                          selected.connection.providerId,
+                          apiKey
+                        )
+                      }
+                    />
+                  )}
                 </div>
               )}
 

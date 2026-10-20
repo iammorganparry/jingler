@@ -1730,6 +1730,8 @@ function AuthedApp({
           onConnectClaude: providerCatalog.connectClaude,
           onStartCodex: providerCatalog.startCodex,
           onSetApiKey: providerCatalog.setApiKey,
+          onCancelLogin: providerCatalog.cancelLogin,
+          onSaveApiKey: providerCatalog.saveApiKey,
         }}
         agents={{
           resources: agentsSettings.snapshot.context.resources,
