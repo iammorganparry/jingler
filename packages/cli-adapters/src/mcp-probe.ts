@@ -97,7 +97,7 @@ const makeTransport = (name: string, launch: McpLaunch, cwd: string | null, shel
  * The `signal` is wired to Effect's interruption, so a timeout tears the transport
  * down instead of leaving an orphaned child process behind.
  */
-const connectAndCount = async (name: string, launch: McpLaunch, cwd: string | null, signal: AbortSignal): Promise<number> => {
+const connectAndList = async (name: string, launch: McpLaunch, cwd: string | null, signal: AbortSignal): Promise<ReadonlyArray<string>> => {
   const client = new Client(clientInfo, { capabilities: {} })
   const shellEnv = launch.transport === "stdio" ? await loginShellEnvironment() : {}
   // The env lookup can outlast a probe timeout; never spawn a server after cancellation.
@@ -109,7 +109,7 @@ const connectAndCount = async (name: string, launch: McpLaunch, cwd: string | nu
     // `connect` performs the MCP `initialize` handshake.
     await client.connect(transport)
     const { tools } = await client.listTools()
-    return tools.length
+    return tools.map((tool) => tool.name)
   } finally {
     signal.removeEventListener("abort", abort)
     await client.close().catch(() => {})
@@ -139,11 +139,11 @@ export const probeServer = (
 
   // A disabled managed server is reported as such rather than probed.
   if (!entry.server.enabled) {
-    return Effect.succeed({ ...base, state: "disabled" as const, toolCount: null, error: null, checkedAt: now() })
+    return Effect.succeed({ ...base, state: "disabled" as const, toolCount: null, toolNames: [], error: null, checkedAt: now() })
   }
 
   return Effect.tryPromise({
-    try: (signal) => connectAndCount(entry.server.name, entry.launch, cwd, signal),
+    try: (signal) => connectAndList(entry.server.name, entry.launch, cwd, signal),
     catch: (cause) => ({ message: message(cause), unauthorized: isUnauthorized(cause) })
   }).pipe(
     Effect.timeoutFail({
@@ -153,10 +153,11 @@ export const probeServer = (
         unauthorized: false
       })
     }),
-    Effect.map((toolCount) => ({
+    Effect.map((toolNames) => ({
       ...base,
       state: "connected" as const,
-      toolCount,
+      toolCount: toolNames.length,
+      toolNames,
       error: null,
       checkedAt: now()
     })),
@@ -167,6 +168,7 @@ export const probeServer = (
           ? "needs-auth" as const
           : "failed" as const,
         toolCount: null,
+        toolNames: [],
         error: error.message,
         checkedAt: now()
       })

@@ -28,6 +28,8 @@ const props = (over: Partial<McpSettingsProps> = {}): McpSettingsProps => ({
   probe: () => {},
   setEnabled: async () => {},
   setAuth: async () => {},
+  setDisabledTools: async () => {},
+  signOut: async () => {},
   remove: async () => {},
   add: async () => {},
   setApiKey: async () => {},
@@ -55,6 +57,7 @@ describe("McpSettings", () => {
       scope: "user",
       state: "connected",
       toolCount: 12,
+      toolNames: [],
       error: null,
       checkedAt: "2026-10-12T00:00:00.000Z"
     }
@@ -93,6 +96,7 @@ describe("McpSettings", () => {
       scope: "user",
       state: "failed",
       toolCount: null,
+      toolNames: [],
       error: "Connection timeout",
       checkedAt: "2026-10-12T00:00:00.000Z"
     }

@@ -106,8 +106,8 @@ describe("mcpNameError", () => {
 })
 
 describe("applyImportResolutions", () => {
-  const entry: McpConfigEntry = { type: "local", command: ["node", "x.mjs"], environment: {}, enabled: true }
-  const other: McpConfigEntry = { type: "local", command: ["node", "y.mjs"], environment: {}, enabled: true }
+  const entry: McpConfigEntry = { type: "local", command: ["node", "x.mjs"], environment: {}, enabled: true, disabledTools: [] }
+  const other: McpConfigEntry = { type: "local", command: ["node", "y.mjs"], environment: {}, enabled: true, disabledTools: [] }
 
   it("defaults a conflict with no resolution to keep-mine (skip)", () => {
     const result = applyImportResolutions([{ name: "linear", entry }], new Set(["linear"]), {})

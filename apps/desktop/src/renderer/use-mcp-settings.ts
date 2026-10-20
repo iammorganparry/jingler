@@ -51,6 +51,14 @@ export function useMcpSettings(): McpSettingsProps {
       await rpc.mcpSetAuth(name, auth)
       await invalidate()
     },
+    setDisabledTools: async (name, disabledTools) => {
+      await rpc.mcpSetDisabledTools(name, disabledTools)
+      await invalidate()
+    },
+    signOut: async (name) => {
+      await rpc.mcpSignOut(name)
+      await invalidate()
+    },
     remove: async (name: string) => {
       await rpc.mcpRemove(name)
       await invalidate()

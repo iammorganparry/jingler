@@ -306,7 +306,7 @@ const discoverTools = (
         const result = yield* client.listTools(cursor)
         tools.push(...result.tools)
         cursor = result.nextCursor
-        if (cursor === undefined) return tools
+        if (cursor === undefined) return filterDisabledTools(server, tools)
       }
       return yield* clientFailure(
         server.name,
@@ -314,6 +314,14 @@ const discoverTools = (
       )
     })
   )
+
+/** Operator-disabled tools never reach the registry — not just the UI. */
+const filterDisabledTools = (server: RuntimeMcpServer, tools: ReadonlyArray<Tool>): ReadonlyArray<Tool> => {
+  const disabled = server.disabledTools
+  return disabled === undefined || disabled.length === 0
+    ? tools
+    : tools.filter((tool) => !disabled.includes(tool.name))
+}
 
 const safeName = (name: string): string =>
   name.replaceAll(/[^a-zA-Z0-9_-]/g, "_")

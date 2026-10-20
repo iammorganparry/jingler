@@ -5798,6 +5798,17 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     McpConfigService.setAuth(name, auth).pipe(
       Effect.mapError((cause) => mcpError(cause.message, cause)),
     ),
+  "Mcp.setDisabledTools": ({ name, disabledTools }) =>
+    McpConfigService.setDisabledTools(name, disabledTools).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.signOut": ({ name }) =>
+    Effect.gen(function* () {
+      const secretStore = yield* SecretStore;
+      yield* McpConfigService.signOut(name, secretStore).pipe(
+        Effect.mapError((cause) => mcpError(cause.message, cause)),
+      );
+    }),
   "Mcp.setApiKey": ({ name, apiKey }) => mcpSetApiKey(name, apiKey),
   "Mcp.startAuthorization": ({ name }) => mcpStartAuthorization(name),
   "Mcp.importCandidates": ({ source, connectors }) =>

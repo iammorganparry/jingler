@@ -15,6 +15,8 @@ export interface RuntimeRemoteMcpServer {
   }
   readonly onUnauthorized?: () => void
   readonly headerEnvironment?: Readonly<Record<string, string>>
+  /** Tool names the operator disabled; the runtime skips registering these. */
+  readonly disabledTools?: ReadonlyArray<string>
 }
 
 /** Secret-bearing stdio attachment. Its executable and environment are target-local. */
@@ -25,6 +27,8 @@ export interface RuntimeStdioMcpServer {
   readonly args: ReadonlyArray<string>
   readonly env: Readonly<Record<string, string>>
   readonly cwd?: string
+  /** Tool names the operator disabled; the runtime skips registering these. */
+  readonly disabledTools?: ReadonlyArray<string>
 }
 
 export type RuntimeMcpServer = RuntimeRemoteMcpServer | RuntimeStdioMcpServer
