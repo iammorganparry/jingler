@@ -200,3 +200,22 @@ test("right-click offers native text and link actions without replacing app menu
   await window.keyboard.press("Escape")
   await cdp.detach()
 })
+
+test("⌘L with a file selection adds exactly one range chip instead of toggling the lane", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    ...selectionApp,
+    seed: ({ repoPath }) => writeFileSync(join(repoPath, "config.ts"), "export const a = 1\nexport const b = 2\nexport const c = 3\n")
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
+  await window.locator('[role="treeitem"][data-item-path="config.ts"]').click()
+  const lineNumbers = window.locator("diffs-container [data-column-number]").filter({ visible: true })
+  await expect(lineNumbers.first()).toBeVisible()
+  await lineNumbers.first().click({ position: { x: 6, y: 6 } })
+  await lineNumbers.nth(1).click({ modifiers: ["Shift"], position: { x: 6, y: 6 } })
+  await window.getByRole("textbox", { name: "config.ts" }).focus()
+  await window.keyboard.press("ControlOrMeta+l")
+  const chip = window.getByRole("button", { name: "Remove config.ts:L1–L2", exact: true })
+  await expect(chip).toHaveCount(1)
+  await expect(window.getByPlaceholder("Message the agent…")).toBeFocused()
+})
