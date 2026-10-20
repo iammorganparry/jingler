@@ -335,6 +335,29 @@ export const configureE2ePiTools: NonNullable<
     registerReviewPauseTool(registry)
   })
 
+/** Fields of a fixture fleet node that vary only by lifecycle phase. */
+const heldFleetNodePhaseFields = (phase: "start" | "settle" | "ask", at: number) => ({
+  status: phase === "ask" ? "needs-attention" as const : phase === "start" ? "running" as const : "completed" as const,
+  health: phase === "settle" ? "disconnected" as const : "connected" as const,
+  terminal: phase === "start" || phase === "ask" ? null : {
+    reason: "completed" as const,
+    summary: "Fixture child completed",
+    at,
+    retryable: false
+  },
+  currentTool: phase === "settle" ? null : "workspace_read_file",
+  completedAt: phase === "settle" ? at : null,
+  usage: {
+    inputTokens: phase === "settle" ? 120 : 0,
+    outputTokens: phase === "settle" ? 40 : 0,
+    totalTokens: phase === "settle" ? 160 : 0,
+    costUsd: 0,
+    durationMs: phase === "settle" ? 10 : 0,
+    toolCalls: phase === "settle" ? 1 : 0
+  },
+  isSettled: phase === "settle"
+})
+
 const heldFleetNode = (
   id: string,
   agent: string,
@@ -343,8 +366,10 @@ const heldFleetNode = (
   runId: string,
   parentRuntimeSessionId: string,
   at: number
-): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => ({
-  _tag: "SubagentFleetChanged",
+): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => {
+  const phaseFields = heldFleetNodePhaseFields(phase, at)
+  return {
+    _tag: "SubagentFleetChanged",
   event: {
     _tag: "Upsert",
     version: 2,
@@ -363,32 +388,20 @@ const heldFleetNode = (
       agent,
       task,
       model: "e2e/pi-fixture:high",
-      status: phase === "ask" ? "needs-attention" : phase === "start" ? "running" : "completed",
-      health: phase === "settle" ? "disconnected" : "connected",
+      status: phaseFields.status,
+      health: phaseFields.health,
       phase: null,
       blocking: null,
-      terminal: phase === "start" || phase === "ask" ? null : {
-        reason: "completed",
-        summary: "Fixture child completed",
-        at,
-        retryable: false
-      },
+      terminal: phaseFields.terminal,
       background: false,
       sessionFile: null,
-      currentTool: phase === "settle" ? null : "workspace_read_file",
+      currentTool: phaseFields.currentTool,
       startedAt: E2E_FLEET_EPOCH + 10,
       updatedAt: at,
-      completedAt: phase === "settle" ? at : null,
-      usage: {
-        inputTokens: phase === "settle" ? 120 : 0,
-        outputTokens: phase === "settle" ? 40 : 0,
-        totalTokens: phase === "settle" ? 160 : 0,
-        costUsd: 0,
-        durationMs: phase === "settle" ? 10 : 0,
-        toolCalls: phase === "settle" ? 1 : 0
-      },
-      artifacts: phase === "settle"
-        ? [{ kind: "report", path: `reports/${id}.md`, label: "Report" }]
+      completedAt: phaseFields.completedAt,
+      usage: phaseFields.usage,
+      artifacts: phaseFields.isSettled
+        ? [{ kind: "report" as const, path: `reports/${id}.md`, label: "Report" }]
         : [],
       // [[held-subagent-asks]]: the real path is the child sending a SubagentAttentionRequest
       // (contact_supervisor need_decision/interview_request) that lands here via the fleet protocol.
@@ -405,4 +418,5 @@ const heldFleetNode = (
       prNumber: null
     }
   }
-})
+  }
+}
