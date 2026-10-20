@@ -32,8 +32,8 @@ describe("McpImportPrompt", () => {
     fireEvent.click(screen.getByText("Import 2 servers"))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(apply.mock.calls).toEqual([
-      ["claude", ["linear"]],
-      ["codex", ["docs"]]
+      ["claude", ["linear"], {}],
+      ["codex", ["docs"], {}]
     ])
   })
 

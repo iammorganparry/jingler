@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { expect, test } from "./fixtures.js"
 
 test("presents discovered MCP servers with a readable stacked header", async ({ launchApp }) => {
@@ -50,4 +50,30 @@ test("flags a discovered server that clashes with an existing one with a read-on
   await expect(dialog.getByRole("tab", { name: "Keep mine" })).toBeVisible()
   await expect(dialog.getByRole("tab", { name: "Replace" })).toBeVisible()
   await expect(dialog.getByRole("tab", { name: "Keep both" })).toBeVisible()
+})
+
+test("imports a conflicting server as a new name when the operator picks Keep both", async ({ launchApp }) => {
+  const { window, home } = await launchApp({
+    configured: true,
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: { linear: { type: "local", command: ["node", "existing.mjs"] } }
+      }))
+      writeFileSync(join(home, ".claude.json"), JSON.stringify({
+        mcpServers: { linear: { command: "node", args: ["docs-server.mjs"] } }
+      }))
+    }
+  })
+
+  const dialog = window.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole("tab", { name: "Keep both" }).click()
+  await dialog.getByRole("button", { name: /Import \d server/ }).click()
+  await expect(dialog).toBeHidden()
+
+  const mcpJson = JSON.parse(readFileSync(join(home, "jingler", "mcp.json"), "utf8"))
+  expect(mcpJson.mcp["linear"]).toMatchObject({ command: ["node", "existing.mjs"] })
+  expect(mcpJson.mcp["linear-2"]).toMatchObject({ command: ["node", "docs-server.mjs"] })
 })
