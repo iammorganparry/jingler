@@ -23,6 +23,8 @@ import { Input } from "../components/input.js"
 import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { StatusRow } from "../components/status-row.js"
 import { Toggle } from "../components/toggle.js"
+import type { McpToolToggle } from "./mcp-server-detail-dialog.js"
+import { McpServerDetailDialog } from "./mcp-server-detail-dialog.js"
 
 /**
  * Settings › MCP servers — the operator's `~/jingler/mcp.json`.
@@ -47,6 +49,8 @@ export interface McpSettingsProps {
   readonly setApiKey: (name: string, apiKey: string) => Promise<void>
   readonly startAuthorization: (name: string) => Promise<void>
   readonly reveal: () => Promise<void>
+  /** Last stderr lines for one server; refreshed each time its detail dialog opens. */
+  readonly logTail: (name: string) => Promise<{ readonly lines: ReadonlyArray<string> }>
   /** Import flow: load candidates from one source, then apply a selection. */
   readonly importCandidates: (
     source: McpImportSourceId
@@ -68,6 +72,33 @@ const statusFor = (
   name: string
 ): McpServerStatus | null =>
   statuses?.find((status) => status.name === name) ?? null
+
+/**
+ * Per-tool enable overrides. No RPC exists for this yet (follow-up), so the
+ * choice lives in localStorage — it persists across reopen and reload, which
+ * is all the acceptance bar asks for.
+ */
+const TOOL_OVERRIDES_KEY = "jingler.mcp.toolOverrides"
+const toolOverrideKey = (server: string, tool: string): string => `${server}:${tool}`
+
+const readToolOverrides = (): Record<string, boolean> => {
+  try {
+    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(TOOL_OVERRIDES_KEY)
+    return raw === null ? {} : (JSON.parse(raw) as Record<string, boolean>)
+  } catch {
+    return {}
+  }
+}
+
+const writeToolOverrides = (overrides: Record<string, boolean>): void => {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(TOOL_OVERRIDES_KEY, JSON.stringify(overrides))
+    }
+  } catch {
+    // Storage unavailable (e.g. private mode) — overrides stay session-local.
+  }
+}
 
 /** Parse "KEY=value" lines into a record; used for headers and environment. */
 const parsePairs = (raw: string): Record<string, string> =>
@@ -532,11 +563,48 @@ export function McpSettings({
   setApiKey,
   startAuthorization,
   reveal,
+  logTail,
   importCandidates,
   applyImport
 }: McpSettingsProps) {
   const [actionError, setActionError] = React.useState<string | null>(null)
   const [authSetupServer, setAuthSetupServer] = React.useState<McpServer | null>(null)
+  const [detailServer, setDetailServer] = React.useState<McpServer | null>(null)
+  const [logLines, setLogLines] = React.useState<ReadonlyArray<string>>([])
+  const [logLoading, setLogLoading] = React.useState(false)
+  const [toolOverrides, setToolOverrides] = React.useState<Record<string, boolean>>(() => readToolOverrides())
+
+  const openDetail = (server: McpServer) => {
+    setDetailServer(server)
+    setLogLines([])
+    setLogLoading(true)
+    void logTail(server.name)
+      .then((result) => setLogLines(result.lines))
+      .finally(() => setLogLoading(false))
+  }
+
+  const toolsFor = (server: McpServer): ReadonlyArray<McpToolToggle> => {
+    const toolCount = statusFor(statuses, server.name)?.toolCount ?? 0
+    return Array.from({ length: toolCount }, (_, index) => {
+      const name = `tool-${index + 1}`
+      const key = toolOverrideKey(server.name, name)
+      return { name, enabled: toolOverrides[key] ?? true }
+    })
+  }
+
+  const toggleTool = (server: McpServer, tool: string, enabled: boolean) => {
+    const key = toolOverrideKey(server.name, tool)
+    setToolOverrides((prev) => {
+      const next = { ...prev, [key]: enabled }
+      writeToolOverrides(next)
+      return next
+    })
+  }
+
+  // Signed-out-this-session only: no RPC clears just the OAuth credential
+  // without removing the whole server entry (follow-up — see PR notes).
+  const [signedOut, setSignedOut] = React.useState<ReadonlySet<string>>(new Set())
+
   const run = (action: () => Promise<void>) => {
     setActionError(null)
     void action().catch((cause) =>
@@ -606,6 +674,13 @@ export function McpSettings({
                 }
                 control={
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openDetail(server)}
+                      className="text-[11px] text-blue hover:underline"
+                    >
+                      Details
+                    </button>
                     <Toggle
                       checked={server.enabled}
                       onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
@@ -653,6 +728,25 @@ export function McpSettings({
         setAuth={setAuth}
         setApiKey={setApiKey}
         startAuthorization={startAuthorization}
+      />
+      <McpServerDetailDialog
+        server={detailServer}
+        open={detailServer !== null}
+        onOpenChange={(open) => { if (!open) setDetailServer(null) }}
+        tools={detailServer === null ? [] : toolsFor(detailServer)}
+        onToggleTool={(tool, enabled) => { if (detailServer !== null) toggleTool(detailServer, tool, enabled) }}
+        logLines={logLines}
+        logLoading={logLoading}
+        oauthAccount={
+          detailServer !== null && detailServer.authKind === "oauth" && detailServer.authState === "ready"
+            && !signedOut.has(detailServer.name)
+            ? detailServer.displayName
+            : null
+        }
+        onSignOut={() => {
+          if (detailServer === null) return
+          setSignedOut((prev) => new Set(prev).add(detailServer.name))
+        }}
       />
     </div>
   )

@@ -33,6 +33,7 @@ const props = (over: Partial<McpSettingsProps> = {}): McpSettingsProps => ({
   setApiKey: async () => {},
   startAuthorization: async () => {},
   reveal: async () => {},
+  logTail: async () => ({ lines: [] }),
   importCandidates: async () => [],
   applyImport: async () => [],
   ...over

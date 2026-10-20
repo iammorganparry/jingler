@@ -64,6 +64,7 @@ export function useMcpSettings(): McpSettingsProps {
       await invalidate()
     },
     reveal: () => rpc.mcpReveal(),
+    logTail: (name: string) => rpc.mcpLogTail(name),
     importCandidates: (source: McpImportSourceId) => rpc.mcpImportCandidates(source),
     applyImport: async (source: McpImportSourceId, names: ReadonlyArray<string>) => {
       const imported = await rpc.mcpApplyImport(source, names)
