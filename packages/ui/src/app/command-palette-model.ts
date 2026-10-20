@@ -323,7 +323,7 @@ export const needsYouPaletteItems = (
       kind: "action" as const,
       label: "Go to next workspace that needs you",
       group,
-      hint: "⌘⇧N",
+      hint: "⌘J",
       run: () => {
         const next = nextNeedsYouSession(blocked, currentId)
         if (next) open(next)
@@ -527,16 +527,12 @@ export const matchFileQuickOpenChord = (
   return e.code === "KeyP" || e.key.toLowerCase() === "p"
 }
 
-/**
- * Global binding for "Go to next workspace that needs you" — ⌘⇧N on macOS,
- * Ctrl+⇧N elsewhere. Provisional: the redesign board draws this chord as a
- * placeholder (#507, board 10+), not a confirmed pick — expect it to move.
- */
+/** Global binding for "Go to next workspace that needs you" — ⌘J on macOS, Ctrl+J elsewhere (#507). */
 export const matchNeedsYouChord = (
   e: PaletteChord,
   isMac: boolean = isMacPlatform()
 ): boolean => {
-  if (e.defaultPrevented || e.altKey || !e.shiftKey) return false
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return false
   if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
-  return e.code === "KeyN" || e.key.toLowerCase() === "n"
+  return e.code === "KeyJ" || e.key.toLowerCase() === "j"
 }

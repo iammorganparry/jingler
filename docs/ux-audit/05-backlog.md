@@ -1706,7 +1706,7 @@ Open engineering questions (not product decisions) are written inline as "Open q
 - **Type:** feature · **Board(s):** 10, 10+ · **Spec:** §5f · **Gaps:** F4-04 · **Source:** `ui:app/command-palette-model.ts:31`, `ui:app/command-palette.tsx:50`
 - **Scope:**
   - Pinned first section "Needs you (3)" listing blocked workspaces.
-  - Action "Go to next workspace that needs you" with a shortcut. **Q:** shortcut not decided (⌘⇧N is a placeholder drawn on board 10+).
+  - Action "Go to next workspace that needs you" with a shortcut. **Shortcut:** ⌘J (decided: ⌘J, #507).
 - **Acceptance:**
   - [ ] The action cycles blocked workspaces in order and opens each question.
 - **Tests:** extend `ui:app/command-palette-model.test.ts`; e2e extend `command-palette.spec.ts`.
