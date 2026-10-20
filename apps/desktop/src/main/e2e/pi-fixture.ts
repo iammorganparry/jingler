@@ -283,6 +283,27 @@ const heldUnsteeredResponse = (
   )
 }
 
+/** [[held-subagent-asks]]: one held child sends a SubagentAttentionRequest (the real
+ * contact_supervisor/interview_request path) and sits in `needs-attention` — feeds the
+ * sidebar needs-you count, the latest turn's amber rail tick, and the subagent QuestionCard. */
+const heldSubagentAskResponse = (
+  context: PiContext
+): ReturnType<typeof fauxAssistantMessage> | null => {
+  const prompts = operatorText(context)
+  if (!prompts.some((prompt) => prompt.includes("[[held-subagent-asks]]"))) return null
+  const resultsAfterLatestPrompt = recentToolResultCount(context, E2E_HELD_SUBAGENTS_TOOL)
+  if (resultsAfterLatestPrompt === 0) {
+    return fauxAssistantMessage(
+      [
+        fauxText("Delegated to two agents."),
+        fauxToolCall(E2E_HELD_SUBAGENTS_TOOL, { phase: "ask" }, { id: "held-subagent-asks-0" })
+      ],
+      { stopReason: "toolUse" }
+    )
+  }
+  return fauxAssistantMessage("One agent is waiting for your input.")
+}
+
 const heldSubagentsResponse = (
   context: PiContext
 ): ReturnType<typeof fauxAssistantMessage> | null => {
@@ -952,6 +973,8 @@ function scenarioFixtureResponse(context: PiContext) {
   if (fileBrowser !== null) return fileBrowser
   const supervisorSubagent = supervisorSubagentResponse(context)
   if (supervisorSubagent !== null) return supervisorSubagent
+  const heldSubagentAsk = heldSubagentAskResponse(context)
+  if (heldSubagentAsk !== null) return heldSubagentAsk
   const heldSubagents = heldSubagentsResponse(context)
   if (heldSubagents !== null) return heldSubagents
   if (operatorText(context).some((text) => text.includes("adversarial code reviewer"))) {

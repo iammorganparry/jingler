@@ -224,16 +224,20 @@ const heldSubagentIds = (runId: string) => ({
 
 const heldSubagentEvents = (
   runId: string,
-  phase: "start" | "settle",
+  phase: "start" | "settle" | "ask",
   direct: boolean
 ): ReadonlyArray<StreamEvent> => {
   const { first, second } = heldSubagentIds(runId)
   const parentRuntimeSessionId = `e2e-parent-${runId}`
   // Later than any real fleet snapshot, so the fixture's parent id stays the latest one
   // (parentRuntimeSessionIdFromFleetEvents picks by occurredAt) and its nodes aren't filtered out.
-  const at = E2E_FLEET_EPOCH + (phase === "start" ? 10 : 20)
+  const at = E2E_FLEET_EPOCH + (phase === "start" ? 10 : phase === "ask" ? 15 : 20)
   const fleetNode = (id: string, agent: string, task: string) =>
     heldFleetNode(id, agent, task, phase, runId, parentRuntimeSessionId, at)
+
+  // [[held-subagent-asks]]: only the first child asks — mirrors a real subagent sending a
+  // SubagentAttentionRequest (contact_supervisor/interview_request) while its sibling runs on.
+  if (phase === "ask") return [fleetNode(first, "Explore", "Survey the tab bar")]
 
   return direct
     ? [fleetNode(first, "Worker", "Inspect direct delegation")]
@@ -253,7 +257,7 @@ const registerHeldSubagentsTool = (
     version: "1",
     description: "Drive deterministic foreground sub-agent lifecycle events in Electron e2e.",
     input: Schema.Struct({
-      phase: Schema.Literal("start", "wait", "settle", "direct-start", "direct-settle")
+      phase: Schema.Literal("start", "wait", "settle", "direct-start", "direct-settle", "ask")
     }),
     risk: "read",
     roles: ["conversation"],
@@ -265,7 +269,9 @@ const registerHeldSubagentsTool = (
     execute: ({ phase }, toolContext) =>
       Effect.runPromise(
         Effect.gen(function* () {
-          if (phase !== "wait") {
+          if (phase === "ask") {
+            yield* publishAll(context, heldSubagentEvents(spec.runId, "ask", false))
+          } else if (phase !== "wait") {
             const direct = phase.startsWith("direct-")
             yield* publishAll(
               context,
@@ -329,16 +335,41 @@ export const configureE2ePiTools: NonNullable<
     registerReviewPauseTool(registry)
   })
 
+/** Fields of a fixture fleet node that vary only by lifecycle phase. */
+const heldFleetNodePhaseFields = (phase: "start" | "settle" | "ask", at: number) => ({
+  status: phase === "ask" ? "needs-attention" as const : phase === "start" ? "running" as const : "completed" as const,
+  health: phase === "settle" ? "disconnected" as const : "connected" as const,
+  terminal: phase === "start" || phase === "ask" ? null : {
+    reason: "completed" as const,
+    summary: "Fixture child completed",
+    at,
+    retryable: false
+  },
+  currentTool: phase === "settle" ? null : "workspace_read_file",
+  completedAt: phase === "settle" ? at : null,
+  usage: {
+    inputTokens: phase === "settle" ? 120 : 0,
+    outputTokens: phase === "settle" ? 40 : 0,
+    totalTokens: phase === "settle" ? 160 : 0,
+    costUsd: 0,
+    durationMs: phase === "settle" ? 10 : 0,
+    toolCalls: phase === "settle" ? 1 : 0
+  },
+  isSettled: phase === "settle"
+})
+
 const heldFleetNode = (
   id: string,
   agent: string,
   task: string,
-  phase: "start" | "settle",
+  phase: "start" | "settle" | "ask",
   runId: string,
   parentRuntimeSessionId: string,
   at: number
-): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => ({
-  _tag: "SubagentFleetChanged",
+): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => {
+  const phaseFields = heldFleetNodePhaseFields(phase, at)
+  return {
+    _tag: "SubagentFleetChanged",
   event: {
     _tag: "Upsert",
     version: 2,
@@ -350,43 +381,42 @@ const heldFleetNode = (
       orchestrationRunId: runId,
       nodeKind: "agent",
       registryRevision: at,
-      childSequence: phase === "start" ? 1 : 2,
+      childSequence: phase === "settle" ? 2 : 1,
       runId: id,
       parentId: null,
       parentRuntimeSessionId,
       agent,
       task,
       model: "e2e/pi-fixture:high",
-      status: phase === "start" ? "running" : "completed",
-      health: phase === "start" ? "connected" : "disconnected",
+      status: phaseFields.status,
+      health: phaseFields.health,
       phase: null,
       blocking: null,
-      terminal: phase === "start" ? null : {
-        reason: "completed",
-        summary: "Fixture child completed",
-        at,
-        retryable: false
-      },
+      terminal: phaseFields.terminal,
       background: false,
       sessionFile: null,
-      currentTool: phase === "start" ? "workspace_read_file" : null,
+      currentTool: phaseFields.currentTool,
       startedAt: E2E_FLEET_EPOCH + 10,
       updatedAt: at,
-      completedAt: phase === "start" ? null : at,
-      usage: {
-        inputTokens: phase === "start" ? 0 : 120,
-        outputTokens: phase === "start" ? 0 : 40,
-        totalTokens: phase === "start" ? 0 : 160,
-        costUsd: 0,
-        durationMs: phase === "start" ? 0 : 10,
-        toolCalls: phase === "start" ? 0 : 1
-      },
-      artifacts: phase === "start"
-        ? []
-        : [{ kind: "report", path: `reports/${id}.md`, label: "Report" }],
-      attention: null,
+      completedAt: phaseFields.completedAt,
+      usage: phaseFields.usage,
+      artifacts: phaseFields.isSettled
+        ? [{ kind: "report" as const, path: `reports/${id}.md`, label: "Report" }]
+        : [],
+      // [[held-subagent-asks]]: the real path is the child sending a SubagentAttentionRequest
+      // (contact_supervisor need_decision/interview_request) that lands here via the fleet protocol.
+      attention: phase === "ask"
+        ? {
+            requestId: `attention-${id}`,
+            reason: "need_decision",
+            message: "Should I include the archived tabs in the tab bar survey?",
+            requestedAt: at,
+            deadlineAt: null
+          }
+        : null,
       workspace: null,
       prNumber: null
     }
   }
-})
+  }
+}
