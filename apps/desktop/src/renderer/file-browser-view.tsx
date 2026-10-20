@@ -511,9 +511,11 @@ function fileBrowserShortcut(rootRef: import("react").RefObject<HTMLDivElement |
     if (!containsFileShortcutTarget(root, event.target)) return
     if (!isFileShortcutModifier(event)) return
     if (!event.shiftKey &&
-      isFileShortcutKey(event, "j") &&
+      (isFileShortcutKey(event, "j") || isFileShortcutKey(event, "l")) &&
       canSendSelection) {
       event.preventDefault()
+      // ⌘L also toggles the chat lane in the session pane; stop that when a selection is sent.
+      event.stopPropagation()
       sendSelectionToChat()
       return
     }
@@ -1289,6 +1291,6 @@ function discardActionLabel(discard: NonNullable<FileBrowserController["pendingD
   return "reload this file"
 }
 
-function isFileShortcutKey(event: KeyboardEvent, key: "j" | "s"): boolean {
+function isFileShortcutKey(event: KeyboardEvent, key: "j" | "l" | "s"): boolean {
   return event.code === `Key${key.toUpperCase()}` || event.key.toLowerCase() === key
 }
