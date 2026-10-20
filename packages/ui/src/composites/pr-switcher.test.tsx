@@ -14,6 +14,10 @@ const nav = (over: Partial<PrStackNav> = {}): PrStackNav => ({
   selected: 481,
   onSelect: () => {},
   onStep: () => {},
+  mergeState: "idle",
+  merged: 0,
+  mergeError: null,
+  onMergeStack: () => {},
   ...over
 })
 

@@ -65,4 +65,33 @@ describe("prStackMachine merge progress", () => {
     expect(actor.getSnapshot().context).toMatchObject({ merged: 0, mergeError: null })
     expect(actor.getSnapshot().value).toBe("merging")
   })
+
+  test("a failing layer stops the run: later LAYER_MERGED events are ignored once failed", () => {
+    const actor = start()
+    actor.send({ type: "MERGE_STACK" })
+    actor.send({ type: "LAYER_MERGED" }) // base layer merges fine
+    actor.send({ type: "MERGE_FAILED", message: "conflict on #481" })
+    expect(actor.getSnapshot().value).toBe("failed")
+    // A driver that (incorrectly) kept going past the failure must not move progress.
+    actor.send({ type: "LAYER_MERGED" })
+    expect(actor.getSnapshot().context.merged).toBe(1)
+    expect(actor.getSnapshot().value).toBe("failed")
+  })
+
+  test("merges base-up: progress advances one layer at a time in stack order", () => {
+    // The driver (use-pr-stack.ts) walks `numbers`, bottom layer first, sending one
+    // LAYER_MERGED per successful RPC — this asserts the machine counts each step
+    // rather than jumping straight to "merged".
+    const actor = start([480, 481, 482])
+    actor.send({ type: "MERGE_STACK" })
+    actor.send({ type: "LAYER_MERGED" }) // #480, the base
+    expect(actor.getSnapshot().context.merged).toBe(1)
+    expect(actor.getSnapshot().value).toBe("merging")
+    actor.send({ type: "LAYER_MERGED" }) // #481
+    expect(actor.getSnapshot().context.merged).toBe(2)
+    expect(actor.getSnapshot().value).toBe("merging")
+    actor.send({ type: "LAYER_MERGED" }) // #482, the top
+    expect(actor.getSnapshot().context.merged).toBe(3)
+    expect(actor.getSnapshot().value).toBe("merged")
+  })
 })

@@ -98,11 +98,13 @@ test("PR stack rail orders layers base-up and ⌥] moves to the next PR with Che
   await window.getByTestId("header-link-pr").click()
   await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
 
-  // Rail lists the layers bottom (base) first.
+  // Rail lists the layers bottom (base) first. Scoped to layer rows, not the
+  // "Merge stack" CTA below them, which is also a button on this rail.
   const rail = window.getByTestId("pr-stack-rail")
-  await expect(rail.getByRole("button")).toHaveCount(3)
-  await expect(rail.getByRole("button").nth(0)).toContainText("#480")
-  await expect(rail.getByRole("button").nth(2)).toContainText("#482")
+  const layerButtons = rail.locator("[data-testid^='pr-stack-layer-']")
+  await expect(layerButtons).toHaveCount(3)
+  await expect(layerButtons.nth(0)).toContainText("#480")
+  await expect(layerButtons.nth(2)).toContainText("#482")
 
   // The session's own PR (top of the stack) is selected first.
   await expect(window.getByTestId("pr-switcher")).toContainText("PR #482")
@@ -118,4 +120,43 @@ test("PR stack rail orders layers base-up and ⌥] moves to the next PR with Che
   await window.keyboard.press("Alt+BracketRight")
   await expect(window.getByTestId("pr-switcher")).toContainText("PR #481")
   await expect(window.getByText("check-481").first()).toBeVisible()
+})
+
+test("Merge stack CTA merges layers base-up and shows progress", async ({ launchApp }) => {
+  const pr = (number: number, headRefName: string, baseRefName: string, check: string) => ({
+    number, title: `Layer ${number}`, headRefName, baseRefName, author: { login: "e2e-user" },
+    checks: [{ name: check, conclusion: "success" }]
+  })
+  const { window, githubServer } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{
+      id: "s_merge_stack", repo: "widget", githubSlug: "acme/widget", branch: "stack/ui", title: "Stack session", status: "idle",
+      diff: { added: 0, removed: 0 }, prNumber: 482, costUsd: 0, tokens: 0, updatedAt: "2026-10-12T10:00:00.000Z",
+      prs: [
+        { number: 480, branch: "stack/model", base: "main" },
+        { number: 481, branch: "stack/api", base: "stack/model" },
+        { number: 482, branch: "stack/ui", base: "stack/api" }
+      ],
+      githubInstallationId: "101", githubRepositoryId: "301", worktreePath: context.repoPath
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [
+        pr(480, "stack/model", "main", "check-480"),
+        pr(481, "stack/api", "stack/model", "check-481"),
+        pr(482, "stack/ui", "stack/api", "check-482")
+      ]
+    }
+  })
+  await window.getByTestId("session-row-s_merge_stack").click()
+  await window.getByTestId("header-link-pr").click()
+  await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
+
+  await window.getByTestId("merge-stack-cta").click()
+
+  // The run merges base-up and the fake server merges every layer.
+  await expect.poll(() => githubServer.operations.filter((op) => op.startsWith("pr merge")).length, { timeout: 15_000 }).toBe(3)
+  await expect(window.getByTestId("merge-stack-cta")).toHaveText("Merge stack")
 })
