@@ -201,9 +201,10 @@ test("reconnects a restored subscription whose encrypted credential is missing",
     ),
   ).toBeVisible();
 
-  await launched.window
-    .getByRole("button", { name: "Reconnect in browser" })
-    .click();
+  await launched.window.getByRole("button", { name: "Reconnect", exact: true }).click();
+  const sheet = launched.window.getByRole("dialog");
+  await expect(sheet.getByRole("button", { name: "Use device code" })).toBeVisible();
+  await sheet.getByRole("button", { name: "Open browser" }).click();
 
   await expect(
     launched.window.getByText(SUBSCRIPTION_BILLING),
