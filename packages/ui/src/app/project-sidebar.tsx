@@ -194,6 +194,7 @@ export function ProjectSidebar({
   sessions,
   activeProjectId,
   liveActivity,
+  subagentAttentionCounts,
   projectOwners,
   loading = false,
   onSelect,
@@ -207,6 +208,8 @@ export function ProjectSidebar({
   sessions: ReadonlyArray<Session>
   activeProjectId: string
   liveActivity?: Readonly<Record<string, SessionActivity>>
+  /** Count of a session's subagent fleet nodes with a pending attention request (e.g. a child's question). */
+  subagentAttentionCounts?: Readonly<Record<string, number>>
   projectOwners?: Readonly<Record<string, string>>
   loading?: boolean
   onSelect: (projectId: string) => void
@@ -263,7 +266,8 @@ export function ProjectSidebar({
                   ["running", "thinking"].includes(displayStatusOf(liveActivity?.[session.id], session.status))
                 ).length}
                 needsYouCount={projectSessions.filter((session) =>
-                  NEEDS_YOU_KINDS.has(liveActivity?.[session.id]?.kind ?? "")
+                  NEEDS_YOU_KINDS.has(liveActivity?.[session.id]?.kind ?? "") ||
+                  (subagentAttentionCounts?.[session.id] ?? 0) > 0
                 ).length}
                 onSelect={() => onSelect(project.id)}
                 onOpenSettings={

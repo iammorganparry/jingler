@@ -24,6 +24,7 @@ import type { ToastInput } from "@jingler/ui"
 import {
   agentFileActivityOf,
   clampFontScale,
+  countNodesAwaitingAttention,
   piEndpointId,
   plannotatorProjectionToPlanDocument
 } from "@jingler/core"
@@ -1045,6 +1046,7 @@ export function ConversationPane({
         <SubagentEntryContext.Provider value={subagentEntry}>
         {renderMainConversation({
                 convo,
+                subagentNeedsAttention: countNodesAwaitingAttention(fleet.nodes) > 0,
                 addLocalMcp: localMcpConfig.add,
                 mcpServers: localMcpConfig.servers,
                 onSetMcpApiKey: localMcpConfig.setApiKey,
@@ -1222,6 +1224,7 @@ const availableRetryPrompt = (
 
 function renderMainConversation({
   convo,
+  subagentNeedsAttention,
   addLocalMcp,
   mcpServers,
   onSetMcpApiKey,
@@ -1262,6 +1265,8 @@ function renderMainConversation({
   onFilterChanges
 }: {
   convo: Conversation;
+  /** The active chat's subagent fleet has a pending attention request — lights the latest turn's rail tick amber. */
+  subagentNeedsAttention: boolean;
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
   mcpServers: ReadonlyArray<McpServer>;
   onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
@@ -1307,6 +1312,7 @@ function renderMainConversation({
     loadingHistory={convo.loadingHistory}
     onLoadEarlier={convo.loadOlder}
     mode={convo.mode}
+    subagentNeedsAttention={subagentNeedsAttention}
     skills={convo.skills}
     files={convo.files}
     onAddMcp={addLocalMcp}

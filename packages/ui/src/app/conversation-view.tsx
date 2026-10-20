@@ -142,10 +142,11 @@ const buildRailItem = (
   userIndex: number,
   turnCount: number,
   id: string,
-  checkpointed: boolean
+  checkpointed: boolean,
+  subagentNeedsAttention: boolean
 ): PreviewRailItem => {
   const responseTurn = messages.slice(messageIndex + 1).find(candidate => candidate.role === "assistant")
-  const summary = summarizeTurn(messages.slice(messageIndex + 1, nextUserIndex))
+  const summary = summarizeTurn(messages.slice(messageIndex + 1, nextUserIndex), subagentNeedsAttention)
   return {
     id,
     ...createMessageRailPreview(railText(messages[messageIndex]!), responseTurn ? railText(responseTurn) : ""),
@@ -215,6 +216,8 @@ export interface ConversationViewProps {
   /** Page the next window of older turns onto the front of `messages`. */
   onLoadEarlier?: () => void
   mode: PermissionMode
+  /** The active chat's subagent fleet has a pending attention request (e.g. a child asked a question) — lights the latest turn's rail tick amber. */
+  subagentNeedsAttention?: boolean
   skills?: ReadonlyArray<Skill>
   files?: ReadonlyArray<string>
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>
@@ -396,7 +399,7 @@ const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: Con
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     checkpointCount: 0,
     loadingHistory: false,
@@ -703,7 +706,9 @@ function renderSessionAnalytics() {
         userMessageIndexes.length,
         itemKeys[messageIndex]!,
         // Turn numbers only line up with checkpoints once the whole history is loaded.
-        !hasMoreHistory && userIndex < checkpointCount
+        !hasMoreHistory && userIndex < checkpointCount,
+        // Only the latest turn's fleet is live — a prior turn's subagents are long done.
+        userIndex === userMessageIndexes.length - 1 && subagentNeedsAttention === true
       )
       const old = previous[userIndex]
       if (old !== undefined && sameRailItem(old, item)) return old

@@ -20,15 +20,22 @@ const isBlocked = (part: Message["parts"][number]): boolean =>
 const endedFailed = (lastTool: ToolCall | undefined, lastText: string): boolean =>
   lastTool?.status === "error" || lastText.startsWith("pi prompt failed")
 
-/** What a turn (the assistant messages that answer one user message) did, for the rail tick and hover card. */
-export const summarizeTurn = (turn: ReadonlyArray<Message>): TurnSummary => {
+/**
+ * What a turn (the assistant messages that answer one user message) did, for the rail tick
+ * and hover card. `subagentNeedsAttention` is set only for the LATEST turn, whose live subagent
+ * fleet a question/approval can actually be pending on — completed turns' fleets are done.
+ */
+export const summarizeTurn = (
+  turn: ReadonlyArray<Message>,
+  subagentNeedsAttention?: boolean
+): TurnSummary => {
   const paths = new Set<string>()
   const parts = turn.flatMap(message => message.parts)
   const tools = parts.flatMap(part => (part._tag === "Tool" ? [part.tool] : []))
   const edits = tools.flatMap(toolEdits)
   for (const edit of edits) paths.add(edit.path)
   const lastText = parts.findLast(part => part._tag === "Text")
-  const blocked = parts.some(isBlocked)
+  const blocked = parts.some(isBlocked) || subagentNeedsAttention === true
   const attention = blocked ? "needs-you" : endedFailed(tools.at(-1), lastText?._tag === "Text" ? lastText.text : "") ? "failed" : undefined
   return {
     attention,

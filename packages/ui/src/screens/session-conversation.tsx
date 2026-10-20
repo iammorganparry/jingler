@@ -151,6 +151,8 @@ export interface SessionConversationProps {
   prStates?: Record<string, SessionPrStatus>
   /** Running subagent count per session id, shown on sidebar rows. */
   subagentCounts?: Readonly<Record<string, number>>
+  /** Count of a session's subagent fleet nodes with a pending attention request (e.g. a child's question). */
+  subagentAttentionCounts?: Readonly<Record<string, number>>
   /** GitHub owner login per session, used for repository avatars in the sidebar. */
   repoOwners?: Readonly<Record<string, string>>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
@@ -405,6 +407,7 @@ export function SessionConversation(props: SessionConversationProps) {
           sessions={props.sessions}
           activeProjectId={selectedProjectId}
           liveActivity={props.liveActivity}
+          subagentAttentionCounts={props.subagentAttentionCounts}
           projectOwners={props.projectOwners}
           loading={props.projectsLoading}
           onSelect={selectProject}
