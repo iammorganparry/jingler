@@ -128,36 +128,68 @@ const assertCheckpointSource = (context: NewWorkspaceContext): void => {
 }
 const checkpointCreationFields = (context: NewWorkspaceContext) => context.checkpointSafeMode ? { checkpointSafeMode: true } : {}
 
+/** The project-picker value for Auto: no repo chosen, no checkout until `switch_checkout`. */
+export const AUTO_PROJECT_ID = "auto"
+const isAutoProject = (context: NewWorkspaceContext): boolean => context.projectId === AUTO_PROJECT_ID
+
+const submitAuto = (
+  context: NewWorkspaceContext,
+  canonical: NonNullable<ReturnType<typeof canonicalWorkspaceModel>>,
+  onProgress: (phase: SessionCreationPhase) => void
+): Promise<void> =>
+  context.getDeps().onCreate({
+    ...canonical,
+    ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}),
+    mode: context.mode,
+    reasoning: context.reasoning ?? null
+  }, context.attachments, onProgress)
+
+const commonFields = (
+  context: NewWorkspaceContext,
+  project: NonNullable<NewWorkspaceContext["resolvedProject"]>,
+  canonical: NonNullable<ReturnType<typeof canonicalWorkspaceModel>>
+) => ({
+  projectId: project.id,
+  ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
+  repoPath: project.path,
+  repoName: project.name,
+  ...canonical,
+  mode: context.mode,
+  reasoning: context.reasoning ?? null
+})
+
+const submitFromRemote = (
+  context: NewWorkspaceContext,
+  common: ReturnType<typeof commonFields>,
+  initialPrompt: { initialPrompt?: string },
+  onProgress: (phase: SessionCreationPhase) => void
+): Promise<void> => {
+  if (context.source === "pr") {
+    const createFromPr = context.getDeps().onCreateFromPr
+    if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
+    return createFromPr({ ...common, ...initialPrompt, pr: context.selectedPr }, context.attachments, onProgress)
+  }
+  const createFromIssue = context.getDeps().onCreateFromIssue
+  if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
+  return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
+}
+
 const submitWorkspace = (
   context: NewWorkspaceContext,
   onProgress: (phase: SessionCreationPhase) => void
 ): Promise<void> => {
             assertCheckpointSource(context)
-            const project = context.resolvedProject
-            if (project === null) return Promise.reject(new Error("Select a project."))
             const canonical = canonicalWorkspaceModel(context)
             if (canonical === null) {
               return Promise.reject(new Error("Select a certified provider model."))
             }
-            const common = {
-              projectId: project.id,
-              ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
-              repoPath: project.path,
-              repoName: project.name,
-              ...canonical,
-              mode: context.mode,
-              reasoning: context.reasoning ?? null
-            }
+            if (isAutoProject(context)) return submitAuto(context, canonical, onProgress)
+            const project = context.resolvedProject
+            if (project === null) return Promise.reject(new Error("Select a project."))
+            const common = commonFields(context, project, canonical)
             const initialPrompt = context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}
-            if (context.source === "pr") {
-              const createFromPr = context.getDeps().onCreateFromPr
-              if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
-              return createFromPr({ ...common, ...initialPrompt, pr: context.selectedPr }, context.attachments, onProgress)
-            }
-            if (context.source === "github" || context.source.startsWith("provider:")) {
-              const createFromIssue = context.getDeps().onCreateFromIssue
-              if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
-              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
+            if (context.source !== "blank" && context.source !== "branch") {
+              return submitFromRemote(context, common, initialPrompt, onProgress)
             }
             return context.getDeps().onCreate({
               ...common,
@@ -330,15 +362,18 @@ export const newWorkspaceMachine = setup({
   },
   guards: {
     sourceNeedsLoading: ({ event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source),
-    canSubmit: ({ context }) =>
-      context.resolvedProject !== null &&
-      context.baseBranch.length > 0 &&
-      context.runtimeId !== null &&
-      context.endpointId !== null &&
-      context.providerId !== null &&
-      context.modelId !== null &&
-      (context.source === "pr" ? context.selectedPr !== null :
-        context.source === "github" || context.source.startsWith("provider:") ? context.selectedIssue !== null : true)
+    canSubmit: ({ context }) => {
+      const hasModel = context.runtimeId !== null &&
+        context.endpointId !== null &&
+        context.providerId !== null &&
+        context.modelId !== null
+      if (isAutoProject(context)) return hasModel && context.source === "blank"
+      return context.resolvedProject !== null &&
+        context.baseBranch.length > 0 &&
+        hasModel &&
+        (context.source === "pr" ? context.selectedPr !== null :
+          context.source === "github" || context.source.startsWith("provider:") ? context.selectedIssue !== null : true)
+    }
   },
   actions: {
     seed: assign(({ context, event }) => {
@@ -351,7 +386,10 @@ export const newWorkspaceMachine = setup({
         deps.projects.find((project) => project.availability === "available")
       const provider = providerSelection(deps, "local")
       return {
-        projectId: selected?.id ?? "",
+        // Auto is requested explicitly (never a fallback default): it has no
+        // entry in `deps.projects` to match, so it must be handled ahead of
+        // the "fall back to an available project" lookup above.
+        projectId: requested === AUTO_PROJECT_ID ? AUTO_PROJECT_ID : (selected?.id ?? ""),
         environmentId: "local",
         resolvedProject: null,
         isolation: "worktree" as const,

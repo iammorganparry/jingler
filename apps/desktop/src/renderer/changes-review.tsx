@@ -7,8 +7,8 @@
 import { useCallback, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type { Session } from "@jingler/core"
-import { checkoutsOf, workspaceModeOf } from "@jingler/core"
-import { ChangedFilesExplorer, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
+import { activeCheckoutOf, checkoutsOf, hasNoRepo, workspaceModeOf } from "@jingler/core"
+import { ChangedFilesExplorer, EmptyState, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
 import {
   setReviewFilter,
@@ -148,6 +148,10 @@ export function ChangesExplorerPanel({
   readonly onOpenPath: (path: string) => void
 }) {
   const checkouts = checkoutsOf(session)
+  // An Auto session with nothing attached yet has no repo to diff against.
+  if (checkouts.length < 2 && hasNoRepo(activeCheckoutOf(session))) {
+    return <EmptyState className="py-6" title={<span data-testid="changes-no-repo">No repo</span>} description="The agent hasn't attached a repo yet." />
+  }
   if (checkouts.length < 2) {
     return (
       <CheckoutChangesList

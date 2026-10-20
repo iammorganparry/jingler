@@ -45,6 +45,7 @@ import type { PendingEnvironmentSession } from "../app/environment-session-start
 import { Composer } from "./composer.js";
 import { IssuePickerList } from "./issue-picker-list.js";
 import {
+  AUTO_PROJECT_ID,
   newWorkspaceMachine,
   type NewSessionSource,
   type NewWorkspaceContext,
@@ -382,11 +383,12 @@ function ProjectControls({ context, projectOptions, sourceOptions, checkoutOptio
   checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">>; branchOptions: ReadonlyArray<PickerOption<string>>; loading: boolean; send: WorkspaceSend
 }) {
   const { projectId, source, isolation, selectedPr, baseBranch, environmentId } = context
+  const auto = projectId === AUTO_PROJECT_ID
   return <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
     <div className="min-w-[130px] flex-1"><SearchPicker value={projectId} options={projectOptions} onValueChange={(value) => send({ type: "SET_PROJECT", projectId: value })} ariaLabel="Project" placeholder="Choose project" searchPlaceholder="Search projects…" emptyLabel="No projects match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[340px]" /></div>
     <div className="min-w-[130px] flex-1"><SearchPicker value={source} options={sourceOptions} onValueChange={(value) => send({ type: "SET_SOURCE", source: value })} ariaLabel="Session source" placeholder="Start from" searchPlaceholder="Search session sources…" emptyLabel="No session sources match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[300px]" /></div>
-    <div className="min-w-[130px] flex-1"><SearchPicker value={isolation} options={checkoutOptions} onValueChange={(value) => send({ type: "SET_ISOLATION", isolation: value })} ariaLabel="Checkout" placeholder="Choose checkout" searchPlaceholder="Search checkout modes…" emptyLabel="No checkout modes match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[300px]" /></div>
-    <div className="min-w-[130px] flex-1"><SearchPicker value={selectedBranchOption(source, selectedPr?.headRefName, baseBranch)} options={branchOptions} onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })} ariaLabel="Base branch" placeholder={branchPlaceholder(loading, environmentId === "local")} searchPlaceholder="Search branches…" emptyLabel="No branches match." disabled={loading || source === "pr"} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[320px]" /></div>
+    {!auto && <div className="min-w-[130px] flex-1"><SearchPicker value={isolation} options={checkoutOptions} onValueChange={(value) => send({ type: "SET_ISOLATION", isolation: value })} ariaLabel="Checkout" placeholder="Choose checkout" searchPlaceholder="Search checkout modes…" emptyLabel="No checkout modes match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[300px]" /></div>}
+    {!auto && <div className="min-w-[130px] flex-1"><SearchPicker value={selectedBranchOption(source, selectedPr?.headRefName, baseBranch)} options={branchOptions} onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })} ariaLabel="Base branch" placeholder={branchPlaceholder(loading, environmentId === "local")} searchPlaceholder="Search branches…" emptyLabel="No branches match." disabled={loading || source === "pr"} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[320px]" /></div>}
   </div>
 }
 function WorkspaceComposer({ submitting, context, props, catalog, unavailableReason, controls, selectedProject, send }: {
@@ -572,11 +574,21 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     environmentId === "local" || selectedEnvironment?.kind === "managed",
     props.projects.length > 0,
     modelUnavailableReason,
-    () => contentUnavailableReason(source, selectedPr !== null, selectedIssue !== null, projectId, baseBranch),
+    () => projectId === AUTO_PROJECT_ID
+      ? (source === "blank" ? undefined : "Auto only supports a new task.")
+      : contentUnavailableReason(source, selectedPr !== null, selectedIssue !== null, projectId, baseBranch),
   );
 
-  const projectOptions: ReadonlyArray<PickerOption<string>> =
-    props.projects.map((project) => ({
+  const projectOptions: ReadonlyArray<PickerOption<string>> = [
+    {
+      value: AUTO_PROJECT_ID,
+      label: "Auto",
+      description: "Start with no repo; the agent attaches one as it works",
+      icon: (
+        <SquarePen size={16} className="flex-none text-muted-foreground" aria-hidden />
+      ),
+    },
+    ...props.projects.map((project) => ({
       value: project.id,
       label: project.name,
       description:
@@ -588,7 +600,8 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       icon: (
         <FolderGit2 size={16} className="flex-none text-muted-foreground" aria-hidden />
       ),
-    }));
+    })),
+  ];
   const checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">> = [
     {
       value: "worktree",

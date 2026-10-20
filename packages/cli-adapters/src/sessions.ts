@@ -49,6 +49,7 @@ import { AppPaths } from "./app-paths.js"
 import { displayNameFromCreativeSlug, freeCreativeName } from "./creative-name.js"
 import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
+import { runGit } from "./command.js"
 import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime-identity.js"
 
 const updateWorkspaceReadiness = (session: Session): void => {
@@ -760,6 +761,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             yield* fs
               .makeDirectory(scratchDir, { recursive: true })
               .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create session scratch folder", cause })))
+            // The file-change tracker diffs the cwd with git, so the scratch folder must be a repo.
+            yield* runGit(scratchDir, ["init", "-q"])
             const autoSession: Session = {
               id,
               checkpointExecutionHistory: "clean",

@@ -31,3 +31,12 @@ export const LongBranchAtSidebarWidth: Story = {
     </div>
   )
 }
+
+/** An Auto session before the agent attaches a repo reads "No repo" in place of the repo name. */
+export const NoRepo: Story = {
+  render: () => (
+    <div className="w-[248px]">
+      <SessionRow session={testSession({ id: "auto", title: "Cross-repo audit", repo: "", branch: "", checkouts: [] })} />
+    </div>
+  )
+}

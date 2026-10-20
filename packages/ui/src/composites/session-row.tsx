@@ -3,7 +3,7 @@ import type { KeyboardEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activityLabel, checkoutsOf, displayStatusOf, issueReferenceOf } from "@jingler/core"
+import { activeCheckoutOf, activityLabel, checkoutsOf, displayStatusOf, hasNoRepo, issueReferenceOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
@@ -57,6 +57,8 @@ function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: str
 }
 
 /** A session row for the sidebar list. Active state gets the blue ring. */
+const repoLabelOf = (session: Session): string => (hasNoRepo(activeCheckoutOf(session)) ? "No repo" : session.repo)
+
 export function SessionRow({
   session,
   environment,
@@ -139,9 +141,9 @@ export function SessionRow({
       >
         {hoverActions}
         <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
-          <RepoMark repo={session.repo} owner={repoOwner} />
+          <RepoMark repo={repoLabelOf(session)} owner={repoOwner} />
           <span className="min-w-0 flex-1 truncate font-medium">
-            {session.repo}
+            {repoLabelOf(session)}
             {checkoutsOf(session).length > 1 && (
               <span data-testid={`session-repos-${session.id}`}> · {checkoutsOf(session).length} repos</span>
             )}
