@@ -23,15 +23,10 @@ const meta = {
     server: SERVER,
     open: true,
     onOpenChange: () => {},
-    tools: [
-      { name: "search", enabled: true },
-      { name: "deploy", enabled: false }
-    ],
-    onToggleTool: () => {},
+    toolCount: 6,
     logLines: ["[info] connected", "[info] tools/list ok"],
     logLoading: false,
-    oauthAccount: "morgan@trigify.io",
-    onSignOut: () => {}
+    oauthAccount: "morgan@trigify.io"
   }
 } satisfies Meta<typeof McpServerDetailDialog>
 

@@ -1,6 +1,5 @@
 import type { McpServer } from "@jingler/core"
 import * as React from "react"
-import { Button } from "../components/button.js"
 import {
   Dialog,
   DialogBody,
@@ -9,38 +8,14 @@ import {
   DialogHeader,
   DialogTitle
 } from "../components/dialog.js"
-import { Toggle } from "../components/toggle.js"
 import { McpBrand } from "./mcp-settings.js"
 
-export interface McpToolToggle {
-  readonly name: string
-  readonly enabled: boolean
-}
-
-/** Per-tool enable/disable list for one MCP server. */
-export function ToolList({
-  tools,
-  onToggle
-}: {
-  readonly tools: ReadonlyArray<McpToolToggle>
-  readonly onToggle: (tool: string, enabled: boolean) => void
-}) {
-  if (tools.length === 0) {
-    return <p className="text-[12px] text-dim">No tools reported yet.</p>
-  }
+/** How many tools the server reported on its last connection test; null = not tested or failed. */
+export function ToolCount({ count }: { readonly count: number | null }) {
   return (
-    <ul className="flex flex-col gap-2">
-      {tools.map((tool) => (
-        <li key={tool.name} className="flex items-center justify-between gap-2">
-          <span className="min-w-0 truncate font-mono text-[12px] text-text-body">{tool.name}</span>
-          <Toggle
-            checked={tool.enabled}
-            onCheckedChange={(checked) => onToggle(tool.name, checked)}
-            aria-label={`Enable tool ${tool.name}`}
-          />
-        </li>
-      ))}
-    </ul>
+    <p className="text-[12px] text-text-body">
+      {count === null ? "Run Test connections to list tools." : `${count} tool${count === 1 ? "" : "s"} available`}
+    </p>
   )
 }
 
@@ -70,23 +45,13 @@ export function LogTail({
   )
 }
 
-/** "OAuth · Signed in as … · Sign out" row for an OAuth-authenticated server. */
-export function OAuthRow({
-  account,
-  onSignOut
-}: {
-  readonly account: string
-  readonly onSignOut: () => void
-}) {
+/** "OAuth · Signed in as …" row for an OAuth-authenticated server. */
+export function OAuthRow({ account }: { readonly account: string }) {
   return (
     <div className="flex items-center gap-1.5 text-[12px] text-text-body">
       <span className="text-dim">OAuth</span>
       <span className="text-dim">·</span>
       <span>Signed in as {account}</span>
-      <span className="text-dim">·</span>
-      <Button variant="ghost" size="sm" onClick={onSignOut} className="h-auto px-0 py-0 hover:bg-transparent hover:underline">
-        Sign out
-      </Button>
     </div>
   )
 }
@@ -95,12 +60,10 @@ export interface McpServerDetailDialogProps {
   readonly server: McpServer | null
   readonly open: boolean
   readonly onOpenChange: (open: boolean) => void
-  readonly tools: ReadonlyArray<McpToolToggle>
-  readonly onToggleTool: (tool: string, enabled: boolean) => void
+  readonly toolCount: number | null
   readonly logLines: ReadonlyArray<string>
   readonly logLoading: boolean
   readonly oauthAccount: string | null
-  readonly onSignOut: () => void
 }
 
 /** Settings › MCP servers › one server's detail: tools, log tail, OAuth session. */
@@ -108,12 +71,10 @@ export function McpServerDetailDialog({
   server,
   open,
   onOpenChange,
-  tools,
-  onToggleTool,
+  toolCount,
   logLines,
   logLoading,
-  oauthAccount,
-  onSignOut
+  oauthAccount
 }: McpServerDetailDialogProps) {
   if (server === null) return null
   return (
@@ -128,10 +89,10 @@ export function McpServerDetailDialog({
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
-            {oauthAccount !== null ? <OAuthRow account={oauthAccount} onSignOut={onSignOut} /> : null}
+            {oauthAccount !== null ? <OAuthRow account={oauthAccount} /> : null}
             <div>
               <h4 className="mb-1.5 text-[12px] font-semibold text-text-bright">Tools</h4>
-              <ToolList tools={tools} onToggle={onToggleTool} />
+              <ToolCount count={toolCount} />
             </div>
             <div>
               <h4 className="mb-1.5 text-[12px] font-semibold text-text-bright">Log</h4>

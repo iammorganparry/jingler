@@ -83,7 +83,7 @@ test("a dismissed MCP reconnect card stays hidden after the window reloads", asy
   await expect(window.getByRole("region", { name: "MCP server recovery" })).toHaveCount(0)
 })
 
-test("a server's detail dialog shows the log tail and persists a tool toggle across reopen", async ({ launchApp }) => {
+test("a server's detail dialog shows the log tail and tool count, and refreshes on reopen", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
@@ -108,13 +108,10 @@ test("a server's detail dialog shows the log tail and persists a tool toggle acr
   const dialog = window.getByRole("dialog")
   await expect(dialog.getByRole("log", { name: "Server log" })).toBeVisible()
 
-  const toggle = dialog.getByRole("switch", { name: "Enable tool tool-1" })
-  await expect(toggle).toHaveAttribute("aria-checked", "true")
-  await toggle.click()
-  await expect(toggle).toHaveAttribute("aria-checked", "false")
+  await expect(dialog.getByText(/tools? available|Run Test connections/)).toBeVisible()
 
   await window.keyboard.press("Escape")
+  await expect(window.getByRole("dialog")).toHaveCount(0)
   await window.getByRole("button", { name: "Details" }).click()
-  await expect(window.getByRole("dialog").getByRole("switch", { name: "Enable tool tool-1" }))
-    .toHaveAttribute("aria-checked", "false")
+  await expect(window.getByRole("dialog").getByRole("log", { name: "Server log" })).toBeVisible()
 })

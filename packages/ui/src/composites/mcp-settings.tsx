@@ -23,7 +23,6 @@ import { Input } from "../components/input.js"
 import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { StatusRow } from "../components/status-row.js"
 import { Toggle } from "../components/toggle.js"
-import type { McpToolToggle } from "./mcp-server-detail-dialog.js"
 import { McpServerDetailDialog } from "./mcp-server-detail-dialog.js"
 
 /**
@@ -72,33 +71,6 @@ const statusFor = (
   name: string
 ): McpServerStatus | null =>
   statuses?.find((status) => status.name === name) ?? null
-
-/**
- * Per-tool enable overrides. No RPC exists for this yet (follow-up), so the
- * choice lives in localStorage — it persists across reopen and reload, which
- * is all the acceptance bar asks for.
- */
-const TOOL_OVERRIDES_KEY = "jingler.mcp.toolOverrides"
-const toolOverrideKey = (server: string, tool: string): string => `${server}:${tool}`
-
-const readToolOverrides = (): Record<string, boolean> => {
-  try {
-    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(TOOL_OVERRIDES_KEY)
-    return raw === null ? {} : (JSON.parse(raw) as Record<string, boolean>)
-  } catch {
-    return {}
-  }
-}
-
-const writeToolOverrides = (overrides: Record<string, boolean>): void => {
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(TOOL_OVERRIDES_KEY, JSON.stringify(overrides))
-    }
-  } catch {
-    // Storage unavailable (e.g. private mode) — overrides stay session-local.
-  }
-}
 
 /** Parse "KEY=value" lines into a record; used for headers and environment. */
 const parsePairs = (raw: string): Record<string, string> =>
@@ -572,7 +544,6 @@ export function McpSettings({
   const [detailServer, setDetailServer] = React.useState<McpServer | null>(null)
   const [logLines, setLogLines] = React.useState<ReadonlyArray<string>>([])
   const [logLoading, setLogLoading] = React.useState(false)
-  const [toolOverrides, setToolOverrides] = React.useState<Record<string, boolean>>(() => readToolOverrides())
 
   const openDetail = (server: McpServer) => {
     setDetailServer(server)
@@ -583,27 +554,6 @@ export function McpSettings({
       .finally(() => setLogLoading(false))
   }
 
-  const toolsFor = (server: McpServer): ReadonlyArray<McpToolToggle> => {
-    const toolCount = statusFor(statuses, server.name)?.toolCount ?? 0
-    return Array.from({ length: toolCount }, (_, index) => {
-      const name = `tool-${index + 1}`
-      const key = toolOverrideKey(server.name, name)
-      return { name, enabled: toolOverrides[key] ?? true }
-    })
-  }
-
-  const toggleTool = (server: McpServer, tool: string, enabled: boolean) => {
-    const key = toolOverrideKey(server.name, tool)
-    setToolOverrides((prev) => {
-      const next = { ...prev, [key]: enabled }
-      writeToolOverrides(next)
-      return next
-    })
-  }
-
-  // Signed-out-this-session only: no RPC clears just the OAuth credential
-  // without removing the whole server entry (follow-up — see PR notes).
-  const [signedOut, setSignedOut] = React.useState<ReadonlySet<string>>(new Set())
 
   const run = (action: () => Promise<void>) => {
     setActionError(null)
@@ -733,20 +683,14 @@ export function McpSettings({
         server={detailServer}
         open={detailServer !== null}
         onOpenChange={(open) => { if (!open) setDetailServer(null) }}
-        tools={detailServer === null ? [] : toolsFor(detailServer)}
-        onToggleTool={(tool, enabled) => { if (detailServer !== null) toggleTool(detailServer, tool, enabled) }}
+        toolCount={detailServer === null ? null : (statusFor(statuses, detailServer.name)?.toolCount ?? null)}
         logLines={logLines}
         logLoading={logLoading}
         oauthAccount={
           detailServer !== null && detailServer.authKind === "oauth" && detailServer.authState === "ready"
-            && !signedOut.has(detailServer.name)
             ? detailServer.displayName
             : null
         }
-        onSignOut={() => {
-          if (detailServer === null) return
-          setSignedOut((prev) => new Set(prev).add(detailServer.name))
-        }}
       />
     </div>
   )
