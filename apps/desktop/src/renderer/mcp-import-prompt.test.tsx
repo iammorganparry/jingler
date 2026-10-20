@@ -37,7 +37,7 @@ describe("McpImportPrompt", () => {
     ])
   })
 
-  it("does not prompt for servers already configured", async () => {
+  it("flags a candidate that clashes with an already-configured server", async () => {
     render(<McpImportPrompt
       ready
       servers={[{
@@ -63,6 +63,7 @@ describe("McpImportPrompt", () => {
       apply={async () => []}
     />)
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(await screen.findByRole("dialog")).toBeTruthy()
+    expect(screen.getByText("Conflict")).toBeTruthy()
   })
 })

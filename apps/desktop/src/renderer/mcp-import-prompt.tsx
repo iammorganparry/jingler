@@ -3,9 +3,11 @@ import type {
   McpImportSourceId,
   McpServer
 } from "@jingler/core"
+import { mcpImportMachine } from "@jingler/core"
 import {
-  AsyncButton,
+  Button,
   Callout,
+  ConflictBadge,
   Dialog,
   DialogBody,
   DialogContent,
@@ -13,8 +15,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  NeedsSecretsRow,
   NeedsSignInRow
 } from "@jingler/ui"
+import { useMachine } from "@xstate/react"
 import { ServerCog } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
@@ -37,6 +41,8 @@ const markCompleted = (): void => {
   }
 }
 
+type Candidate = McpImportCandidateView & { readonly conflict: boolean }
+
 export function McpImportPrompt({
   ready,
   servers,
@@ -52,47 +58,45 @@ export function McpImportPrompt({
   ) => Promise<ReadonlyArray<string>>
 }) {
   const started = useRef(false)
-  const [open, setOpen] = useState(false)
-  const [candidates, setCandidates] = useState<ReadonlyArray<McpImportCandidateView>>([])
-  const [error, setError] = useState<string | null>(null)
+  const serversRef = useRef(servers)
+  serversRef.current = servers
+
+  const [state, send] = useMachine(mcpImportMachine, {
+    input: {
+      detect: async () => {
+        const existing = new Set(serversRef.current.map(({ name }) => name))
+        const results = await Promise.all(SOURCES.map((source) => load(source).catch(() => [])))
+        const found = new Map<string, Candidate>()
+        for (const candidate of results.flat()) {
+          if (candidate.problem === null && !found.has(candidate.name)) {
+            found.set(candidate.name, { ...candidate, conflict: existing.has(candidate.name) })
+          }
+        }
+        return [...found.values()]
+      },
+      apply: async (candidates) => {
+        for (const source of SOURCES) {
+          const names = candidates
+            .filter((candidate) => candidate.source === source)
+            .map((candidate) => candidate.name)
+          if (names.length > 0) await apply(source, names)
+        }
+      }
+    }
+  })
+  const candidates = state.context.candidates as ReadonlyArray<Candidate>
 
   useEffect(() => {
     if (!ready || started.current || completed()) return
     started.current = true
-    const existing = new Set(servers.map(({ name }) => name))
-    Promise.all(SOURCES.map((source) => load(source).catch(() => []))).then((results) => {
-      const found = new Map<string, McpImportCandidateView>()
-      for (const candidate of results.flat()) {
-        if (candidate.problem === null && !existing.has(candidate.name) && !found.has(candidate.name)) {
-          found.set(candidate.name, candidate)
-        }
-      }
-      const discovered = [...found.values()]
-      setCandidates(discovered)
-      setOpen(discovered.length > 0)
-    })
-  }, [load, ready, servers])
+    send({ type: "START" })
+  }, [ready, send])
+
+  const open = state.matches("reviewing") || state.matches("detectFailed") || state.matches("importing") || state.matches("importFailed")
 
   const dismiss = () => {
     markCompleted()
-    setOpen(false)
-  }
-
-  const importAll = async () => {
-    setError(null)
-    try {
-      for (const source of SOURCES) {
-        const names = candidates
-          .filter((candidate) => candidate.source === source)
-          .map((candidate) => candidate.name)
-        if (names.length > 0) await apply(source, names)
-      }
-      dismiss()
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Could not import MCP servers"
-      setError(message)
-      throw new Error(message)
-    }
+    send({ type: "DISMISS" })
   }
 
   return (
@@ -104,40 +108,68 @@ export function McpImportPrompt({
           </div>
           <div className="min-w-0 space-y-1">
             <DialogTitle className="text-[14px] leading-5">Import MCP servers</DialogTitle>
-            <DialogDescription>
-              Found {candidates.length} server{candidates.length === 1 ? "" : "s"} in Claude,
-              Codex/OpenAI, and OpenCode. Import them for on-demand use in local sessions.
-            </DialogDescription>
+            {!state.matches("detectFailed") && (
+              <DialogDescription>
+                Found {candidates.length} server{candidates.length === 1 ? "" : "s"} in Claude,
+                Codex/OpenAI, and OpenCode. Import them for on-demand use in local sessions.
+              </DialogDescription>
+            )}
           </div>
         </DialogHeader>
         <DialogBody className="px-5 py-4">
-          <div className="max-h-64 overflow-auto rounded-xl border border-line bg-sunken">
-            {candidates.map((candidate) => (
-              <div key={`${candidate.source}:${candidate.name}`} className="border-b border-line px-3.5 py-2.5 last:border-b-0">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="truncate text-xs font-medium text-text-bright">{candidate.name}</div>
-                  <div className="flex-none rounded-md border border-hairline bg-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-dim">
-                    {candidate.source}
+          {state.matches("detectFailed") ? (
+            <div role="alert">
+              <Callout tone="red">{state.context.error}</Callout>
+            </div>
+          ) : (
+            <div className="max-h-64 overflow-auto rounded-xl border border-line bg-sunken">
+              {candidates.map((candidate) => (
+                <div key={`${candidate.source}:${candidate.name}`} className="border-b border-line px-3.5 py-2.5 last:border-b-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="truncate text-xs font-medium text-text-bright">{candidate.name}</div>
+                    <div className="flex-none rounded-md border border-hairline bg-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-dim">
+                      {candidate.source}
+                    </div>
                   </div>
+                  <div className="mt-0.5 truncate font-mono text-[10px] text-dim">{candidate.target}</div>
+                  {candidate.needsSignIn && (
+                    <div className="mt-1">
+                      <NeedsSignInRow host={candidate.target} />
+                    </div>
+                  )}
+                  {candidate.needsSecrets && (
+                    <div className="mt-1">
+                      <NeedsSecretsRow />
+                    </div>
+                  )}
+                  {candidate.conflict && (
+                    <div className="mt-1.5">
+                      {/* Read-only: Mcp.applyImport keeps the existing server and skips this
+                          name, so a chosen resolution would not take effect yet (#487 follow-up). */}
+                      <ConflictBadge value="keep-mine" />
+                    </div>
+                  )}
                 </div>
-                <div className="mt-0.5 truncate font-mono text-[10px] text-dim">{candidate.target}</div>
-                {candidate.needsSignIn && (
-                  <div className="mt-1">
-                    <NeedsSignInRow host={candidate.target} />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          {error ? <div role="alert" className="mt-3"><Callout tone="red">{error}</Callout></div> : null}
+              ))}
+            </div>
+          )}
+          {state.matches("importFailed") ? <div role="alert" className="mt-3"><Callout tone="red">{state.context.error}</Callout></div> : null}
         </DialogBody>
         <DialogFooter className="justify-between px-5">
           <button type="button" onClick={dismiss} className="rounded-md px-2 py-1.5 text-xs text-dim outline-none transition-colors hover:text-text focus-visible:ring-2 focus-visible:ring-ring">
             Not now
           </button>
-          <AsyncButton pendingLabel="Importing…" onClick={importAll}>
-            Import {candidates.length} server{candidates.length === 1 ? "" : "s"}
-          </AsyncButton>
+          {state.matches("detectFailed") ? (
+            <Button onClick={() => send({ type: "RETRY" })}>Retry</Button>
+          ) : state.matches("importFailed") ? (
+            <Button onClick={() => send({ type: "RETRY" })}>Retry import</Button>
+          ) : (
+            <Button disabled={state.matches("importing")} onClick={() => send({ type: "IMPORT" })}>
+              {state.matches("importing")
+                ? "Importing…"
+                : `Import ${candidates.length} server${candidates.length === 1 ? "" : "s"}`}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

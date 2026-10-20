@@ -158,9 +158,23 @@ export const McpImportCandidateView = Schema.Struct({
   /** Why this candidate cannot be imported; null when it can. */
   problem: Schema.NullOr(Schema.String),
   /** True when the source config already carries an OAuth server; it imports in `needs-auth`. */
-  needsSignIn: Schema.optionalWith(Schema.Boolean, { default: () => false })
+  needsSignIn: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** True when the source entry is missing an env/header value it references (e.g. an unset `{env:VAR}`). */
+  needsSecrets: Schema.optionalWith(Schema.Boolean, { default: () => false })
 })
 export type McpImportCandidateView = Schema.Schema.Type<typeof McpImportCandidateView>
+
+/** Does any header/environment value reference an `{env:VAR}` that `env` doesn't set? Used to flag import candidates that need a secret filled in after import. */
+export const entryNeedsSecrets = (
+  entry: McpConfigEntry,
+  env: Readonly<Record<string, string | undefined>>
+): boolean => {
+  const values = entry.type === "remote" ? Object.values(entry.headers) : Object.values(entry.environment)
+  return values.some((value) => {
+    const matches = [...value.matchAll(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g)]
+    return matches.some(([, name]) => !env[name!])
+  })
+}
 
 const PLACEHOLDER = /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g
 

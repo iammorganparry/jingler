@@ -158,6 +158,7 @@ import {
   WEB_SEARCH_CONFIG_DEFAULT,
   type WebSearchConfig,
   type McpConfigEntry,
+  entryNeedsSecrets,
   WebSearchError,
 } from "@jingler/core";
 import type {
@@ -5682,6 +5683,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           problem: candidate.problem,
           needsSignIn:
             candidate.entry?.type === "remote" && candidate.entry.auth?.type === "oauth",
+          needsSecrets:
+            candidate.entry !== null && entryNeedsSecrets(candidate.entry, process.env),
         })),
       ),
     ),
