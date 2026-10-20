@@ -121,6 +121,7 @@ export function ProviderIcon({
       fill="currentColor"
       style={mono ? undefined : { color: PROVIDER_COLOR[kind] }}
       className={cn("shrink-0", className)}
+      data-provider-icon={kind}
       aria-hidden
     >
       <path d={icon.d} fillRule={icon.fillRule} />

@@ -11,7 +11,7 @@ import {
   type ProviderModelId
 } from "@jingler/core"
 import { useMachine } from "@xstate/react"
-import { Check, LogOut, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react"
+import { Check, LogOut, Plus, RefreshCw, ShieldCheck, Star } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
@@ -344,26 +344,24 @@ export function ProviderConnectionsSettings({
                 <span className="flex items-center gap-2 text-[12px] font-medium text-text-bright">
                   <ProviderIcon providerId={connection.providerId} size={13} />
                   {providerAuthRouteLabel(connection.authKind)}
+                  {connection.id === defaultConnectionId && (
+                    <Star size={10} className="shrink-0 fill-current text-dim" aria-label="Default connection" />
+                  )}
                 </span>
                 <span className="font-mono text-[10px] text-dim">
                   {connection.targetId} · {models.filter(({ selectable }) => selectable).length} certified
                 </span>
               </button>
-              <button
-                type="button"
-                aria-label={`Remove ${providerAuthRouteLabel(connection.authKind)} connection`}
-                title="Remove connection"
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Sign out ${providerAuthRouteLabel(connection.authKind)} connection`}
                 disabled={busy}
                 onClick={() => (onRemove ?? onLogout)(connection.id)}
-                className={cn(
-                  "mr-2 flex size-6 flex-none items-center justify-center rounded-md",
-                  "text-dim opacity-0 transition-opacity hover:bg-red/10 hover:text-red",
-                  "focus-visible:opacity-100 group-hover:opacity-100",
-                  busy && "cursor-not-allowed"
-                )}
+                className="mr-2 flex-none text-dim hover:text-red"
               >
-                <Trash2 size={12} />
-              </button>
+                <LogOut size={12} /> Sign out
+              </Button>
             </div>
           ))}
           {connections.length === 0 && (
