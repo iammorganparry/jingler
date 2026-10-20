@@ -1,6 +1,7 @@
 import { execFileText } from "../../child-registry.js"
 import { resolveClaudeBinary } from "../../claude-cli-resolver.js"
 import {
+  contextWindowFor,
   nativeCliEndpointId,
   ProviderId,
   ProviderModelId,
@@ -8,6 +9,7 @@ import {
   type AgentEndpointStatus
 } from "@jingler/core"
 import { claudeCliEnvironment } from "./claude-cli-environment.js"
+import { claudeModelsForVersion, type ClaudeCliModel } from "./claude-cli-model-list.js"
 
 interface ClaudeAuthStatus {
   readonly loggedIn?: boolean
@@ -44,14 +46,14 @@ const versionAtLeast = (raw: string, minimum: readonly [number, number, number])
   return true
 }
 
-const models = (version: string | null) => {
+const models = (cli: ReadonlyArray<ClaudeCliModel>) => {
   const providerId = ProviderId.make("anthropic")
-  const model = (id: string, label: string, contextWindow: number) => ({
+  const model = (id: string, label: string) => ({
     providerId,
     id: ProviderModelId.make(`anthropic/${id}`),
     label,
     capabilities: {
-      contextWindow,
+      contextWindow: contextWindowFor(providerId, id) ?? 200_000,
       reasoning: ["low", "medium", "high", "max"] as const,
       reasoningCanDisable: false,
       reasoningDefault: "medium" as const,
@@ -63,14 +65,10 @@ const models = (version: string | null) => {
     selectable: true,
     certificationKey: null
   })
-  return [
-    model("opus", "Opus (latest)", 1_000_000),
-    ...(version !== null && versionAtLeast(version, [2, 1, 282])
-      ? [model("claude-opus-5-5", "Claude Opus 5.5", 1_000_000)]
-      : []),
-    model("sonnet", "Sonnet (latest)", 1_000_000),
-    model("haiku", "Haiku (latest)", 200_000)
-  ]
+  // Before the first successful probe, offer the aliases the CLI always accepts.
+  return cli.length > 0
+    ? cli.map(({ value, displayName }) => model(value, displayName))
+    : [model("opus", "Opus (latest)"), model("sonnet", "Sonnet (latest)"), model("haiku", "Haiku (latest)")]
 }
 
 const probeAuthentication = async (
@@ -128,7 +126,9 @@ export const probeClaudeEndpoint = async (
         backgroundTasks: true
       }
     },
-    models: models(version).map((model) => ({
+    models: models(
+      status === "ready" && version !== null ? await claudeModelsForVersion(binary, version, environment) : []
+    ).map((model) => ({
       ...model,
       status: status === "ready" ? "ready" as const : "unavailable" as const,
       selectable: status === "ready"
