@@ -182,6 +182,21 @@ describe("TranscriptStore", () => {
     expect(result.adopted).toStrictEqual([legacy])
   })
 
+  it("reading a chat with no transcript doesn't block adopting the legacy one", async () => {
+    const legacy = userMessage("u1", "Legacy turn", "2026-07-11T10:00:00.000Z")
+    const result = await run(
+      Effect.gen(function* () {
+        yield* TranscriptStore.append("s1", legacy)
+        const before = yield* TranscriptStore.listPage("c_s1_1", { limit: 1 })
+        yield* TranscriptStore.adoptLegacy("s1", "c_s1_1")
+        return { before: before.messages, adopted: yield* TranscriptStore.list("c_s1_1") }
+      })
+    )
+
+    expect(result.before).toStrictEqual([])
+    expect(result.adopted).toStrictEqual([legacy])
+  })
+
   it("patchLast replaces the last (streaming) turn in place", async () => {
     const user = userMessage("u1", "hi", "2026-07-11T10:00:00.000Z")
     const assistant = assistantMessage("a1", "2026-07-11T10:00:01.000Z")
