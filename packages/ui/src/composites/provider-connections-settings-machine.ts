@@ -81,6 +81,8 @@ export const providerConnectionsSettingsMachine = setup({
       event.type === "START_OAUTH" ? { oauthLoginId: event.loginId } : {}
     ),
     clearOauth: assign({ oauthLoginId: null }),
+    /** No-op by default; the host composite `.provide()`s this to call the Provider.cancelLogin RPC. */
+    cancelLogin: () => {},
     setApiKeyValue: assign(({ event }) =>
       event.type === "SUBMIT_API_KEY" ? { apiKeyValue: event.value, apiKeyError: null } : {}
     ),
