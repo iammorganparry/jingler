@@ -214,6 +214,127 @@ test("reconnects a restored subscription whose encrypted credential is missing",
   ).toBeVisible();
 });
 
+test("cancels a hung Codex OAuth login from the reconnect sheet", async ({
+  launchApp,
+}) => {
+  const connectionId = "codex-login-hangs";
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-reauthentication",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+      codexLoginHangs: true,
+    },
+    seed: ({ home }) => {
+      const runtime = join(home, "jingler", "runtime");
+      mkdirSync(runtime, { recursive: true });
+      writeFileSync(
+        join(runtime, "provider-connections.json"),
+        JSON.stringify([
+          {
+            id: connectionId,
+            providerId: "openai-codex",
+            authKind: "openai-codex-oauth",
+            account: { fingerprint: "missing-credential", displayLabel: null },
+            targetId: "desktop",
+            status: "authenticated",
+            subscription: {
+              entitlement: "active",
+              planLabel: "Test subscription",
+              expiresAt: "2026-08-22T09:32:34.581Z",
+              quotaLabel: null,
+              rateLimitLabel: null,
+              confirmedBillingRoute: "subscription",
+            },
+            createdAt: "2026-08-12T09:32:36.863Z",
+            updatedAt: "2026-08-12T09:32:36.863Z",
+          },
+        ]),
+      );
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
+  await launched.window.getByRole("button", { name: "Reconnect", exact: true }).click();
+  const sheet = launched.window.getByRole("dialog");
+  await sheet.getByRole("button", { name: "Open browser" }).click();
+
+  await expect(
+    sheet.getByText("Waiting for browser sign-in…"),
+  ).toBeVisible();
+  await sheet.getByRole("button", { name: "Cancel" }).click();
+
+  await expect(
+    sheet.getByRole("button", { name: "Open browser" }),
+  ).toBeVisible();
+  await expect(
+    sheet.getByText("Waiting for browser sign-in…"),
+  ).toBeHidden();
+});
+
+test("keeps the typed API key and shows an error when verification rejects it", async ({
+  launchApp,
+}) => {
+  const connectionId = "codex-reject-api-key";
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-reauthentication",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+      rejectApiKey: "The provider rejected this API key.",
+    },
+    seed: ({ home }) => {
+      const runtime = join(home, "jingler", "runtime");
+      mkdirSync(runtime, { recursive: true });
+      writeFileSync(
+        join(runtime, "provider-connections.json"),
+        JSON.stringify([
+          {
+            id: connectionId,
+            providerId: "openai-codex",
+            authKind: "openai-codex-oauth",
+            account: { fingerprint: "missing-credential", displayLabel: null },
+            targetId: "desktop",
+            status: "authenticated",
+            subscription: {
+              entitlement: "active",
+              planLabel: "Test subscription",
+              expiresAt: "2026-08-22T09:32:34.581Z",
+              quotaLabel: null,
+              rateLimitLabel: null,
+              confirmedBillingRoute: "subscription",
+            },
+            createdAt: "2026-08-12T09:32:36.863Z",
+            updatedAt: "2026-08-12T09:32:36.863Z",
+          },
+        ]),
+      );
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
+  await launched.window.getByRole("button", { name: "Reconnect", exact: true }).click();
+  const sheet = launched.window.getByRole("dialog");
+  await sheet.getByRole("tab", { name: "API key" }).click();
+  await sheet.getByPlaceholder("Provider API key").fill("sk-bad");
+  await sheet.getByRole("button", { name: "Save API key" }).click();
+
+  await expect(
+    sheet.getByText("The provider rejected this API key."),
+  ).toBeVisible();
+  await expect(sheet.getByPlaceholder("Provider API key")).toHaveValue("sk-bad");
+});
+
 test("adds a provider from settings after provider onboarding was skipped", async ({
   launchApp,
 }) => {

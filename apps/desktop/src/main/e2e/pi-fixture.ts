@@ -43,7 +43,11 @@ const E2ePiFixture = Schema.Struct({
   staleCertification: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   modelCount: Schema.optionalWith(Schema.Int.pipe(Schema.between(1, 100)), {
     default: () => 1
-  })
+  }),
+  /** Codex OAuth login waits on cancellation instead of resolving, for Cancel-flow e2e coverage. */
+  codexLoginHangs: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** When set, Provider.setApiKey/verifyModel fails with this message instead of succeeding. */
+  rejectApiKey: Schema.optional(Schema.String)
 })
 
 export type E2ePiFixture = Schema.Schema.Type<typeof E2ePiFixture>

@@ -73,9 +73,13 @@ const loginNotification = (event: AuthEvent): void => {
   }
 }
 
-const e2eCodexOAuth: CodexOAuthFlow = {
+const makeE2eCodexOAuth = (codexLoginHangs: boolean): CodexOAuthFlow => ({
   login: async ({ signal, prompt, notify }) => {
     if (signal.aborted) throw new Error("Login cancelled")
+    if (codexLoginHangs) {
+      // Stays pending until the renderer cancels (aborts the signal); never resolves on its own.
+      await waitForCancellation(signal)
+    }
     const method = await prompt({
       type: "select",
       message: "Choose a deterministic Codex login method",
@@ -107,7 +111,17 @@ const e2eCodexOAuth: CodexOAuthFlow = {
       expires: Date.now() + 3_600_000
     }
   }
-}
+})
+
+const makeE2eEntitlementProbe = (rejectApiKey: string | undefined) =>
+  async (input: {
+    readonly authKind: ModelCertification["authRoute"]["kind"]
+  }): Promise<EntitlementProbeResult> => {
+    if (input.authKind === "api-key" && rejectApiKey !== undefined) {
+      throw new Error(rejectApiKey)
+    }
+    return e2eEntitlementProbe(input)
+  }
 
 const e2eEntitlementProbe = async (input: {
   readonly authKind: ModelCertification["authRoute"]["kind"]
@@ -133,8 +147,12 @@ export const ProviderConnectionsLive = Layer.effect(
       : e2eProviderConnection(e2eFixture)
     const broker = yield* makeAuthBroker({
       credentials,
-      codexOAuth: e2eFixture === null ? makePiCodexOAuthFlow() : e2eCodexOAuth,
-      probe: e2eFixture === null ? probePiEntitlement : e2eEntitlementProbe
+      codexOAuth: e2eFixture === null
+        ? makePiCodexOAuthFlow()
+        : makeE2eCodexOAuth(e2eFixture.codexLoginHangs),
+      probe: e2eFixture === null
+        ? probePiEntitlement
+        : makeE2eEntitlementProbe(e2eFixture.rejectApiKey)
     })
     const certifications = new FileModelCertificationStore(
       paths.certificationsFile
