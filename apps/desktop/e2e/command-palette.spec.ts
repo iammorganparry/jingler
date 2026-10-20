@@ -322,6 +322,25 @@ test("archives the active session from the palette", async ({ launchApp }) => {
   await expect(sessionRow(window, "Alpha session")).toBeHidden()
 })
 
+test("typing '>' switches to the Commands prefix scope and shows its chip", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.keyboard.press("Meta+k")
+  await expect(window.getByTestId("command-palette")).toBeVisible()
+
+  // The placeholder itself changes once a prefix scope is active, so the
+  // input is found by its dialog rather than by the (now stale) placeholder.
+  const input = window.getByTestId("command-palette").locator("input")
+  await input.fill(">")
+  await expect(window.getByTestId("palette-prefix-chip")).toBeVisible()
+  await expect(window.getByTestId("palette-prefix-chip")).toContainText("Commands")
+
+  // Backspace on the now-empty input clears the prefix scope back to Workspace.
+  await input.press("Backspace")
+  await expect(window.getByTestId("palette-prefix-chip")).toHaveCount(0)
+})
+
 test("the Chat scope narrows results and Tab cycles back to Workspace", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
