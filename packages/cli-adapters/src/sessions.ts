@@ -749,6 +749,51 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             ...propertiesWhen(options.defaultReasoning !== undefined, { reasoning: options.defaultReasoning })
           })
+
+          // Auto: no repo chosen yet. No worktree, no checkout — the agent
+          // attaches one later via `switch_checkout`. Starts in a scratch
+          // folder so there is always SOME cwd for the runtime to launch in.
+          if (input.repoPath === undefined) {
+            const fs = yield* FileSystem.FileSystem
+            const paths = yield* AppPaths
+            const scratchDir = `${paths.root}/sessions/${id}`
+            yield* fs
+              .makeDirectory(scratchDir, { recursive: true })
+              .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create session scratch folder", cause })))
+            const autoSession: Session = {
+              id,
+              checkpointExecutionHistory: "clean",
+              ...checkpointCreationFields(input),
+              ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
+              repo: "",
+              branch: "",
+              checkouts: [],
+              title,
+              ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
+                initialPrompt: input.initialPrompt?.trim()
+              }),
+              autoTitle: explicit.length === 0,
+              status: "idle",
+              ...selection,
+              diff: { added: 0, removed: 0 },
+              prNumber: null,
+              costUsd: 0,
+              tokens: 0,
+              updatedAt: now,
+              chats: [chat],
+              activeChatId: chat.id,
+              worktreePath: scratchDir
+            }
+            yield* atomically(
+              Effect.gen(function* () {
+                const current = yield* readAll()
+                yield* ensureSessionIdAvailable(current, autoSession.id)
+                yield* writeAll([autoSession, ...current])
+              })
+            )
+            return autoSession
+          }
+
           const makeSession = (
             workspace: { path: string; branch: string; repoPath: string },
             workspaceMode: WorkspaceMode
@@ -758,7 +803,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...checkpointCreationFields(input),
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-            repo: input.repoName,
+            // Non-Auto creation always supplies `repoName`; Auto (no `repoPath`)
+            // returns above before this closure is ever called.
+            repo: input.repoName!,
             ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
             branch: workspace.branch,
             ...propertiesWhen(workspaceMode === "worktree" && input.continueBranch !== true, { semanticBranchPending: true }),
@@ -779,7 +826,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: workspace.path,
             workspaceMode,
             repoPath: workspace.repoPath,
-            baseBranch: input.baseBranch,
+            // Non-Auto creation always supplies `baseBranch`; Auto (no `repoPath`)
+            // returns above before this closure is ever called.
+            baseBranch: input.baseBranch!,
             ...propertiesWhen(
               workspaceMode === "worktree" && input.projectId !== undefined && input.environmentId === undefined,
               { workspaceLifecycle: initialWorkspaceLifecycle(input, now) }
@@ -787,11 +836,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
 
           if (input.useWorktree === false) {
-            const identity = yield* GitService.repositoryIdentity(input.repoPath)
+            const identity = yield* GitService.repositoryIdentity(input.repoPath!)
             const reservation = makeSession(
               {
                 path: identity.repoPath,
-                branch: input.baseBranch,
+                branch: input.baseBranch!,
                 repoPath: identity.repoPath
               },
               "direct"
@@ -837,7 +886,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                 )
                 const branch = yield* GitService.switchBranch(
                   identity.repoPath,
-                  input.baseBranch
+                  input.baseBranch!
                 ).pipe(
                   Effect.tapError(() =>
                     atomically(
@@ -2299,7 +2348,7 @@ function* createIsolatedSession(
   writeAll: (sessions: ReadonlyArray<Session>) => Effect.Effect<void, GitError, PersistEnv>,
   checkWorkspaceSetup: (session: Session) => Effect.Effect<Session, GitError, PersistEnv | Path.Path>
 ) {
-  const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
+  const worktreePath = yield* GitService.worktreePathFor(input.repoName!, slug)
   if (existing.some((s) => s.worktreePath === worktreePath)) {
     return yield* Effect.fail(
       new GitError({
@@ -2311,16 +2360,16 @@ function* createIsolatedSession(
   // first task-understanding/retitle pass proposes a semantic branch and
   // GitService creates it; a user-supplied title pins display text only.
   const worktree = yield* GitService.createDetachedWorktree({
-    repoPath: input.repoPath,
-    repoName: input.repoName,
+    repoPath: input.repoPath!,
+    repoName: input.repoName!,
     slug,
-    baseBranch: input.baseBranch
+    baseBranch: input.baseBranch!
   })
   if (input.continueBranch === true) {
-    yield* GitService.checkoutBranch(worktree.path, input.baseBranch)
+    yield* GitService.checkoutBranch(worktree.path, input.baseBranch!)
   }
   let session = makeSession(
-    input.continueBranch === true ? { ...worktree, branch: input.baseBranch } : worktree,
+    input.continueBranch === true ? { ...worktree, branch: input.baseBranch! } : worktree,
     "worktree"
   )
   // `existing` was read above (for the friendly-name collision check).

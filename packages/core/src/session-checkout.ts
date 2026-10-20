@@ -48,7 +48,14 @@ const legacyCheckoutOf = (session: CheckoutScalars): SessionCheckout =>
     githubSlug: session.githubSlug,
   });
 
-/** A legacy session reads as exactly one checkout built from its scalars. */
+/**
+ * A legacy OR Auto session (no `checkouts`, or an empty array — an Auto
+ * session that has not yet `switch_checkout`ed into a repo) reads as exactly
+ * one checkout built from its scalars. For Auto those scalars are blank
+ * (`repoPath`/`worktreePath` absent, `repo`/`branch` empty strings), so this
+ * is a placeholder checkout with nowhere to run — `agentCwdOf` below falls
+ * back to the session's scratch folder for exactly that case.
+ */
 export const checkoutsOf = (session: CheckoutSession): ReadonlyArray<SessionCheckout> =>
   session.checkouts && session.checkouts.length > 0 ? session.checkouts : [legacyCheckoutOf(session)];
 
@@ -62,6 +69,12 @@ export const migrateSessionCheckouts = <S extends CheckoutSession>(session: S): 
   session.checkouts && session.checkouts.length > 0
     ? session
     : { ...session, checkouts: [legacyCheckoutOf(session)], activeCheckoutId: PRIMARY_CHECKOUT_ID };
+
+/** Directory the agent's tools run in: the active checkout's worktree/repo, else the session's scratch folder. */
+export const agentCwdOf = (session: CheckoutSession, scratchDir: string): string => {
+  const active = activeCheckoutOf(session);
+  return active.worktreePath ?? active.repoPath ?? scratchDir;
+};
 
 export type CheckoutAction =
   /** Attach a checkout and make it active; an existing one for the same repo is re-activated, never duplicated. */
@@ -92,9 +105,12 @@ export const reduceCheckouts = <S extends CheckoutSession>(session: S, action: C
   switch (action.type) {
     case "attach": {
       const existing = checkouts.find((c) => sameRepo(c, action.checkout));
-      return existing
-        ? withActive(migrated, checkouts, existing.id)
-        : withActive(migrated, [...checkouts, action.checkout], action.checkout.id);
+      if (existing) return withActive(migrated, checkouts, existing.id);
+      // Drop the Auto placeholder (no `repoPath`, synthesized from blank
+      // scalars by `checkoutsOf`) once a real checkout is attached — it was
+      // never a repo the session worked in, just the absence of one.
+      const real = checkouts.filter((c) => c.repoPath !== undefined);
+      return withActive(migrated, [...real, action.checkout], action.checkout.id);
     }
     case "switch":
       return checkouts.some((c) => c.id === action.checkoutId)
