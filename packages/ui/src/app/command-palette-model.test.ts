@@ -29,6 +29,7 @@ const item = (over: Partial<PaletteItem> = {}): PaletteItem => ({
   detail: over.detail,
   group: over.group ?? "Group",
   hint: over.hint,
+  scope: over.scope,
   run: over.run ?? (() => {})
 })
 
@@ -384,17 +385,21 @@ describe("palette scopes", () => {
   const rows = [
     item({ id: "s", group: PALETTE_GROUP.sessions }),
     item({ id: "a", group: PALETTE_GROUP.actions }),
-    item({ id: "t", group: PALETTE_GROUP.tabs }),
-    item({ id: "v", group: PALETTE_GROUP.views }),
-    item({ id: "g", group: PALETTE_GROUP.subagents })
+    item({ id: "t", group: PALETTE_GROUP.tabs, scope: "chat" }),
+    item({ id: "v", group: PALETTE_GROUP.views, scope: "chat" }),
+    item({ id: "g", group: PALETTE_GROUP.subagents, scope: "chat" })
   ]
 
   it("Workspace keeps every row", () => {
     expect(itemsInScope(rows, "workspace")).toHaveLength(rows.length)
   })
 
-  it("Chat keeps only the active chat's tabs, views and subagents", () => {
+  it("Chat keeps only rows marked with an explicit chat scope — never by group name", () => {
     expect(itemsInScope(rows, "chat").map((i) => i.id)).toEqual(["t", "v", "g"])
+    // A row sitting under a chat-shaped heading but with no explicit scope is
+    // NOT swept in — the whole point of `item.scope` over matching `group`.
+    const impostor = item({ id: "fake", group: PALETTE_GROUP.tabs })
+    expect(itemsInScope([impostor], "chat")).toEqual([])
   })
 
   it("Tab cycles Workspace → Chat → Workspace", () => {
