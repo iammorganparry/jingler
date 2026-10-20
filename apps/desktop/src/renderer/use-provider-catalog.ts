@@ -126,6 +126,36 @@ export function useProviderCatalog(environments: readonly Environment[] = []) {
     onSuccess: (config) => queryClient.setQueryData(["config"], config)
   })
 
+  /** Provider.cancelLogin for the `ProviderConnectSheet` OAuth-waiting Cancel button. */
+  const cancelLogin = async (connectionId: ProviderConnectionId) => {
+    await rpc.providerCancelLogin(connectionId)
+    await refreshCatalog()
+  }
+
+  /**
+   * Sets then verifies an API key for `ProviderConnectSheet` (Provider.setApiKey +
+   * Provider.verifyModel), resolving ok/error instead of throwing so the sheet can
+   * keep the typed value on an invalid key.
+   */
+  const saveApiKey = async (
+    connectionId: ProviderConnectionId,
+    providerId: ProviderId,
+    apiKey: string
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    try {
+      await setApiKey.mutateAsync({ connectionId, providerId, apiKey })
+      const updated = await queryClient.fetchQuery({ queryKey: CATALOG_KEY, queryFn: rpc.providerList })
+      const entry = updated.connections.find(({ connection }) => connection.id === connectionId)
+      const modelId = entry?.models.find(({ selectable }) => selectable)?.id
+      if (modelId) await verify.mutateAsync({ connectionId, modelId })
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: messageOf(error) }
+    } finally {
+      await refreshCatalog()
+    }
+  }
+
   const activeMutation = [
     refresh,
     verify,
@@ -198,6 +228,8 @@ export function useProviderCatalog(environments: readonly Environment[] = []) {
       providerId: ProviderId,
       apiKey: string
     ) => setApiKey.mutate({ connectionId, providerId, apiKey }),
-    makeDefault: makeDefault.mutate
+    makeDefault: makeDefault.mutate,
+    cancelLogin,
+    saveApiKey
   }
 }

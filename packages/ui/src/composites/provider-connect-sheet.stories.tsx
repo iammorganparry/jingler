@@ -38,6 +38,10 @@ export const OauthWaiting: Story = {
   render: () => <Shell onStartOauth={async () => "login-1"} />
 }
 
+export const DeviceCodeOffered: Story = {
+  render: () => <Shell onStartDeviceCode={async () => "login-device-1"} />
+}
+
 export const DeviceCode: Story = {
   render: () => (
     <Shell

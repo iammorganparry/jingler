@@ -93,7 +93,9 @@ const useProviderSettings = (): NonNullable<SettingsViewProps["providerConnectio
     onLogout: noop,
     onConnectClaude: noop,
     onStartCodex: noop,
-    onSetApiKey: noop
+    onSetApiKey: noop,
+    onCancelLogin: async () => {},
+    onSaveApiKey: async () => ({ ok: true })
   }
 }
 
