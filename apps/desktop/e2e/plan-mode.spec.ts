@@ -125,9 +125,6 @@ test("projects explicit deliverable stages without treating overview headings as
   await approveReview(launched)
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
 
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   const transcriptCard = launched.window.getByTestId("plannotator-transcript-card")
   await expect(transcriptCard).toBeVisible()
   await expect(transcriptCard.locator('[data-testid^="plan-approval-stage-"]')).toHaveCount(2)
@@ -355,9 +352,6 @@ test("a new review in the same chat is presented and can be approved", async ({
   await planTab.click()
   await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
   await approveReview(launched)
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 
@@ -373,9 +367,6 @@ test("a new review in the same chat is presented and can be approved", async ({
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true }))
     .toBeVisible({ timeout: 20_000 })
   await approveReview(launched)
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect.poll(() =>
     launched.window.getByText("Implemented and verified the approved plan.").count(),
   { timeout: 30_000 }).toBeGreaterThan(1)
@@ -406,9 +397,6 @@ test("closing the Plan tab keeps a pending review approvable", async ({
   await launched.window.getByTestId("new-tab-option-plan").click()
   await expect(review(launched)).toBeVisible()
   await approveReview(launched)
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
@@ -430,9 +418,6 @@ test("missing PLAN.md during execution fails closed without rejecting progress",
   await expect(review(launched)).toBeVisible()
   await approveReview(launched)
 
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect(launched.window.getByRole("tab", { name: "Plan 1/2" })).toBeVisible({
     timeout: 20_000
   })
@@ -479,9 +464,6 @@ test("revises one stage approach through native review feedback", async ({
     .toContain("The implementation preserves compatibility")
   await approveReview(launched)
 
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
@@ -499,9 +481,6 @@ test("main-chat feedback revises a pending Plannotator review", async ({ launchA
 
   await openPlanTab(launched)
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeVisible()
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   const composer = launched.window.getByPlaceholder("Queue a message while the agent works…")
   await composer.fill("Keep the existing token format")
   await composer.press("Enter")
@@ -524,9 +503,6 @@ test("a plan revised while open shows the stale banner and Reload fetches the ne
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeEnabled()
 
   // Feedback from the main chat replaces the review the reviewer has open.
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   const composer = launched.window.getByPlaceholder("Queue a message while the agent works…")
   await composer.fill("Keep the existing token format")
   await composer.press("Enter")
@@ -578,9 +554,6 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   await expect(review(reopened)).toBeVisible({ timeout: 30_000 })
   await expect.poll(() => reviewText(reopened)).toContain("Implement the auth change")
 
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect(reopened.window.getByText("0/2")).toBeVisible({ timeout: 20_000 })
   const transcriptCard = reopened.window.getByTestId("plannotator-transcript-card")
   await expect(transcriptCard).toContainText("Implement the auth change")
@@ -592,9 +565,6 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   // The resumed review must still be decidable over the native channel.
   await planTab.click()
   await approveReview(reopened)
-  // The Plan view opens in its own split editor group; the chat's group (now a
-  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
-  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect(reopened.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
