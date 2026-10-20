@@ -726,7 +726,8 @@ function AuthedApp({
     onProgress?: (phase: SessionCreationPhase) => void,
   ) => {
     const session = await rpc.sessionsCreate(input, onProgress);
-    void rememberLastRepo(input.repoPath);
+    // Auto (no repo chosen yet) has nothing to preselect next time.
+    if (input.repoPath !== undefined) void rememberLastRepo(input.repoPath);
     // A first message (typed text and/or attachments) means the operator wants
     // the agent working now, not a pre-filled draft. Flag the session for
     // first-turn auto-send BEFORE it becomes active, so the ConversationPane

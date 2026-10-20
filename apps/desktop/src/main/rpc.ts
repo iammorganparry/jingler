@@ -1031,11 +1031,13 @@ const provisionRemoteSession = (
       yield* reportSessionCreation(progress, "resolving-repository");
       const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
       managedSessionId = sessionId;
-      const repository = yield* managedRepositoryIdentity(input.repoPath);
+      // Auto (no `repoPath`) never reaches a managed/remote environment in
+      // this PR — choosing a repo up front is still required there.
+      const repository = yield* managedRepositoryIdentity(input.repoPath!);
       const { branch, baseBranch, source } = remoteProvisioningSource(operation, input);
-      const headSha = yield* GitService.revision(input.repoPath, branch).pipe(
+      const headSha = yield* GitService.revision(input.repoPath!, branch).pipe(
         Effect.orElse(() =>
-          GitService.revision(input.repoPath, `origin/${branch}`),
+          GitService.revision(input.repoPath!, `origin/${branch}`),
         ),
       );
       const plan = createWorkspaceProvisioningPlan({
@@ -7057,8 +7059,10 @@ function remoteProvisioningSource(
     const { pr } = input as CreateSessionFromPrInput;
     return { branch: pr.headRefName, baseBranch: pr.baseRefName, source: { kind: "pull-request" as const, pullRequestNumber: pr.number } };
   }
+  // Auto (no `repoPath`) never reaches a managed/remote environment in this
+  // PR, so `baseBranch` is always supplied by the time provisioning runs.
   const { baseBranch } = input as CreateSessionInput | CreateSessionFromIssueInput;
-  return { branch: baseBranch, baseBranch, source: { kind: "new" as const } };
+  return { branch: baseBranch!, baseBranch: baseBranch!, source: { kind: "new" as const } };
 }
 
 const resolveContinuationTarget = (source: Session, checkpoint: WorkspaceTransferCheckpoint, target: string | undefined, environments: EnvironmentService) => Effect.gen(function* () {
