@@ -341,6 +341,85 @@ test("typing '>' switches to the Commands prefix scope and shows its chip", asyn
   await expect(window.getByTestId("palette-prefix-chip")).toHaveCount(0)
 })
 
+/**
+ * #507: a session blocked on the operator (a pending question) must surface
+ * as its own "Needs you" group at the top of the palette, and picking it must
+ * land the operator back on that session with the question still visible —
+ * same scripted-question setup as `notification-question.spec.ts`'s
+ * `[[ask]]` trick, but driven through the palette instead of a notification
+ * click.
+ */
+test("the 'Needs you' palette group jumps to a session blocked on a question", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    sessions: [
+      { ...seededSessions[0]!, id: "sess-a", title: "Session A" },
+      { ...seededSessions[1]!, id: "sess-b", title: "Session B" }
+    ]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  // Session A: ask a question while it's active.
+  await sessionRow(window, "Session A").click()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[ask]] migrate the store")
+  await composer.press("Enter")
+  await expect(window.getByText("Agent needs your input")).toBeVisible({ timeout: 15_000 })
+
+  // The operator looks away: switch to Session B, which has no pending question.
+  await sessionRow(window, "Session B").click()
+  await expect(window.getByText("Agent needs your input")).toHaveCount(0)
+
+  // The palette's first group is "Needs you (1)", listing Session A.
+  await window.keyboard.press("Meta+k")
+  await expect(window.getByText("Needs you (1)")).toBeVisible()
+  const needsYouRow = window.getByTestId("palette-item-needs-you:sess-a")
+  await expect(needsYouRow).toBeVisible()
+  await needsYouRow.click()
+
+  // Session A is active again, question still visible.
+  await expect(window.getByTestId("command-palette")).toBeHidden()
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText(
+    "Session A"
+  )
+  await expect(window.getByText("Agent needs your input")).toBeVisible()
+})
+
+/**
+ * ⌘⇧N ("Go to next workspace that needs you") is the global binding the
+ * palette's own "Needs you" action lists as its hint — provisional (#507),
+ * but it is live now, so it must switch straight to the blocked session
+ * without going through the palette at all.
+ */
+test("⌘⇧N switches to the session that needs you", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    sessions: [
+      { ...seededSessions[0]!, id: "sess-a", title: "Session A" },
+      { ...seededSessions[1]!, id: "sess-b", title: "Session B" }
+    ]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await sessionRow(window, "Session A").click()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[ask]] migrate the store")
+  await composer.press("Enter")
+  await expect(window.getByText("Agent needs your input")).toBeVisible({ timeout: 15_000 })
+
+  await sessionRow(window, "Session B").click()
+  await expect(window.getByText("Agent needs your input")).toHaveCount(0)
+
+  await window.keyboard.press("Meta+Shift+n")
+
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText(
+    "Session A"
+  )
+  await expect(window.getByText("Agent needs your input")).toBeVisible()
+})
+
 test("the Chat scope narrows results and Tab cycles back to Workspace", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
