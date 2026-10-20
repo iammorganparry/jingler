@@ -146,9 +146,11 @@ export function CommandPalette({
         }}
         prefix={
           chip && (
-            <Badge tone="blue" size="sm" data-testid="palette-prefix-chip">
-              {chip.prefix} {chip.label}
-            </Badge>
+            <span data-testid="palette-prefix-chip">
+              <Badge tone="blue" size="sm">
+                {chip.prefix} {chip.label}
+              </Badge>
+            </span>
           )
         }
       />
