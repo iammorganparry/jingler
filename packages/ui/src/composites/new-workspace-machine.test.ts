@@ -3,7 +3,7 @@ import { nativeCliEndpointId, piEndpointId, ProviderConnectionId, ProviderId, Pr
 import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
-import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
+import { AUTO_PROJECT_ID, newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
 
 const projects: ReadonlyArray<Project> = [
   { id: "p-local", name: "local", path: "/repos/local", availability: "available", createdAt: "now", updatedAt: "now" },
@@ -157,6 +157,23 @@ describe("newWorkspaceMachine", () => {
       modelId
     }), [], expect.any(Function))
     expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("connectionId")
+  })
+
+  it("Auto: creates a session with no repoPath/repoName/baseBranch, requiring only a model and the blank source", async () => {
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate).start()
+    actor.send({ type: "OPEN", projectId: AUTO_PROJECT_ID })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    expect(actor.getSnapshot().can({ type: "SUBMIT" })).toBe(true)
+    actor.send({ type: "SET_DRAFT", draft: "do a thing" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    const input = onCreate.mock.calls[0]?.[0] as CreateSessionInput
+    expect(input).not.toHaveProperty("repoPath")
+    expect(input).not.toHaveProperty("repoName")
+    expect(input).not.toHaveProperty("baseBranch")
+    expect(input.initialPrompt).toBe("do a thing")
   })
 
   it("starts every model in the configured default mode and falls back to Auto", async () => {

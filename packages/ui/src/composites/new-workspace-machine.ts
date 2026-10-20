@@ -367,7 +367,10 @@ export const newWorkspaceMachine = setup({
         deps.projects.find((project) => project.availability === "available")
       const provider = providerSelection(deps, "local")
       return {
-        projectId: selected?.id ?? "",
+        // Auto is requested explicitly (never a fallback default): it has no
+        // entry in `deps.projects` to match, so it must be handled ahead of
+        // the "fall back to an available project" lookup above.
+        projectId: requested === AUTO_PROJECT_ID ? AUTO_PROJECT_ID : (selected?.id ?? ""),
         environmentId: "local",
         resolvedProject: null,
         isolation: "worktree" as const,
