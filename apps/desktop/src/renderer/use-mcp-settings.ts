@@ -53,7 +53,8 @@ export function useMcpSettings(): McpSettingsProps {
     },
     setDisabledTools: async (name, disabledTools) => {
       await rpc.mcpSetDisabledTools(name, disabledTools)
-      await invalidate()
+      // A tool toggle doesn't change connectivity, so keep the probe results.
+      await queryClient.invalidateQueries({ queryKey: mcpKey })
     },
     signOut: async (name) => {
       await rpc.mcpSignOut(name)

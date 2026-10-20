@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "../components/dialog.js"
+import { Button } from "../components/button.js"
 import { Toggle } from "../components/toggle.js"
 import { McpBrand } from "./mcp-settings.js"
 
@@ -89,13 +90,9 @@ export function OAuthRow({
       {onSignOut !== undefined && (
         <>
           <span className="text-dim">·</span>
-          <button
-            type="button"
-            onClick={onSignOut}
-            className="text-state-failed hover:underline"
-          >
+          <Button variant="danger" size="sm" onClick={onSignOut}>
             Sign out
-          </button>
+          </Button>
         </>
       )}
     </div>
