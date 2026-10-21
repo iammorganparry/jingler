@@ -1,3 +1,4 @@
+import type { SubagentFleetNode } from "@jingler/core"
 import type { SessionChatActions } from "../app/session-tree.js"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { matchExplorerToggleChord } from "../app/app-shortcuts.js"
@@ -120,6 +121,10 @@ export interface SessionConversationProps {
   /** Open a file selected from the workspace Explorer and reveal its Files surface. */
   onOpenExplorerFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
+  /** Fleet nodes per session id; any with a PR join the header PRs chip. */
+  /** Open a session PR (main or subagent) in the PR view. */
+  onOpenSessionPr?: (sessionId: string, prNumber: number) => void
+  subagentPrNodes?: Readonly<Record<string, ReadonlyArray<SubagentFleetNode>>>
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -363,6 +368,8 @@ export function SessionConversation(props: SessionConversationProps) {
             onRequestCloseFile={props.onRequestCloseFile}
             conversationPane={props.conversationPane}
             renderSubagentTabs={props.renderSubagentTabs}
+            subagentPrNodes={props.subagentPrNodes}
+            onOpenSessionPr={props.onOpenSessionPr}
             onRenameSession={props.onRenameSession}
             onCreateChat={props.onCreateChat}
             onCloseUntouchedChat={props.onCloseUntouchedChat}

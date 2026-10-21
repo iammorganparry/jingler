@@ -1,3 +1,4 @@
+import type { SubagentFleetNode } from "@jingler/core"
 import {
   type ReactNode,
   memo,
@@ -35,6 +36,8 @@ import {
 import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
+import { SessionPrsChip } from "../app/session-prs-chip.js"
+import { sessionPrRows } from "../lib/session-prs.js"
 import { HeaderLinkChips, HeaderViewButtons, type HeaderLinkChip, type HeaderViewItem } from "../app/header-view-buttons.js"
 import { ViewOverflowMenu } from "../app/view-overflow-menu.js"
 import {
@@ -188,6 +191,10 @@ export interface SessionPaneProps {
    * `renderConversation` is wired. Falls back again to the seeded transcript.
    */
   conversationPane?: ReactNode
+  /** Fleet nodes per session id; any with a PR join the header PRs chip. */
+  /** Open a session PR (main or subagent) in the PR view. */
+  onOpenSessionPr?: (sessionId: string, prNumber: number) => void
+  subagentPrNodes?: Readonly<Record<string, ReadonlyArray<SubagentFleetNode>>>
   /** Render the subagent chip for one chat in the lane header. */
   renderSubagentTabs?: (
     session: Session,
@@ -962,6 +969,10 @@ function SessionPaneBody(props: SessionPaneProps) {
       onOpen: () => selectTab(BUILTIN_TAB.checks)
     })
   }
+  const prRows = sessionPrRows(
+    active.prs?.length ? active.prs.map((pr) => pr.number) : active.prNumber == null ? [] : [active.prNumber],
+    props.subagentPrNodes?.[active.id] ?? []
+  )
   const linkedIssue = issueReferenceOf(active)
   const issueTab = tabs.find((tab) => linkedIssue !== undefined && tab.issueProviderId === linkedIssue.providerId)
   if (linkedIssue && issueTab) {
@@ -996,9 +1007,18 @@ function SessionPaneBody(props: SessionPaneProps) {
       </>
     ) : null
   const headerViewControls =
-    issuePicker || viewButtons || linkChips.length > 0 ? (
+    issuePicker || viewButtons || linkChips.length > 0 || prRows.length > 1 ? (
       <div className="flex items-center gap-0.5">
-        <HeaderLinkChips chips={linkChips} />
+        <HeaderLinkChips chips={prRows.length > 1 ? linkChips.filter((chip) => chip.id !== "pr") : linkChips} />
+        {prRows.length > 1 && (
+          <SessionPrsChip
+            rows={prRows}
+            onSelect={(row) => {
+              props.onOpenSessionPr?.(active.id, row.number)
+              selectTab(BUILTIN_TAB.checks)
+            }}
+          />
+        )}
         {issuePicker}
         {viewButtons}
       </div>

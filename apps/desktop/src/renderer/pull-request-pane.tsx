@@ -12,6 +12,7 @@ import { usePullRequest } from "./use-pull-request.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { usePublish } from "./use-publish.js"
 import { usePrStack } from "./use-pr-stack.js"
+import { clearSessionPrRequest, useSessionPrRequest } from "./session-pr-request.js"
 import { useWorkspaceWorkflow } from "./use-workspace-workflow.js"
 
 export function PullRequestPane({
@@ -45,7 +46,9 @@ export function PullRequestPane({
 }) {
   const stack = usePrStack(session, connected)
   // Session-level writes (merge, review, close…) act on the session's own PR, so a lower layer is read-only.
-  const viewingLowerLayer = stack.selected !== null && stack.selected !== session.prNumber
+  const requestedPr = useSessionPrRequest(session.id)
+  const shownPr = requestedPr ?? stack.selected
+  const viewingLowerLayer = shownPr !== null && shownPr !== session.prNumber
   const {
     pr,
     busy,
@@ -68,7 +71,7 @@ export function PullRequestPane({
     openOnGithub,
     conflictedFiles,
     resolveConflicts
-  } = usePullRequest(session, { connected, autoDetect, onPrLinked, prNumber: stack.selected })
+  } = usePullRequest(session, { connected, autoDetect, onPrLinked, prNumber: shownPr })
   const publish = usePublish(session, onPrLinked, onPublishCheckpoint)
   const workflow = useWorkspaceWorkflow(session, project, onSession)
 
@@ -102,7 +105,14 @@ export function PullRequestPane({
       branch={session.branch}
       baseBranch={session.baseBranch ?? pr?.baseRefName}
       prs={session.prs}
-      stack={stack.nav}
+      stack={stack.nav && {
+        ...stack.nav,
+        selected: shownPr ?? stack.nav.selected,
+        onSelect: (number) => {
+          clearSessionPrRequest(session.id)
+          stack.nav?.onSelect(number)
+        }
+      }}
       readOnly={viewingLowerLayer}
       sessionTitle={session.title}
       onCreatePr={
