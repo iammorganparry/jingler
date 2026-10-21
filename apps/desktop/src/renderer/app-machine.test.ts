@@ -259,6 +259,24 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
+  it("skipping GitHub from the error state proceeds to provider and stays completable", async () => {
+    const actor = createActor(unconfigured()).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    actor.send({ type: "CONTINUE" });
+    expect(actor.getSnapshot().matches({ setup: "github" })).toBe(true);
+    actor.send({ type: "SKIP_GITHUB" });
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { provider: "idle" } }),
+    );
+    actor.send({ type: "CONTINUE_PROVIDER" });
+    await waitFor(actor, (snapshot) => snapshot.matches({ setup: "importSessions" }));
+    actor.stop();
+  });
+
   it("continues after authentication without requiring model discovery or certification", async () => {
     const completeProviderSetup = vi.fn(async () => undefined);
     const machine = unconfigured().provide({
