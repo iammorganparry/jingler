@@ -118,7 +118,7 @@ describe("Linear Issue tab content", () => {
   it("renders issue metadata, description, and comments", async () => {
     const view = render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
 
-    expect(await screen.findByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
+    expect(await screen.findByRole("heading", { name: /Retry failed payments/ })).toBeTruthy()
     expect(screen.getByText("Payment retries stop after the first failure.")).toBeTruthy()
     expect(screen.getByText("I can reproduce this.")).toBeTruthy()
     expect(screen.getByText("In Progress")).toBeTruthy()
@@ -130,6 +130,17 @@ describe("Linear Issue tab content", () => {
       "jingler-plugin://linear/dist/assets/linear-mark.svg?v=1.0.0"
     )
     expect(view.container.querySelector("[data-linear-mark] path")).toBeNull()
+  })
+
+  it("renders through the shared reading shell, rail and comment composer", async () => {
+    render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
+
+    const heading = await screen.findByRole("heading", { name: /Retry failed payments/ })
+    expect(heading.textContent).toContain("ENG-123")
+    expect(screen.getByTestId("reading-shell")).toBeTruthy()
+    expect(screen.getByTestId("issue-rail")).toBeTruthy()
+    expect(screen.getByTestId("issue-meta-line")).toBeTruthy()
+    expect(screen.getByTestId("comment-composer")).toBeTruthy()
   })
 
   it("adds a named account from the contextual setup flyout without retaining its key", async () => {
@@ -184,7 +195,7 @@ describe("Linear Issue tab content", () => {
     fireEvent.click(link)
     await waitFor(() => expect(mocks.linkIssue).toHaveBeenCalledWith("session-1", linkedIssue))
     view.rerender(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
-    expect(await screen.findByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
+    expect(await screen.findByRole("heading", { name: /Retry failed payments/ })).toBeTruthy()
 
     expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.configured")).toHaveLength(2)
     expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.context")).toHaveLength(1)
@@ -236,14 +247,14 @@ describe("Linear Issue tab states", () => {
     })
     render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
 
-    expect(await screen.findByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
-    const comment = screen.getByLabelText("Add a comment")
+    expect(await screen.findByRole("heading", { name: /Retry failed payments/ })).toBeTruthy()
+    const comment = screen.getByLabelText("Leave a comment")
     fireEvent.change(comment, { target: { value: "Keep this draft." } })
     fireEvent.click(screen.getByRole("button", { name: "Comment" }))
 
     expect((await screen.findByRole("alert")).textContent).toContain("Linear rate limit reached")
-    expect(screen.getByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
-    expect(screen.getByLabelText<HTMLTextAreaElement>("Add a comment").value).toBe(
+    expect(screen.getByRole("heading", { name: /Retry failed payments/ })).toBeTruthy()
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Leave a comment").value).toBe(
       "Keep this draft."
     )
   })
@@ -273,9 +284,9 @@ describe("Linear Issue tab rendering", () => {
     })
 
     const view = render(<IssueTab pluginId="linear" session={selectedSession(first)} />)
-    expect(await screen.findByRole("heading", { name: first.title })).toBeTruthy()
+    expect(await screen.findByRole("heading", { name: new RegExp(first.title) })).toBeTruthy()
     view.rerender(<IssueTab pluginId="linear" session={selectedSession(second)} />)
-    expect(await screen.findByRole("heading", { name: second.title })).toBeTruthy()
+    expect(await screen.findByRole("heading", { name: new RegExp(second.title) })).toBeTruthy()
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
       "linear.get",
       expect.objectContaining({ issueId: second.id, profileId: "personal" })
@@ -286,7 +297,7 @@ describe("Linear Issue tab rendering", () => {
     mocks.tier = "narrow"
     render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
 
-    await screen.findByRole("heading", { name: "Retry failed payments" })
+    await screen.findByRole("heading", { name: /Retry failed payments/ })
     expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Open in Linear" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Unlink" })).toBeTruthy()

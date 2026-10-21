@@ -13,11 +13,15 @@ import {
 import {
   atLeast,
   Avatar,
+  Badge,
+  Button,
   cn,
-  IssueLabelChip,
+  CommentComposer,
+  IssueRail,
+  IssueStateView,
   Markdown,
+  ReadingShell,
   relativeTime,
-  Spinner,
   useWidthTier
 } from "@jingler/plugin-sdk/ui"
 import {
@@ -140,21 +144,29 @@ function ErrorNotice({ message }: { readonly message: string }) {
   )
 }
 
-function Comment({ comment }: { readonly comment: IssueComment }) {
-  const author = comment.author?.name ?? "Deleted user"
+function Comment({
+  author: actor,
+  body,
+  createdAt,
+  opening = false
+}: {
+  readonly author: IssueComment["author"]
+  readonly body: string
+  readonly createdAt: string
+  readonly opening?: boolean
+}) {
+  const author = actor?.name ?? "Deleted user"
   return (
     <article className="overflow-hidden rounded-md border border-line">
       <header className="flex items-center gap-2 border-b border-line bg-panel px-3 py-2">
-        <Avatar
-          initial={author.slice(0, 1).toUpperCase()}
-          src={comment.author?.avatarUrl ?? undefined}
-          size={20}
-        />
-        <span className="text-[12px] font-medium text-text">{author}</span>
-        <span className="text-[11px] text-dim">commented {relativeTime(comment.createdAt)}</span>
+        <Avatar initial={author.slice(0, 1).toUpperCase()} src={actor?.avatarUrl ?? undefined} size={20} />
+        <span className="text-[12.5px] font-medium text-text">{author}</span>
+        <span className="text-[11.5px] text-dim">
+          {opening ? "opened this" : "commented"} {relativeTime(createdAt)}
+        </span>
       </header>
       <div className="bg-editor px-3 py-3">
-        <Markdown>{comment.body}</Markdown>
+        {body.trim() ? <Markdown>{body}</Markdown> : <span className="text-[12.5px] italic text-dim">No description provided.</span>}
       </div>
     </article>
   )
@@ -260,68 +272,102 @@ function Metadata({ issue }: { readonly issue: LinearIssueDetail }) {
     ["Status", issue.statusName ?? (issue.state === "open" ? "Open" : "Closed")],
     ["Priority", issue.priority.label],
     ["Team", issue.team.name],
-    ["Assignee", issue.assignees.map((actor) => actor.name).join(", ") || "Unassigned"],
     ["Project", issue.project?.name],
     ["Cycle", issue.cycle?.name]
   ].filter((row) => row[1])
   return (
-    <aside aria-label="Issue metadata" className="rounded-md border border-line bg-panel px-3 py-3">
-      <dl className="grid grid-cols-[80px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[11.5px]">
-        {rows.map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt className="text-dim">{label}</dt><dd className="truncate text-text">{value}</dd>
-          </div>
-        ))}
-      </dl>
-      {issue.labels.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-3">{issue.labels.map((label) => <IssueLabelChip key={label.name} name={label.name} color={label.color ?? undefined} />)}</div>}
-    </aside>
+    <dl aria-label="Issue metadata" className="grid grid-cols-[80px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12.5px]">
+      {rows.map(([label, value]) => (
+        <div key={label} className="contents">
+          <dt className="text-dim">{label}</dt>
+          <dd className="truncate text-text">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/** Provider logo · state badge · author · relative `updatedAt` · comment count. */
+function IssueMetaLine({ issue }: { readonly issue: LinearIssueDetail }) {
+  const open = issue.state === "open"
+  const author = issue.author?.name
+  return (
+    <div data-testid="issue-meta-line" className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[11.5px] text-muted-foreground">
+      <LinearMark className="h-3.5 w-3.5" />
+      <Badge tone={open ? "green" : "purple"} size="sm">{open ? "Open" : "Closed"}</Badge>
+      {author && (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <Avatar initial={author.slice(0, 1).toUpperCase()} src={issue.author?.avatarUrl ?? undefined} size={16} />
+          {author}
+        </span>
+      )}
+      <span className="shrink-0">updated {relativeTime(issue.updatedAt ?? issue.createdAt)}</span>
+      {issue.comments.length > 0 && (
+        <span className="flex shrink-0 items-center gap-1"><MessageSquare size={12} aria-hidden /> {issue.comments.length}</span>
+      )}
+    </div>
   )
 }
 
 function DetailView({
   issue,
+  session,
   error,
   busy,
-  commentBody,
   send,
+  post,
   openExternal
 }: {
   readonly issue: LinearIssueDetail
+  readonly session: SessionSnapshot
   readonly error: string | null
   readonly busy: boolean
-  readonly commentBody: string
   readonly send: LinearIssueSend
+  readonly post: (body: string) => Promise<void>
   readonly openExternal: (url: string) => Promise<void>
 }) {
-  const tier = useWidthTier()
   return (
-    <div className={cn("grid gap-5", atLeast(tier, "wide") ? "grid-cols-[minmax(0,1fr)_220px]" : "grid-cols-1")}>
-      <main className="min-w-0">
-        {error && <div className="mb-3"><ErrorNotice message={error} /></div>}
-        <div className="mb-4 flex flex-wrap items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="mb-1 text-[12px] font-medium text-purple">{issue.identifier}</div>
-            <h1 className="text-[21px] font-semibold leading-tight text-text-bright">{issue.title}</h1>
-          </div>
-          <button type="button" disabled={busy} onClick={() => send({ type: "REFRESH" })} className="inline-flex items-center gap-1 rounded border border-line px-2 py-1.5 text-[11.5px] text-text hover:border-blue disabled:opacity-50"><RefreshCw size={12} /> Refresh</button>
-          <button type="button" onClick={async () => openExternal(issue.url)} className="inline-flex items-center gap-1 rounded border border-line px-2 py-1.5 text-[11.5px] text-text hover:border-purple"><ExternalLink size={12} /> Open in Linear</button>
-          <button type="button" disabled={busy} onClick={() => send({ type: "UNLINK" })} className="inline-flex items-center gap-1 rounded border border-line px-2 py-1.5 text-[11.5px] text-text hover:border-red disabled:opacity-50"><Unlink size={12} /> {busy ? "Working…" : "Unlink"}</button>
+    <ReadingShell
+      title={issue.title}
+      identifier={issue.identifier}
+      meta={<IssueMetaLine issue={issue} />}
+      rail={
+        <>
+          <IssueRail
+            assignees={issue.assignees.map((actor) => ({ login: actor.name }))}
+            labels={issue.labels.map((label) => ({ name: label.name, color: label.color ?? undefined }))}
+            workspace={{ title: session.title }}
+            provider="Linear"
+            providerMark={<LinearMark className="h-3.5 w-3.5" />}
+            repository={issue.team.name}
+          />
+          <Metadata issue={issue} />
+        </>
+      }
+      actions={
+        <>
+          <Button variant="secondary" size="sm" disabled={busy} onClick={() => send({ type: "REFRESH" })}>
+            <RefreshCw size={14} aria-hidden /> Refresh
+          </Button>
+          <Button variant="secondary" size="sm" onClick={async () => openExternal(issue.url)}>
+            <ExternalLink size={14} aria-hidden /> Open in Linear
+          </Button>
+          <Button variant="secondary" size="sm" disabled={busy} onClick={() => send({ type: "UNLINK" })}>
+            <Unlink size={14} aria-hidden /> {busy ? "Working…" : "Unlink"}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-[18px]">
+        {error && <ErrorNotice message={error} />}
+        <div className="flex flex-col gap-3">
+          <Comment author={issue.author} body={issue.body} createdAt={issue.createdAt} opening />
+          {issue.comments.map((comment) => <Comment key={comment.id} author={comment.author} body={comment.body} createdAt={comment.createdAt} />)}
         </div>
-        <section aria-label="Description" className="mb-4 rounded-md border border-line bg-editor px-4 py-4">
-          {issue.body.trim() ? <Markdown>{issue.body}</Markdown> : <p className="text-[12px] italic text-dim">No description provided.</p>}
-        </section>
-        <section aria-labelledby="linear-comments" className="flex flex-col gap-3">
-          <h2 id="linear-comments" className="flex items-center gap-1.5 text-[13px] font-semibold text-text-bright"><MessageSquare size={14} /> Comments ({issue.comments.length})</h2>
-          {issue.comments.map((comment) => <Comment key={comment.id} comment={comment} />)}
-          <form className="rounded-md border border-line bg-panel p-3" onSubmit={(event) => { event.preventDefault(); send({ type: "COMMENT_SUBMIT" }) }}>
-            <label htmlFor="linear-comment" className="mb-2 block text-[11.5px] font-medium text-text">Add a comment</label>
-            <textarea id="linear-comment" rows={3} value={commentBody} onChange={(event) => send({ type: "COMMENT_CHANGED", body: event.currentTarget.value })} className="w-full resize-y rounded border border-line bg-editor px-3 py-2 text-[12px] text-text outline-none focus:border-blue" />
-            <button type="submit" disabled={busy || !commentBody.trim()} className="mt-2 rounded bg-purple px-3 py-1.5 text-[12px] font-medium text-editor disabled:opacity-50">{busy ? "Posting…" : "Comment"}</button>
-          </form>
-        </section>
-      </main>
-      <Metadata issue={issue} />
-    </div>
+        {/* Remounted per issue so a draft never crosses to another one. */}
+        <CommentComposer key={issue.id} canClose={false} post={post} />
+      </div>
+    </ReadingShell>
   )
 }
 
@@ -451,26 +497,49 @@ function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
   const { context } = snapshot
   const waiting = isIssueWaiting(snapshot)
 
+  // The composer keeps its own draft and error, so a failed post rejects to it
+  // rather than going through the machine's commenting state.
+  const post = async (body: string) => {
+    if (!context.issue) return
+    await services.comment(context.issue.id, body)
+    send({ type: "REFRESH" })
+  }
+  const showDetail = Boolean(context.issue) && ["detail", "commenting", "unlinking", "loadingIssue"].some((state) => snapshot.matches(state as never))
+  const busy = ["commenting", "unlinking", "loadingIssue"].some((state) => snapshot.matches(state as never))
+
   return (
-    <div data-testid="linear-issue-body" className="relative flex min-h-0 flex-1 flex-col overflow-auto bg-editor">
+    <div data-testid="linear-issue-body" className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-editor">
       <div className="border-b border-line bg-panel px-4 py-2.5">
-        <div className="mx-auto flex max-w-[980px] items-center gap-2 text-[12px] font-medium text-text-bright"><LinearMark className="h-4 w-4" /> Linear <span className="font-normal text-dim">{context.workspace?.workspace.name}</span><button type="button" aria-label="Configure Linear for this session" onClick={() => setSetupOpen((value) => !value)} className="ml-auto rounded p-1 text-dim hover:bg-editor hover:text-text"><SlidersHorizontal size={14} /></button></div>
+        <div className="mx-auto flex max-w-[1032px] items-center gap-2 text-[12px] font-medium text-text-bright"><LinearMark className="h-4 w-4" /> Linear <span className="font-normal text-dim">{context.workspace?.workspace.name}</span><Button variant="ghost" size="sm" className="ml-auto" aria-label="Configure Linear for this session" onClick={() => setSetupOpen((value) => !value)}><SlidersHorizontal size={14} aria-hidden /></Button></div>
       </div>
       <LinearSetupFlyout session={session} open={setupOpen} onClose={() => setSetupOpen(false)} onConfigured={() => send({ type: "CONFIGURATION_CHANGED" })} />
-      <div className="mx-auto w-full max-w-[980px] flex-1 px-4 py-6 md:px-7">
-        {waiting && !context.issue && <div className="flex min-h-[220px] items-center justify-center text-dim"><Spinner size={20} /></div>}
-        {snapshot.matches("needsConfiguration") && (
-          <div className="mx-auto flex min-h-[280px] max-w-[460px] flex-col items-center justify-center gap-3 text-center">
-            <LinearMark className="h-8 w-8" />
-            <h1 className="text-[16px] font-semibold text-text-bright">Connect Linear</h1>
-            <p className="text-[12.5px] leading-relaxed text-dim">Connect a named Linear account, then choose workspace defaults for this repository or only this session. Jingler encrypts API keys and never exposes them to the agent.</p>
-            <button type="button" onClick={() => setSetupOpen(true)} className="inline-flex items-center gap-1.5 rounded bg-purple px-3 py-2 text-[12px] font-medium text-editor"><Settings size={13} /> Set up Linear</button>
+      {showDetail && context.issue ? (
+        <DetailView issue={context.issue} session={session} error={context.error} busy={busy} send={send} post={post} openExternal={host.openExternal} />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto">
+          {waiting && !context.issue && <IssueStateView state={{ kind: "loading" }} />}
+          <div className="mx-auto w-full max-w-[980px] px-4 py-6 md:px-7">
+            {snapshot.matches("needsConfiguration") && (
+              <div className="mx-auto flex min-h-[280px] max-w-[460px] flex-col items-center justify-center gap-3 text-center">
+                <LinearMark className="h-8 w-8" />
+                <h1 className="text-[16px] font-semibold text-text-bright">Connect Linear</h1>
+                <p className="text-[12.5px] leading-relaxed text-dim">Connect a named Linear account, then choose workspace defaults for this repository or only this session. Jingler encrypts API keys and never exposes them to the agent.</p>
+                <Button size="sm" onClick={() => setSetupOpen(true)}><Settings size={13} aria-hidden /> Set up Linear</Button>
+              </div>
+            )}
+            {snapshot.matches("unlinked") && <UnlinkedView snapshot={snapshot} send={send} />}
+            {snapshot.matches("error") && (
+              <div className="mx-auto flex min-h-[260px] max-w-[460px] flex-col items-center justify-center gap-3">
+                <ErrorNotice message={context.error ?? "Linear request failed."} />
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => send({ type: "RETRY" })}>Retry</Button>
+                  {context.linkedIssue?.providerId === "linear" && <Button variant="secondary" size="sm" onClick={() => send({ type: "UNLINK" })}><Unlink size={12} aria-hidden /> Unlink issue</Button>}
+                </div>
+              </div>
+            )}
           </div>
-        )}
-        {snapshot.matches("unlinked") && <UnlinkedView snapshot={snapshot} send={send} />}
-        {snapshot.matches("error") && <div className="mx-auto flex min-h-[260px] max-w-[460px] flex-col items-center justify-center gap-3"><ErrorNotice message={context.error ?? "Linear request failed."} /><div className="flex gap-2"><button type="button" onClick={() => send({ type: "RETRY" })} className="rounded border border-line px-3 py-2 text-[12px] text-text hover:border-blue">Retry</button>{context.linkedIssue?.providerId === "linear" && <button type="button" onClick={() => send({ type: "UNLINK" })} className="inline-flex items-center gap-1 rounded border border-line px-3 py-2 text-[12px] text-text hover:border-red"><Unlink size={12} /> Unlink issue</button>}</div></div>}
-        {context.issue && (snapshot.matches("detail") || snapshot.matches("commenting") || snapshot.matches("unlinking") || snapshot.matches("loadingIssue")) && <DetailView issue={context.issue} error={context.error} busy={snapshot.matches("commenting") || snapshot.matches("unlinking") || snapshot.matches("loadingIssue")} commentBody={context.commentBody} send={send} openExternal={host.openExternal} />}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
