@@ -61,6 +61,8 @@ export interface NewWorkspaceContext {
   issues: ReadonlyArray<IssueSummary>
   selectedPr: PrSummary | null
   selectedIssue: IssueSummary | null
+  /** Why the last Start-from list load failed; null when it has not failed. */
+  sourceError: string | null
   draft: string
   attachments: ReadonlyArray<Attachment>
   mode: PermissionMode
@@ -85,6 +87,7 @@ export type NewWorkspaceEvent =
   | { type: "SET_SOURCE"; source: NewSessionSource }
   | { type: "SET_SEARCH"; search: string }
   | { type: "SET_MINE"; mine: boolean }
+  | { type: "RETRY_SOURCE" }
   | { type: "SELECT_PR"; pr: PrSummary }
   | { type: "SELECT_ISSUE"; issue: IssueSummary }
   | { type: "SET_DRAFT"; draft: string }
@@ -288,7 +291,8 @@ const resetSource = {
   pullRequests: [] as ReadonlyArray<PrSummary>,
   issues: [] as ReadonlyArray<IssueSummary>,
   selectedPr: null,
-  selectedIssue: null
+  selectedIssue: null,
+  sourceError: null as string | null
 }
 
 export const newWorkspaceMachine = setup({
@@ -361,7 +365,8 @@ export const newWorkspaceMachine = setup({
     })
   },
   guards: {
-    sourceNeedsLoading: ({ event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source),
+    sourceNeedsLoading: ({ context, event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source) &&
+      (!event.source.startsWith("provider:") || (context.getDeps().issueProviders ?? []).some((provider) => `provider:${provider.id}` === event.source)),
     canSubmit: ({ context }) => {
       const hasModel = context.runtimeId !== null &&
         context.endpointId !== null &&
@@ -456,10 +461,10 @@ export const newWorkspaceMachine = setup({
     }),
     applySource: assign(({ event }) => {
       const output = (event as unknown as { output: { pullRequests: ReadonlyArray<PrSummary>; issues: ReadonlyArray<IssueSummary> } }).output
-      return { ...output, selectedPr: null, selectedIssue: null, error: null }
+      return { ...output, selectedPr: null, selectedIssue: null, sourceError: null }
     }),
     setLoadError: assign(({ event }) => ({ branches: [], baseBranch: "", resolvedProject: null, error: errorText((event as unknown as { error: unknown }).error, "Could not load branches.") })),
-    setSourceError: assign(({ event }) => ({ pullRequests: [], issues: [], error: errorText((event as unknown as { error: unknown }).error, "Could not load this source.") })),
+    setSourceError: assign(({ event }) => ({ pullRequests: [], issues: [], sourceError: errorText((event as unknown as { error: unknown }).error, "Could not load this source.") })),
     beginSubmit: assign(({ context }) => ({
       provisioningPhase: (context.environmentId === "local"
         ? "creating-session"
@@ -555,6 +560,7 @@ export const newWorkspaceMachine = setup({
         ],
         SET_SEARCH: { target: "sourceLoading", actions: assign(({ event }) => ({ search: event.search })) },
         SET_MINE: { target: "sourceLoading", actions: assign(({ event }) => ({ mine: event.mine })) },
+        RETRY_SOURCE: { target: "sourceLoading" },
         SET_CHECKPOINT_SAFE_MODE: { actions: assign(({ event }) => ({ checkpointSafeMode: event.enabled })) },
         SET_ISOLATION: { actions: assign(({ event }) => ({ isolation: event.isolation })) },
         SET_BASE: { actions: assign(({ event }) => ({ baseBranch: event.baseBranch })) },

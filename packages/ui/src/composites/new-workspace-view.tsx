@@ -11,7 +11,9 @@ import type {
   ProviderModelId,
   Project,
   PrSummary,
+  Session,
 } from "@jingler/core";
+import { sessionsLinkedToIssue } from "@jingler/core";
 import type { SessionCreationPhase } from "@jingler/contracts";
 import { useMachine } from "@xstate/react";
 import {
@@ -32,7 +34,6 @@ import {
 import { Button } from "../components/button.js";
 import { GithubMark } from "../components/github-mark.js";
 import { LinearMark } from "../components/linear-mark.js";
-import { SearchInput } from "../components/search-input.js";
 import {
   Select,
   SelectContent,
@@ -43,7 +44,6 @@ import {
 import { cn } from "../lib/cn.js";
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js";
 import { Composer } from "./composer.js";
-import { IssuePickerList } from "./issue-picker-list.js";
 import {
   AUTO_PROJECT_ID,
   newWorkspaceMachine,
@@ -52,7 +52,7 @@ import {
   type NewWorkspaceDeps,
   type NewWorkspaceEvent,
 } from "./new-workspace-machine.js";
-import { PrPickerList } from "./pr-picker-list.js";
+import { StartFromList } from "./start-from-list.js";
 
 interface PickerOption<T extends string> {
   value: T;
@@ -307,6 +307,11 @@ export interface NewWorkspaceViewProps {
   open: boolean;
   projects: ReadonlyArray<Project>;
   environments?: ReadonlyArray<Environment>;
+  /** Sessions already open, for the "Already open in …" warning. */
+  sessions?: ReadonlyArray<Session>;
+  /** Jumps to Settings → Plugins; enables the "<Provider> isn't connected" Connect action. */
+  onConnectIssueProvider?: () => void;
+  onOpenSession?: (id: string) => void;
   providerCatalog?: ProviderCatalog | null;
   agentEndpointCatalog?: AgentEndpointCatalog | null;
   defaultConnectionId?: ProviderConnectionId | null;
@@ -338,25 +343,6 @@ const modelSelectionError = (complete: boolean, hasSelectableModel: boolean) =>
   complete ? undefined : hasSelectableModel
     ? "Choose an agent runtime and model."
     : "Connect a provider in Settings › Provider connections to choose a model."
-
-function SourcePicker({ source, icon, label, search, mine, pullRequests, issues, selectedPr, selectedIssue, loading, onSearch, onMine, onPr, onIssue }: {
-  source: NewSessionSource; icon: React.ReactNode; label: string; search: string; mine: boolean
-  pullRequests: React.ComponentProps<typeof PrPickerList>["prs"]
-  issues: React.ComponentProps<typeof IssuePickerList>["issues"]
-  selectedPr: number | null; selectedIssue: string | null; loading: boolean
-  onSearch: (value: string) => void; onMine: () => void
-  onPr: React.ComponentProps<typeof PrPickerList>["onSelect"]
-  onIssue: React.ComponentProps<typeof IssuePickerList>["onSelect"]
-}) {
-  if (source === "blank" || source === "branch") return null
-  return <section className="overflow-hidden rounded-xl border border-line bg-panel" aria-label="Source picker">
-    <header className="flex items-center gap-2 border-b border-line px-4 py-3"><span className="text-text-bright">{icon}</span><h3 className="text-[12px] font-semibold text-text-bright">{label}s</h3><span className="text-[10.5px] text-dim">Choose one to prefill this session</span></header>
-    <div className="flex items-center gap-2 px-3 pt-3"><SearchInput value={search} onChange={onSearch} placeholder={source === "pr" ? "Search pull requests…" : `Search ${label.toLowerCase()}s…`} className="flex-1" /><Button variant={mine ? "primary" : "secondary"} className="h-[34px]" aria-pressed={mine} onClick={onMine}>Just mine</Button></div>
-    <div className="p-3">{source === "pr"
-      ? <PrPickerList prs={pullRequests} selected={selectedPr} onSelect={onPr} loading={loading} />
-      : <IssuePickerList issues={issues} selected={selectedIssue} onSelect={onIssue} loading={loading} />}</div>
-  </section>
-}
 
 const contentUnavailableReason = (source: NewSessionSource, hasPr: boolean, hasIssue: boolean, projectId: string, baseBranch: string) => {
   if (source === "pr" && !hasPr) return "Choose a pull request before starting."
@@ -396,7 +382,17 @@ function WorkspaceComposer({ submitting, context, props, catalog, unavailableRea
   unavailableReason: string | undefined; controls: React.ReactNode; selectedProject: Project | undefined; send: WorkspaceSend
 }) {
   const { draft, attachments, source, selectedPr, baseBranch, environmentId, connectionId, providerId, modelId, mode, reasoning } = context
-  return <Composer submitting={submitting} preserveDraftOnSend autoFocus focusKey="new-session" value={draft} onValueChange={(value) => send({ type: "SET_DRAFT", draft: value })} attachments={attachments} onAttachmentsChange={(next) => send({ type: "SET_ATTACHMENTS", attachments: next })} onSend={() => send({ type: "SUBMIT" })} placeholder={workspacePrompt(source)} repo={selectedProject?.name} branch={selectedBranch(source, selectedPr?.headRefName, baseBranch)} environments={props.environments} environmentId={remoteEnvironmentId(environmentId)} onSetEnvironment={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" })} providerCatalog={props.providerCatalog} agentEndpointCatalog={catalog} endpointId={context.endpointId} connectionId={connectionId} providerId={providerId} modelId={modelId} onSetModel={(selection) => send({ type: "SET_MODEL", ...selection })} mode={mode} onSetMode={(value) => send({ type: "SET_MODE", mode: value })} reasoningEffort={reasoning?.effort} thinkingEnabled={reasoning?.enabled} onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })} allowPlan disabledReason={unavailableReason} contextControls={controls} />
+  return <Composer submitting={submitting} preserveDraftOnSend autoFocus focusKey="new-session" value={draft} onValueChange={(value) => send({ type: "SET_DRAFT", draft: value })} attachments={attachments} onAttachmentsChange={(next) => send({ type: "SET_ATTACHMENTS", attachments: next })} onSend={() => send({ type: "SUBMIT" })} placeholder={workspacePrompt(source)} repo={selectedProject?.name} branch={selectedBranch(source, selectedPr?.headRefName, baseBranch)} environments={props.environments} environmentId={remoteEnvironmentId(environmentId)} onSetEnvironment={(props.environments?.length ?? 0) > 0 ? (value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" }) : undefined} providerCatalog={props.providerCatalog} agentEndpointCatalog={catalog} endpointId={context.endpointId} connectionId={connectionId} providerId={providerId} modelId={modelId} onSetModel={(selection) => send({ type: "SET_MODEL", ...selection })} mode={mode} onSetMode={(value) => send({ type: "SET_MODE", mode: value })} reasoningEffort={reasoning?.effort} thinkingEnabled={reasoning?.enabled} onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })} allowPlan disabledReason={unavailableReason} contextControls={controls} />
+}
+
+function WorkspaceStartFrom({ props, context, send, icon, label, loading }: {
+  props: NewWorkspaceViewProps; context: NewWorkspaceContext; send: WorkspaceSend; icon: React.ReactNode; label: string; loading: boolean
+}) {
+  const { source, search, mine, pullRequests, issues, selectedPr, selectedIssue, sourceError } = context
+  if (source === "blank" || source === "branch") return null
+  const providerConnected = !source.startsWith("provider:") || (props.issueProviders ?? []).some((provider) => `provider:${provider.id}` === source)
+  const linkedSessions = selectedIssue ? sessionsLinkedToIssue(props.sessions ?? [], selectedIssue) : []
+  return <StartFromList kind={source === "pr" ? "pr" : "issue"} icon={icon} label={label} search={search} mine={mine} pullRequests={pullRequests} issues={issues} selectedPr={selectedPr?.number ?? null} selectedIssue={selectedIssue?.id ?? null} loading={loading} error={sourceError} providerConnected={providerConnected} linkedSessions={linkedSessions} onSearch={(value) => send({ type: "SET_SEARCH", search: value })} onMine={() => send({ type: "SET_MINE", mine: !mine })} onRetry={() => send({ type: "RETRY_SOURCE" })} onConnect={props.onConnectIssueProvider} onOpenSession={props.onOpenSession} onPr={(pr) => send({ type: "SELECT_PR", pr })} onIssue={(issue) => send({ type: "SELECT_ISSUE", issue })} />
 }
 
 function NewWorkspaceContent({ props, context, send, submitting, loading, sourceLoading, selectedEnvironment, selectedSource, sourceLabel, catalog, unavailableReason, selectedProject, projectOptions, sourceOptions, checkoutOptions, branchOptions }: {
@@ -414,7 +410,7 @@ function NewWorkspaceContent({ props, context, send, submitting, loading, source
       ? <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, selectedEnvironment)} />
       : <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
           <div className="flex items-center gap-3"><div><h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">What are we working on?</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Choose where the work starts, configure its checkout, then send the first message.</p></div><span className="flex-1" />{props.onAddProject && <Button variant="secondary" onClick={props.onAddProject}><FolderGit2 size={14} /> Add project</Button>}</div>
-          <SourcePicker source={source} icon={selectedSource?.icon} label={sourceLabel} search={search} mine={mine} pullRequests={pullRequests} issues={issues} selectedPr={selectedPr?.number ?? null} selectedIssue={selectedIssue?.id ?? null} loading={sourceLoading} onSearch={(value) => send({ type: "SET_SEARCH", search: value })} onMine={() => send({ type: "SET_MINE", mine: !mine })} onPr={(pr) => send({ type: "SELECT_PR", pr })} onIssue={(issue) => send({ type: "SELECT_ISSUE", issue })} />
+          <WorkspaceStartFrom props={props} context={context} send={send} icon={selectedSource?.icon} label={sourceLabel} loading={sourceLoading} />
           {source === "branch" && <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.</p>}
           <label className="text-xs text-text-bright">
             <Tooltip
@@ -489,6 +485,9 @@ const sourceOptionsFor = (props: NewWorkspaceViewProps): ReadonlyArray<{
           <CircleDot size={15} className="text-muted-foreground" />
         ),
     })),
+    ...(props.onConnectIssueProvider && !(props.issueProviders ?? []).some((provider) => provider.id === "linear")
+      ? [{ value: "provider:linear" as const, label: "Linear issue", description: "Connect Linear to link issues", icon: <LinearMark className="size-[15px] text-muted-foreground" /> }]
+      : []),
   ];
 
 export function NewWorkspaceView(props: NewWorkspaceViewProps) {

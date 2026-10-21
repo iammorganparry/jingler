@@ -518,6 +518,29 @@ describe("newWorkspaceMachine", () => {
     )
   })
 
+  it("records a source load failure and retries it", async () => {
+    const issue = { id: "1", providerId: "github", identifier: "#1", title: "t", body: "", url: "u", labels: [], assignees: [] } as never
+    const loadGithubIssues = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([issue])
+    const actor = actorFor(undefined, { loadGithubIssues }).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_SOURCE", source: "github" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing") && snapshot.context.sourceError === "boom")
+    actor.send({ type: "RETRY_SOURCE" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing") && snapshot.context.issues.length === 1)
+    expect(actor.getSnapshot().context.sourceError).toBeNull()
+  })
+
+  it("does not load issues for a provider that is not connected", async () => {
+    const loadProviderIssues = vi.fn(async () => [])
+    const actor = actorFor(undefined, { loadProviderIssues, issueProviders: [] }).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_SOURCE", source: "provider:linear" })
+    expect(actor.getSnapshot().matches("editing")).toBe(true)
+    expect(loadProviderIssues).not.toHaveBeenCalled()
+  })
+
   it("loads and submits a selected pull request with composer settings", async () => {
     const pr = {
       number: 42,
