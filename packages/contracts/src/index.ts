@@ -28,6 +28,7 @@ import {
   NotificationKind,
   NotificationPermission,
   NotificationsConfig,
+  VoiceConfig,
   ObsidianExplanationsConfig,
   Issue,
   IssueAutomations,
@@ -1385,6 +1386,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: ObsidianExplanationsConfig
+  }),
+
+  /** Persist voice input preferences (language, model, hold-to-talk key). */
+  Rpc.make("Config.setVoice", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: VoiceConfig
   }),
 
   /** Persist the user's desktop-notification preferences. */

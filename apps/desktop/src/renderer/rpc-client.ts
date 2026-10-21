@@ -43,6 +43,7 @@ import type {
   NotificationKind,
   NotificationPermission,
   NotificationsConfig,
+  VoiceConfig,
   GithubConfig,
   Issue,
   IssueAutomations,
@@ -908,6 +909,8 @@ export const rpc = {
     run((c) => c.Config.setSubagentModel({ providerId, agent, modelId })),
   configSetPlanAutoRun: (planAutoRun: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanAutoRun({ planAutoRun })),
+  configSetVoice: (voice: VoiceConfig): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setVoice(voice)),
   /** Persist ADHD mode; resolves with the whole updated config. */
   configSetAdhdMode: (adhdMode: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setAdhdMode({ adhdMode })),

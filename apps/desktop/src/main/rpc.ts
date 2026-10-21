@@ -5919,6 +5919,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ConfigService.setSubagentModel(providerId, agent, modelId),
   "Config.setPlanAutoRun": ({ planAutoRun }) =>
     ConfigService.setPlanAutoRun(planAutoRun),
+  "Config.setVoice": (voice) => ConfigService.setVoice(voice),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
   "Config.setFontScale": ({ fontScale }) =>
     ConfigService.setFontScale(fontScale),

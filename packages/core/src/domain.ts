@@ -1038,6 +1038,16 @@ export type NotificationsConfig = Schema.Schema.Type<
   typeof NotificationsConfig
 >;
 
+/** Voice input prefs; every field absent means auto language, any installed model, F9 hold-to-talk. */
+export const VoiceConfig = Schema.Struct({
+  /** whisper-cli `-l` code, or "auto". */
+  language: Schema.optional(Schema.String),
+  modelId: Schema.optional(Schema.String),
+  /** `KeyboardEvent.code` held to dictate, or "none". */
+  holdKey: Schema.optional(Schema.String),
+});
+export type VoiceConfig = Schema.Schema.Type<typeof VoiceConfig>;
+
 /**
  * What notifications do when the operator has never chosen.
  *
@@ -1156,6 +1166,8 @@ export const WorkspaceConfig = Schema.Struct({
    * the compaction primer), but explicitly applies only when the task is done.
    */
   adhdMode: Schema.optional(Schema.Boolean),
+  /** Voice input prefs (language, model, hold-to-talk key). */
+  voice: Schema.optional(VoiceConfig),
   /** The operator dismissed the Home MCP-import card; it never shows again. */
   mcpImportDismissed: Schema.optional(Schema.Boolean),
   /**

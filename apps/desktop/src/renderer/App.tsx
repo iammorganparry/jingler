@@ -156,6 +156,7 @@ import {
 import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useMcpSettings } from "./use-mcp-settings.js";
+import { useVoiceSettings } from "./use-voice-settings.js";
 import { McpImportPrompt } from "./mcp-import-prompt.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useAgentsSettings } from "./use-agents-settings.js";
@@ -508,6 +509,7 @@ function AuthedApp({
   );
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
   const mcp = useMcpSettings();
+  const voice = useVoiceSettings();
   const decideGateAllowFor = allowPendingGate;
   const homeImportCard = (
     <McpImportPrompt
@@ -1919,6 +1921,7 @@ function AuthedApp({
         onSaveContextConfig={saveContextConfig}
         contextSessions={contextSessions}
         mcp={mcp}
+        voice={voice}
         environments={environmentController.environments}
         loadEnvironmentDiscovery={rpc.environmentsDiscovery}
         loadBranches={async (repoPath, environmentId) => {

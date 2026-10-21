@@ -4,6 +4,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  VoiceConfig,
   ObsidianExplanationsConfig,
   OffloadComputeSettings,
   PlanTemplateConfig,
@@ -37,7 +38,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   const truthyKeys = [
     "context", "github", "git", "obsidianExplanations", "starredRepos", "headerViews", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
-    "subagentModelsByProvider", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
+    "subagentModelsByProvider", "planTemplate", "notifications", "voice", "theme", "webSearch", "offloadCompute",
     "disabledPlugins"
   ] as const
   // A saved false (or zero) is a real value, not an absent section.
@@ -220,6 +221,8 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Whether final completion summaries are shaped for an ADHD reader. */
       const setMcpImportDismissed = (mcpImportDismissed: boolean) => patch({ mcpImportDismissed })
 
+      const setVoice = (voice: VoiceConfig) => patch({ voice })
+
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
 
       /**
@@ -344,6 +347,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setSubagentDelegationEnabled,
         setSubagentModel,
         setPlanAutoRun,
+        setVoice,
         setAdhdMode,
         setMcpImportDismissed,
         setFontScale,
