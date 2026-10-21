@@ -6429,6 +6429,9 @@ const AssetListHandlersLayer = AssetListRpcs.toLayer({
       ),
     ),
   "Voice.requestMicrophone": () => Effect.promise(() => requestMicrophone()),
+  "Mcp.importDismissed": () =>
+    ConfigService.get().pipe(Effect.map((config) => config?.mcpImportDismissed === true)),
+  "Mcp.dismissImport": () => ConfigService.setMcpImportDismissed(true).pipe(Effect.asVoid),
   "Mcp.list": () => mcpList(),
   "Mcp.status": () => mcpStatus(),
   "Mcp.logTail": ({ server, lines }) =>

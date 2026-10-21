@@ -1156,6 +1156,8 @@ export const WorkspaceConfig = Schema.Struct({
    * the compaction primer), but explicitly applies only when the task is done.
    */
   adhdMode: Schema.optional(Schema.Boolean),
+  /** The operator dismissed the Home MCP-import card; it never shows again. */
+  mcpImportDismissed: Schema.optional(Schema.Boolean),
   /**
    * Multiplier applied to conversation + code text size. Absent means 1
    * (`FONT_SCALE_DEFAULT`) — the unscaled default.
