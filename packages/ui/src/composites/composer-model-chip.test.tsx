@@ -51,6 +51,6 @@ describe("Composer model chip", () => {
     render(<Composer providerCatalog={catalog} connectionId={null} modelId={null} />)
     expect(screen.getByText("Choose a model to start")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Select model" }))
-    expect(screen.getByRole("textbox", { name: "Search models" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Model: Choose model" })).toBeTruthy()
   })
 })
