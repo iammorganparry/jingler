@@ -595,3 +595,52 @@ it("retains the selected provider when overlapping native models refresh", async
     expect(actor.getSnapshot().context).toMatchObject({ endpointId, providerId: beta, modelId })
   } finally { actor.stop() }
 })
+
+describe("newWorkspaceMachine provisioning", () => {
+  const submitFailing = async (onCreate: NewWorkspaceDeps["onCreate"]) => {
+    const actor = actorFor(onCreate).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_DRAFT", draft: "keep me" })
+    actor.send({ type: "SUBMIT" })
+    return actor
+  }
+
+  it("fails into a state that keeps the form values and records the failed phase", async () => {
+    const onCreate = vi.fn(async (_i: CreateSessionInput, _a: unknown, onProgress?: (p: "creating-session") => void) => {
+      onProgress?.("creating-session")
+      throw new Error("boom")
+    })
+    const actor = await submitFailing(onCreate as NewWorkspaceDeps["onCreate"])
+    await waitFor(actor, (snapshot) => snapshot.matches("failed"))
+    expect(actor.getSnapshot().context).toMatchObject({ draft: "keep me", error: "boom", failedPhase: "creating-session" })
+  })
+
+  it("Retry re-runs creation; Edit returns to the form", async () => {
+    const onCreate = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValue(undefined)
+    const actor = await submitFailing(onCreate)
+    await waitFor(actor, (snapshot) => snapshot.matches("failed"))
+    actor.send({ type: "RETRY_PROVISION" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+    expect(onCreate).toHaveBeenCalledTimes(2)
+
+    const second = await submitFailing(vi.fn().mockRejectedValue(new Error("nope")))
+    await waitFor(second, (snapshot) => snapshot.matches("failed"))
+    second.send({ type: "EDIT_AFTER_FAILURE" })
+    expect(second.getSnapshot().matches("editing")).toBe(true)
+    expect(second.getSnapshot().context.draft).toBe("keep me")
+  })
+
+  it("Cancel aborts provisioning, returns to the form, and ignores a late result", async () => {
+    let fail!: (e: Error) => void
+    const onCreate = vi.fn(() => new Promise<void>((_ok, reject) => { fail = reject }))
+    const actor = await submitFailing(onCreate)
+    await waitFor(actor, (snapshot) => snapshot.matches("submitting"))
+    actor.send({ type: "CANCEL_PROVISION" })
+    expect(actor.getSnapshot().matches("editing")).toBe(true)
+    fail(new Error("late"))
+    await Promise.resolve()
+    expect(actor.getSnapshot().matches("editing")).toBe(true)
+    expect(actor.getSnapshot().context).toMatchObject({ draft: "keep me", error: null })
+  })
+})
