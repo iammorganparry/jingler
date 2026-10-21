@@ -31,6 +31,10 @@ test("PR chip opens the PR view with header fields and arrow-key sub-tabs", asyn
   await expect(meta).toContainText("1 commit")
   await expect(meta).toContainText("1 file")
 
+  await expect(window.getByText("No description provided.")).toBeVisible()
+  await expect(window.getByRole("button", { name: "Approve", exact: true })).toBeDisabled()
+  await expect(window.getByRole("button", { name: "Request changes", exact: true })).toBeDisabled()
+
   const tabs = window.getByRole("tab")
   await expect(tabs.filter({ hasText: /^Commits 1$/ })).toBeVisible()
   await expect(tabs.filter({ hasText: /^Files 1$/ })).toBeVisible()
