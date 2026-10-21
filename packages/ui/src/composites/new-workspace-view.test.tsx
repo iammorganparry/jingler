@@ -99,6 +99,9 @@ it("shows send-button submission, ignores duplicate mouse/Enter and retains the 
   fireEvent.click(screen.getByRole("button", { name: "Send ↵" }))
   await screen.findByTestId("workspace-provisioning")
   expect(screen.getByRole("button", { name: "Cancel" })).toBeDefined()
+  // The composer is replaced while provisioning, so a second submit is impossible.
+  expect(screen.queryByRole("button", { name: "Send ↵" })).toBeNull()
+  expect(screen.queryByRole("textbox")).toBeNull()
   expect(onCreate).toHaveBeenCalledTimes(1)
   await act(async () => reject(new Error("Creation failed")))
   await screen.findByText("Creation failed")
@@ -115,4 +118,5 @@ it("shows send-button submission, ignores duplicate mouse/Enter and retains the 
   expect(onCreate).toHaveBeenCalledTimes(3)
   await act(async () => resolve())
   expect(onClose).toHaveBeenCalledOnce()
+  expect(screen.queryByTestId("workspace-provisioning")).toBeNull()
 })
