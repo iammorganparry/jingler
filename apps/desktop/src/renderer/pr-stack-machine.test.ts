@@ -61,6 +61,10 @@ describe("prStackMachine merge progress", () => {
     actor.send({ type: "MERGE_FAILED", message: "conflict" })
     expect(actor.getSnapshot().value).toBe("failed")
     expect(actor.getSnapshot().context).toMatchObject({ merged: 1, mergeError: "conflict" })
+    // A failed run never restarts from 0: that would re-merge layers that already merged.
+    actor.send({ type: "MERGE_STACK" })
+    expect(actor.getSnapshot().value).toBe("failed")
+    expect(actor.getSnapshot().context.merged).toBe(1)
     actor.send({ type: "RESUME" })
     expect(actor.getSnapshot().context).toMatchObject({ merged: 1, mergeError: null })
     expect(actor.getSnapshot().value).toBe("merging")
