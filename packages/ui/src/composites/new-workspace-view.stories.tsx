@@ -842,6 +842,21 @@ type Story = StoryObj<typeof meta>
 /** Manual confirmation surface: sidebar stays fixed while creation owns the main pane. */
 export const Ready: Story = {}
 
+/** Provisioning: phase list with a spinner on the current row and Cancel. */
+export const Provisioning: Story = {
+  args: { onCreate: fn(() => new Promise<void>(() => {})) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(await canvas.findByRole("button", { name: /Create workspace/ }))
+  }
+}
+
+/** Failure: the failing row carries the red icon; Retry / Edit keep the form values. */
+export const ProvisioningFailed: Story = {
+  args: { onCreate: fn(async () => { throw new Error("git worktree add failed") }) },
+  play: Provisioning.play
+}
+
 /** Prompt Input first; every setup choice collapses into one quiet strip. */
 export const MinimalPromptFirst: Story = {
   render: () => <MinimalConceptStory concept="prompt-first" />

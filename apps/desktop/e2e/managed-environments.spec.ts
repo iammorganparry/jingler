@@ -182,6 +182,7 @@ test("rejects an incompatible Cloud runtime before workspace provisioning", asyn
     await expect(app.window.getByRole("alert")).toContainText(
       "Cloud is running an incompatible agent runtime",
     );
+    await expect(app.window.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
     expect(authServer.managedRequests).toHaveLength(0);
   } finally {
     await authServer.close();
