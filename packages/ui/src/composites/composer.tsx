@@ -250,6 +250,37 @@ export interface ComposerVoiceInput {
   onDismiss: () => void;
 }
 
+const VOICE_LABEL: Record<ComposerVoiceInput["status"], string> = {
+  idle: "Voice input", starting: "Voice input", recording: "Stop recording",
+  transcribing: "Transcribing", error: "Voice input", noModel: "Voice input"
+}
+const NO_MODEL_NOTE = "No speech model installed. Add whisper.cpp and a .bin model under ~/jingler/models/whisper."
+
+function voiceIcon(status: ComposerVoiceInput["status"]) {
+  if (status === "starting" || status === "transcribing") return <Spin><LoaderCircle size={14} aria-hidden="true" /></Spin>
+  if (status === "recording") return <Square size={12} fill="currentColor" />
+  return <Mic size={14} />
+}
+
+/** Mic toggle plus its Cancel and failure note; the transcript lands in the draft, never sent. */
+function ComposerVoiceControl({ voice }: { voice: ComposerVoiceInput }) {
+  const { status } = voice
+  const busyVoice = status === "starting" || status === "transcribing"
+  const recording = status === "recording"
+  const note = status === "error" ? (voice.message ?? "Voice input failed") : status === "noModel" ? NO_MODEL_NOTE : null
+  const label = VOICE_LABEL[status]
+  return (<>
+    {note && <Button type="button" variant="ghost" size="sm" onClick={voice.onDismiss} title="Dismiss" className="max-w-[200px] truncate text-state-failed">{note}</Button>}
+    {recording && <Button type="button" variant="ghost" size="sm" aria-label="Cancel recording" onClick={voice.onCancel}>Cancel</Button>}
+    <Tooltip label={label}>
+      <Button type="button" variant={recording ? "primary" : "ghost"} size="icon" className="size-7 rounded-full"
+        aria-label={label} aria-pressed={recording} aria-busy={busyVoice || undefined} disabled={busyVoice} onClick={voice.onToggle}>
+        {voiceIcon(status)}
+      </Button>
+    </Tooltip>
+  </>)
+}
+
 type ComposerProps =  {
   voiceInput?: ComposerVoiceInput;
   skills?: ReadonlyArray<Skill>;
@@ -658,38 +689,10 @@ export function Composer(props: ComposerProps) {
               it and the primary action keeps its full size on the trailing line,
               rather than being the thing pushed past the border. */}
           <span className="flex flex-none items-center gap-1.5">
-            {voiceInput && renderVoiceInput(voiceInput)}
+            {voiceInput && <ComposerVoiceControl voice={voiceInput} />}
             {getDisabledReason()}
           </span>
         </div>)
-  }
-
-  function renderVoiceInput(voice: ComposerVoiceInput) {
-    const { status } = voice
-    const busyVoice = status === "starting" || status === "transcribing"
-    const label = status === "recording" ? "Stop recording" : status === "transcribing" ? "Transcribing" : "Voice input"
-    const note = status === "error" ? voice.message ?? "Voice input failed"
-      : status === "noModel" ? "No speech model installed. Add whisper.cpp and a .bin model under ~/jingler/models/whisper."
-      : null
-    return (<>
-      {note && <button type="button" onClick={voice.onDismiss} title="Dismiss" className="max-w-[200px] truncate text-xs text-red outline-none focus-visible:ring-2 focus-visible:ring-ring">{note}</button>}
-      {status === "recording" && <Button type="button" variant="ghost" size="sm" aria-label="Cancel recording" onClick={voice.onCancel}>Cancel</Button>}
-      <Tooltip label={label}>
-        <Button
-          type="button"
-          variant={status === "recording" ? "primary" : "ghost"}
-          size="icon"
-          className="size-7 rounded-full"
-          aria-label={label}
-          aria-pressed={status === "recording"}
-          aria-busy={busyVoice || undefined}
-          disabled={busyVoice}
-          onClick={voice.onToggle}
-        >
-          {busyVoice ? <Spin><LoaderCircle size={14} aria-hidden="true" /></Spin> : status === "recording" ? <Square size={12} fill="currentColor" /> : <Mic size={14} />}
-        </Button>
-      </Tooltip>
-    </>)
   }
 
   function renderBranchMetadata() {

@@ -302,3 +302,17 @@ function OpenModelPopoverFixture({ noModel = false }: { noModel?: boolean }) {
 
 export const ModelPopoverWithReasoningAndEnvironment: Story = { render: () => <OpenModelPopoverFixture /> }
 export const ModelPopoverNoModel: Story = { render: () => <OpenModelPopoverFixture noModel /> }
+
+const voice = (status: "idle" | "recording" | "transcribing" | "error" | "noModel", message?: string) => ({
+  status, message, onToggle: () => {}, onCancel: () => {}, onDismiss: () => {}
+})
+const VoiceFixture = ({ v }: { v: ReturnType<typeof voice> }) => (
+  <main className="flex h-screen items-end justify-center bg-editor p-[30px] text-text">
+    <div className="w-full max-w-[760px]"><Composer voiceInput={v} onSend={() => {}} /></div>
+  </main>
+)
+export const VoiceIdle: Story = { render: () => <VoiceFixture v={voice("idle")} /> }
+export const VoiceRecording: Story = { render: () => <VoiceFixture v={voice("recording")} /> }
+export const VoiceTranscribing: Story = { render: () => <VoiceFixture v={voice("transcribing")} /> }
+export const VoiceError: Story = { render: () => <VoiceFixture v={voice("error", "Microphone access is blocked in system settings")} /> }
+export const VoiceNoModel: Story = { render: () => <VoiceFixture v={voice("noModel")} /> }

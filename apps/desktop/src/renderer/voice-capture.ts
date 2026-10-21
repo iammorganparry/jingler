@@ -10,12 +10,14 @@ export interface VoiceRecording {
 
 export const encodeWav = (samples: Float32Array): Uint8Array => {
   const out = new DataView(new ArrayBuffer(44 + samples.length * 2))
-  const tag = (offset: number, text: string) => [...text].forEach((c, i) => out.setUint8(offset + i, c.charCodeAt(0)))
+  const tag = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) out.setUint8(offset + i, text.charCodeAt(i))
+  }
   tag(0, "RIFF"); out.setUint32(4, 36 + samples.length * 2, true); tag(8, "WAVEfmt ")
   out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true)
   out.setUint32(24, SAMPLE_RATE, true); out.setUint32(28, SAMPLE_RATE * 2, true)
   out.setUint16(32, 2, true); out.setUint16(34, 16, true); tag(36, "data"); out.setUint32(40, samples.length * 2, true)
-  samples.forEach((s, i) => out.setInt16(44 + i * 2, Math.round(Math.max(-1, Math.min(1, s)) * 0x7fff), true))
+  for (let i = 0; i < samples.length; i++) out.setInt16(44 + i * 2, Math.round(Math.max(-1, Math.min(1, samples[i] ?? 0)) * 0x7fff), true)
   return new Uint8Array(out.buffer)
 }
 
@@ -40,7 +42,9 @@ export const startRecording = async (): Promise<VoiceRecording> => {
   const recorder = new MediaRecorder(stream)
   const chunks: Blob[] = []
   recorder.ondataavailable = (event) => chunks.push(event.data)
-  const release = () => stream.getTracks().forEach((track) => track.stop())
+  const release = () => {
+    for (const track of stream.getTracks()) track.stop()
+  }
   recorder.start()
   return {
     stop: () =>
