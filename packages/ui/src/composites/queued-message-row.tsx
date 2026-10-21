@@ -34,6 +34,8 @@ export interface QueuedMessageRowProps {
    * in a fresh chat.
    */
   readonly sending?: boolean
+  /** Held back because the device is offline; it sends on reconnect. */
+  readonly waiting?: boolean
 }
 
 function EditActions({ onSave, onCancel }: { onSave: () => void; onCancel: () => void }) {
@@ -142,7 +144,8 @@ export function QueuedMessageRow({
   onEdit,
   onRemove,
   handoffHint,
-  sending = false
+  sending = false,
+  waiting = false
 }: QueuedMessageRowProps) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(text)
@@ -189,7 +192,7 @@ export function QueuedMessageRow({
           sending ? "text-blue" : "text-dim"
         )}
       >
-        {sending ? "Sending" : "Queued"}
+        {sending ? "Sending" : waiting ? "Waiting for connection" : "Queued"}
       </span>
       {editing ? (
         <input
