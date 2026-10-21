@@ -1963,30 +1963,77 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const clearInitialPrompt = (id: string) =>
         update(id, (s) => ({ ...s, initialPrompt: undefined }))
 
+      /** Remove one owned worktree, first keeping any detached-HEAD commits reachable. */
+      const removeOwnedWorktree = (session: Session, worktreePath: string) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const worktreeExists = yield* fs
+            .exists(worktreePath)
+            .pipe(Effect.orElseSucceed(() => false))
+          // A blank session starts detached until its first generated title.
+          // If it committed before that retitle, deleting the worktree would
+          // otherwise remove the only reference to those commits.
+          if (worktreeExists) {
+            yield* GitService.preserveDetachedHead(worktreePath, basename(worktreePath))
+          }
+          const repoPath = checkoutsOf(session).find((c) => c.worktreePath === worktreePath)?.repoPath
+          yield* GitService.removeWorktreeAt(worktreePath, repoPath).pipe(Effect.ignore)
+        })
+
+      /**
+       * Free the archived session's worktrees, keeping any with uncommitted or
+       * unpushed work. Returns the first keep reason (undefined when all removed).
+       */
+      const reclaimArchivedWorktrees = (session: Session) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          let kept: string | undefined
+          for (const worktreePath of ownedWorktreePaths(session)) {
+            if (!(yield* fs.exists(worktreePath).pipe(Effect.orElseSucceed(() => false)))) continue
+            const reason = yield* GitService.worktreeKeepReason(worktreePath)
+            if (reason) kept ??= reason
+            else yield* removeOwnedWorktree(session, worktreePath)
+          }
+          return kept
+        })
+
       /** Archive a session (its linked PR was merged/closed) — read-only, kept. */
       const archive = (id: string, reason: "merged" | "closed", metadataOnlyAcknowledged = false) =>
         Effect.gen(function* () {
           const session = yield* get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Session not found for archive", cause })))
           if (session.checkpointPtyHistory && !metadataOnlyAcknowledged) return yield* Effect.fail(new GitError({ message: "Terminal descendants cannot be proven stopped. Explicitly confirm archive without cleanup; files and running jobs will be preserved." }))
+          // The metadata-only path promises files are preserved.
+          const worktreeKeptReason = metadataOnlyAcknowledged ? undefined : yield* reclaimArchivedWorktrees(session)
           const now = yield* Effect.sync(() => new Date().toISOString())
           yield* update(id, (s) => ({
             ...s,
             archived: true,
             archiveReason: reason,
             archivedAt: now,
+            worktreeKeptReason,
             workspaceLifecycle: advanceLifecycle(s)
           }))
         })
 
-      /** Restore an archived session back to an editable state. */
+      /** Restore an archived session, recreating any worktree archive removed. */
       const restore = (id: string) =>
-        update(id, (s) => ({
-          ...s,
-          archived: false,
-          archiveReason: undefined,
-          archivedAt: undefined,
-          workspaceLifecycle: advanceLifecycle(s)
-        }))
+        Effect.gen(function* () {
+          const session = yield* get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Session not found for restore", cause })))
+          const fs = yield* FileSystem.FileSystem
+          for (const c of checkoutsOf(session)) {
+            if (c.workspaceMode === "direct" || !c.worktreePath || !c.repoPath) continue
+            if (yield* fs.exists(c.worktreePath).pipe(Effect.orElseSucceed(() => false))) continue
+            yield* GitService.restoreWorktreeAt(c.repoPath, c.worktreePath, c.branch)
+          }
+          yield* update(id, (s) => ({
+            ...s,
+            archived: false,
+            archiveReason: undefined,
+            archivedAt: undefined,
+            worktreeKeptReason: undefined,
+            workspaceLifecycle: advanceLifecycle(s)
+          }))
+        })
 
     /**
      * Permanently delete a session: remove an owned worktree (best-effort) and
@@ -2010,18 +2057,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           if (workspaceHasUnprovenProcesses(target)) return yield* Effect.fail(new GitError({ message: "Workspace terminal descendants cannot be proven stopped; deletion is refused. The workspace remains usable." }))
           // Every worktree the session owns (one per attached repo), never a direct checkout.
           for (const worktreePath of ownedWorktreePaths(target)) {
-            const fs = yield* FileSystem.FileSystem
-            const worktreeExists = yield* fs
-              .exists(worktreePath)
-              .pipe(Effect.orElseSucceed(() => false))
-            // A blank session starts detached until its first generated title.
-            // If it committed before that retitle, deleting the worktree would
-            // otherwise remove the only reference to those commits.
-            if (worktreeExists) {
-              yield* GitService.preserveDetachedHead(worktreePath, basename(worktreePath))
-            }
-            const repoPath = checkoutsOf(target).find((c) => c.worktreePath === worktreePath)?.repoPath
-            yield* GitService.removeWorktreeAt(worktreePath, repoPath).pipe(Effect.ignore)
+            yield* removeOwnedWorktree(target, worktreePath)
           }
           // Re-read INSIDE the lock rather than filtering the list read above.
           // `removeWorktreeAt` shells out to git (`worktree remove --force`, then
