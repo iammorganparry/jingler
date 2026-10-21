@@ -219,6 +219,7 @@ import {
   SessionReviewDiff,
   type SessionCreationPhase,
   type SessionCreationUpdate,
+  VoiceError,
 } from "@jingler/contracts";
 import { FileSystem, Path } from "@effect/platform";
 import type { CommandExecutor } from "@effect/platform";
@@ -246,6 +247,7 @@ import {
   showNotification,
   shouldNotify,
 } from "./notifications.js";
+import { requestMicrophone, transcribeWav } from "./voice.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
 import { primeOffloadSessions } from "./offload-session-primer.js";
@@ -6446,7 +6448,15 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
 const AssetListHandlersLayer = AssetListRpcs.toLayer({
   "Asset.list": (input) => assetList(input),
+  "Voice.transcribe": ({ wavBase64 }) =>
+    Effect.promise(() => transcribeWav(wavBase64)).pipe(
+      Effect.flatMap((result) =>
+        "text" in result ? Effect.succeed(result) : Effect.fail(new VoiceError(result)),
+      ),
+    ),
+  "Voice.requestMicrophone": () => Effect.promise(() => requestMicrophone()),
 });
+
 
 const HandlersLayer = Layer.mergeAll(
   CoreHandlersLayer,

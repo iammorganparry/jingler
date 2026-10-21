@@ -142,6 +142,8 @@ mac:
     - dmg
     - zip
   hardenedRuntime: true
+  extendInfo:
+    NSMicrophoneUsageDescription: Jingler records your voice to dictate prompts. Audio is transcribed locally and never leaves your Mac.
   gatekeeperAssess: false
   entitlements: build-resources/entitlements.mac.plist
   entitlementsInherit: build-resources/entitlements.mac.plist

@@ -31,6 +31,7 @@ import {
   ImagePlus,
   ListChecks,
   Maximize2,
+  Mic,
   Minimize2,
   Monitor,
   MousePointer2,
@@ -46,6 +47,7 @@ import { downscaleImage } from "../lib/image-downscale.js";
 import { atLeast, useWidthTier } from "../hooks/width-tier.js";
 import { AttachmentThumb } from "../components/attachment-thumb.js";
 import { Button } from "../components/button.js";
+import { Tooltip } from "../components/tooltip.js";
 import { ContextMeter, type ContextMeterProps } from "./context-meter.js";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/beui/select.js";
 import { CodeChip } from "../components/code-chip.js";
@@ -238,7 +240,18 @@ function ComposerSelect<T extends string>({
  * Shift+Enter newline, plus two typeahead palettes: `/` surfaces the harness's
  * skills (harness-agnostic) and `@` references worktree files as code chips.
  */
+export interface ComposerVoiceInput {
+  status: "idle" | "starting" | "recording" | "transcribing" | "error" | "noModel";
+  /** Failure detail shown beside the mic in `error`. */
+  message?: string;
+  /** Start recording, or stop and transcribe. The transcript lands in the draft, never sent. */
+  onToggle: () => void;
+  onCancel: () => void;
+  onDismiss: () => void;
+}
+
 type ComposerProps =  {
+  voiceInput?: ComposerVoiceInput;
   skills?: ReadonlyArray<Skill>;
   files?: ReadonlyArray<string>;
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>;
@@ -644,10 +657,39 @@ export function Composer(props: ComposerProps) {
               together decide what a squeeze does: the row wraps the chips above
               it and the primary action keeps its full size on the trailing line,
               rather than being the thing pushed past the border. */}
-          <span className="flex-none">
+          <span className="flex flex-none items-center gap-1.5">
+            {voiceInput && renderVoiceInput(voiceInput)}
             {getDisabledReason()}
           </span>
         </div>)
+  }
+
+  function renderVoiceInput(voice: ComposerVoiceInput) {
+    const { status } = voice
+    const busyVoice = status === "starting" || status === "transcribing"
+    const label = status === "recording" ? "Stop recording" : status === "transcribing" ? "Transcribing" : "Voice input"
+    const note = status === "error" ? voice.message ?? "Voice input failed"
+      : status === "noModel" ? "No speech model installed. Add whisper.cpp and a .bin model under ~/jingler/models/whisper."
+      : null
+    return (<>
+      {note && <button type="button" onClick={voice.onDismiss} title="Dismiss" className="max-w-[200px] truncate text-xs text-red outline-none focus-visible:ring-2 focus-visible:ring-ring">{note}</button>}
+      {status === "recording" && <Button type="button" variant="ghost" size="sm" aria-label="Cancel recording" onClick={voice.onCancel}>Cancel</Button>}
+      <Tooltip label={label}>
+        <Button
+          type="button"
+          variant={status === "recording" ? "primary" : "ghost"}
+          size="icon"
+          className="size-7 rounded-full"
+          aria-label={label}
+          aria-pressed={status === "recording"}
+          aria-busy={busyVoice || undefined}
+          disabled={busyVoice}
+          onClick={voice.onToggle}
+        >
+          {busyVoice ? <Spin><LoaderCircle size={14} aria-hidden="true" /></Spin> : status === "recording" ? <Square size={12} fill="currentColor" /> : <Mic size={14} />}
+        </Button>
+      </Tooltip>
+    </>)
   }
 
   function renderBranchMetadata() {
@@ -734,7 +776,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
+  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],

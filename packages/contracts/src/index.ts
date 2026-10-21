@@ -232,6 +232,12 @@ export type SessionReviewDiff = Schema.Schema.Type<typeof SessionReviewDiff>
  * one nested client type exceeds TypeScript's instantiation depth; the server
  * merges both groups back into the single IPC surface below.
  */
+/** Local speech-to-text failed; `no-model` means no whisper.cpp model/binary is installed. */
+export class VoiceError extends Schema.TaggedError<VoiceError>()("VoiceError", {
+  reason: Schema.Literal("no-model", "failed"),
+  message: Schema.String
+}) {}
+
 export class AssetListRpcs extends RpcGroup.make(
   Rpc.make("Asset.list", {
     success: Schema.Array(AssetFileEntry),
@@ -241,6 +247,17 @@ export class AssetListRpcs extends RpcGroup.make(
       SessionNotFoundError
     ),
     payload: { sessionId: Schema.String }
+  }),
+  /** Transcribe a 16 kHz mono WAV (base64) locally with whisper.cpp. Macs prompt for mic access first. */
+  Rpc.make("Voice.transcribe", {
+    success: Schema.Struct({ text: Schema.String }),
+    error: VoiceError,
+    payload: { wavBase64: Schema.String }
+  }),
+
+  /** macOS mic permission (`askForMediaAccess`); other platforms resolve true. */
+  Rpc.make("Voice.requestMicrophone", {
+    success: Schema.Boolean
   })
 ) {}
 

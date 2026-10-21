@@ -33,7 +33,7 @@ import type { ArchiveReason, ContextPhase } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
-import { Composer, type ComposerCodeReference } from "../composites/composer.js"
+import { Composer, type ComposerCodeReference, type ComposerVoiceInput } from "../composites/composer.js"
 import { ThinkingOrb } from "../components/loading.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
@@ -370,6 +370,7 @@ export interface ConversationViewProps {
    */
   draft?: string
   onDraftChange?: (value: string) => void
+  voiceInput?: ComposerVoiceInput
   draftAttachments?: ReadonlyArray<Attachment>
   onDraftAttachmentsChange?: (attachments: ReadonlyArray<Attachment>) => void
   draftCodeReferences?: ReadonlyArray<ComposerCodeReference>
@@ -399,7 +400,7 @@ const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: Con
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     checkpointCount: 0,
     loadingHistory: false,
@@ -602,6 +603,7 @@ function renderSessionAnalytics() {
                 initialValue={initialDraft}
                 value={draft}
                 onValueChange={onDraftChange}
+                voiceInput={voiceInput}
                 attachments={draftAttachments}
                 onAttachmentsChange={onDraftAttachmentsChange}
                 codeReferences={draftCodeReferences}

@@ -35,6 +35,7 @@ import {
   BackgroundTaskDock,
   BackgroundTaskOutput,
   Composer,
+  type ComposerVoiceInput,
   ConversationView,
   SubagentEntryContext,
   SubagentReadOnlyBar,
@@ -72,6 +73,7 @@ import {
   disposeChatActor,
   getConversationActor
 } from "./conversation-registry.js"
+import { useVoiceInput } from "./use-voice-input.js"
 import { clearDraft, getDraft, markDraftSeeded, seedDraftOnce, setDraft, useDraft, type Draft } from "./draft-store.js"
 import { useSessionDiffs, type LiveDiffStat } from "./diff-presence.js"
 import { takeFirstMessage } from "./first-message-store.js"
@@ -718,6 +720,7 @@ export function ConversationPane({
   // mounted keyed by session id, so switching sessions unmounts it and any local
   // state goes with it. See `draft-store`.
   const draft = useDraft(activeChat.id)
+  const voiceInput = useVoiceInput(activeChat.id)
   const draftCodeReferences = useMemo(
     () =>
       draft.references.map((reference) => ({
@@ -1235,6 +1238,7 @@ export function ConversationPane({
                 onAdoptBranchStable,
                 plannotatorDocument,
                 draft,
+                voiceInput,
                 draftCodeReferences,
                 paneFocused,
                 fileBrowser,
@@ -1413,6 +1417,7 @@ function renderMainConversation({
   onAdoptBranchStable,
   plannotatorDocument,
   draft,
+  voiceInput,
   draftCodeReferences,
   paneFocused,
   fileBrowser,
@@ -1455,6 +1460,7 @@ function renderMainConversation({
   onAdoptBranchStable: () => Promise<void>;
   plannotatorDocument: import("@jingler/core").PlanDocument | null;
   draft: Draft;
+  voiceInput: ComposerVoiceInput;
   draftCodeReferences: { path: string; startLine: number; endLine: number; label: string }[];
   paneFocused: boolean;
   fileBrowser: FileBrowserController;
@@ -1551,6 +1557,7 @@ function renderMainConversation({
     onAdoptBranch={onAdoptBranchStable}
     planDocument={plannotatorDocument}
     draft={draft.text}
+    voiceInput={voiceInput}
     // Merge against the LIVE draft, never the render-time `draft` closure:
     // on send the composer fires onSend → setValue("") → setAttachments([])
     // in one go, so a stale spread would resurrect the text it just sent.

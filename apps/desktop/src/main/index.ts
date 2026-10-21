@@ -434,6 +434,11 @@ if (!gotPrimaryLock) {
   // in the log to say why.
   registerPluginScheme()
 
+  // e2e: Chromium's fake mic (synthetic tone) with no permission prompt.
+  if (process.env.JINGLER_E2E === "1") {
+    app.commandLine.appendSwitch("use-fake-device-for-media-stream")
+    app.commandLine.appendSwitch("use-fake-ui-for-media-stream")
+  }
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
     const packagedSubagentRoot = join(process.resourcesPath, "subagent-runtime")
