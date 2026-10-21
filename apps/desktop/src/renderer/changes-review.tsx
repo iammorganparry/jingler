@@ -8,7 +8,7 @@ import { useCallback, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type { Session } from "@jingler/core"
 import { activeCheckoutOf, checkoutsOf, hasNoRepo, workspaceModeOf } from "@jingler/core"
-import { ChangedFilesExplorer, EmptyState, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
+import { ChangedFilesExplorer, EmptyState, SubagentScopeBar, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
 import {
   setReviewFilter,
@@ -22,6 +22,7 @@ import { reviewCommentsContext } from "./review-references.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { useAgentTrees } from "./use-agent-trees.js"
 import { useReview } from "./use-review.js"
+import { useViewedChild } from "./subagent-tab-store.js"
 import { useSubagentView } from "./use-subagent-view.js"
 
 /** The instruction handed to the session's agent to clean up one file. */
@@ -125,7 +126,18 @@ function CheckoutChangesList({
   const active = checkoutId === undefined
   const agentTrees = useAgentTrees(session, review.files, active && review.source === "local")
   const { changesScope, setChangesScope } = useSubagentView(session.activeChatId)
+  const viewed = useViewedChild(session.id, session.activeChatId)
+  const scoped = active && viewed !== null && changesScope === viewed.subagentId
   return (
+    <>
+    {scoped && (
+      <SubagentScopeBar
+        agent={viewed.agent}
+        branch={viewed.workspace?.branch ?? null}
+        prNumber={viewed.prNumber}
+        onShowAll={() => setChangesScope("all")}
+      />
+    )}
     <ChangedFilesExplorer
       turns={active ? turns : []}
       turnId={active ? (turn?.id ?? null) : null}
@@ -151,6 +163,7 @@ function CheckoutChangesList({
       error={review.error}
       onRetry={review.retry}
     />
+    </>
   )
 }
 

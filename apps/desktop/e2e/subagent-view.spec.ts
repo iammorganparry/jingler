@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
@@ -218,4 +222,41 @@ test("a tool call with an agent-written intent shows it as the row title", async
   const row = log.getByRole("button", { name: /^Running tests/ })
   await expect(row).toBeVisible()
   await expect(row).toContainText("echo tests passed")
+})
+
+test("#563: entering a child scopes Changes to it and ← Main restores all agents", async ({ launchApp }) => {
+  const childRoot = mkdtempSync(join(tmpdir(), "jingler-child-tree-"))
+  const childTree = join(childRoot, "child")
+  try {
+    const { window } = await launchApp({
+      configured: true,
+      withRepo: true,
+      sessions: seededSessions,
+      e2eEnv: { JINGLER_E2E_SUBAGENT_WORKSPACE: childTree },
+      seed: ({ repoPath }) => {
+        execFileSync("git", ["worktree", "add", "-b", "child/a", childTree], { cwd: repoPath })
+        writeFileSync(join(childTree, "child.txt"), "child change\n")
+        writeFileSync(join(repoPath, "README.md"), "# e2e repo\nmain change\n")
+      }
+    })
+    await expect(appShell(window)).toBeVisible()
+    const composer = window.getByPlaceholder("Message the agent…")
+    await composer.fill("[[held-subagents]] survey the app")
+    await composer.press("Enter")
+    await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+
+    await window.getByRole("button", { name: "View", exact: true }).first().click()
+    await window.getByRole("button", { name: "Changes" }).first().click()
+    const list = window.getByRole("listbox", { name: "Changed files by agent" })
+    await expect(window.getByTestId("subagent-scope-bar")).toContainText("Scoped to")
+    await expect(list.getByRole("option", { name: /child\.txt/ })).toBeVisible({ timeout: 30_000 })
+    await expect(list.getByRole("option", { name: /README\.md/ })).toHaveCount(0)
+
+    await window.getByTestId("subagent-back").click()
+    await expect(window.getByTestId("subagent-scope-bar")).toHaveCount(0)
+    await expect(list.getByRole("option", { name: /README\.md/ })).toBeVisible()
+    await expect(list.getByRole("option", { name: /child\.txt/ })).toBeVisible()
+  } finally {
+    rmSync(childRoot, { recursive: true, force: true })
+  }
 })
