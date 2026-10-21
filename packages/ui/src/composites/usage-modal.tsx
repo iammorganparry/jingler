@@ -109,7 +109,7 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
         )}
       </div>
       {route && (
-        <div className="mb-3 flex items-center gap-2 overflow-x-auto">
+        <div data-testid="usage-route-badges" className="mb-3 flex items-center gap-2 overflow-x-auto">
           <Badge tone="neutral" size="sm" className="max-w-[180px] truncate">{route}</Badge>
           <Badge tone="neutral" size="sm" className="max-w-[160px] truncate">Billing: {p.billingRoute ?? "unconfirmed"}</Badge>
           <Badge tone="neutral" size="sm" className="max-w-[160px] truncate">Target: {p.targetId}</Badge>
@@ -189,6 +189,14 @@ const runtimeFilterOptions: ReadonlyArray<{ value: "all" | AgentRuntimeId; label
   { value: "pi", label: "Pi" }
 ]
 
+const rangeDays = { "7d": 7, "30d": 30 } as const
+type RangeValue = "all" | keyof typeof rangeDays
+const rangeOptions: ReadonlyArray<{ value: RangeValue; label: string }> = [
+  { value: "all", label: "All time" },
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" }
+]
+
 /**
  * The execution report's filter row, KPI strip and sortable per-model table. Filtering
  * re-aggregates the underlying facts client-side; project filtering is skipped until
@@ -200,9 +208,15 @@ function ReportSection({ report, onExport }: { report: UsageReport; onExport?: (
   const [direction, setDirection] = useState<"asc" | "desc">("desc")
   const [selectedGroup, setSelectedGroup] = useState<UsageReportGroup | null>(null)
 
+  const [range, setRange] = useState<RangeValue>("all")
+
   const filteredFacts = useMemo<ReadonlyArray<UsageFact>>(
-    () => filterUsageFacts(report.facts, runtimeFilter === "all" ? {} : { runtimeId: runtimeFilter }),
-    [report.facts, runtimeFilter]
+    () =>
+      filterUsageFacts(report.facts, {
+        ...(runtimeFilter === "all" ? {} : { runtimeId: runtimeFilter }),
+        ...(range === "all" ? {} : { from: new Date(Date.now() - rangeDays[range] * 86_400_000).toISOString() })
+      }),
+    [report.facts, runtimeFilter, range]
   )
   const filteredGroups = useMemo(() => usageReportFromFacts(filteredFacts).groups, [filteredFacts])
   const sortedGroups = useMemo(
@@ -224,6 +238,7 @@ function ReportSection({ report, onExport }: { report: UsageReport; onExport?: (
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="text-[12px] font-semibold text-text-bright">Execution report</div>
         <div className="flex items-center gap-2">
+          <FilterChips options={rangeOptions} value={range} onChange={setRange} ariaLabel="Filter by date range" />
           <FilterChips options={runtimeFilterOptions} value={runtimeFilter} onChange={setRuntimeFilter} ariaLabel="Filter by runtime" />
           {onExport && <Button size="sm" variant="ghost" onClick={() => void onExport()}>Export JSON</Button>}
         </div>

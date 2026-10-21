@@ -39,6 +39,23 @@ describe("UsageModal execution report", () => {
     expect(screen.getByTestId("usage-kpis").textContent).toContain("1")
   })
 
+  it("drops facts older than the selected date range from the KPIs and table", () => {
+    const old = makeUsageFact({
+      id: "o", runId: "o", sessionId: "s", chatId: "c", parentRunId: null,
+      runtimeId: "pi", providerId: "openai", modelId: "pi-old", kind: "parent",
+      startedAt: Date.now() - 60 * 86_400_000, outcome: "success", provenance: "test",
+      inputTokens: 1, outputTokens: 1, totalTokens: 2, toolCalls: 0
+    })
+    render(<UsageModal open usage={null} report={usageReportFromFacts([...report.facts, old])} />)
+    expect(screen.getAllByTestId("model-performance-row")).toHaveLength(3)
+
+    fireEvent.click(screen.getByRole("radio", { name: "30 days" }))
+
+    const rows = screen.getAllByTestId("model-performance-row")
+    expect(rows).toHaveLength(2)
+    expect(rows.some((r) => r.textContent?.includes("pi-old"))).toBe(false)
+  })
+
   it("re-sorts the model table when a column header is clicked", () => {
     render(<UsageModal open usage={null} report={report} />)
     const table = screen.getByTestId("model-performance-table")
