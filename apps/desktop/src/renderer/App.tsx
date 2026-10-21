@@ -92,6 +92,7 @@ import {
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionSubagentTabs, SubagentLaneViewProvider } from "./session-chat-tabs.js";
 import { useAgentEditsMarkerRenderer } from "./file-agent-edits.js";
+import { sessionPrRows } from "@jingler/ui";
 import { requestSessionPr } from "./session-pr-request.js";
 import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
@@ -447,9 +448,11 @@ function AuthedApp({
   );
   // Keep the module-level cell the conversation registry reads in sync. It can't
   // use a hook: it outlives every component. See `active-session.ts`.
+  const [visibleIds, setVisibleIds] = useState<ReadonlySet<string>>(new Set());
   const onVisibleSessionsChange = useCallback(
     (ids: ReadonlySet<string>) => {
       setVisibleSessionIds(ids);
+      setVisibleIds(ids);
       setVisibleDebugSessionIds(ids);
     },
     [],
@@ -1401,6 +1404,17 @@ function AuthedApp({
       ),
     [sessions, subagentTabs],
   );
+  const sessionPrKeys = useMemo(
+    () =>
+      new Set(
+        sessions.flatMap((s) =>
+          visibleIds.has(s.id) && s.githubSlug
+            ? sessionPrRows(prNumbersOf(s), subagentPrNodes[s.id] ?? []).map((row) => `${s.githubSlug}#${row.number}`.toLowerCase())
+            : [],
+        ),
+      ),
+    [sessions, visibleIds, subagentPrNodes],
+  );
   const subagentEntries = useMemo(
     () =>
       Object.fromEntries(
@@ -1673,7 +1687,7 @@ function AuthedApp({
         releaseNotes={releaseNotes}
         whatsNew={whatsNew}
         pullRequestsView={
-          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
+          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession, sessionPrKeys)
         }
         issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
@@ -2335,7 +2349,8 @@ function renderPullRequestInbox(
   github: ReturnType<typeof useGitHubConnection>,
   selectedPullRequestTarget: ReturnType<typeof pullRequestSessionTarget> | null,
   openSelectedPullRequestFiles: () => void,
-  openSelectedPullRequestSession: () => void
+  openSelectedPullRequestSession: () => void,
+  sessionPrKeys: ReadonlySet<string>
 ) {
   return <PullRequestInbox
     prs={pullRequestInbox.prs}
@@ -2350,6 +2365,7 @@ function renderPullRequestInbox(
       discovering: pullRequestInbox.discovering,
       error: pullRequestInbox.discoveryError,
     }}
+    sessionPrKeys={sessionPrKeys}
     onActivate={pullRequestInbox.discover}
     warnings={pullRequestInbox.warnings}
     selected={pullRequestInbox.selected ? {

@@ -27,11 +27,17 @@ const FILTERS: ReadonlyArray<{ value: PullRequestInboxFilter; label: string }> =
   { value: "review-requested", label: "Review requested" }
 ]
 
+const THIS_SESSION_FILTER = { value: "this-session", label: "This session" } as const
+
+const filterOptionsFor = (sessionKeys?: ReadonlySet<string>) =>
+  sessionKeys ? [...FILTERS, THIS_SESSION_FILTER] : FILTERS
+
 const keyOf = (pr: Pick<PullRequestListItem, "repository" | "number">) =>
   `${pr.repository}#${pr.number}`
 
-const matchesRelationship = (pr: PullRequestListItem, filter: PullRequestInboxFilter, viewerLogin: string) => {
+const matchesRelationship = (pr: PullRequestListItem, filter: PullRequestInboxFilter, viewerLogin: string, sessionKeys?: ReadonlySet<string>) => {
   switch (filter) {
+    case "this-session": return sessionKeys?.has(keyOf(pr).toLowerCase()) ?? false
     case "created": return pr.author.login.toLowerCase() === viewerLogin.toLowerCase()
     case "assigned": return pr.assignedToViewer
     case "review-requested": return pr.reviewRequestedFromViewer
@@ -52,11 +58,12 @@ export function filterPullRequests(
   filter: PullRequestInboxFilter,
   query: string,
   viewerLogin: string,
-  facets: PullRequestInboxFacets = initialInboxFilters
+  facets: PullRequestInboxFacets = initialInboxFilters,
+  sessionKeys?: ReadonlySet<string>
 ): ReadonlyArray<PullRequestListItem> {
   const search = query.trim().toLowerCase()
   return prs.filter((pr) => {
-    if (!matchesRelationship(pr, filter, viewerLogin) || !matchesFacets(pr, facets)) return false
+    if (!matchesRelationship(pr, filter, viewerLogin, sessionKeys) || !matchesFacets(pr, facets)) return false
     return search.length === 0 || `${pr.title} ${pr.repository} ${pr.author.login} ${pr.number}`.toLowerCase().includes(search)
   })
 }
@@ -74,6 +81,8 @@ export interface PullRequestInboxProps {
     readonly error: string | null
   }
   onActivate?: () => void
+  /** Lowercase `owner/repo#number` keys of the visible session's main + child PRs; enables the "This session" filter. */
+  sessionPrKeys?: ReadonlySet<string>
   warnings?: ReadonlyArray<string>
   viewerLogin: string
   selected: { repository: string; number: number } | null
@@ -106,6 +115,7 @@ export function PullRequestInbox({
   prs,
   teamControls,
   onActivate,
+  sessionPrKeys,
   warnings = [],
   viewerLogin,
   selected,
@@ -223,8 +233,8 @@ export function PullRequestInbox({
   const compact = !atLeast(useWidthTier(), "mid")
   const isTeam = Boolean(teamControls?.teamId)
   const visible = useMemo(
-    () => filterPullRequests(prs, isTeam ? "all" : filter, query, viewerLogin, facets),
-    [filter, prs, query, viewerLogin, isTeam, facets]
+    () => filterPullRequests(prs, isTeam ? "all" : filter, query, viewerLogin, facets, sessionPrKeys),
+    [filter, prs, query, viewerLogin, isTeam, facets, sessionPrKeys]
   )
   useActivateOnFocus(onActivate)
   const selectedKey = selected ? `${selected.repository}#${selected.number}` : null
@@ -241,8 +251,8 @@ export function PullRequestInbox({
               <Badge tone="count" size="xs">{visible.length}</Badge>
             </div>
             <SearchField value={query} onChange={setQuery} placeholder="Search pull requests" />
-            {teamControls ? <InboxTeamControls controls={teamControls} filter={filter} onFilter={setFilter} />
-              : <FilterChips options={FILTERS} value={filter} onChange={setFilter} ariaLabel="Pull request filter" />}
+            {teamControls ? <InboxTeamControls controls={teamControls} filter={filter} onFilter={setFilter} sessionPrKeys={sessionPrKeys} />
+              : <FilterChips options={filterOptionsFor(sessionPrKeys)} value={filter} onChange={setFilter} ariaLabel="Pull request filter" />}
             <div className="grid min-w-0 grid-cols-2 gap-2">
               {(["repository", "author", "label"] as const).map((kind) => <InboxFilterSelect
                 key={kind} label={kind === "repository" ? "Repository" : kind === "author" ? "Author" : "Label"}
@@ -286,7 +296,8 @@ export function PullRequestInbox({
   )
 }
 
-function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter }: {
+function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter, sessionPrKeys }: {
+  sessionPrKeys?: ReadonlySet<string>
   controls: NonNullable<PullRequestInboxProps["teamControls"]>
   filter: PullRequestInboxFilter
   onFilter: (filter: PullRequestInboxFilter) => void
@@ -325,7 +336,7 @@ function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter
               <option value="reviews">Requested reviews</option>
               <option value="authored">Member-authored</option>
               <option value="repositories">Team repositories</option>
-            </select> : <FilterChips options={FILTERS} value={filter} onChange={setFilter} ariaLabel="Pull request filter" />}
+            </select> : <FilterChips options={filterOptionsFor(sessionPrKeys)} value={filter} onChange={setFilter} ariaLabel="Pull request filter" />}
   </>
 }
 
