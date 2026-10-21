@@ -957,8 +957,11 @@ export const rpc = {
     run((c) => c.Notify.openSystemSettings()),
   voiceRequestMicrophone: (): Promise<boolean> =>
     runAssetList((c) => c.Voice.requestMicrophone()),
-  voiceTranscribe: (wavBase64: string): Promise<{ text: string }> =>
-    runAssetList((c) => c.Voice.transcribe({ wavBase64 })),
+  voiceTranscribe: (wavBase64: string, language?: string, modelId?: string): Promise<{ text: string }> =>
+    runAssetList((c) => c.Voice.transcribe({ wavBase64, language, modelId })),
+  voiceModels: (): Promise<ReadonlyArray<VoiceModel>> => runAssetList((c) => c.Voice.models()),
+  voiceDownloadModel: (id: string): Promise<void> => runAssetList((c) => c.Voice.downloadModel({ id })),
+  voiceRemoveModel: (id: string): Promise<void> => runAssetList((c) => c.Voice.removeModel({ id })),
   configSetStarredRepos: (
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>
