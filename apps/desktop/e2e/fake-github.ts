@@ -95,7 +95,7 @@ export interface FakeGitHubServer {
     readonly state: "active" | "archived";
   } | null;
   /** Fail exactly the next matching mutation, then recover for retry/restart tests. */
-  readonly failNext: (operation: "create-pr" | "update-pr") => void;
+  readonly failNext: (operation: "create-pr" | "update-pr" | "merge-pr") => void;
   readonly status: () => GitHubAppConnectionStatus;
   readonly publishedPr: () => {
     readonly number: number;
@@ -219,7 +219,7 @@ export const startFakeGitHubServer = async (
       updatedAt: string;
     }
   >();
-  const failures = new Set<"create-pr" | "update-pr">();
+  const failures = new Set<"create-pr" | "update-pr" | "merge-pr">();
   const grant = options.relayGrant ?? "e2e-short-lived-github-grant";
   let publishedPr: PublishedPull | null = null;
 
@@ -839,6 +839,11 @@ export const startFakeGitHubServer = async (
               handle: async function mergePull() {
                 if (!requirePermissions("contents:write")) return;
                 const body = await requestBody(req);
+                if (failures.delete("merge-pr")) {
+                  operations.push(`fail pr merge ${number}`);
+                  json(res, 405, { message: "Merge conflict" });
+                  return;
+                }
                 operations.push(
                   `pr merge ${number} --${String(body.merge_method ?? "merge")}`,
                 );

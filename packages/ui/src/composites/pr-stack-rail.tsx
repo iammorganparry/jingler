@@ -1,9 +1,12 @@
+import type { PrMergeMethod } from "@jingler/core"
 import { mergedBaseOf, restackPlan, type PrCheckStatus, type PrState } from "@jingler/core"
+import type { ReactNode } from "react"
 import { Check, X } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Loader } from "../components/beui/loader.js"
+import { SegmentedControl } from "../components/segmented-control.js"
 import { cn } from "../lib/cn.js"
 
 /** One layer of a PR stack. */
@@ -18,7 +21,7 @@ export interface PrStackLayer {
 export const PR_STATE_LABEL: Record<PrState, string> = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }
 
 /** `prStackMachine`'s state value while a "Merge stack" run is in flight. */
-export type PrStackMergeState = "idle" | "merging" | "failed" | "merged"
+export type PrStackMergeState = "idle" | "merging" | "restacking" | "failed" | "merged"
 
 /** Stack navigation handed to the PR view: switcher in the header, rail on Checks. */
 export interface PrStackNav {
@@ -35,6 +38,10 @@ export interface PrStackNav {
   readonly mergeError: string | null
   /** Merge every unmerged layer base-up, one RPC per layer; stops on the first failure. */
   readonly onMergeStack: () => void
+  /** Continue a failed run from the failed layer. */
+  readonly onResume?: () => void
+  readonly mergeMethod?: PrMergeMethod
+  readonly onMergeMethod?: (method: PrMergeMethod) => void
   /** True while `Github.restack` is running. */
   readonly restacking?: boolean
   /** Retarget and rebase every layer above `mergedPr` (from `restackPlan`). */
@@ -58,6 +65,58 @@ function LayerNode({ layer }: { layer: PrStackLayer }) {
   )
 }
 
+/** Per-layer row of a merge run: merged tick, the layer in flight, or nothing yet. */
+function layerProgress(index: number, merged: number, mergeState: PrStackMergeState): ReactNode {
+  if (index < merged) {
+    return mergeState === "restacking" && index === merged - 1 ? (<><Loader size={11} /> Restacking layers above…</>) : (<><Check size={11} /> Merged</>)
+  }
+  if (index !== merged) return null
+  if (mergeState === "merging") return (<><Loader size={11} /> Merging…</>)
+  return mergeState === "failed" ? "Failed" : null
+}
+
+/** Method picker plus the Merge stack / Resume button. */
+function MergeStackActions({ mergeState, merged, total, mergeMethod, onMergeMethod, onMergeStack, onResume }: {
+  mergeState: PrStackMergeState
+  merged: number
+  total: number
+  mergeMethod: PrMergeMethod
+  onMergeMethod?: (method: PrMergeMethod) => void
+  onMergeStack: () => void
+  onResume?: () => void
+}) {
+  const inFlight = mergeState === "merging" || mergeState === "restacking"
+  return (
+    <>
+          {onMergeMethod && mergeState === "idle" && (
+            <SegmentedControl
+              size="sm"
+              aria-label="Merge method"
+              value={mergeMethod}
+              onChange={onMergeMethod}
+              items={[{ value: "merge", label: "Merge" }, { value: "squash", label: "Squash" }, { value: "rebase", label: "Rebase" }]}
+            />
+          )}
+          {mergeState === "failed" && onResume ? (
+            <Button variant="secondary" size="sm" data-testid="merge-stack-resume" onClick={onResume}>
+              Resume
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="merge-stack-cta"
+              disabled={inFlight}
+              onClick={onMergeStack}
+            >
+              {inFlight && <Loader size={13} />}
+              {inFlight ? `Merging ${merged}/${total}…` : "Merge stack"}
+            </Button>
+          )}
+    </>
+  )
+}
+
 /**
  * The stack rail on the Checks tab (Graphite style): h36 rows joined by a 1px line, **base layer first**.
  * The selected layer is marked neutrally (`aria-current`, raised surface); merged layers are dimmed.
@@ -70,6 +129,9 @@ export function PrStackRail({
   merged = 0,
   mergeError = null,
   onMergeStack,
+  onResume,
+  mergeMethod = "merge",
+  onMergeMethod,
   restacking = false,
   onRestack,
   className
@@ -83,6 +145,9 @@ export function PrStackRail({
   merged?: number
   mergeError?: string | null
   onMergeStack?: () => void
+  onResume?: () => void
+  mergeMethod?: PrMergeMethod
+  onMergeMethod?: (method: PrMergeMethod) => void
   restacking?: boolean
   /** Omit to hide the restack actions. */
   onRestack?: (mergedPr: number) => void
@@ -124,6 +189,16 @@ export function PrStackRail({
             <span className="min-w-0 flex-1 truncate text-[12px]">{layer.title ?? layer.branch}</span>
             {baseMerged ? <Badge tone="yellow" size="xs">Base merged</Badge> : layer.state && <span className="text-[11px] text-dim">{PR_STATE_LABEL[layer.state]}</span>}
           </Button>
+          {onMergeStack && layer.state !== "merged" && index > 0 && layers[index - 1]?.state !== "merged" && mergeState !== "merging" && mergeState !== "restacking" && (
+            <Button variant="ghost" size="sm" disabled data-testid={`pr-stack-merge-first-${layer.number}`} className="ml-6 h-7 justify-start px-2 text-[11px]">
+              Merge #{layers[index - 1]!.number} first
+            </Button>
+          )}
+          {mergeState !== "idle" && (
+            <div data-testid={`pr-stack-progress-${layer.number}`} className="ml-6 flex h-7 items-center gap-2 px-2 text-[11px] text-dim">
+              {layerProgress(index, merged, mergeState)}
+            </div>
+          )}
           {baseMerged && onRestack && (
             <Button
               variant="ghost"
@@ -147,20 +222,7 @@ export function PrStackRail({
       */}
       {onMergeStack && !everyLayerMerged && (
         <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
-          <Button
-            variant="secondary"
-            size="sm"
-            data-testid="merge-stack-cta"
-            disabled={mergeState === "merging"}
-            onClick={onMergeStack}
-          >
-            {mergeState === "merging" && <Loader size={13} />}
-            {mergeState === "merging"
-              ? `Merging ${merged}/${layers.length}…`
-              : mergeState === "failed"
-                ? "Retry merge stack"
-                : "Merge stack"}
-          </Button>
+          <MergeStackActions mergeState={mergeState} merged={merged} total={layers.length} mergeMethod={mergeMethod} onMergeMethod={onMergeMethod} onMergeStack={onMergeStack} onResume={onResume} />
           {mergeState === "failed" && mergeError && (
             <div data-testid="merge-stack-error">
               <Callout tone="red">{mergeError}</Callout>
