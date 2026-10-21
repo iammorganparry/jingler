@@ -152,7 +152,7 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   const reviewing = filter !== "all" || drafts.length > 0
 
   const prQuery = useQuery({
-    queryKey: ["github", "review", session.id, session.prNumber, ...checkoutKeyPart(checkoutId)],
+    queryKey: ["github", "review", session.id, session.prNumber, shared.prLayer, ...checkoutKeyPart(checkoutId)],
     enabled: reviewing && session.prNumber != null,
     queryFn: async () => {
       // Settle independently: the file list and the diff are separate fetches
@@ -160,8 +160,8 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
       // otherwise-complete review. (A single Promise.all rejection here showed
       // "No changes to review" even when 25 files had loaded.)
       const [filesResult, diffResult] = await Promise.allSettled([
-        rpc.githubFiles(session.id, undefined, checkoutId),
-        rpc.githubDiff(session.id, undefined, checkoutId)
+        rpc.githubFiles(session.id, shared.prLayer ?? undefined, checkoutId),
+        rpc.githubDiff(session.id, shared.prLayer ?? undefined, checkoutId)
       ])
       if (filesResult.status === "rejected") throw filesResult.reason
       return {

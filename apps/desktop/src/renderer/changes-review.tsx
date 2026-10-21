@@ -13,6 +13,7 @@ import { getConversationActor } from "./conversation-registry.js"
 import {
   setReviewFilter,
   setReviewFocused,
+  setReviewPrLayer,
   setReviewTurn,
   useReviewFocused,
   useSessionReviewState
@@ -110,6 +111,14 @@ function CheckoutChangesList({
 }) {
   const { review, adversarial, revertFile } = useChangesReview(session, connected, checkoutId)
   const { turns, turn, setTurn } = useReviewTurns(session)
+  const { prLayer } = useSessionReviewState(session.id, session.prNumber)
+  const selectLayer = useCallback(
+    (next: number) => {
+      setReviewPrLayer(session.id, session.prNumber, next)
+      setReviewFilter(session.id, session.prNumber, "pr")
+    },
+    [session.id, session.prNumber]
+  )
   // The turn filter and Discard belong to the active checkout only.
   const active = checkoutId === undefined
   return (
@@ -117,6 +126,9 @@ function CheckoutChangesList({
       turns={active ? turns : []}
       turnId={active ? (turn?.id ?? null) : null}
       onTurnChange={setTurn}
+      prLayers={active ? (session.prs ?? []) : []}
+      prNumber={prLayer ?? session.prNumber}
+      onPrNumberChange={selectLayer}
       files={review.files}
       fileDiffs={review.fileDiffs}
       omittedFiles={review.omittedFiles}
