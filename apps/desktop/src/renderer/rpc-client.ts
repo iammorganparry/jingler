@@ -133,7 +133,8 @@ import {
   type SessionCreationUpdate,
   type SessionDiffStat,
   type SessionFileDiff,
-  type SessionReviewDiff
+  type SessionReviewDiff,
+  type VoiceModel
 } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type {
