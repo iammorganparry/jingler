@@ -393,6 +393,14 @@ export const BranchDriftPart = Schema.TaggedStruct("BranchDrift", {
 })
 export type BranchDriftPart = Schema.Schema.Type<typeof BranchDriftPart>
 
+/** A persisted PR lifecycle card in the transcript: "Opened #N · stacked on #M" or "PR #N merged". */
+export const PrEventPart = Schema.TaggedStruct("PrEvent", {
+  kind: Schema.Literal("opened", "merged"),
+  number: Schema.Number,
+  stackedOn: Schema.optional(Schema.Number)
+})
+export type PrEventPart = Schema.Schema.Type<typeof PrEventPart>
+
 /**
  * The carried-forward summary of a conversation, produced by a background run
  * over our own transcript and used to seed a fresh harness conversation.
@@ -489,6 +497,7 @@ export const ContentPart = Schema.Union(
   QuestionPart,
   PlanPart,
   BranchDriftPart,
+  PrEventPart,
   ContextPart
 )
 export type ContentPart = Schema.Schema.Type<typeof ContentPart>

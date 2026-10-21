@@ -538,6 +538,7 @@ type ConversationEvent =
       diffStat: SessionDiffStat
     }
   | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
+  | { type: "PR_EVENT_RECORDED"; message: Message }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
   | { type: "REVIEW_EVENT"; event: StreamEvent }
   | { type: "REFRESH_DIFF" }
@@ -1872,6 +1873,11 @@ export const conversationMachine = setup({
       ) return {}
       return reconciledSession(context, event.session, event.type !== "SESSION_UPDATED")
     }),
+    appendPrEvent: assign(({ context, event }) =>
+      event.type !== "PR_EVENT_RECORDED" || context.messages.some((m) => m.id === event.message.id)
+        ? {}
+        : { messages: [...context.messages, event.message] }
+    ),
     applySharedPlan: assign(({ context, event }) => {
       if (event.type !== "SHARED_PLAN_UPDATED") return {}
       const hasPlan = context.messages.some((message) =>
@@ -2115,6 +2121,7 @@ export const conversationMachine = setup({
     MODEL_PERSIST_FAILED: { actions: "reconcileSession" },
     SESSION_UPDATED: { guard: "sessionChanged", actions: "reconcileSession" },
     SHARED_PLAN_UPDATED: { guard: "sharedPlanChanged", actions: "applySharedPlan" },
+    PR_EVENT_RECORDED: { actions: "appendPrEvent" },
     // Root-level for the same reason: a sub-agent's tab outlives the turn that
     // spawned it, so closing one has to work in `idle` — and a stop request
     // races nothing, since the harness answers it on the ordinary stream.
