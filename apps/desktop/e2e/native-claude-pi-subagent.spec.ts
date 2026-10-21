@@ -23,6 +23,7 @@ test("native Claude delegates through bundled PI without a PI provider credentia
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Claude Code", { exact: true })).toBeVisible()
   await window.getByRole("option", { name: /^Haiku \(latest\)/ }).click()

@@ -20,6 +20,7 @@ test("selects native Codex beside PI and preserves native continuation after rel
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Codex CLI", { exact: true })).toBeVisible()
   await expect(window.getByText(/^PI ·/).first()).toBeVisible()

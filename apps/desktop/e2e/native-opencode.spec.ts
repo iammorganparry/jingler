@@ -17,6 +17,7 @@ test("selects OpenCode provider identity and resumes a persisted native session"
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("OpenCode CLI", { exact: true })).toBeVisible()
   await expect(window.getByRole("option", { name: /^OpenCode alpha/ })).toBeVisible()

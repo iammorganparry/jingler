@@ -23,6 +23,8 @@ describe("Composer thinking strength", () => {
       <Composer providerCatalog={catalog} connectionId={connectionId} modelId={modelId} reasoningEffort="low" onSetReasoning={onSetReasoning} />
     )
 
+    fireEvent.click(screen.getByRole("button", { name: "Model settings" }))
+
     fireEvent.click(screen.getByRole("button", { name: "Thinking strength" }))
     expect(screen.getByRole("option", { name: "Low" })).toBeDefined()
     expect(screen.getByRole("option", { name: "Off" })).toBeDefined()
@@ -32,6 +34,7 @@ describe("Composer thinking strength", () => {
     expect(onSetReasoning).toHaveBeenCalledWith({ enabled: true, effort: "xhigh" })
 
     rerender(<Composer providerCatalog={catalog} connectionId={connectionId} modelId={modelId} reasoningEffort="low" onSetReasoning={onSetReasoning} />)
+    fireEvent.click(screen.getByRole("button", { name: "Model settings" }))
     fireEvent.click(screen.getByRole("button", { name: "Thinking strength" }))
     fireEvent.click(screen.getByRole("option", { name: "Medium (default)" }))
     expect(onSetReasoning).toHaveBeenLastCalledWith(undefined)
@@ -46,6 +49,8 @@ describe("Composer thinking strength", () => {
         modelId={alwaysThinking.connections[0]!.models[0]!.id}
       />
     )
+
+    fireEvent.click(screen.getByRole("button", { name: "Model settings" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Thinking strength" }))
     expect(screen.queryByRole("option", { name: "Off" })).toBeNull()

@@ -172,6 +172,7 @@ test("rejects an incompatible Cloud runtime before workspace provisioning", asyn
     });
     await expect(appShell(app.window)).toBeVisible();
     await app.window.getByTestId("new-session").click();
+    await app.window.getByRole("button", { name: "Model settings" }).click()
     await app.window.getByRole("button", { name: "Execution environment" }).click();
     await app.window.getByRole("option", { name: "Cloud" }).click();
     await app.window.getByRole("button", { name: "Create workspace" }).click();

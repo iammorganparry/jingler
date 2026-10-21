@@ -51,6 +51,7 @@ test("native Claude spend sums each resumed run's own cost", async ({ launchApp 
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Claude Code", { exact: true })).toBeVisible()
   await window.getByRole("option", { name: /^Opus \(latest\)/ }).click()

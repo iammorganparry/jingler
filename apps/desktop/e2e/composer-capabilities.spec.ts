@@ -110,6 +110,8 @@ test("derives reasoning choices from the certified model capability", async ({ l
   })
   await expect(appShell(launched.window)).toBeVisible()
 
+  await launched.window.getByRole("button", { name: "Model settings" }).click()
+
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   for (const label of ["Off", "Low", "Medium", "High", "Xhigh"]) {
     await expect(launched.window.getByRole("option", { name: label, exact: true })).toBeVisible()
@@ -126,6 +128,7 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
   await expect(appShell(first.window)).toBeVisible()
   await first.window.getByRole("button", { name: "Accept Edits", exact: true }).click()
   await first.window.getByRole("option", { name: /^Auto\b/ }).click()
+  await first.window.getByRole("button", { name: "Model settings" }).click()
   await first.window.getByRole("button", { name: "Thinking strength" }).click()
   await first.window.getByRole("option", { name: "High", exact: true }).click()
 
@@ -192,6 +195,7 @@ test("configures canonical model, mode, and reasoning before creating a session"
   ).toBeVisible()
   await launched.window.getByRole("button", { name: "Auto", exact: true }).click()
   await launched.window.getByRole("option", { name: /^Ask Before Actions\b/ }).click()
+  await launched.window.getByRole("button", { name: "Model settings" }).click()
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   await launched.window.getByRole("option", { name: "High", exact: true }).click()
   await launched.window.getByRole("button", { name: "Checkout" }).click()

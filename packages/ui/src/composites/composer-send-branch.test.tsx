@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { testProviderCatalog } from "../test-support.js"
 import { Composer } from "./composer.js"
@@ -117,6 +117,7 @@ describe("Composer send row", () => {
 
   it("fills one bar per rung of the selected model's reasoning ladder", () => {
     render(<Composer providerCatalog={catalog} connectionId={connectionId} modelId={modelId} reasoningEffort="high" />)
+    fireEvent.click(screen.getByRole("button", { name: "Model settings" }))
     const chip = () => screen.getByRole("button", { name: "Thinking strength" })
     expect(filledBars(chip())).toBe(3)
   })

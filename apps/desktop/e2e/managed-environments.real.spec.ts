@@ -332,6 +332,7 @@ const openNewSession = async (
   await expect(
     window.getByRole("button", { name: `Model: ${model.label}` }),
   ).toBeVisible();
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: "Execution environment" }).click();
   await window.getByRole("option", { name: environment }).click();
 };
@@ -426,6 +427,7 @@ const startLocalHandoff = async (
 };
 
 const finishCloudHandoff = async (window: Page): Promise<void> => {
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: "Execution environment" }).click();
   await window.getByRole("option", { name: "Cloud" }).click();
   await expect(window.getByRole("alert")).toContainText("Stop the active turn");

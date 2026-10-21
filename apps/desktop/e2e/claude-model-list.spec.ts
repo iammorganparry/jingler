@@ -19,6 +19,8 @@ test("the Claude model picker lists what the installed CLI reports, not a fixed 
   })
   await expect(appShell(window)).toBeVisible()
 
+  await window.getByRole("button", { name: "Model settings" }).click()
+
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Claude Code", { exact: true })).toBeVisible()
   await expect(window.getByRole("option", { name: /^Sonnet 5\.5/ })).toBeVisible({ timeout: 20_000 })

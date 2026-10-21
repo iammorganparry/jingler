@@ -56,6 +56,7 @@ const enrollBuildbox = async (app: LaunchedApp): Promise<void> => {
 }
 
 const selectComposerEnvironment = async (window: Page, name = "buildbox") => {
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: "Execution environment" }).click()
   await window.getByRole("option", { name: new RegExp(name) }).click()
 }
@@ -64,6 +65,7 @@ const createRemoteWorkspace = async (window: Page, projectPath: string): Promise
   await window.getByTestId("new-session").click()
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
   await addProject(window, projectPath)
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: "Execution environment" }).click()
   await window.getByRole("option", { name: "buildbox" }).click()
   await expect(window.getByRole("button", { name: "Create workspace" })).toBeEnabled({ timeout: 20_000 })
@@ -151,6 +153,7 @@ test("returns a new session to Local while remote project preparation is pending
   const environment = app.window.getByRole("button", { name: "Execution environment" })
   await app.window.getByRole("button", { name: "Auto", exact: true }).click()
   await app.window.getByRole("option", { name: "Ask Before Actions" }).click()
+  await app.window.getByRole("button", { name: "Model settings" }).click()
   await app.window.getByRole("button", { name: "Thinking strength" }).click()
   await app.window.getByRole("option", { name: "High", exact: true }).click()
   await expect(environment).toBeEnabled()
@@ -274,6 +277,7 @@ test("revokes an account-owned environment while preserving local sessions", asy
   await expect(app.window.getByText("buildbox", { exact: true })).toHaveCount(0)
   await app.window.getByRole("button", { name: "Close settings" }).click()
   await expect(sessionRow(app.window, "Local session")).toBeVisible()
+  await app.window.getByRole("button", { name: "Model settings" }).click()
   await app.window.getByRole("button", { name: "Execution environment" }).click()
   await expect(app.window.getByRole("option", { name: /buildbox/ })).toHaveCount(0)
 })
