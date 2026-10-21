@@ -1,7 +1,7 @@
 import type { ReviewFinding } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
-import { ReviewFindingRow } from "./review-findings.js"
+import { FindingsList, ReviewFindingRow } from "./review-findings.js"
 
 /**
  * A resolved finding is archive, not work. It keeps its place — the record that
@@ -65,5 +65,36 @@ describe("ReviewFindingRow", () => {
 
     expect(screen.getByText(/rewrite the origin's state/)).toBeTruthy()
     expect(toggle.getAttribute("aria-expanded")).toBe("true")
+  })
+})
+
+describe("FindingsList dismissal", () => {
+  const two = [finding(), finding({ id: "f2", title: "Second problem" })]
+  const renderList = (dismissed: string[], onDismiss: (id: string, d?: boolean) => void = () => {}) =>
+    render(
+      <FindingsList
+        findings={two}
+        review={null}
+        canRoute
+        dismissedFindingIds={new Set(dismissed)}
+        onDismissFinding={onDismiss}
+      />
+    )
+
+  it("hides dismissed findings behind a Dismissed (N) · Show row", () => {
+    renderList(["f1"])
+    expect(screen.queryByText("Regular files are symlinked")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Dismissed (1) · Show" }))
+    expect(screen.getByText("Regular files are symlinked")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Dismissed (1) · Hide" })).toBeTruthy()
+  })
+
+  it("dismisses and restores through onDismissFinding", () => {
+    const calls: Array<[string, boolean | undefined]> = []
+    renderList(["f1"], (id, d) => void calls.push([id, d]))
+    fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[0]!)
+    fireEvent.click(screen.getByRole("button", { name: "Dismissed (1) · Show" }))
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+    expect(calls).toEqual([["f2", true], ["f1", false]])
   })
 })

@@ -174,6 +174,34 @@ export interface ReviewFindingRowProps {
   onRestore?: (findingId: string) => void
 }
 
+function FindingActions({
+  canAsk,
+  canRoute,
+  onAsk,
+  onRestore
+}: {
+  canAsk: boolean
+  canRoute: boolean
+  onAsk: () => void
+  onRestore?: () => void
+}) {
+  if (!canAsk && !onRestore) return null
+  return (
+    <>
+      {canAsk && (
+        <Button variant="ghost" size="sm" disabled={!canRoute} onClick={onAsk}>
+          Ask agent to fix
+        </Button>
+      )}
+      {onRestore && (
+        <Button variant="ghost" size="sm" onClick={onRestore}>
+          Restore
+        </Button>
+      )}
+    </>
+  )
+}
+
 /** One finding, as a plain comment row (severity text, message, Ask agent to fix, Dismiss). */
 export function ReviewFindingRow({
   finding,
@@ -204,25 +232,12 @@ export function ReviewFindingRow({
         location={location ?? undefined}
         onDismiss={!dismissed && onDismiss ? () => onDismiss(finding.id) : undefined}
         action={
-          canAsk || (dismissed && onRestore) ? (
-            <>
-              {canAsk && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={!canRoute}
-                  onClick={() => onSendToAgent(finding.id)}
-                >
-                  Ask agent to fix
-                </Button>
-              )}
-              {dismissed && onRestore && (
-                <Button variant="ghost" size="sm" onClick={() => onRestore(finding.id)}>
-                  Restore
-                </Button>
-              )}
-            </>
-          ) : undefined
+          <FindingActions
+            canAsk={!!canAsk}
+            canRoute={canRoute}
+            onAsk={() => onSendToAgent?.(finding.id)}
+            onRestore={dismissed && onRestore ? () => onRestore(finding.id) : undefined}
+          />
         }
       >
         <div className="flex flex-col gap-[7px]">
