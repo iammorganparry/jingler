@@ -67,6 +67,8 @@ import {
   IssueInbox,
   BootFailureCard,
   UnreachableBanner,
+  OfflineBanner,
+  RelayQuotaBanner,
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
@@ -79,6 +81,7 @@ import {
   updateEditorLayout,
 } from "@jingler/ui";
 import { appMachine } from "./app-machine.js";
+import { useConnectivity } from "./connectivity.js";
 import { authMachine } from "./auth-machine.js";
 import { ConversationPane } from "./conversation-pane.js";
 import {
@@ -2332,6 +2335,12 @@ function loginStateOf(
  * The `jingler://` deep-link callback arrives from the main process via the
  * preload bridge and re-validates the freshly-stored token.
  */
+/** Placeholder reset date until the relay reports the real one: the 1st of next month. */
+const nextMonthStart = () => {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth() + 1, 1).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
+
 export function App() {
   // Test-only hook: throw immediately if the e2e flag is set, before any real work.
   if (window.jingler.isE2E && localStorage.getItem('__TEST_CRASH') === 'true') {
@@ -2401,6 +2410,7 @@ function AppContent({
   authState: ReturnType<typeof useMachine<typeof authMachine>>[0];
   authSend: ReturnType<typeof useMachine<typeof authMachine>>[1];
 }) {
+  const connectivity = useConnectivity();
   // Both splash mounts consult the same floor, and the floor is measured from
   // app start rather than from mount — so the auth check and the boot machine
   // share one hold between them instead of queueing two.
@@ -2426,7 +2436,13 @@ function AppContent({
         user={signedIn ? authState.context.session?.user : undefined}
         onSignOut={signedIn ? () => authSend({ type: "SIGN_OUT" }) : undefined}
         onSignIn={signedOut ? () => setSignInOpen(true) : undefined}
-        banner={authState.matches("unreachable") ? <UnreachableBanner onRetry={() => authSend({ type: "RETRY" })} /> : undefined}
+        banner={
+          <>
+            {connectivity.offline && <OfflineBanner />}
+            {authState.matches("unreachable") && <UnreachableBanner onRetry={() => authSend({ type: "RETRY" })} />}
+            {connectivity.relayQuotaReached && <RelayQuotaBanner resetsOn={nextMonthStart()} />}
+          </>
+        }
       />
       <SignInDialog
         open={signInOpen && signedOut}

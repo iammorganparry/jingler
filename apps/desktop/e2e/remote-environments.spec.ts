@@ -353,3 +353,40 @@ test(`refreshes a ${status} remote-only endpoint and selects it on its target`, 
     .find((session: { id: string }) => session.id === sessionId).endpointId).toBe(endpointId)
 })
 }
+
+test("shows the offline banner, queues a send as Waiting for connection, and sends on reconnect", async ({ launchApp }) => {
+  const app = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [localSession(repoPath)]
+  })
+  await expect(appShell(app.window)).toBeVisible()
+  await sessionRow(app.window, "Local session").click()
+  await app.window.evaluate(() => window.dispatchEvent(new Event("offline")))
+  await expect(app.window.getByText("Offline — agents keep running locally", { exact: true })).toBeVisible()
+  const composer = app.window.getByPlaceholder("Message the agent…")
+  await composer.fill("Send when back online")
+  await composer.press("Enter")
+  await expect(app.window.getByText("Waiting for connection", { exact: true })).toBeVisible()
+  await app.window.evaluate(() => window.dispatchEvent(new Event("online")))
+  await expect(app.window.getByText("Offline — agents keep running locally", { exact: true })).toHaveCount(0)
+  await expect(app.window.getByText("Waiting for connection", { exact: true })).toHaveCount(0)
+  await expect(app.window.getByTestId("conversation-scroll").getByText("Send when back online", { exact: true })).toBeVisible()
+})
+
+test("shows the device-offline lane banner on a remote session and clears it on reconnect", async ({ launchApp }) => {
+  const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true, remoteRepo: false, seed: addFixtureOrigin })
+  await enrollBuildbox(app)
+  await createRemoteWorkspace(app.window, app.repoPath)
+  app.deviceRelay?.setDeviceState("offline")
+  await openDevices(app.window)
+  await app.window.getByRole("button", { name: "Refresh" }).click()
+  await app.window.getByRole("button", { name: "Close settings" }).click()
+  await expect(app.window.getByText("buildbox went offline — the run is paused", { exact: true })).toBeVisible()
+  await expect(app.window.getByRole("button", { name: "Continue on this Mac…", exact: true })).toBeVisible()
+  app.deviceRelay?.setDeviceState("online")
+  await openDevices(app.window)
+  await app.window.getByRole("button", { name: "Refresh" }).click()
+  await app.window.getByRole("button", { name: "Close settings" }).click()
+  await expect(app.window.getByText("buildbox went offline — the run is paused", { exact: true })).toHaveCount(0)
+})
