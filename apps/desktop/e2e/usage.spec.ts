@@ -126,3 +126,53 @@ test("clicking a model row opens its detail drawer; Esc closes it", async ({ lau
   await window.keyboard.press("Escape")
   await expect(drawer).toBeHidden()
 })
+
+test("at 1100px the date-range filter updates KPIs, columns sort, and route badges stay on one line", async ({ launchApp }) => {
+  const { app, window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: { scenarioId: "usage-popover", authRoute: "claude-setup-token" },
+    seed: ({ home }) => {
+      const journals = join(home, "jingler", "runtime", "journals")
+      mkdirSync(journals, { recursive: true })
+      const old = { ...fact("c", "pi", "pi-old"), startedAt: "2020-01-01T00:00:00.000Z", endedAt: "2020-01-01T00:00:10.000Z" }
+      const recent = (id: string, runtime: string, model: string, tokens: number) => ({
+        ...fact(id, runtime, model),
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+        totalTokens: tokens
+      })
+      writeFileSync(
+        join(journals, "usage-facts.json"),
+        JSON.stringify([recent("a", "claude", "sonnet", 1500), recent("b", "codex", "gpt-codex", 90_000), old])
+      )
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1100, 900))
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: /Usage & limits/ }).click()
+
+  const rows = window.getByTestId("model-performance-row")
+  await expect(rows).toHaveCount(3)
+  await window.getByRole("radio", { name: "30 days" }).click()
+  await expect(rows).toHaveCount(2)
+  await expect(window.getByTestId("usage-kpis").getByText("2", { exact: true })).toBeVisible()
+
+  const table = window.getByTestId("model-performance-table")
+  await table.getByRole("button", { name: /Tokens/ }).click()
+  await expect(rows.first()).toContainText("gpt-codex")
+  await table.getByRole("button", { name: /Tokens/ }).click()
+  await expect(rows.first()).toContainText("sonnet")
+
+  const boxes = await window.getByTestId("usage-route-badges").locator("> *").evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect()
+      return { top: Math.round(r.top), height: Math.round(r.height) }
+    })
+  )
+  expect(boxes.length).toBeGreaterThan(1)
+  expect(new Set(boxes.map((b) => b.top)).size).toBe(1)
+  expect(new Set(boxes.map((b) => b.height)).size).toBe(1)
+})
