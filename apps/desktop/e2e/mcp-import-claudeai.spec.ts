@@ -42,7 +42,7 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
       }
     })
     await expect(appShell(window)).toBeVisible()
-    const notNow = window.getByRole("button", { name: "Not now" })
+    const notNow = window.getByTestId("import-card").getByRole("button", { name: "Not now" })
     if (await notNow.isVisible().catch(() => false)) await notNow.click()
 
     await window.getByRole("button", { name: "Account menu" }).click()

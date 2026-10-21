@@ -17,7 +17,7 @@ export function ImportCard({
   readonly onDismiss: () => void
 }) {
   return (
-    <Card className="px-4 py-3" data-testid="import-card">
+    <div data-testid="import-card"><Card className="px-4 py-3">
       <div className="text-[11px] text-dim">MCP servers</div>
       {state.kind === "detecting" ? (
         <StatusRow icon={<Spin animation="spin"><span className="size-3 rounded-full border-2 border-line border-t-transparent" /></Spin>} className="mt-1">Looking for MCP servers in Claude, Codex and OpenCode…</StatusRow>
@@ -38,6 +38,6 @@ export function ImportCard({
           </div>
         </>
       )}
-    </Card>
+    </Card></div>
   )
 }
