@@ -71,6 +71,17 @@ describe("authMachine", () => {
     expect(actor.getSnapshot().matches({ signedOut: "idle" })).toBe(true)
   })
 
+  it("a signed-out launch settles with no session and no pending auth step, so the app never waits on sign-in", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => !s.matches("checking"))
+    const snapshot = actor.getSnapshot()
+    expect(snapshot.matches({ signedOut: "idle" })).toBe(true)
+    expect(snapshot.context.session).toBeNull()
+    expect(snapshot.context.error).toBeNull()
+    expect(h.sentEmails).toEqual([])
+    expect(h.openedUrls).toEqual([])
+  })
+
   it("reaches unreachable, not the wall, when the auth server can't be reached", async () => {
     h.sessionError = new Error("Couldn't reach the sign-in service.")
     const actor = start()
