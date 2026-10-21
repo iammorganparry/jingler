@@ -9,6 +9,7 @@ import type {
   Repo
 } from "@jingler/core"
 import { ArrowRight, GitBranch } from "lucide-react"
+import { Avatar } from "../components/avatar.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
@@ -42,6 +43,7 @@ export interface SetupScreenProps {
   onCloneRepository: () => void
   onConnectGithub: () => void
   onSkipGithub: () => void
+  onRetryGithub?: () => void
   onConnectClaude: (token: string) => void
   onStartCodex: (method: CodexLoginMethod) => void
   onConnectApi: (providerId: string, apiKey: string) => void
@@ -72,6 +74,55 @@ const githubLabel = (github: GitHubConnection): string => {
   }
 }
 
+function GithubStatusCard({ github }: { github: GitHubConnection }) {
+  const hasConnection = github.connected && github.user !== null
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-line bg-sunken px-3 py-3">
+      {github.user ? (
+        <Avatar
+          initial={github.user.login.slice(0, 2).toUpperCase()}
+          src={github.user.avatarUrl}
+          size={32}
+          label={github.user.login}
+        />
+      ) : (
+        <GithubMark size={18} className="flex-none text-text-bright" />
+      )}
+      <StatusDot
+        tone={github.mode === "error" ? "bg-red" : "bg-line-strong"}
+        size={8}
+        glow={hasConnection}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[12.5px] font-medium text-text-body">
+          {githubLabel(github)}
+        </div>
+        {github.installations.length > 0 && (
+          <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground">
+            {github.installations.length === 1
+              ? "1 installation"
+              : `${github.installations.length} installations`}
+            {" · "}
+            {github.installations.map((installation) => `@${installation.account.login}`).join(", ")}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function GithubErrorCallout({ github }: { github: GitHubConnection }) {
+  if (github.mode !== "error") {
+    return github.error ? <Callout tone="red">{github.error}</Callout> : null
+  }
+  return (
+    <Callout tone="red">
+      <div className="font-medium">GitHub didn't respond</div>
+      {github.error && <div>{github.error}</div>}
+    </Callout>
+  )
+}
+
 /** First-run welcome. Side effects stay in the renderer's coordinated machines. */
 export function SetupScreen({
   step,
@@ -95,6 +146,7 @@ export function SetupScreen({
   onCloneRepository,
   onConnectGithub,
   onSkipGithub,
+  onRetryGithub,
   onConnectClaude,
   onStartCodex,
   onConnectApi,
@@ -117,37 +169,25 @@ function renderGithubSetup() {
               </p>
             </div>
 
-            <div className="flex items-center gap-3 rounded-lg border border-line bg-sunken px-3 py-3">
-              <GithubMark size={18} className="flex-none text-text-bright" />
-              <StatusDot
-                tone={github.mode === "error" ? "bg-red" : "bg-line-strong"}
-                size={8}
-                glow={hasConnection}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[12.5px] font-medium text-text-body">
-                  {githubLabel(github)}
-                </div>
-                {github.installations.length > 0 && (
-                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground">
-                    {github.installations.map((installation) => `@${installation.account.login}`).join(", ")}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {github.error && <Callout tone="red">{github.error}</Callout>}
+            <GithubStatusCard github={github} />
+            <GithubErrorCallout github={github} />
             <RepositorySummary repos={shownRepos} total={repos.length} overflow={overflow} />
 
             <div className="flex flex-wrap items-center gap-2.5 pt-1">
-              <Button variant="primary" onClick={onConnectGithub} disabled={githubBusy}>
-                {githubBusy ? <Spinner size={13} /> : <GithubMark size={14} />}
-                {githubBusy
-                  ? "Waiting for browser…"
-                  : hasConnection
-                    ? "Manage repositories"
-                    : "Install / Connect GitHub"}
-              </Button>
+              {github.mode === "error" && onRetryGithub ? (
+                <Button variant="primary" onClick={onRetryGithub}>
+                  Try again
+                </Button>
+              ) : (
+                <Button variant="primary" onClick={onConnectGithub} disabled={githubBusy}>
+                  {githubBusy ? <Spinner size={13} /> : <GithubMark size={14} />}
+                  {githubBusy
+                    ? "Waiting for browser…"
+                    : hasConnection
+                      ? "Manage repositories"
+                      : "Install / Connect GitHub"}
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 onClick={onSkipGithub}

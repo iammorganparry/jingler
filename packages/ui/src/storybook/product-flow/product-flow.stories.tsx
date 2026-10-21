@@ -372,6 +372,39 @@ export const WorkspaceScanFailed: Story = {
   )
 }
 
+const githubStep = (github: typeof FLOW_GITHUB) => frame(
+  <SetupScreen
+    step="github"
+    github={github}
+    onChooseDir={noop}
+    onContinue={noop}
+    onToggleRepo={noop}
+    onToggleAllRepos={noop}
+    onAddProjects={noop}
+    onCloneRepository={noop}
+    onConnectGithub={noop}
+    onSkipGithub={noop}
+    onRetryGithub={noop}
+    onConnectClaude={noop}
+    onStartCodex={noop}
+    onConnectApi={noop}
+    onContinueProvider={noop}
+    onSkipProvider={noop}
+    onCancelAuth={noop}
+    onRetryProvider={noop}
+    onSkipImportSessions={noop}
+    onContinueImportSessions={noop}
+  />
+)
+
+/** Step 2 connected: avatar, @login and installation count. */
+export const GithubConnected: Story = { render: () => githubStep(FLOW_GITHUB) }
+
+/** Step 2 error: "GitHub didn't respond" with Try again and Skip for now. */
+export const GithubError: Story = {
+  render: () => githubStep({ ...FLOW_GITHUB, mode: "error", error: "Request timed out" })
+}
+
 /** A scanned folder with no git repositories offers cloning one. */
 export const WorkspaceEmpty: Story = {
   render: () => frame(

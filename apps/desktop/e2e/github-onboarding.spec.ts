@@ -85,6 +85,28 @@ test("first-run GitHub remains skippable when the browser flow is abandoned", as
   await finishProviderSetup(window)
 })
 
+test("first-run GitHub error offers Try again and Skip for now, and skip continues", async ({
+  launchApp
+}) => {
+  const { app, window, reposDir, githubServer } = await launchApp({
+    withRepo: true,
+    githubApp: { accountLogin: "acme" }
+  })
+  await chooseFixtureRepo(app, reposDir)
+  await window.getByRole("button", { name: "Choose repos folder" }).click()
+  await window.getByRole("button", { name: "Continue" }).click()
+  await expect(window.getByRole("heading", { name: "Connect GitHub" })).toBeVisible()
+  // GitHub stops responding before the install URL is requested.
+  await githubServer.close()
+  await window.getByRole("button", { name: "Install / Connect GitHub" }).click()
+  await expect(window.getByText("GitHub didn't respond")).toBeVisible()
+  await expect(window.getByRole("button", { name: "Try again", exact: true })).toBeVisible()
+  await window.getByRole("button", { name: "Try again", exact: true }).click()
+  await expect(window.getByText("GitHub didn't respond")).toBeVisible()
+  await window.getByRole("button", { name: "Skip for now", exact: true }).click()
+  await finishProviderSetup(window)
+})
+
 test("a migration-era WorkspaceConfig keeps its preferences and offers App reconnection once", async ({
   launchApp
 }) => {

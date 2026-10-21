@@ -2613,6 +2613,7 @@ function renderAppSetup(
       onConnectGithub={
         github.connection.connected ? github.manage : github.connect
       }
+      onRetryGithub={github.retry}
       onSkipGithub={() => {
         github.cancel();
         send({ type: "SKIP_GITHUB" });
