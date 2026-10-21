@@ -3,7 +3,9 @@ import { useSyncExternalStore } from "react"
 // One-shot-ish "show this PR" request per session, set by the header PRs chip and read by PullRequestPane.
 let requests: Readonly<Record<string, number>> = {}
 const listeners = new Set<() => void>()
-const emit = () => listeners.forEach((l) => l())
+const emit = () => {
+  for (const l of listeners) l()
+}
 
 export const requestSessionPr = (sessionId: string, prNumber: number): void => {
   requests = { ...requests, [sessionId]: prNumber }
