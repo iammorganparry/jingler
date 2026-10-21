@@ -60,6 +60,8 @@ function useResultActions(startAuthorization: ResultProps["startAuthorization"],
   return { logName, setLogName, logLines, logLoading, actionError, viewLog, connect }
 }
 
+const DIALOG_STATES = ["reviewing", "detectFailed", "importing", "importFailed", "done"] as const
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI maps mutually exclusive machine states (review, importing, failed, result) to their controls.
 export function McpImportPrompt({
   ready,
@@ -138,7 +140,7 @@ export function McpImportPrompt({
     })
   }, [ready, send, isDismissed, persistDismissed])
 
-  const open = reviewOpen && (state.matches("reviewing") || state.matches("detectFailed") || state.matches("importing") || state.matches("importFailed") || state.matches("done"))
+  const open = reviewOpen && DIALOG_STATES.some((name) => state.matches(name))
   const done = state.matches("done")
 
 
