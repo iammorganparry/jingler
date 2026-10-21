@@ -116,6 +116,20 @@ const activityListeners = new Set<() => void>()
  * subscription closure, because the observation is now made in the flush.
  */
 const notifyBaselines = new Map<string, NotifiableState>()
+export interface BlockedEvent {
+  readonly sessionId: string
+  readonly title: string
+  readonly body: string
+}
+const blockedListeners = new Set<(event: BlockedEvent) => void>()
+/** Subscribe to runs entering a blocked state (question/approval). */
+export const onSessionBlocked = (listener: (event: BlockedEvent) => void): (() => void) => {
+  blockedListeners.add(listener)
+  return () => blockedListeners.delete(listener)
+}
+const emitBlocked = (event: BlockedEvent): void => {
+  for (const listener of blockedListeners) listener(event)
+}
 /**
  * File completions are interaction edges, not human-speed status furniture.
  * Keep the newest edge alongside the trailing snapshot so ToolEnd + Done inside
@@ -573,6 +587,7 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   // Fire-and-forget, and deliberately last: a notification that fails must never
   // take the status stores down with it. Main decides whether this actually
   // surfaces (window focus + the operator's prefs).
+  if (announce?.kind === "needs-input") emitBlocked({ sessionId: session.id, title: announce.title, body: announce.body })
   if (announce !== null) {
     void rpc
       .notifyShow({

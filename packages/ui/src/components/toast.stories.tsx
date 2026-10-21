@@ -51,3 +51,8 @@ export const StackedQueue: Story = {
     )
   }
 }
+
+/** #508: background session blocked on a question. */
+export const NeedsYouQuestion: Story = {
+  args: { variant: "needs-you", title: "Session A", description: "Waiting for your input.", action: { label: "Jump", onAction: noop }, onDismiss: noop }
+}

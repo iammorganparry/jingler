@@ -113,6 +113,7 @@ import {
   disposeChatActor,
   disposeConversationActor,
   getConversationActor,
+  onSessionBlocked,
   isChatUntouched,
   useAllChatActivities,
 } from "./conversation-registry.js";
@@ -128,7 +129,8 @@ import {
   requestCloseFileSurface,
 } from "./use-file-browser.js";
 import { onSessionUpdate, publishSessionUpdate } from "./session-updates.js";
-import { setVisibleSessionIds } from "./active-session.js";
+import { isSessionVisible, setVisibleSessionIds } from "./active-session.js";
+import { needsYouToast } from "./needs-you-toast.js";
 import { prNotification } from "./notifier.js";
 import { completedSessionIds } from "./pr-refresh.js";
 import {
@@ -400,22 +402,41 @@ function AuthedApp({
   // `notificationTarget`. `selectSessionRequest` already switches project (via
   // `SessionConversation`'s activeSessionId effect), so nothing extra is
   // needed for that half.
+  const landOnNotification = useCallback((sessionId: string, turnId: string | null) => {
+    setSelectRequest((prev) => ({
+      sessionId,
+      nonce: (prev?.nonce ?? 0) + 1,
+    }));
+    const session = sessionsRef.current.find((s) => s.id === sessionId);
+    if (!session) return;
+    const pending = pendingQuestion(
+      getConversationActor(session).getSnapshot().context.messages,
+    );
+    const target = notificationTarget({ sessionId, turnId }, pending?.id ?? null);
+    if (target.focusQuestion && turnId) jumpToTurn(session.activeChatId, turnId);
+  }, []);
   useEffect(
     () =>
-      window.jingler.onNotificationActivated(({ sessionId, turnId }) => {
-        setSelectRequest((prev) => ({
-          sessionId,
-          nonce: (prev?.nonce ?? 0) + 1,
-        }));
-        const session = sessionsRef.current.find((s) => s.id === sessionId);
-        if (!session) return;
-        const pending = pendingQuestion(
-          getConversationActor(session).getSnapshot().context.messages,
+      window.jingler.onNotificationActivated(({ sessionId, turnId }) =>
+        landOnNotification(sessionId, turnId),
+      ),
+    [landOnNotification],
+  );
+  // #508: a run blocking in a session the operator isn't looking at raises a
+  // "Needs you" toast whose Jump lands exactly like a notification click.
+  useEffect(
+    () =>
+      onSessionBlocked((blocked) => {
+        const session = sessionsRef.current.find((s) => s.id === blocked.sessionId);
+        const turnId = session
+          ? (pendingQuestion(getConversationActor(session).getSnapshot().context.messages)?.id ?? null)
+          : null;
+        const toast = needsYouToast(blocked, isSessionVisible(blocked.sessionId), () =>
+          landOnNotification(blocked.sessionId, turnId),
         );
-        const target = notificationTarget({ sessionId, turnId }, pending?.id ?? null);
-        if (target.focusQuestion && turnId) jumpToTurn(session.activeChatId, turnId);
+        if (toast) sendToast({ type: "PUSH", toast });
       }),
-    [],
+    [landOnNotification, sendToast],
   );
   // Keep the module-level cell the conversation registry reads in sync. It can't
   // use a hook: it outlives every component. See `active-session.ts`.
