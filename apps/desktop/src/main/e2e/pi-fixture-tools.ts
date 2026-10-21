@@ -424,7 +424,8 @@ const heldFleetNode = (
           }
         : null,
       workspace: null,
-      prNumber: null
+      // A settled child has opened a PR (#561 header PRs chip); running children have none yet.
+      prNumber: phase === "settle" ? 491 : null
     }
   }
   }
