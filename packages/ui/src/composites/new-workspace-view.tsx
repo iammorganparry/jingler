@@ -53,6 +53,7 @@ import {
   type NewWorkspaceEvent,
 } from "./new-workspace-machine.js";
 import { StartFromList } from "./start-from-list.js";
+import { EnvironmentWakeChip, WorkspaceProvisioning, showsWakeChip } from "./workspace-provisioning.js";
 
 interface PickerOption<T extends string> {
   value: T;
@@ -332,6 +333,8 @@ export interface NewWorkspaceViewProps {
   onCreateFromIssue?: NewWorkspaceDeps["onCreateFromIssue"];
   /** App-owned remote startup state survives navigation away from this view. */
   environmentStartup?: PendingEnvironmentSession | null;
+  /** Resumes a paused managed environment, or retries a failed one. */
+  onWakeEnvironment?: (environmentId: string) => void;
   onAddProject?: () => void;
   onImportSessions?: () => void;
   onClose: () => void;
@@ -395,8 +398,13 @@ function WorkspaceStartFrom({ props, context, send, icon, label, loading }: {
   return <StartFromList kind={source === "pr" ? "pr" : "issue"} icon={icon} label={label} search={search} mine={mine} pullRequests={pullRequests} issues={issues} selectedPr={selectedPr?.number ?? null} selectedIssue={selectedIssue?.id ?? null} loading={loading} error={sourceError} providerConnected={providerConnected} linkedSessions={linkedSessions} onSearch={(value) => send({ type: "SET_SEARCH", search: value })} onMine={() => send({ type: "SET_MINE", mine: !mine })} onRetry={() => send({ type: "RETRY_SOURCE" })} onConnect={props.onConnectIssueProvider} onOpenSession={props.onOpenSession} onPr={(pr) => send({ type: "SELECT_PR", pr })} onIssue={(issue) => send({ type: "SELECT_ISSUE", issue })} />
 }
 
-function NewWorkspaceContent({ props, context, send, submitting, loading, sourceLoading, selectedEnvironment, selectedSource, sourceLabel, catalog, unavailableReason, selectedProject, projectOptions, sourceOptions, checkoutOptions, branchOptions }: {
-  props: NewWorkspaceViewProps; context: NewWorkspaceContext; send: WorkspaceSend; submitting: boolean; loading: boolean; sourceLoading: boolean
+function WakeChip({ environment, onWake }: { environment: Environment | undefined; onWake?: () => void }) {
+  if (environment?.kind !== "managed" || !showsWakeChip(environment.state)) return null
+  return <EnvironmentWakeChip state={environment.state} onWake={onWake} />
+}
+
+function NewWorkspaceContent({ props, context, send, submitting, failed, loading, sourceLoading, selectedEnvironment, selectedSource, sourceLabel, catalog, unavailableReason, selectedProject, projectOptions, sourceOptions, checkoutOptions, branchOptions }: {
+  props: NewWorkspaceViewProps; context: NewWorkspaceContext; send: WorkspaceSend; submitting: boolean; failed: boolean; loading: boolean; sourceLoading: boolean
   selectedEnvironment: Environment | undefined; selectedSource: PickerOption<NewSessionSource> | undefined; sourceLabel: string
   catalog: AgentEndpointCatalog | null | undefined; unavailableReason: string | undefined; selectedProject: Project | undefined
   projectOptions: ReadonlyArray<PickerOption<string>>; sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>
@@ -405,9 +413,11 @@ function NewWorkspaceContent({ props, context, send, submitting, loading, source
   const { source, search, mine, pullRequests, issues, selectedPr, selectedIssue, draft, provisioningPhase, error } = context
   const startup = props.environmentStartup || (submitting && selectedEnvironment !== undefined)
   return <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="new-session-view">
-    <div className="flex h-12 flex-none items-center border-b border-hairline px-5"><h1 className="text-[13px] font-semibold text-text-bright">New session</h1><span className="flex-1" /><Button variant="ghost" size="icon" aria-label="Close new session" disabled={submitting && !props.environmentStartup?.error} onClick={() => send({ type: "CLOSE" })}><X size={15} /></Button></div>
+    <div className="flex h-12 flex-none items-center border-b border-hairline px-5"><h1 className="text-[13px] font-semibold text-text-bright">New session</h1><span className="flex-1" /><WakeChip environment={selectedEnvironment} onWake={props.onWakeEnvironment && selectedEnvironment ? () => props.onWakeEnvironment?.(selectedEnvironment.id) : undefined} /><Button variant="ghost" size="icon" aria-label="Close new session" disabled={submitting && !props.environmentStartup?.error} onClick={() => send({ type: "CLOSE" })}><X size={15} /></Button></div>
     <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">{startup
       ? <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, selectedEnvironment)} />
+      : submitting || failed
+      ? <WorkspaceProvisioning phase={provisioningPhase} failedPhase={failed ? context.failedPhase ?? provisioningPhase : null} error={error} onCancel={() => send({ type: "CANCEL_PROVISION" })} onRetry={() => send({ type: "RETRY_PROVISION" })} onEdit={() => send({ type: "EDIT_AFTER_FAILURE" })} />
       : <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
           <div className="flex items-center gap-3"><div><h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">What are we working on?</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Choose where the work starts, configure its checkout, then send the first message.</p></div><span className="flex-1" />{props.onAddProject && <Button variant="secondary" onClick={props.onAddProject}><FolderGit2 size={14} /> Add project</Button>}</div>
           <WorkspaceStartFrom props={props} context={context} send={send} icon={selectedSource?.icon} label={sourceLabel} loading={sourceLoading} />
@@ -642,6 +652,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     context={state.context}
     send={send}
     submitting={submitting}
+    failed={state.matches("failed")}
     loading={loading}
     sourceLoading={sourceLoading}
     selectedEnvironment={selectedEnvironment}

@@ -73,6 +73,8 @@ export interface NewWorkspaceContext {
   providerId: ProviderId | null
   modelId: ProviderModelId | null
   provisioningPhase: SessionCreationPhase | null
+  /** The phase that was running when creation failed; null otherwise. */
+  failedPhase: SessionCreationPhase | null
   error: string | null
 }
 
@@ -107,6 +109,9 @@ export type NewWorkspaceEvent =
   | { type: "PROVISION_PROGRESS"; phase: SessionCreationPhase }
   | { type: "PROVISION_DONE" }
   | { type: "PROVISION_FAILED"; error: unknown }
+  | { type: "CANCEL_PROVISION" }
+  | { type: "RETRY_PROVISION" }
+  | { type: "EDIT_AFTER_FAILURE" }
 
 const canonicalWorkspaceModel = (context: NewWorkspaceContext) => (
               context.runtimeId !== null &&
@@ -419,6 +424,7 @@ export const newWorkspaceMachine = setup({
         mode: deps.defaultMode ?? "auto",
         reasoning: undefined,
         provisioningPhase: null,
+        failedPhase: null,
         error: null
       }
     }),
@@ -469,12 +475,14 @@ export const newWorkspaceMachine = setup({
       provisioningPhase: (context.environmentId === "local"
         ? "creating-session"
         : "checking-access") as SessionCreationPhase,
+      failedPhase: null,
       error: null
     })),
     setProvisioningPhase: assign(({ event }) =>
       event.type === "PROVISION_PROGRESS" ? { provisioningPhase: event.phase } : {}
     ),
-    setSubmitError: assign(({ event }) => ({
+    setSubmitError: assign(({ context, event }) => ({
+      failedPhase: context.provisioningPhase,
       error: errorText(event.type === "PROVISION_FAILED" ? event.error : event, "Could not create the workspace.")
     })),
     close: ({ context }) => context.getDeps().onClose()
@@ -502,6 +510,7 @@ export const newWorkspaceMachine = setup({
     providerId: null,
     modelId: null,
     provisioningPhase: null,
+    failedPhase: null,
     error: null
   }),
   on: {
@@ -601,7 +610,16 @@ export const newWorkspaceMachine = setup({
       on: {
         PROVISION_PROGRESS: { actions: "setProvisioningPhase" },
         PROVISION_DONE: { target: "closed", actions: "close" },
-        PROVISION_FAILED: { target: "editing", actions: "setSubmitError" },
+        PROVISION_FAILED: { target: "failed", actions: "setSubmitError" },
+        // Leaving the state stops the callback, so a late result is ignored.
+        CANCEL_PROVISION: { target: "editing", actions: assign({ provisioningPhase: null, error: null }) },
+        CLOSE: { target: "closed", actions: "close" }
+      }
+    },
+    failed: {
+      on: {
+        RETRY_PROVISION: { guard: "canSubmit", target: "submitting", actions: "beginSubmit" },
+        EDIT_AFTER_FAILURE: { target: "editing", actions: assign({ provisioningPhase: null }) },
         CLOSE: { target: "closed", actions: "close" }
       }
     }
