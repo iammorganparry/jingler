@@ -30,8 +30,7 @@ export function PrCheckRow({ check }: { check: PrCheck }) {
         Duration and details are not alternatives — a green run has both a time
         and logs worth reading (why it took 9 minutes, what it actually covered).
         The link used to be failures-only, so a passing check was a dead end that
-        sent you to the browser. Failures keep the red, louder treatment; every
-        other state gets the quiet one.
+        sent you to the browser. Only the failing icon is red; the row and link stay neutral.
       */}
       {running ? (
         <span className="font-mono text-[10.5px] text-muted-foreground">running</span>
@@ -48,10 +47,7 @@ export function PrCheckRow({ check }: { check: PrCheck }) {
           target="_blank"
           rel="noreferrer"
           aria-label={`Details for ${check.name}`}
-          className={cn(
-            "font-mono text-[10.5px] hover:underline",
-            check.status === "fail" ? "text-red" : "text-dim hover:text-text"
-          )}
+          className="font-mono text-[10.5px] text-dim hover:text-text hover:underline"
         >
           details
         </a>
