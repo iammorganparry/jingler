@@ -30,6 +30,7 @@ export interface IssuePayload {
   readonly author?: GitHubUser
   readonly labels: ReadonlyArray<{ readonly name: string; readonly color?: string }>
   readonly assignees: ReadonlyArray<GitHubUser>
+  readonly linkedPrs?: ReadonlyArray<{ readonly number: number; readonly state: string; readonly url: string }>
   readonly comments: ReadonlyArray<IssueComment>
   readonly createdAt: string
   readonly updatedAt?: string
@@ -91,6 +92,19 @@ const user = (value: unknown): GitHubUser | undefined => {
   return login ? { login } : undefined
 }
 
+/** gh reports `closedByPullRequestsReferences` (no state); fixtures/other sources may send `linkedPrs`. */
+const linkedPullRequests = (issue: Record<string, unknown>) => {
+  const raw = issue.linkedPrs ?? issue.closedByPullRequestsReferences
+  if (!Array.isArray(raw)) return {}
+  const linkedPrs = raw.flatMap((value) => {
+    const pr = record(value)
+    const number = pr?.number
+    const url = string(pr?.url)
+    return typeof number === "number" && url ? [{ number, url, state: string(pr?.state) ?? "linked" }] : []
+  })
+  return linkedPrs.length > 0 ? { linkedPrs } : {}
+}
+
 const normalizeIssue = async (
   value: unknown,
   loadComments?: () => Promise<ReadonlyArray<IssueComment>>
@@ -125,6 +139,7 @@ const normalizeIssue = async (
           return assignee ? [assignee] : []
         })
       : [],
+    ...linkedPullRequests(issue),
     comments: loadComments ? await loadComments() : Array.isArray(issue.comments)
       ? issue.comments.flatMap((value) => {
           const comment = record(value)
@@ -251,7 +266,7 @@ export const fetchIssue = async (
 }
 
 const CLI_FIELDS = [
-  "number", "title", "body", "state", "url", "author", "labels", "assignees", "comments", "createdAt", "updatedAt"
+  "number", "title", "body", "state", "url", "author", "labels", "assignees", "closedByPullRequestsReferences", "comments", "createdAt", "updatedAt"
 ].join(",")
 
 /** Prefer the operator's authenticated GitHub CLI without exposing its token. */

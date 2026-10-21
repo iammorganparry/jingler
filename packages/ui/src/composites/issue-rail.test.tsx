@@ -10,7 +10,7 @@ describe("IssueRail", () => {
     render(<IssueRail provider="GitHub" repository="acme/widget" />)
     expect(screen.queryByText("Assignees")).toBeNull()
     expect(screen.queryByText("Labels")).toBeNull()
-    expect(screen.queryByText("Linked workspace / PR")).toBeNull()
+    expect(screen.queryByText("Linked workspace")).toBeNull()
     expect(screen.getByText("acme/widget")).toBeTruthy()
   })
 

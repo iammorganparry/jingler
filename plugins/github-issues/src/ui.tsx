@@ -68,6 +68,7 @@ interface Issue {
   readonly author?: IssueUser
   readonly labels?: ReadonlyArray<{ name: string; color?: string }>
   readonly assignees?: ReadonlyArray<IssueUser>
+  readonly linkedPrs?: ReadonlyArray<{ number: number; state: string; url: string }>
   readonly comments?: ReadonlyArray<IssueComment>
   readonly createdAt: string
   readonly updatedAt?: string
@@ -175,6 +176,8 @@ function IssueTab({ session }: TabProps) {
         <IssueRail
           assignees={issue.assignees}
           labels={issue.labels}
+          pullRequests={issue.linkedPrs}
+          onOpenPullRequest={(url) => void host.openExternal(url)}
           workspace={{ title: session.title }}
           provider="GitHub"
           repository={session.repo}

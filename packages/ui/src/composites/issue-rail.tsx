@@ -14,6 +14,7 @@ export interface IssueRailData {
   readonly pullRequests?: ReadonlyArray<{ readonly number: number; readonly state: string; readonly url: string }>
   /** The workspace (session) linked to this issue; `onOpen` is omitted when it is already open. */
   readonly workspace?: { readonly title: string; readonly onOpen?: () => void }
+  readonly onOpenPullRequest?: (url: string) => void
   readonly provider: string
   readonly repository: string
 }
@@ -28,7 +29,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /** 280px-rail body for an issue; sections with nothing to show are not rendered. */
-export function IssueRail({ assignees = [], labels = [], pullRequests = [], workspace, provider, repository }: IssueRailData) {
+export function IssueRail({ assignees = [], labels = [], pullRequests = [], workspace, onOpenPullRequest, provider, repository }: IssueRailData) {
   return (
     <div data-testid="issue-rail" className="flex flex-col gap-4">
       {assignees.length > 0 && (
@@ -48,18 +49,20 @@ export function IssueRail({ assignees = [], labels = [], pullRequests = [], work
           </div>
         </Section>
       )}
-      {(workspace || pullRequests.length > 0) && (
-        <Section title="Linked workspace / PR">
-          {workspace && (
-            <div className="flex items-center gap-2 text-[12.5px] text-text">
-              <span className="min-w-0 flex-1 truncate">{workspace.title}</span>
-              {workspace.onOpen && <Button variant="secondary" size="sm" onClick={workspace.onOpen}>Open workspace</Button>}
-            </div>
-          )}
+      {workspace && (
+        <Section title="Linked workspace">
+          <div className="flex items-center gap-2 text-[12.5px] text-text">
+            <span className="min-w-0 flex-1 truncate">{workspace.title}</span>
+            {workspace.onOpen && <Button variant="secondary" size="sm" onClick={workspace.onOpen}>Open workspace</Button>}
+          </div>
+        </Section>
+      )}
+      {pullRequests.length > 0 && (
+        <Section title="Linked pull requests">
           {pullRequests.map((pr) => (
-            <span key={pr.url} className="flex items-center gap-2 font-mono text-[11.5px] text-muted-foreground">
+            <Button key={pr.url} variant="ghost" size="sm" className="justify-start font-mono" onClick={() => onOpenPullRequest?.(pr.url)}>
               <GitPullRequest size={12} aria-hidden /> #{pr.number} · {pr.state}
-            </span>
+            </Button>
           ))}
         </Section>
       )}
