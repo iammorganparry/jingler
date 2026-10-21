@@ -92,6 +92,7 @@ import {
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionSubagentTabs, SubagentLaneViewProvider } from "./session-chat-tabs.js";
 import { useAgentEditsMarkerRenderer } from "./file-agent-edits.js";
+import { requestSessionPr } from "./session-pr-request.js";
 import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
@@ -1390,6 +1391,16 @@ function AuthedApp({
       ),
     [subagentTabs],
   );
+  const subagentPrNodes = useMemo(
+    () =>
+      Object.fromEntries(
+        sessions.map((s) => {
+          const chat = subagentTabs[s.id]?.find(({ chatId }) => chatId === s.activeChatId);
+          return [s.id, [...(chat?.active ?? []), ...(chat?.completed ?? [])]] as const;
+        }),
+      ),
+    [sessions, subagentTabs],
+  );
   const subagentEntries = useMemo(
     () =>
       Object.fromEntries(
@@ -2044,6 +2055,8 @@ function AuthedApp({
             onOpenPath={ctx.onOpenPath}
           />
         )}
+        subagentPrNodes={subagentPrNodes}
+        onOpenSessionPr={requestSessionPr}
         renderSubagentTabs={(session: Session, ctx) => (
           <SessionSubagentTabs
             session={session}

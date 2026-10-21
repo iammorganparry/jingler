@@ -1,3 +1,4 @@
+import type { SubagentFleetNode } from "@jingler/core"
 import type { ReactNode } from "react"
 import type { DiffStat, IssueIdentity, Session, SessionActivity, SessionPrStatus } from "@jingler/core"
 import type { SplitGroup } from "./split-layout.js"
@@ -39,6 +40,10 @@ export interface SessionSplitProps {
   onTrackFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
   conversationPane?: ReactNode
+  /** Fleet nodes per session id; any with a PR join the header PRs chip. */
+  /** Open a session PR (main or subagent) in the PR view. */
+  onOpenSessionPr?: (sessionId: string, prNumber: number) => void
+  subagentPrNodes?: Readonly<Record<string, ReadonlyArray<SubagentFleetNode>>>
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -128,6 +133,8 @@ export function SessionSplit(props: SessionSplitProps) {
       onRequestCloseFile={props.onRequestCloseFile}
       conversationPane={props.conversationPane}
       renderSubagentTabs={props.renderSubagentTabs}
+      subagentPrNodes={props.subagentPrNodes}
+      onOpenSessionPr={props.onOpenSessionPr}
       onRenameSession={props.onRenameSession}
       onCreateChat={props.onCreateChat}
       onCloseUntouchedChat={props.onCloseUntouchedChat}
