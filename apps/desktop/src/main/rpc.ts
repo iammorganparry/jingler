@@ -118,14 +118,15 @@ import {
   scanClaudeCodeSessions,
   scanCodexSessions,
   scanConductorSessions,
-  scanT3CodeSessions
+  scanT3CodeSessions,
+  runString
 } from "@jingler/cli-adapters";
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   AssetUnsupportedError,
   prEventMessage,
@@ -616,9 +617,30 @@ const mcpReveal = () =>
  * a broken worktree for a clean one.
  * Exported for tests.
  */
-export const sessionDiff = (id: string, checkoutId?: string) =>
+export const sessionDiff = (id: string, checkoutId?: string, workspacePath?: string) =>
   Effect.gen(function* () {
     const session = yield* resolveCheckoutSession(id, checkoutId);
+    // A subagent worktree: only one git lists as a worktree of this session's
+    // repo, so the renderer can't ask for a diff of an arbitrary directory.
+    if (workspacePath !== undefined) {
+      const anchor = session?.worktreePath ?? session?.repoPath;
+      if (!anchor || !isAbsolute(workspacePath)) return EMPTY_REVIEW_DIFF;
+      const porcelain = yield* runString("git", "-C", anchor, "worktree", "list", "--porcelain");
+      // Real paths: macOS tmp dirs are symlinks (/var → /private/var) and git reports the real one.
+      const real = (p: string) => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return resolve(p);
+        }
+      };
+      const target = real(workspacePath);
+      const known = (porcelain ?? "")
+        .split("\n")
+        .some((line) => line.startsWith("worktree ") && real(line.slice(9)) === target);
+      if (!known) return EMPTY_REVIEW_DIFF;
+      return yield* WorkspaceService.diff(target);
+    }
     if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
     return yield* WorkspaceService.diff(session.worktreePath);
   });
@@ -5325,7 +5347,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }
       return null;
     }).pipe(Effect.orElseSucceed(() => null)),
-  "Sessions.diff": ({ id, checkoutId }) =>
+  "Sessions.diff": ({ id, checkoutId, workspacePath }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(id);
       const remote = yield* RemoteSessionService;
@@ -5333,7 +5355,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Sessions.diff",
         {},
-        { execute: () => sessionDiff(id, checkoutId) },
+        { execute: () => sessionDiff(id, checkoutId, workspacePath) },
         {
           execute: () =>
             remote

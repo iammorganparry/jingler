@@ -703,8 +703,8 @@ export const rpc = {
     attachmentId: string
   ): Promise<string | null> =>
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),
-  sessionsDiff: (id: string, checkoutId?: string): Promise<SessionReviewDiff> =>
-    run((c) => c.Sessions.diff({ id, checkoutId })),
+  sessionsDiff: (id: string, checkoutId?: string, workspacePath?: string): Promise<SessionReviewDiff> =>
+    run((c) => c.Sessions.diff({ id, checkoutId, workspacePath })),
   sessionsDiffStat: (id: string): Promise<SessionDiffStat> =>
     run((c) => c.Sessions.diffStat({ id })),
   sessionsFileDiff: (id: string, path: string): Promise<SessionFileDiff> =>

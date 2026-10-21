@@ -20,7 +20,9 @@ import {
 } from "./review-store.js"
 import { reviewCommentsContext } from "./review-references.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
+import { useAgentTrees } from "./use-agent-trees.js"
 import { useReview } from "./use-review.js"
+import { useSubagentView } from "./use-subagent-view.js"
 
 /** The instruction handed to the session's agent to clean up one file. */
 const deslopPrompt = (path: string): string =>
@@ -121,6 +123,8 @@ function CheckoutChangesList({
   )
   // The turn filter and Discard belong to the active checkout only.
   const active = checkoutId === undefined
+  const agentTrees = useAgentTrees(session, review.files, active && review.source === "local")
+  const { changesScope, setChangesScope } = useSubagentView(session.activeChatId)
   return (
     <ChangedFilesExplorer
       turns={active ? turns : []}
@@ -130,6 +134,9 @@ function CheckoutChangesList({
       prNumber={prLayer ?? session.prNumber}
       onPrNumberChange={selectLayer}
       files={review.files}
+      agentTrees={agentTrees}
+      agentScope={changesScope}
+      onAgentScopeChange={setChangesScope}
       fileDiffs={review.fileDiffs}
       omittedFiles={review.omittedFiles}
       diffLineLimit={review.diffLineLimit}

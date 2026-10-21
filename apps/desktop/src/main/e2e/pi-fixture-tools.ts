@@ -423,7 +423,10 @@ const heldFleetNode = (
             deadlineAt: null
           }
         : null,
-      workspace: null,
+      // JINGLER_E2E_SUBAGENT_WORKSPACE gives the first child its own worktree (#560).
+      workspace: id.startsWith("e2e-subagent-a") && process.env.JINGLER_E2E_SUBAGENT_WORKSPACE
+        ? { path: process.env.JINGLER_E2E_SUBAGENT_WORKSPACE, branch: "child/a", baseRef: null }
+        : null,
       // A settled child has opened a PR (#561 header PRs chip); running children have none yet.
       prNumber: phase === "settle" ? 491 : null
     }
