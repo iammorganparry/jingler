@@ -73,6 +73,7 @@ import {
   useSplashHold,
   useThemeCatalog,
   AgentEditsMarkerContext,
+  PrEventActionsContext,
   closeSurfaceEverywhere,
   forgetEditorLayout,
   jumpToTurn,
@@ -797,10 +798,27 @@ function AuthedApp({
       send({ type: "SESSION_PR_LINKED", sessionId, prNumber }),
     [send],
   );
+  // Persist the PR lifecycle card (idempotent per kind+PR in main) and show it live.
+  const recordPrEvent = useCallback(
+    (sessionId: string, kind: "opened" | "merged", number: number) => {
+      void rpc
+        .sessionsRecordPrEvent(sessionId, kind, number)
+        .then((message) => {
+          const session = sessionsRef.current.find((s) => s.id === sessionId);
+          if (message && session)
+            getConversationActor(session).send({ type: "PR_EVENT_RECORDED", message });
+        })
+        .catch(() => {});
+    },
+    [],
+  );
   const onPublishCheckpoint = useCallback(
-    (sessionId: string, checkpoint: PublishCheckpoint) =>
-      send({ type: "SESSION_PUBLISH_UPDATED", sessionId, checkpoint }),
-    [send],
+    (sessionId: string, checkpoint: PublishCheckpoint) => {
+      send({ type: "SESSION_PUBLISH_UPDATED", sessionId, checkpoint });
+      if (checkpoint.step === "complete" && checkpoint.prNumber !== undefined)
+        recordPrEvent(sessionId, "opened", checkpoint.prNumber);
+    },
+    [send, recordPrEvent],
   );
   const selectIssue = useCallback((sessionId: string, issue: IssueIdentity) => {
     void rpc.sessionsSelectIssue(sessionId, issue).then(publishSessionUpdate);
@@ -1525,6 +1543,7 @@ function AuthedApp({
     )) {
       notifiedPrsRef.current.add(prNotifyKey(session.id, number));
       if (seeding) continue;
+      if (prState === "merged") recordPrEvent(session.id, "merged", number);
       const plan = prNotification(session.title, prState, number, stackedUnder);
       void rpc
         .notifyShow({
@@ -1540,7 +1559,7 @@ function AuthedApp({
         .catch(() => {});
     }
     if (seeding) prBaselineRef.current = true;
-  }, [prStacks, sweepTargets]);
+  }, [prStacks, sweepTargets, recordPrEvent]);
 
   useEffect(() => {
     if (!state.matches({ setup: "github" })) return;
@@ -1949,6 +1968,12 @@ function AuthedApp({
           {/* The registry keeps each actor alive, but React state must remount per
               chat or useSelector can display the previous actor until the new
               transcript load emits its first transition. */}
+          <PrEventActionsContext.Provider
+            value={{
+              openPullRequest: ctx.onOpenPullRequest,
+              archiveWorkspace: () => void archiveSession(session.id),
+            }}
+          >
           <ConversationPane
             key={`${session.id}:${session.activeChatId}`}
             session={session}
@@ -1975,6 +2000,7 @@ function AuthedApp({
             onPushToast={(toast) => sendToast({ type: "PUSH", toast })}
             paneFocused={ctx.paneFocused ?? true}
           />
+          </PrEventActionsContext.Provider>
           </div>
         )}
         renderExplorer={(session, onOpenPath) => (

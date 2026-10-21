@@ -128,6 +128,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   AssetUnsupportedError,
+  prEventMessage,
   AuthError,
   ConfigError,
   GitHubApiError,
@@ -1984,6 +1985,24 @@ export const restoreSession = (sessionId: string) =>
   );
 
 /** `Sessions.rename` handler — pin a manual title and return the updated record. */
+/** Append the PR lifecycle card unless one for this (kind, PR) is already in the transcript. */
+export const recordPrEvent = (sessionId: string, kind: "opened" | "merged", number: number) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId);
+    const existing = yield* TranscriptStore.list(session.activeChatId);
+    const message = prEventMessage({
+      kind,
+      number,
+      prs: session.prs ?? [],
+      now: new Date().toISOString(),
+    });
+    if (existing.some((m) => m.id === message.id)) return null;
+    yield* TranscriptStore.append(session.activeChatId, message);
+    return message;
+  }).pipe(
+    Effect.mapError((cause) => new GitError({ message: "Could not record the PR event", cause })),
+  );
+
 export const renameSession = (sessionId: string, title: string) =>
   Effect.gen(function* () {
     yield* SessionStore.renameTitle(sessionId, title);
@@ -5970,6 +5989,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
 });
 
 const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
+  "Github.recordPrEvent": ({ sessionId, kind, number }) => recordPrEvent(sessionId, kind, number),
   "Github.inbox": () => githubPrInbox(),
   "Github.teams": () => GitHubApi.teams(),
   "Github.teamPrs": (input) => GitHubApi.teamPrs(input),

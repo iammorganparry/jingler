@@ -145,7 +145,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step, { timeout: 25_000 }).toBe("complete")
   await expect(restarted.window.getByRole("heading", { name: "Implement deterministic publishing" })).toBeVisible()
   await expect(
-    restarted.window.getByRole("button", { name: "Open on GitHub ↗" })
+    restarted.window.getByRole("button", { name: "Open on GitHub", exact: true })
   ).toBeVisible()
 
   const recovered = sessionsAt(home)[0]!
@@ -200,6 +200,9 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
   expect(
     githubServer.credentialRequests.some(({ permissions }) => permissions.includes("workflows:write"))
   ).toBe(false)
+  // Publish completion leaves exactly one persisted transcript card.
+  await expect(window.getByText(/^Opened #900/)).toHaveCount(1)
+  await expect(window.getByRole("button", { name: "View PRs", exact: true })).toBeVisible()
 })
 
 test("publishes a migration-era established jingler branch without renaming it", async ({

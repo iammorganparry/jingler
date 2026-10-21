@@ -23,6 +23,7 @@ import type { SubagentChipItem } from "../app/subagent-chip.js"
 import { providerColor, providerLabel, ProviderIcon } from "../components/provider-icon.js"
 import { ApprovalGate } from "./approval-gate.js"
 import { BranchDriftBanner } from "./branch-drift-banner.js"
+import { PrEventCard } from "./pr-event-card.js"
 import { ContextDivider } from "./context-divider.js"
 import { QuestionSummary } from "./question-summary.js"
 import { ThoughtBlock } from "./thought-block.js"
@@ -559,6 +560,8 @@ const PartView = memo(function PartView({
       // Deliberately full-width and unindented: this marks a boundary in the
       // conversation rather than being something the agent said.
       return <ContextDivider digest={part.digest} tokensBefore={part.tokensBefore} />
+    case "PrEvent":
+      return <PrEventCard event={part} className={WIDTH} />
     case "BranchDrift":
       return (
         <BranchDriftBanner
