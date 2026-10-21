@@ -47,3 +47,36 @@ test("PR chip opens the PR view with header fields and arrow-key sub-tabs", asyn
   await window.keyboard.press("ArrowLeft")
   await expect(conversation).toHaveAttribute("aria-selected", "true")
 })
+
+test("PR right rail shows its sections and collapses to a sheet when narrow", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{
+      id: "s_pr_rail", repo: "widget", branch: "chore/refactor", title: "PR rail test", status: "idle",
+      diff: { added: 0, removed: 0 }, prNumber: 482, costUsd: 0, tokens: 0, updatedAt: "2026-10-12T10:00:00.000Z",
+      githubInstallationId: "101", githubRepositoryId: "301", worktreePath: context.repoPath
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [{
+        number: 482, title: "Refactor auth flow", headRefName: "chore/refactor", baseRefName: "main",
+        author: { login: "e2e-user" }, additions: 5, deletions: 2,
+        checks: [{ name: "lint", conclusion: "success" }, { name: "e2e", conclusion: "failure" }]
+      }]
+    }
+  })
+  await window.setViewportSize({ width: 1800, height: 900 })
+  await window.getByTestId("session-row-s_pr_rail").click()
+  await window.getByTestId("header-link-pr").click()
+
+  await expect(window.getByText("1/2 passing")).toBeVisible()
+  await expect(window.getByText("Reviewers", { exact: true })).toHaveCount(0)
+  await expect(window.getByRole("button", { name: "Pull request details" })).toHaveCount(0)
+
+  await window.setViewportSize({ width: 800, height: 900 })
+  await expect(window.getByText("1/2 passing")).toHaveCount(0)
+  await window.getByRole("button", { name: "Pull request details" }).click()
+  await expect(window.getByText("1/2 passing")).toBeVisible()
+})
