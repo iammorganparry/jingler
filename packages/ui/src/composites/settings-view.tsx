@@ -339,17 +339,41 @@ export function SettingsView({
   onClose,
   initialSection = "providers"
 }: SettingsViewProps) {
-         function getSection() {
+         /** Sections that render their props or a stub; split out to keep getSection under the complexity gate. */
+         function getOptionalSection(): React.ReactNode | undefined {
            switch (section) {
 case "devices": {
 return (renderOptionalSection(devices, (props) => <DevicesSection {...props} />, "Devices"))
 }
+case "voice": {
+return renderOptionalSection(voice, (props) => <VoiceSettings {...props} />, "Voice")
+}
+case "providers": {
+return (renderOptionalSection(providerConnections, (props) => <ProviderConnectionsSettings {...props} />, "Providers"))
+}
+case "agents": {
+return (renderOptionalSection(agents, (props) => <AgentsSettings {...props} />, "Agents & skills"))
+}
+case "runtime": {
+return (renderOptionalSection(runtimeInspector, (props) => <RuntimeInspector {...props} />, "Runtime"))
+}
+case "plugins": {
+return (renderOptionalSection(plugins, (props) => <PluginsSettings {...props} />, "Plugins"))
+}
+case "themes": {
+return (renderOptionalSection(themes, (props) => <ThemesSettings {...props} />, "Themes"))
+}
+           }
+           return undefined
+         }
+
+         function getSection() {
+           const optional = getOptionalSection()
+           if (optional !== undefined) return optional
+           switch (section) {
 case "routines":
 case "projects": {
 return renderOptionalSection(projectWorkflows, (props) => <ProjectWorkflowSettings {...props} routines={routines} />, "Projects")
-}
-case "voice": {
-return renderOptionalSection(voice, (props) => <VoiceSettings {...props} />, "Voice")
 }
 case "notifications": {
 return (<NotificationsSection
@@ -381,9 +405,6 @@ return (<GeneralSection
           webSearch={webSearch}
         />)
 }
-case "providers": {
-return (renderOptionalSection(providerConnections, (props) => <ProviderConnectionsSettings {...props} />, "Providers"))
-}
 case "context": {
 return (<ContextSection
           context={context}
@@ -399,22 +420,10 @@ return (<PlanSection
           onSavePlanTemplate={onSavePlanTemplate}
         />)
 }
-case "agents": {
-return (renderOptionalSection(agents, (props) => <AgentsSettings {...props} />, "Agents & skills"))
-}
-case "runtime": {
-return (renderOptionalSection(runtimeInspector, (props) => <RuntimeInspector {...props} />, "Runtime"))
-}
 case "connectors": {
 return (<div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-6">
           {renderOptionalSection(mcp, (props) => <McpSettings {...props} />, "MCP servers")}
         </div>)
-}
-case "plugins": {
-return (renderOptionalSection(plugins, (props) => <PluginsSettings {...props} />, "Plugins"))
-}
-case "themes": {
-return (renderOptionalSection(themes, (props) => <ThemesSettings {...props} />, "Themes"))
 }
 case "github": {
 return (<GithubSection

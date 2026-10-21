@@ -20,9 +20,10 @@ export interface VoicePrefs {
 
 export const DEFAULT_HOLD_KEY = "F9"
 
-export function useVoiceInput(chatId: string, rpc: VoiceRpc, prefs: VoicePrefs = {}): ComposerVoiceInput {
-  const prefsRef = useRef(prefs)
-  prefsRef.current = prefs
+/** `config` is the workspace config; only its `voice` prefs are read. */
+export function useVoiceInput(chatId: string, rpc: VoiceRpc, config?: { readonly voice?: VoicePrefs | undefined } | null): ComposerVoiceInput {
+  const prefsRef = useRef<VoicePrefs>({})
+  prefsRef.current = config?.voice ?? {}
   const [state, send] = useMachine(voiceInputMachine, {
     input: {
       start: async () => {
@@ -36,7 +37,7 @@ export function useVoiceInput(chatId: string, rpc: VoiceRpc, prefs: VoicePrefs =
       }
     }
   })
-  const holdKey = prefs.holdKey ?? DEFAULT_HOLD_KEY
+  const holdKey = prefsRef.current.holdKey ?? DEFAULT_HOLD_KEY
   useEffect(() => {
     if (holdKey === "none") return
     const down = (event: KeyboardEvent) => {

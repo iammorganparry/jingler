@@ -749,7 +749,7 @@ export function ConversationPane({
   // mounted keyed by session id, so switching sessions unmounts it and any local
   // state goes with it. See `draft-store`.
   const draft = useDraft(activeChat.id)
-  const voiceInput = useVoiceInput(activeChat.id, rpc, providersQuery.data?.voice)
+  const voiceInput = useVoiceInput(activeChat.id, rpc, providersQuery.data)
   const draftCodeReferences = useMemo(
     () =>
       draft.references.map((reference) => ({
