@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react"
+import type { Session, SessionActivity } from "@jingler/core"
+import { deriveHomeCards } from "./home-cards-model.js"
 import { Button } from "../components/button.js"
 import { Card } from "../components/card.js"
-import { Skeleton } from "../components/loading.js"
 import { StatusRow } from "../components/status-row.js"
 
 /** Home › a run blocked on the operator. A stale card (no longer pending) turns neutral and only dismisses. */
@@ -20,7 +22,7 @@ export function NeedsYouCard({
   readonly onDismiss: () => void
 }) {
   return (
-    <Card className="px-4 py-3" >
+    <Card className="px-4 py-3">
       <div className="text-[11px] text-dim">{title}</div>
       {stale ? (
         <StatusRow className="mt-1">
@@ -49,45 +51,43 @@ export function RunningRow({ title, activity, onOpen }: { readonly title: string
   )
 }
 
-export type ImportCardState = "detecting" | "found" | "failed"
-
-/** Home › dismissible MCP import card: scanning skeleton, found counts, or a retryable failure. */
-export function ImportCard({
-  state,
-  count = 0,
-  onReview,
-  onDismiss,
-  onRetry
+/** Home › needs-you cards then running rows, derived from live activities; remembers cards it showed so they can go stale. */
+export function HomeCards({
+  sessions,
+  liveActivity,
+  onOpenSession
 }: {
-  readonly state: ImportCardState
-  readonly count?: number
-  readonly onReview: () => void
-  readonly onDismiss: () => void
-  readonly onRetry: () => void
+  readonly sessions: ReadonlyArray<Session>
+  readonly liveActivity: Readonly<Record<string, SessionActivity>>
+  readonly onOpenSession: (sessionId: string) => void
 }) {
-  if (state === "detecting") {
-    return (
-      <Card className="px-4 py-3">
-        <Skeleton className="h-4 w-48" />
-      </Card>
-    )
-  }
-  if (state === "failed") {
-    return (
-      <Card className="px-4 py-3">
-        <StatusRow failed>
-          Couldn't scan Claude Code · <Button variant="ghost" size="sm" onClick={onRetry} className="inline h-auto px-0 py-0 hover:bg-transparent hover:underline">Retry</Button>
-        </StatusRow>
-      </Card>
-    )
-  }
+  const [seen, setSeen] = useState<ReadonlySet<string>>(new Set())
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set())
+  const { needsYou, running } = deriveHomeCards({ sessions, liveActivity, seen, dismissed })
+  useEffect(() => {
+    const fresh = needsYou.filter((card) => !card.stale && !seen.has(card.sessionId))
+    if (fresh.length === 0) return
+    setSeen((prev) => new Set([...prev, ...fresh.map((card) => card.sessionId)]))
+    // A new question after a dismissal must show again.
+    setDismissed((prev) => new Set([...prev].filter((id) => !fresh.some((card) => card.sessionId === id))))
+  }, [needsYou, seen])
+  const dismiss = (id: string) => setDismissed((prev) => new Set(prev).add(id))
+  if (needsYou.length === 0 && running.length === 0) return null
   return (
-    <Card className="flex items-center gap-3 px-4 py-3">
-      <span className="min-w-0 flex-1 text-[13px] text-text-bright">
-        Found {count} MCP server{count === 1 ? "" : "s"} in Claude Code, Codex and OpenCode
-      </span>
-      <Button size="sm" onClick={onReview}>Review</Button>
-      <Button size="sm" variant="ghost" onClick={onDismiss}>Not now</Button>
-    </Card>
+    <div className="flex w-full max-w-[452px] flex-col gap-2 text-left" data-testid="home-cards">
+      {needsYou.map((card) => (
+        <NeedsYouCard
+          key={card.sessionId}
+          title={card.title}
+          text={card.text}
+          stale={card.stale}
+          onAnswer={() => onOpenSession(card.sessionId)}
+          onDismiss={() => dismiss(card.sessionId)}
+        />
+      ))}
+      {running.map((row) => (
+        <RunningRow key={row.sessionId} title={row.title} activity={row.activity} onOpen={() => onOpenSession(row.sessionId)} />
+      ))}
+    </div>
   )
 }

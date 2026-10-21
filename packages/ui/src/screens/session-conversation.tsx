@@ -339,6 +339,9 @@ export function SessionConversation(props: SessionConversationProps) {
            if (props.showEmpty || activeSessionProjectId !== selectedProjectId) return (<EmptyConversation
             version={props.version}
             onNewSession={openNewSession}
+            sessions={props.sessions}
+            liveActivity={props.liveActivity}
+            onOpenSession={props.onSelectSession}
           />)
            return (<SessionSplit
             onOpenCheckpoints={props.onOpenCheckpoints}
