@@ -46,6 +46,7 @@ import {
   useContainerWidth,
   OPEN_THREAD_SWITCHER_EVENT
 } from "@jingler/ui"
+import { mcpSignInPhase, type McpSignInAttempt } from "./mcp-sign-in-card.js"
 import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, mcpRecoveryKey } from "./mcp-recovery-dismissals.js"
 import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
@@ -136,47 +137,77 @@ function McpRecoveryCards({
   readonly authorize?: (name: string) => Promise<void>
 }) {
   const [apiKeyServer, setApiKeyServer] = useState<McpServer | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [attempts, setAttempts] = useState<Readonly<Record<string, { attempt: McpSignInAttempt; error?: string }>>>({})
   const [, setDismissed] = useState(0)
+  const setAttempt = (name: string, attempt: McpSignInAttempt | undefined, error?: string) =>
+    setAttempts((current) => {
+      const { [name]: _removed, ...rest } = current
+      return attempt === undefined ? rest : { ...rest, [name]: { attempt, error } }
+    })
   // A healthy server drops its dismissal, so the next failure shows the card again.
   useEffect(() => {
     for (const server of servers) {
-      if (!server.enabled || server.authState !== "needs-auth") clearMcpRecoveryDismissal(mcpRecoveryKey(server))
+      if (!server.enabled || (server.authState !== "needs-auth" && server.authState !== "authorizing")) {
+        clearMcpRecoveryDismissal(mcpRecoveryKey(server))
+      }
     }
   }, [servers])
-  const needsAuth = servers.filter((server) =>
-    server.enabled && server.authState === "needs-auth" && !isMcpRecoveryDismissed(mcpRecoveryKey(server))
-  )
+  const phaseOf = (server: McpServer) => mcpSignInPhase(server.authState, attempts[server.name]?.attempt)
+  // "Connected" confirms briefly, then the card goes away.
+  const connectedNames = servers.filter((server) => phaseOf(server) === "connected").map((server) => server.name).join("\n")
+  useEffect(() => {
+    if (connectedNames === "") return
+    const timer = setTimeout(() => { for (const name of connectedNames.split("\n")) setAttempt(name, undefined) }, 2_500)
+    return () => clearTimeout(timer)
+  }, [connectedNames])
+  const visible = servers.filter((server) => {
+    if (!server.enabled) return false
+    const phase = phaseOf(server)
+    return phase !== "hidden" && (phase !== "needs-sign-in" || !isMcpRecoveryDismissed(mcpRecoveryKey(server)))
+  })
+  const connect = (server: McpServer) => {
+    setAttempt(server.name, "waiting")
+    void authorize?.(server.name).catch((cause) =>
+      setAttempt(server.name, "failed", cause instanceof Error ? cause.message : "MCP authorization failed")
+    )
+  }
   return (
     <>
-      {error !== null && (
-        <div role="alert" className="border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red">{error}</div>
-      )}
-      {needsAuth.map((server) => (
-        <RuntimeRecoveryCard
-          key={server.name}
-          icon={<McpBrand server={server} />}
-          label="MCP server recovery"
-          kind="MCP server"
-          title={`Reconnect ${server.displayName}`}
-          message={`The ${server.displayName} MCP server needs ${server.authKind === "oauth" ? "authorization" : "a new API key"} before its tools can run. Other tools keep working.`}
-          onDismiss={() => {
-            dismissMcpRecovery(mcpRecoveryKey(server))
-            setDismissed((count) => count + 1)
-          }}
-          actionLabel={server.authKind === "oauth" ? "Authorize" : "Add API key"}
-          actionDisabled={server.authKind === "oauth" ? authorize === undefined : setApiKey === undefined}
-          onAction={() => {
-            if (server.authKind === "api-key") setApiKeyServer(server)
-            else {
-              setError(null)
-              void authorize?.(server.name).catch((cause) =>
-                setError(cause instanceof Error ? cause.message : "MCP authorization failed")
-              )
-            }
-          }}
-        />
-      ))}
+      {visible.map((server) => {
+        const phase = phaseOf(server)
+        const oauth = server.authKind === "oauth"
+        const copy = {
+          "needs-sign-in": { message: `Needs sign-in. The ${server.displayName} MCP server needs ${oauth ? "authorization" : "a new API key"} before its tools can run. Other tools keep working.`, action: oauth ? "Authorize" : "Add API key" },
+          waiting: { message: "Waiting for browser… Finish signing in there, or cancel.", action: "Cancel" },
+          connected: { message: `Connected. ${server.displayName} tools are available.`, action: "Done" },
+          failed: { message: "Sign-in failed. Check the browser sign-in and try again.", action: "Retry" },
+          hidden: { message: "", action: "" }
+        }[phase]
+        return (
+          <RuntimeRecoveryCard
+            key={server.name}
+            icon={<McpBrand server={server} />}
+            label="MCP server recovery"
+            kind="MCP server"
+            title={`Reconnect ${server.displayName}`}
+            message={copy.message}
+            detail={attempts[server.name]?.error}
+            failed={phase === "failed"}
+            onDismiss={phase === "needs-sign-in" ? () => {
+              dismissMcpRecovery(mcpRecoveryKey(server))
+              setDismissed((count) => count + 1)
+            } : undefined}
+            actionLabel={copy.action}
+            actionDisabled={phase === "needs-sign-in" || phase === "failed" ? (oauth ? authorize === undefined : setApiKey === undefined) : false}
+            onAction={() => {
+              if (phase === "waiting") setAttempt(server.name, "cancelled")
+              else if (phase === "connected") setAttempt(server.name, undefined)
+              else if (!oauth) setApiKeyServer(server)
+              else connect(server)
+            }}
+          />
+        )
+      })}
       {setApiKey !== undefined && (
         <McpApiKeyDialog
           server={apiKeyServer}
