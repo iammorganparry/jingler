@@ -39,3 +39,25 @@ export const layerRangeByNumber = (
   ranges: ReadonlyArray<PrLayerRange>,
   number: number
 ): PrLayerRange | null => ranges.find((range) => range.number === number) ?? null
+
+/** The layers a stack needs restacked once a base layer has merged. */
+export interface RestackPlan {
+  /** Top-most merged layer with an unmerged layer directly above it; pass to `Github.restack`. */
+  readonly mergedPr: number
+  /** The one layer whose PR base moves onto the merged layer's base. */
+  readonly retarget: number
+  /** Every layer above `mergedPr`, bottom first; each is rebased. */
+  readonly rebase: ReadonlyArray<number>
+}
+
+/** Plan a restack for a bottom-first stack, or null when no unmerged layer sits on a merged one. */
+export const restackPlan = (layers: ReadonlyArray<{ readonly number: number; readonly state?: string }>): RestackPlan | null => {
+  const at = layers.findLastIndex((layer, index) => layer.state === "merged" && layers[index + 1] !== undefined && layers[index + 1]!.state !== "merged")
+  if (at < 0) return null
+  const above = layers.slice(at + 1)
+  return { mergedPr: layers[at]!.number, retarget: above[0]!.number, rebase: above.map((layer) => layer.number) }
+}
+
+/** The merged layer directly under `layers[index]` when that layer itself is unmerged ("Base merged"), else null. */
+export const mergedBaseOf = (layers: ReadonlyArray<{ readonly number: number; readonly state?: string }>, index: number): number | null =>
+  index > 0 && layers[index]?.state !== "merged" && layers[index - 1]?.state === "merged" ? layers[index - 1]!.number : null

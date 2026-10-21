@@ -3,15 +3,17 @@
  * view shows, and the base-up layer list (live state shares the sidebar poll's
  * `pr-state` query cache). Returns `nav: undefined` for a single-PR session.
  */
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useMachine } from "@xstate/react"
-import type { PrMergeMethod, Session } from "@jingler/core"
+import { conflictResolutionPrompt, type PrMergeMethod, type Session } from "@jingler/core"
 import type { PrStackNav } from "@jingler/ui"
 import { prStackMachine } from "./pr-stack-machine.js"
 import { prNumbersOf } from "./pr-sweep.js"
 import { prKey } from "./use-pull-request.js"
 import { rpc } from "./rpc-client.js"
+import { getConversationActor } from "./conversation-registry.js"
+import { rpcFailureTag, unwrapRpcFailure } from "./rpc-failure.js"
 
 const PR_STATE_STALE_MS = 5 * 60_000
 
@@ -75,6 +77,27 @@ export function usePrStack(session: Session, connected: boolean): { selected: nu
     })()
   }, [session.githubSlug, session.id, session.prNumber, qc, send])
 
+  // Restack after a base layer merged. A rebase conflict hands off to the agent
+  // as a normal turn, the same path as "Ask agent to resolve conflicts".
+  const [restacking, setRestacking] = useState(false)
+  const onRestack = useCallback(
+    (mergedPr: number) => {
+      setRestacking(true)
+      void rpc
+        .githubRestack(session.id, mergedPr)
+        .catch((cause: unknown) => {
+          if (rpcFailureTag(cause) !== "RestackConflictError") return
+          const { paths } = unwrapRpcFailure(cause) as { paths: ReadonlyArray<string> }
+          getConversationActor(session).send({ type: "SEND", text: conflictResolutionPrompt(paths) })
+        })
+        .finally(() => {
+          setRestacking(false)
+          void qc.invalidateQueries({ queryKey: ["pr-state", session.id] })
+        })
+    },
+    [session, qc]
+  )
+
   const nav = useMemo<PrStackNav | undefined>(
     () =>
       numbers.length > 1
@@ -86,11 +109,13 @@ export function usePrStack(session: Session, connected: boolean): { selected: nu
             mergeState: snapshot.value as PrStackNav["mergeState"],
             merged: snapshot.context.merged,
             mergeError: snapshot.context.mergeError,
-            onMergeStack
+            onMergeStack,
+            restacking,
+            onRestack
           }
         : undefined,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key, layers, snapshot.context.selected, snapshot.value, snapshot.context.merged, snapshot.context.mergeError, send, onMergeStack]
+    [key, layers, snapshot.context.selected, snapshot.value, snapshot.context.merged, snapshot.context.mergeError, send, onMergeStack, restacking, onRestack]
   )
   return { selected: snapshot.context.selected, nav }
 }

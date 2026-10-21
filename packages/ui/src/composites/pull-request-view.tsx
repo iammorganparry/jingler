@@ -714,6 +714,8 @@ function CheckEvidence({ pr, stack }: { pr: PullRequest; stack?: PrStackNav }) {
         merged={stack.merged}
         mergeError={stack.mergeError}
         onMergeStack={stack.onMergeStack}
+        restacking={stack.restacking}
+        onRestack={stack.onRestack}
       />
       <div className="min-w-0 flex-1">{checks}</div>
     </div>
