@@ -1,6 +1,6 @@
 /**
  * Local speech-to-text via a whisper.cpp CLI (`whisper-cli -m <model> -f <wav> -nt -np`).
- * Binary: `JINGLER_WHISPER_BIN`, else `~/jingler/models/whisper/bin` (a file, or a
+ * Binary: `JINGLER_WHISPER_BIN`, else the bundled one (packaged), else `~/jingler/models/whisper/bin` (a file, or a
  * directory holding `whisper-cli`). Model: first `*.bin` in `~/jingler/models/whisper/`.
  */
 import { execFile } from "node:child_process"
@@ -10,6 +10,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { app, systemPreferences } from "electron"
 import type { VoiceModel } from "@jingler/contracts"
+import { pickWhisperBinary } from "./voice-binary.js"
 import { downloadVerified, listModels, modelFile, WHISPER_MODELS } from "./voice-models.js"
 
 export type TranscribeFailure = { readonly reason: "no-model" | "failed"; readonly message: string }
@@ -17,9 +18,11 @@ export type TranscribeFailure = { readonly reason: "no-model" | "failed"; readon
 const whisperDir = (): string => join(homedir(), "jingler", "models", "whisper")
 
 const whisperBinary = (): string | null => {
-  const configured = process.env.JINGLER_WHISPER_BIN ?? join(whisperDir(), "bin")
-  if (!existsSync(configured)) return null
-  return statSync(configured).isDirectory() ? join(configured, "whisper-cli") : configured
+  const exe = process.platform === "win32" ? "whisper-cli.exe" : "whisper-cli"
+  const bundled = app.isPackaged ? join(process.resourcesPath, "whisper", exe) : undefined
+  const found = pickWhisperBinary([process.env.JINGLER_WHISPER_BIN, bundled, join(whisperDir(), "bin")], existsSync)
+  if (found === null) return null
+  return statSync(found).isDirectory() ? join(found, "whisper-cli") : found
 }
 
 const findModel = async (modelId?: string): Promise<string | null> => {
