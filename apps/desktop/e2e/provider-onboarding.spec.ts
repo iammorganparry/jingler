@@ -518,6 +518,9 @@ test("skips provider setup and preserves that choice across restart", async ({
   await expect(
     first.window.getByRole("button", { name: "Continue" }),
   ).toBeDisabled();
+  await expect(
+    first.window.getByText("Connect a provider to continue, or skip for now.", { exact: true }),
+  ).toBeVisible();
   await first.window.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     first.window.getByRole("heading", { name: "Import existing sessions?" }),

@@ -2588,6 +2588,13 @@ function renderAppSetup(
       providerLoginEvent={state.context.providerLoginEvent}
       providerPendingAuthKind={state.context.providerPendingAuthKind}
       error={state.context.error}
+      providerFailure={
+        state.matches({ setup: { provider: "loadFailed" } })
+          ? "loadFailed"
+          : state.matches({ setup: { provider: "completionFailed" } })
+            ? "completionFailed"
+            : null
+      }
       repos={repos}
       reposDir={reposDir}
       busy={

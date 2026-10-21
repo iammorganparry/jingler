@@ -30,6 +30,7 @@ export interface SetupScreenProps {
   providerLoginEvent?: ProviderLoginEvent | null
   providerPendingAuthKind?: AuthKind | null
   error?: string | null
+  providerFailure?: "loadFailed" | "completionFailed" | null
   repos?: ReadonlyArray<Repo>
   busy?: boolean
   onChooseDir: () => void
@@ -132,6 +133,7 @@ export function SetupScreen({
   providerLoginEvent = null,
   providerPendingAuthKind = null,
   error = null,
+  providerFailure = null,
   repos = [],
   busy = false,
   onChooseDir,
@@ -258,6 +260,7 @@ return (<ProviderSetupStep
             busy={busy}
             pendingAuthKind={providerPendingAuthKind}
             error={error}
+            failure={providerFailure}
             onConnectClaude={onConnectClaude}
             onStartCodex={onStartCodex}
             onConnectApi={onConnectApi}

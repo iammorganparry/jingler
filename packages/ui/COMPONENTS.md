@@ -66,6 +66,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | PierreFileTree | `components/pierre-file-tree.tsx` | Large repository file tree (Pierre). | paths, gitStatus, path, status, selectedPaths, focusedPath | no | — |
 | Pill | `components/pill.tsx` | Status lozenge with optional leading dot. One line by construction (nowrap, shrink-0). | children, dot, pulse, className, title | yes | #361 (1.3) |
 | ProviderIcon | `components/provider-icon.tsx` | Brand marks for agent providers (Claude, Codex…); providerLabel/providerColor helpers. | — | no | — |
+| HarnessCard | `composites/harness-card.tsx` | Agent harness row: real provider logo, name, detail and a one-line status pill (Ready / Signing in… / Needs attention / Signed out). | providerId, name, detail, status | yes | #475 (9.5) |
 | ProviderSignedOutCard, ProviderResumeCard, ProviderLimitBanner, ProviderAccountChoice | `composites/provider-recovery-cards.tsx` | Chat recovery states: signed-out Reconnect, Resume run, "Limited until HH:MM" banner, signed-in account radio choice. | title, message, limit, accounts, onUse | yes | #419 (5.13) |
 | ResizeHandle | `components/resizable.tsx` | ResizeHandle for persisted drag-resizable widths. | — | no | — |
 | SearchField (alias SearchInput) | `components/search-input.tsx` | 32px search field: leading magnifier, clear button, Esc clears, optional count and kbd hint. | value, onChange, placeholder, kbd, count | yes | #367 (2.2) |
