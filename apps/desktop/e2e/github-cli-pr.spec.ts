@@ -84,6 +84,10 @@ test("links and shows a pull request through authenticated gh without a GitHub A
     await expect(readiness.getByText("No checks reported")).toBeVisible()
     await expect(window.getByText("Timeline", { exact: true })).toBeVisible()
     await expect(window.getByText("No reviews or comments yet")).toBeVisible()
+    // gh-only has no viewer identity, so the own-PR guard can't apply; the composer's three actions still render.
+    await expect(window.getByRole("button", { name: "Approve", exact: true })).toBeVisible()
+    await expect(window.getByRole("button", { name: "Request changes", exact: true })).toBeVisible()
+    await expect(window.getByRole("button", { name: "Comment", exact: true })).toBeVisible()
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

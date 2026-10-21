@@ -72,7 +72,7 @@ export function PrReviewComposer({
         {!commentOnly && (
           <label className="flex items-center gap-2 text-[11.5px] text-text">
             <Toggle checked={routeToAgent} onCheckedChange={setRouteToAgent} />
-            Route to agent
+            Also send to agent
           </label>
         )}
         <div className="flex-1" />
@@ -85,13 +85,12 @@ export function PrReviewComposer({
         >
           Comment
         </AsyncButton>
-        {/* Approve / request-changes are hidden on your own PR — GitHub forbids
-            self-approval, so only Comment is offered. */}
-        {!commentOnly && !selfAuthored && (
+        {/* GitHub forbids self-approval, so on your own PR these are disabled; Comment stays. */}
+        {!commentOnly && (
           <>
             <AsyncButton
               variant="danger"
-              disabled={!connected}
+              disabled={!connected || selfAuthored}
               pendingLabel="Requesting…"
               successLabel="Requested"
               onClick={() => submit("request-changes")}
@@ -100,7 +99,7 @@ export function PrReviewComposer({
             </AsyncButton>
             <AsyncButton
               variant="primary"
-              disabled={!connected}
+              disabled={!connected || selfAuthored}
               pendingLabel="Approving…"
               successLabel="Approved"
               onClick={() => submit("approve")}

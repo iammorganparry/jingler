@@ -237,6 +237,37 @@ export interface PullRequestViewProps {
  * in the centre column, with reviewers / checks / merge state in the right rail.
  * Pure presentational: all data + actions come through props.
  */
+/** The PR description rendered as the opening comment; placeholder when empty. */
+function PrDescriptionCard({ pr, repository }: { pr: PullRequest; repository?: string }) {
+  return (
+          <Card>
+              <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-[11px]">
+                <Avatar
+                  initial={pr.author.login.charAt(0).toUpperCase()}
+                  src={githubAvatarUrl(pr.author.login)}
+                  tone="orange"
+                  size={22}
+                />
+                <span className="text-[13px] font-semibold text-text-bright">
+                  {pr.author.login}
+                </span>
+                <span className="text-[11.5px] text-muted-foreground">opened this</span>
+                <div className="flex-1" />
+                <span className="font-mono text-[11px] text-dim">
+                  {relativeTime(pr.createdAt)}
+                </span>
+              </div>
+              <div className="px-[14px] py-[11px]">
+                {pr.body?.trim() ? (
+                  <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
+                ) : (
+                  <p className="text-[13.5px] text-muted-foreground">No description provided.</p>
+                )}
+              </div>
+          </Card>
+  )
+}
+
 export function PullRequestView({
   pr,
   connected,
@@ -390,29 +421,7 @@ return (evidence === "checks" ? (
             + timestamp are what let you tell a stale description from a current
             one.
           */}
-          {pr.body !== null && pr.body.trim().length > 0 && (
-            <Card>
-              <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-[11px]">
-                <Avatar
-                  initial={pr.author.login.charAt(0).toUpperCase()}
-                  src={githubAvatarUrl(pr.author.login)}
-                  tone="orange"
-                  size={22}
-                />
-                <span className="text-[13px] font-semibold text-text-bright">
-                  {pr.author.login}
-                </span>
-                <span className="text-[11.5px] text-muted-foreground">opened this</span>
-                <div className="flex-1" />
-                <span className="font-mono text-[11px] text-dim">
-                  {relativeTime(pr.createdAt)}
-                </span>
-              </div>
-              <div className="px-[14px] py-[11px]">
-                <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
-              </div>
-            </Card>
-          )}
+          <PrDescriptionCard pr={pr} repository={repository} />
 
           {/* Timeline — top-level reviews/comments and inline thread groups, interleaved */}
           <Eyebrow>Timeline</Eyebrow>
