@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { closeIssue, commentIssue, fetchIssue, fetchIssueWithCli, resolveRepository } from "./main.js"
+import { closeIssue, commentIssue, reopenIssue, fetchIssue, fetchIssueWithCli, resolveRepository } from "./main.js"
 
 const session = {
   accessToken: "ghs_installation_secret",
@@ -205,6 +205,15 @@ describe("updatedAt and closeIssue", () => {
 })
 
 describe("commentIssue", () => {
+  it("reopens through gh and surfaces failures", async () => {
+    const ok = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" })
+    await reopenIssue({ repo: "acme/widgets", issueNumber: 7 }, ok)
+    expect(ok.mock.calls[0]?.[1]).toEqual(["issue", "reopen", "7", "--repo", "acme/widgets"])
+    const bad = vi.fn().mockResolvedValue({ code: 1, stdout: "", stderr: "denied" })
+    await expect(reopenIssue({ repo: "acme/widgets", issueNumber: 7 }, bad)).rejects.toThrow("denied")
+    await expect(reopenIssue({ repo: "acme/widgets", issueNumber: 0 }, ok)).rejects.toThrow("invalid")
+  })
+
   it("comments, or closes with the comment, through gh", async () => {
     const ok = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" })
     await commentIssue({ repo: "acme/widgets", issueNumber: 7, body: "Looking" }, ok)

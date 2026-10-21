@@ -6475,6 +6475,7 @@ const AssetListHandlersLayer = AssetListRpcs.toLayer({
   "Window.close": () => Effect.sync(() => appWindow()?.close()),
   "Window.isMaximized": () => Effect.sync(() => appWindow()?.isMaximized() ?? false),
   "Mcp.reveal": () => mcpReveal(),
+  "Github.reopenIssue": ({ repository, number }) => GitHubApi.issueReopenBySlug(repository, number)
 });
 
 

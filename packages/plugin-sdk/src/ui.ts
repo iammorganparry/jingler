@@ -65,6 +65,7 @@ export { GithubMark } from "@jingler/ui"
 // plugin rendering an issue uses it instead of private header markup, so its
 // header cannot drift from the app's own pull request view.
 export { ReadingShell, ReadingActionsMenu } from "@jingler/ui"
+export { IssueRail, IssueStateView, ClosedIssueBanner } from "@jingler/ui"
 export { Callout } from "@jingler/ui"
 export { Card } from "@jingler/ui"
 export { Input } from "@jingler/ui"
