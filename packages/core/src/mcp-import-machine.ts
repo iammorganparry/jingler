@@ -125,7 +125,7 @@ export const mcpImportMachine = setup({
     importFailed: {
       on: { RETRY: "importing" }
     },
-    done: { type: "final" },
+    done: { on: { DISMISS: "dismissed" } },
     dismissed: { type: "final" }
   }
 })

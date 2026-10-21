@@ -21,7 +21,7 @@ describe("McpImportPrompt", () => {
     )
     const apply = vi.fn(async () => [])
 
-    render(<McpImportPrompt ready servers={[]} load={load} apply={apply} />)
+    render(<McpImportPrompt ready servers={[]} load={load} apply={apply} probe={async () => []} startAuthorization={async () => {}} logTail={async () => ({ lines: [] })} />)
 
     expect(await screen.findByRole("dialog")).toBeTruthy()
     expect(screen.getByText("linear")).toBeTruthy()
@@ -30,6 +30,7 @@ describe("McpImportPrompt", () => {
     // Acceptance: an OAuth server imports marked "Needs sign-in".
     expect(screen.getByText(/Needs sign-in/)).toBeTruthy()
     fireEvent.click(screen.getByText("Import 2 servers"))
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(apply.mock.calls).toEqual([
       ["claude", ["linear"], {}],
@@ -63,9 +64,31 @@ describe("McpImportPrompt", () => {
         needsSecrets: false
       }]}
       apply={async () => []}
+      probe={async () => []} startAuthorization={async () => {}} logTail={async () => ({ lines: [] })}
     />)
 
     expect(await screen.findByRole("dialog")).toBeTruthy()
     expect(screen.getByText("Conflict")).toBeTruthy()
+  })
+
+  it("shows result rows derived from the probe; Connect and View log call their handlers", async () => {
+    const startAuthorization = vi.fn(async () => {})
+    const logTail = vi.fn(async () => ({ lines: ["boom"] }))
+    const cand = (name: string) => ({ name, source: "claude" as const, origin: "user" as const, target: "x", problem: null, needsSignIn: false, needsSecrets: false })
+    const status = (name: string, state: "failed" | "needs-auth") => ({ name, scope: "user" as const, state, toolCount: null, toolNames: [], error: null, checkedAt: "2026-01-01T00:00:00Z" })
+    render(<McpImportPrompt
+      ready
+      servers={[]}
+      load={async (source) => (source === "claude" ? [cand("bad"), cand("oauth")] : [])}
+      apply={async (_s, names) => names}
+      probe={async () => [status("bad", "failed"), status("oauth", "needs-auth")]}
+      startAuthorization={startAuthorization}
+      logTail={logTail}
+    />)
+    fireEvent.click(await screen.findByText("Import 2 servers"))
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
+    expect(startAuthorization).toHaveBeenCalledWith("oauth")
+    fireEvent.click(screen.getByRole("button", { name: "View log" }))
+    await waitFor(() => expect(logTail).toHaveBeenCalledWith("bad"))
   })
 })
