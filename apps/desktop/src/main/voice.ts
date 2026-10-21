@@ -5,10 +5,12 @@
  */
 import { execFile } from "node:child_process"
 import { existsSync, statSync } from "node:fs"
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { app, systemPreferences } from "electron"
+import type { VoiceModel } from "@jingler/contracts"
+import { downloadVerified, listModels, modelFile, WHISPER_MODELS } from "./voice-models.js"
 
 export type TranscribeFailure = { readonly reason: "no-model" | "failed"; readonly message: string }
 
@@ -20,16 +22,19 @@ const whisperBinary = (): string | null => {
   return statSync(configured).isDirectory() ? join(configured, "whisper-cli") : configured
 }
 
-const findModel = async (): Promise<string | null> => {
+const findModel = async (modelId?: string): Promise<string | null> => {
+  if (modelId !== undefined && existsSync(modelFile(whisperDir(), modelId))) return modelFile(whisperDir(), modelId)
   const entries = await readdir(whisperDir()).catch(() => [] as string[])
   const model = entries.filter((name) => name.endsWith(".bin")).sort()[0]
   return model === undefined ? null : join(whisperDir(), model)
 }
 
 export const transcribeWav = async (
-  wavBase64: string
+  wavBase64: string,
+  language?: string,
+  modelId?: string
 ): Promise<{ readonly text: string } | TranscribeFailure> => {
-  const [binary, model] = [whisperBinary(), await findModel()]
+  const [binary, model] = [whisperBinary(), await findModel(modelId)]
   if (binary === null || !existsSync(binary) || model === null) {
     return { reason: "no-model", message: `Add a whisper.cpp binary and a .bin model under ${whisperDir()}` }
   }
@@ -38,7 +43,7 @@ export const transcribeWav = async (
     const wav = join(dir, "input.wav")
     await writeFile(wav, Buffer.from(wavBase64, "base64"))
     return await new Promise((resolve) => {
-      execFile(binary, ["-m", model, "-f", wav, "-nt", "-np"], { timeout: 120_000 }, (error, stdout, stderr) => {
+      execFile(binary, ["-m", model, "-f", wav, "-nt", "-np", ...(language ? ["-l", language] : [])], { timeout: 120_000 }, (error, stdout, stderr) => {
         if (error !== null) resolve({ reason: "failed", message: stderr.trim() || error.message })
         else resolve({ text: stdout.replace(/\s+/g, " ").trim() })
       })
@@ -53,3 +58,36 @@ export const requestMicrophone = async (): Promise<boolean> =>
   process.platform === "darwin" && app.isPackaged
     ? systemPreferences.askForMediaAccess("microphone")
     : true
+
+const downloading = new Map<string, number>()
+
+export const voiceModels = (): Promise<ReadonlyArray<VoiceModel>> => listModels(whisperDir(), downloading)
+
+const modelBaseUrl = (): string =>
+  process.env.JINGLER_WHISPER_MODEL_BASE_URL ?? "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+
+/** E2E only: the fake server's bytes cannot match a real pinned hash, so the test supplies its own. */
+const pinnedSha = (sha256: string): string =>
+  process.env.JINGLER_E2E === "1" ? (process.env.JINGLER_E2E_WHISPER_SHA256 ?? sha256) : sha256
+
+export const downloadVoiceModel = async (id: string): Promise<void> => {
+  const model = WHISPER_MODELS.find((candidate) => candidate.id === id)
+  if (model === undefined) throw new Error(`Unknown model ${id}`)
+  if (downloading.has(id)) return
+  await mkdir(whisperDir(), { recursive: true })
+  downloading.set(id, 0)
+  try {
+    await downloadVerified({
+      url: `${modelBaseUrl()}/ggml-${id}.bin`,
+      dest: modelFile(whisperDir(), id),
+      sha256: pinnedSha(model.sha256),
+      onProgress: (received) => downloading.set(id, received)
+    })
+  } finally {
+    downloading.delete(id)
+  }
+}
+
+export const removeVoiceModel = async (id: string): Promise<void> => {
+  if (WHISPER_MODELS.some((model) => model.id === id)) await rm(modelFile(whisperDir(), id), { force: true })
+}

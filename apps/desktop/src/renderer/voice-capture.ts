@@ -4,6 +4,8 @@ const SAMPLE_RATE = 16_000
 export interface VoiceRecording {
   /** Stop recording and return the WAV as base64. */
   readonly stop: () => Promise<string>
+  /** Current input loudness, 0–1. */
+  readonly level: () => number
   /** Stop and discard. */
   readonly cancel: () => void
 }
@@ -40,13 +42,23 @@ const blobToWavBase64 = async (blob: Blob): Promise<string> => {
 export const startRecording = async (): Promise<VoiceRecording> => {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   const recorder = new MediaRecorder(stream)
+  const audio = new AudioContext()
+  const analyser = audio.createAnalyser()
+  analyser.fftSize = 256
+  audio.createMediaStreamSource(stream).connect(analyser)
+  const bins = new Uint8Array(analyser.fftSize)
   const chunks: Blob[] = []
   recorder.ondataavailable = (event) => chunks.push(event.data)
   const release = () => {
     for (const track of stream.getTracks()) track.stop()
+    void audio.close()
   }
   recorder.start()
   return {
+    level: () => {
+      analyser.getByteTimeDomainData(bins)
+      return Math.min(1, Math.max(...bins.map((v) => Math.abs(v - 128))) / 64)
+    },
     stop: () =>
       new Promise((resolve, reject) => {
         recorder.onstop = () => {

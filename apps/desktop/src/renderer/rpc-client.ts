@@ -43,6 +43,7 @@ import type {
   NotificationKind,
   NotificationPermission,
   NotificationsConfig,
+  VoiceConfig,
   GithubConfig,
   Issue,
   IssueAutomations,
@@ -133,7 +134,8 @@ import {
   type SessionCreationUpdate,
   type SessionDiffStat,
   type SessionFileDiff,
-  type SessionReviewDiff
+  type SessionReviewDiff,
+  type VoiceModel
 } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type {
@@ -907,6 +909,8 @@ export const rpc = {
     run((c) => c.Config.setSubagentModel({ providerId, agent, modelId })),
   configSetPlanAutoRun: (planAutoRun: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanAutoRun({ planAutoRun })),
+  configSetVoice: (voice: VoiceConfig): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setVoice(voice)),
   /** Persist ADHD mode; resolves with the whole updated config. */
   configSetAdhdMode: (adhdMode: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setAdhdMode({ adhdMode })),
@@ -959,8 +963,11 @@ export const rpc = {
     run((c) => c.Notify.openSystemSettings()),
   voiceRequestMicrophone: (): Promise<boolean> =>
     runAssetList((c) => c.Voice.requestMicrophone()),
-  voiceTranscribe: (wavBase64: string): Promise<{ text: string }> =>
-    runAssetList((c) => c.Voice.transcribe({ wavBase64 })),
+  voiceTranscribe: (wavBase64: string, language?: string, modelId?: string): Promise<{ text: string }> =>
+    runAssetList((c) => c.Voice.transcribe({ wavBase64, language, modelId })),
+  voiceModels: (): Promise<ReadonlyArray<VoiceModel>> => runAssetList((c) => c.Voice.models()),
+  voiceDownloadModel: (id: string): Promise<void> => runAssetList((c) => c.Voice.downloadModel({ id })),
+  voiceRemoveModel: (id: string): Promise<void> => runAssetList((c) => c.Voice.removeModel({ id })),
   configSetStarredRepos: (
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>

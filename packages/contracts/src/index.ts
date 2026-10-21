@@ -28,6 +28,7 @@ import {
   NotificationKind,
   NotificationPermission,
   NotificationsConfig,
+  VoiceConfig,
   ObsidianExplanationsConfig,
   Issue,
   IssueAutomations,
@@ -232,6 +233,15 @@ export type SessionReviewDiff = Schema.Schema.Type<typeof SessionReviewDiff>
  * one nested client type exceeds TypeScript's instantiation depth; the server
  * merges both groups back into the single IPC surface below.
  */
+export const VoiceModel = Schema.Struct({
+  id: Schema.String,
+  sizeBytes: Schema.Number,
+  installed: Schema.Boolean,
+  downloading: Schema.Boolean,
+  receivedBytes: Schema.Number
+})
+export type VoiceModel = Schema.Schema.Type<typeof VoiceModel>
+
 /** Local speech-to-text failed; `no-model` means no whisper.cpp model/binary is installed. */
 export class VoiceError extends Schema.TaggedError<VoiceError>()("VoiceError", {
   reason: Schema.Literal("no-model", "failed"),
@@ -1378,6 +1388,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: ObsidianExplanationsConfig
   }),
 
+  /** Persist voice input preferences (language, model, hold-to-talk key). */
+  Rpc.make("Config.setVoice", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: VoiceConfig
+  }),
+
   /** Persist the user's desktop-notification preferences. */
   Rpc.make("Config.setNotifications", {
     success: WorkspaceConfig,
@@ -1591,7 +1608,30 @@ export class AssetListRpcs extends RpcGroup.make(
   Rpc.make("Voice.transcribe", {
     success: Schema.Struct({ text: Schema.String }),
     error: VoiceError,
-    payload: { wavBase64: Schema.String }
+    payload: {
+      wavBase64: Schema.String,
+      /** whisper-cli `-l` code, or "auto". */
+      language: Schema.optional(Schema.String),
+      /** Installed model id to use; falls back to any installed model. */
+      modelId: Schema.optional(Schema.String)
+    }
+  }),
+
+  /** Pinned whisper models with install state and live download progress. */
+  Rpc.make("Voice.models", {
+    success: Schema.Array(VoiceModel)
+  }),
+
+  /** Download a pinned model, verify its SHA-256, then move it into place. Resolves when installed. */
+  Rpc.make("Voice.downloadModel", {
+    success: Schema.Void,
+    error: VoiceError,
+    payload: { id: Schema.String }
+  }),
+
+  Rpc.make("Voice.removeModel", {
+    success: Schema.Void,
+    payload: { id: Schema.String }
   }),
 
   /** macOS mic permission (`askForMediaAccess`); other platforms resolve true. */

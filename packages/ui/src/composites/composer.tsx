@@ -244,6 +244,10 @@ export interface ComposerVoiceInput {
   status: "idle" | "starting" | "recording" | "transcribing" | "error" | "noModel";
   /** Failure detail shown beside the mic in `error`. */
   message?: string;
+  /** Input loudness 0–1 while recording. */
+  level?: number;
+  /** Time recorded so far. */
+  elapsedMs?: number;
   /** Start recording, or stop and transcribe. The transcript lands in the draft, never sent. */
   onToggle: () => void;
   onCancel: () => void;
@@ -262,6 +266,23 @@ function voiceIcon(status: ComposerVoiceInput["status"]) {
   return <Mic size={14} />
 }
 
+const formatElapsed = (ms: number): string => {
+  const seconds = Math.floor(ms / 1000)
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+}
+
+/** Live input level bar (CSS only, --sb-* tokens via the theme classes) beside the elapsed time. */
+export function VoiceLevelMeter({ level, elapsedMs }: { level: number; elapsedMs: number }) {
+  return (
+    <span className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums text-muted-foreground" role="status" aria-label="Recording level">
+      <span className="h-1.5 w-12 overflow-hidden rounded-full bg-panel">
+        <span className="block h-full rounded-full bg-purple transition-[width] duration-100" style={{ width: `${Math.round(Math.min(1, Math.max(0, level)) * 100)}%` }} />
+      </span>
+      {formatElapsed(elapsedMs)}
+    </span>
+  )
+}
+
 /** Mic toggle plus its Cancel and failure note; the transcript lands in the draft, never sent. */
 function ComposerVoiceControl({ voice }: { voice: ComposerVoiceInput }) {
   const { status } = voice
@@ -271,6 +292,7 @@ function ComposerVoiceControl({ voice }: { voice: ComposerVoiceInput }) {
   const label = VOICE_LABEL[status]
   return (<>
     {note && <Button type="button" variant="ghost" size="sm" onClick={voice.onDismiss} title="Dismiss" className="max-w-[200px] truncate text-state-failed">{note}</Button>}
+    {recording && <VoiceLevelMeter level={voice.level ?? 0} elapsedMs={voice.elapsedMs ?? 0} />}
     {recording && <Button type="button" variant="ghost" size="sm" aria-label="Cancel recording" onClick={voice.onCancel}>Cancel</Button>}
     <Tooltip label={label}>
       <Button type="button" variant={recording ? "primary" : "ghost"} size="icon" className="size-7 rounded-full"

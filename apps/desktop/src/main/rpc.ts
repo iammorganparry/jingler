@@ -249,7 +249,7 @@ import {
   showNotification,
   shouldNotify,
 } from "./notifications.js";
-import { requestMicrophone, transcribeWav } from "./voice.js";
+import { downloadVoiceModel, removeVoiceModel, requestMicrophone, transcribeWav, voiceModels } from "./voice.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
 import { primeOffloadSessions } from "./offload-session-primer.js";
@@ -5919,6 +5919,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ConfigService.setSubagentModel(providerId, agent, modelId),
   "Config.setPlanAutoRun": ({ planAutoRun }) =>
     ConfigService.setPlanAutoRun(planAutoRun),
+  "Config.setVoice": (voice) => ConfigService.setVoice(voice),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
   "Config.setFontScale": ({ fontScale }) =>
     ConfigService.setFontScale(fontScale),
@@ -6422,8 +6423,15 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
 const AssetListHandlersLayer = AssetListRpcs.toLayer({
   "Asset.list": (input) => assetList(input),
-  "Voice.transcribe": ({ wavBase64 }) =>
-    Effect.promise(() => transcribeWav(wavBase64)).pipe(
+  "Voice.models": () => Effect.promise(() => voiceModels()),
+  "Voice.downloadModel": ({ id }) =>
+    Effect.tryPromise({
+      try: () => downloadVoiceModel(id),
+      catch: (cause) => new VoiceError({ reason: "failed", message: cause instanceof Error ? cause.message : String(cause) }),
+    }),
+  "Voice.removeModel": ({ id }) => Effect.promise(() => removeVoiceModel(id)),
+  "Voice.transcribe": ({ wavBase64, language, modelId }) =>
+    Effect.promise(() => transcribeWav(wavBase64, language, modelId)).pipe(
       Effect.flatMap((result) =>
         "text" in result ? Effect.succeed(result) : Effect.fail(new VoiceError(result)),
       ),
