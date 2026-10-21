@@ -339,6 +339,14 @@ export function SessionConversation(props: SessionConversationProps) {
            if (props.showEmpty || activeSessionProjectId !== selectedProjectId) return (<EmptyConversation
             version={props.version}
             onNewSession={openNewSession}
+            sessions={props.sessions}
+            liveActivity={props.liveActivity}
+            onOpenSession={(sessionId) => {
+              // The session may already be active while another project is selected: switch the project too.
+              const session = props.sessions.find((candidate) => candidate.id === sessionId)
+              if (session) setSelectedProjectId(projectIdForSession(session, projects))
+              props.onSelectSession(sessionId)
+            }}
           />)
            return (<SessionSplit
             onOpenCheckpoints={props.onOpenCheckpoints}

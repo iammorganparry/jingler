@@ -1,3 +1,5 @@
+import type { Session, SessionActivity } from "@jingler/core"
+import { HomeCards } from "../composites/home-cards.js"
 import { Spin } from "../components/spin.js"
 import { FolderOpen, Plus } from "lucide-react"
 import { JinglerMark } from "../brand/jingler-mark.js"
@@ -11,8 +13,14 @@ import { JinglerMark } from "../brand/jingler-mark.js"
 export function EmptyConversation({
   version,
   onNewSession,
-  onOpenRepo
+  onOpenRepo,
+  sessions,
+  liveActivity,
+  onOpenSession
 }: {
+  sessions?: ReadonlyArray<Session>
+  liveActivity?: Record<string, SessionActivity>
+  onOpenSession?: (sessionId: string) => void
   version?: string
   onNewSession?: () => void
   onOpenRepo?: () => void
@@ -57,6 +65,11 @@ export function EmptyConversation({
             )}
           </div>
 
+          {sessions && liveActivity && onOpenSession ? (
+            <div className="mt-7 w-full">
+              <HomeCards sessions={sessions} liveActivity={liveActivity} onOpenSession={onOpenSession} />
+            </div>
+          ) : null}
         </div>
       </div>
 
