@@ -34,7 +34,7 @@ import { parsePierreFileDiffs } from "../diff/parse.js"
 import { cn } from "../lib/cn.js"
 import { InlineCommentComposer } from "./inline-comment-composer.js"
 import { PrReviewThreadView } from "./pr-review-thread.js"
-import { ReviewFindingRow } from "./review-findings.js"
+import { FindingsList } from "./review-findings.js"
 import type { ReviewDraft } from "./review-tray.js"
 
 export interface ReviewCodeFile {
@@ -266,6 +266,8 @@ interface ReviewCodeViewProps {
   readonly findingsByPath: ReadonlyMap<string, readonly ReviewFinding[]>
   readonly review: AdversarialReview | null
   readonly sentFindingIds?: ReadonlySet<string>
+  readonly dismissedFindingIds?: ReadonlySet<string>
+  readonly onDismissFinding?: (findingId: string, dismissed?: boolean) => void
   readonly connected: boolean
   readonly routeTargetSession: string | null
   readonly compactActions: boolean
@@ -304,6 +306,8 @@ export function ReviewCodeView({
   findingsByPath,
   review,
   sentFindingIds,
+  dismissedFindingIds,
+  onDismissFinding,
   connected,
   routeTargetSession,
   compactActions,
@@ -357,6 +361,8 @@ export function ReviewCodeView({
           findings={findingsByPath.get(entry.file.path) ?? []}
           review={review}
           sentFindingIds={sentFindingIds}
+          dismissedFindingIds={dismissedFindingIds}
+          onDismissFinding={onDismissFinding}
           routeTargetSession={routeTargetSession}
           compactActions={compactActions}
           collapsed={collapseViewed && entry.file.viewed}
@@ -385,7 +391,9 @@ export function ReviewCodeView({
       review,
       routeTargetSession,
       selection?.path,
-      sentFindingIds
+      sentFindingIds,
+      dismissedFindingIds,
+      onDismissFinding
     ]
   )
 
@@ -512,6 +520,8 @@ function ReviewCodeHeader({
   findings,
   review,
   sentFindingIds,
+  dismissedFindingIds,
+  onDismissFinding,
   routeTargetSession,
   compactActions,
   collapsed,
@@ -523,6 +533,8 @@ function ReviewCodeHeader({
   readonly findings: readonly ReviewFinding[]
   readonly review: AdversarialReview | null
   readonly sentFindingIds?: ReadonlySet<string>
+  readonly dismissedFindingIds?: ReadonlySet<string>
+  readonly onDismissFinding?: (findingId: string, dismissed?: boolean) => void
   readonly routeTargetSession: string | null
   readonly compactActions: boolean
   readonly collapsed: boolean
@@ -586,16 +598,15 @@ function ReviewCodeHeader({
       </div>
       {findings.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-hairline bg-panel px-4 py-3">
-          {findings.map((finding) => (
-            <ReviewFindingRow
-              key={finding.id}
-              finding={finding}
-              sent={sentFindingIds?.has(finding.id) ?? false}
-              canRoute={routeTargetSession !== null}
-              review={review}
-              onSendToAgent={onSendFindingToAgent}
-            />
-          ))}
+          <FindingsList
+            findings={findings}
+            review={review}
+            sentFindingIds={sentFindingIds}
+            canRoute={routeTargetSession !== null}
+            onSendFindingToAgent={onSendFindingToAgent}
+            dismissedFindingIds={dismissedFindingIds}
+            onDismissFinding={onDismissFinding}
+          />
         </div>
       )}
     </div>

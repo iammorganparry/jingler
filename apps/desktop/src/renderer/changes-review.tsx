@@ -213,6 +213,8 @@ export function ReviewTrayDock({
       connectionActionLabel={connectionActionLabel}
       review={reviewing ? adversarial.review : null}
       sentFindingIds={adversarial.sentFindingIds}
+      dismissedFindingIds={adversarial.dismissedFindingIds}
+      onDismissFinding={adversarial.dismissFinding}
       routeTargetSession={session.title}
       paths={paths}
       onConnectGithub={onConnectGithub}

@@ -130,6 +130,7 @@ import {
 } from "./use-file-browser.js";
 import { onSessionUpdate, publishSessionUpdate } from "./session-updates.js";
 import { isSessionVisible, setVisibleSessionIds } from "./active-session.js";
+import { onFindingDismissToast } from "./finding-dismiss-toast.js";
 import { needsYouToast } from "./needs-you-toast.js";
 import { prNotification } from "./notifier.js";
 import { completedSessionIds } from "./pr-refresh.js";
@@ -437,6 +438,10 @@ function AuthedApp({
         if (toast) sendToast({ type: "PUSH", toast });
       }),
     [landOnNotification, sendToast],
+  );
+  useEffect(
+    () => onFindingDismissToast((toast) => sendToast({ type: "PUSH", toast })),
+    [sendToast],
   );
   // Keep the module-level cell the conversation registry reads in sync. It can't
   // use a hook: it outlives every component. See `active-session.ts`.
