@@ -141,3 +141,27 @@ test("MCP sign-in waits for the browser and Cancel returns to Needs sign-in", as
   await expect(card.getByText(/^Needs sign-in\./)).toBeVisible()
   await expect(card.getByRole("button", { name: "Authorize", exact: true })).toBeVisible()
 })
+
+test("an MCP tool failing with needs-auth shows a sign-in action", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: { scenarioId: "mcp-needs-auth", authRoute: "api-key" },
+    sessions: ({ repoPath }) => [{ ...session("s_mcp_tool", "Tool sign-in session"), worktreePath: repoPath, mode: "auto" }],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.invalid/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await openSessionByTitle(window, "Tool sign-in session")
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("List my pods")
+  await composer.press("Enter")
+  await expect(window.getByRole("button", { name: "Sign in to runpod", exact: true })).toBeVisible({ timeout: 20_000 })
+})

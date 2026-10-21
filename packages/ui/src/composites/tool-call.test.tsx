@@ -1,5 +1,5 @@
-import { cleanup, render } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { ToolCall, toolCallLabel } from "./tool-call.js"
 
 afterEach(cleanup)
@@ -24,6 +24,18 @@ describe("ToolCall", () => {
       expect(container.querySelector("[data-tool-status]")?.getAttribute("data-tool-status")).toBe(status)
       cleanup()
     }
+  })
+})
+
+describe("ToolCall sign-in", () => {
+  it("shows the action only on a failed call and fires it", () => {
+    const onClick = vi.fn()
+    render(<ToolCall status="error" name="List pods" signIn={{ label: "Sign in to RunPod", onClick }} />)
+    fireEvent.click(screen.getByRole("button", { name: "Sign in to RunPod" }))
+    expect(onClick).toHaveBeenCalledOnce()
+    cleanup()
+    render(<ToolCall status="success" name="List pods" signIn={{ label: "Sign in to RunPod", onClick }} />)
+    expect(screen.queryByRole("button", { name: "Sign in to RunPod" })).toBeNull()
   })
 })
 
