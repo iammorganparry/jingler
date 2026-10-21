@@ -55,6 +55,25 @@ describe("PullRequestView evidence navigation", () => {
     expect(onOpenFiles).toHaveBeenCalledTimes(1)
   })
 
+  it("shows the supplied PR files panel in place on the Files tab", () => {
+    const onOpenFiles = vi.fn()
+    render(<WidthTierValue width={1200}><PullRequestView pr={pr} connected onOpenFiles={onOpenFiles} filesPanel={<div>only-pr-file.ts</div>} /></WidthTierValue>)
+    fireEvent.click(screen.getByRole("tab", { name: "Files 3" }))
+    expect(screen.getByText("only-pr-file.ts")).toBeTruthy()
+    expect(onOpenFiles).not.toHaveBeenCalled()
+  })
+
+  it("marks only a failing check's icon red, never its row or link", () => {
+    const failing = { ...pr, checks: [{ name: "Lint", status: "fail" as const, detailsUrl: "https://ci.example/1", durationMs: 48000 }] }
+    render(<WidthTierValue width={1200}><PullRequestView pr={failing} connected /></WidthTierValue>)
+    fireEvent.click(screen.getByRole("tab", { name: "Checks 0/1" }))
+    const row = screen.getAllByText("Lint")[0]!.parentElement as HTMLElement
+    expect(row.querySelector("svg.text-red")).toBeTruthy()
+    expect(row.className).not.toMatch(/red/)
+    expect(screen.getAllByText("48s").length).toBeGreaterThan(0)
+    expect(screen.getAllByRole("link", { name: "Details for Lint" })[0]!.className).not.toMatch(/red/)
+  })
+
   it("floats the details rail when the PR pane is medium width", () => {
     render(<WidthTierValue width={700}><PullRequestView pr={pr} connected readOnly /></WidthTierValue>)
     expect(screen.getByRole("button", { name: "Pull request details" })).toBeTruthy()

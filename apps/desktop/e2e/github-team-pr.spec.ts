@@ -75,7 +75,7 @@ if (args[0] === 'api') {
     output({total_count:items.length,incomplete_results:control.partial,items:items.slice((page-1)*100,page*100)})
   }
   if (endpoint === 'repos/acme/widget') output({id:7,node_id:'R_7',clone_url:control.repoPath,ssh_url:null})
-  if (endpoint.endsWith('/files')) output([[]])
+  if (endpoint.endsWith('/files')) output([[{filename:'src/only-in-pr.ts',additions:1,deletions:0,status:'added',patch:'@@ -0,0 +1 @@\\n+pr'}]])
   if (endpoint === 'graphql') {
     if (joined.includes('search(query:')) {
       const rows = control.filterRows ? filterItems() : [item(42)]
@@ -259,6 +259,13 @@ test("team pickup creates a session using pinned HTTPS fetches and files reuse t
     // Files accessed via Explorer (files tab removed in redesign 3.6)
     await expect(window.getByRole("tab", { name: "Explorer", exact: true })).toBeVisible()
     expect(JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf8"))).toHaveLength(1)
+    // The PR view's Files sub-tab lists this PR's files only, not the working tree.
+    await sessionRow(window, "Team PR 45").click()
+    await window.getByTestId("header-link-pr").click()
+    await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Files/ }).click()
+    const panel = window.getByTestId("pr-files-panel")
+    await expect(panel.getByText("only-in-pr.ts").first()).toBeVisible()
+    await expect(panel.getByText("README.md")).toHaveCount(0)
   } finally { rmSync(cli.root, { recursive: true, force: true }) }
 })
 

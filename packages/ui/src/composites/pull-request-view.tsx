@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import type {
   PrLabel,
   PrMergeMethod,
@@ -38,6 +38,22 @@ import { PrSwitcher } from "./pr-switcher.js"
 import { PrViewHeader } from "./pr-view-header.js"
 
 type PrEvidence = "overview" | "commits" | "checks" | "files"
+
+/** Conversation and Checks carry the readiness checklist; Commits and Files do not. */
+const showsReadiness = (evidence: PrEvidence) => evidence !== "commits" && evidence !== "files"
+
+/** Files opens in place when a panel is supplied, otherwise hands off to `onOpenFiles`. */
+function selectEvidence(value: string, panel: ReactNode, onOpenFiles: (() => void) | undefined, set: (value: PrEvidence) => void) {
+  if (value === "files" && !panel) onOpenFiles?.()
+  else set(value as PrEvidence)
+}
+
+const evidenceTabs = (pr: PullRequest, onOpenFiles: (() => void) | undefined, filesPanel: ReactNode) => [
+  { value: "overview", label: "Conversation" },
+  { value: "commits", label: `Commits ${pr.commits}` },
+  { value: "files", label: `Files ${pr.changedFiles}`, disabled: !(onOpenFiles ?? filesPanel) },
+  { value: "checks", label: checksLabel(pr) }
+]
 
 /** A single PR label chip, tinted with the label's own colour when known. */
 function LabelChip({ label }: { label: PrLabel }) {
@@ -188,6 +204,8 @@ export interface PullRequestViewProps {
   closeError?: string | null
   /** Open this PR's changed files in Jingler or GitHub. */
   onOpenFiles?: () => void
+  /** This PR's own changed files; when set, the Files tab shows it in place instead of calling `onOpenFiles`. */
+  filesPanel?: ReactNode
   onMerge?: (method: PrMergeMethod) => Promise<void> | void
   /** A merge is in flight — disables the button and shows a spinner. */
   merging?: boolean
@@ -251,6 +269,7 @@ export function PullRequestView({
   closing = false,
   closeError,
   onOpenFiles,
+  filesPanel,
   onMerge,
   merging = false,
   mergeError,
@@ -342,20 +361,12 @@ export function PullRequestView({
               size="sm"
               ariaLabel="Pull request sections"
               value={evidence}
-              onChange={(value) => {
-                if (value === "files") onOpenFiles?.()
-                else setEvidence(value)
-              }}
-              items={[
-                { value: "overview", label: "Conversation" },
-                { value: "commits", label: `Commits ${pr.commits}` },
-                { value: "files", label: `Files ${pr.changedFiles}`, disabled: !onOpenFiles },
-                { value: "checks", label: checksLabel(pr) }
-              ]}
+              onChange={(value) => selectEvidence(value, filesPanel, onOpenFiles, setEvidence)}
+              items={evidenceTabs(pr, onOpenFiles, filesPanel)}
             />
           </div>
 
-          {evidence !== "commits" && <ReadinessChecklist pr={pr} />}
+          {showsReadiness(evidence) && <ReadinessChecklist pr={pr} />}
           {renderReviewEvidence(pr)}
           </div>
         </div>
@@ -364,6 +375,7 @@ export function PullRequestView({
 
          function renderReviewEvidence(pr: NonNullable<PullRequestViewProps["pr"]>) {
            if (evidence === "commits") return (<CommitEvidence pr={pr} />)
+           if (evidence === "files" && filesPanel) return filesPanel
 return (evidence === "checks" ? (
             <CheckEvidence pr={pr} stack={stack} />
           ) : (
