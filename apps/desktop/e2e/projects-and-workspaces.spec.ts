@@ -8,8 +8,7 @@ import {
   expect,
   sessionRow,
   type SeedSession,
-  test
-} from "./fixtures.js"
+  test, openModelSettings } from "./fixtures.js"
 
 const LOCAL_REPOSITORY = /^Local repository/
 
@@ -278,7 +277,7 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   const projectPath = makeProject(launched.home, "journey-project")
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
-  await launched.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(launched.window)
   await expect(
     launched.window.getByRole("button", { name: "Model: Deterministic pi model" })
   ).toBeVisible()
@@ -292,7 +291,7 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
     return persisted.chats[0].modelId
   }).toBe("jingler-e2e/eval-model")
 
-  await launched.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(launched.window)
   await expect(launched.window.getByRole("button", { name: /^Model:/ })).toBeVisible()
   const sessions = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))
   const worktreePath = sessions[0].worktreePath as string

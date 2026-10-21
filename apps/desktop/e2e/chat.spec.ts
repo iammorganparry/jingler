@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, confirmArchive, expect, sessionRow, showSessions, test } from "./fixtures.js"
+import { appShell, confirmArchive, expect, sessionRow, showSessions, test, openModelSettings } from "./fixtures.js"
 import { explorerTree } from "./explorer.js"
 import { showPullRequestDetails } from "./pull-request.js"
 import type { Page } from "@playwright/test"
@@ -261,7 +261,7 @@ test("thinking strength is a compact per-session composer control", async ({ lau
     sessions: seededSessions
   })
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
-  await window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(window)
   const thinking = window.getByRole("button", { name: "Thinking strength" })
 
   await expect(thinking).toContainText("Default")

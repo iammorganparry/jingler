@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, type SeedSession, test } from "./fixtures.js"
+import { appShell, expect, type SeedSession, test, openModelSettings } from "./fixtures.js"
 
 const CONNECTION_ID = "jingler-e2e-connection"
 const PROVIDER_ID = "jingler-e2e"
@@ -52,7 +52,7 @@ test("offers certified models with canonical route identity", async ({ launchApp
   })
   await expect(appShell(launched.window)).toBeVisible()
 
-  await launched.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(launched.window)
   await launched.window.getByRole("button", { name: /^Model: Deterministic pi model/ }).click()
   const search = launched.window.getByRole("textbox", { name: "Search models" })
   const listbox = launched.window.getByRole("listbox")
@@ -111,7 +111,7 @@ test("derives reasoning choices from the certified model capability", async ({ l
   })
   await expect(appShell(launched.window)).toBeVisible()
 
-  await launched.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(launched.window)
 
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   for (const label of ["Off", "Low", "Medium", "High", "Xhigh"]) {
@@ -129,7 +129,7 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
   await expect(appShell(first.window)).toBeVisible()
   await first.window.getByRole("button", { name: "Accept Edits", exact: true }).click()
   await first.window.getByRole("option", { name: /^Auto\b/ }).click()
-  await first.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(first.window)
   await first.window.getByRole("button", { name: "Thinking strength" }).click()
   await first.window.getByRole("option", { name: "High", exact: true }).click()
 
@@ -158,7 +158,7 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
     piFixture: PI_FIXTURE
   })
   await expect(appShell(reopened.window)).toBeVisible()
-  await reopened.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(reopened.window)
   await expect(reopened.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Auto" })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
@@ -192,13 +192,13 @@ test("configures canonical model, mode, and reasoning before creating a session"
   expect(projectWidth).toBeGreaterThanOrEqual(210)
   expect(otherWidths).toEqual([projectWidth, projectWidth])
 
-  await launched.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(launched.window)
   await expect(
     launched.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })
   ).toBeVisible()
   await launched.window.getByRole("button", { name: "Auto", exact: true }).click()
   await launched.window.getByRole("option", { name: /^Ask Before Actions\b/ }).click()
-  await launched.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(launched.window)
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   await launched.window.getByRole("option", { name: "High", exact: true }).click()
   await launched.window.getByRole("button", { name: "Checkout" }).click()
@@ -265,7 +265,7 @@ test("changes reasoning from the model popover and the next send uses it", async
   })
   await expect(appShell(launched.window)).toBeVisible()
   await expect(launched.window.getByRole("button", { name: "Thinking strength" })).toHaveCount(0)
-  await launched.window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(launched.window)
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   await launched.window.getByRole("option", { name: "High", exact: true }).click()
   const composer = launched.window.getByPlaceholder("Message the agent…")

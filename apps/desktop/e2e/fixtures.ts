@@ -103,6 +103,17 @@ export const confirmArchive = async (window: Page): Promise<void> => {
  */
 export const appShell = (window: Page) => window.getByTestId("title-bar");
 
+/**
+ * Open the composer's model popover (model, reasoning, environment). It
+ * toggles, and stays open after a pick, so only click when it's closed. With
+ * no model chosen the trigger reads "Select model" instead of "Model settings".
+ */
+export const openModelSettings = async (window: Page): Promise<void> => {
+  if (await window.getByRole("button", { name: /^Model:/ }).isVisible()) return;
+  const trigger = window.getByRole("button", { name: /^(Model settings|Select model)$/ }).first();
+  await trigger.click();
+};
+
 /** Create a normal workspace through the current project-scoped composer. */
 export const createWorkspace = async (
   window: Page,

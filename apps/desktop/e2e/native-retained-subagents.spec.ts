@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
-import { appShell, expect, test, type LaunchedApp, type LaunchOptions, type SeedSession } from "./fixtures.js"
+import { appShell, expect, test, type LaunchedApp, type LaunchOptions, type SeedSession, openModelSettings } from "./fixtures.js"
 
 const claudeBinary = resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/agent/fixtures/claude-subagent.mjs")
 const codexBinary = resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/codex/fixtures/app-server.mjs")
@@ -91,7 +91,7 @@ const send = async (window: Page, prompt: string) => {
 }
 
 const selectRuntime = async (window: Page, entry: RuntimeCase) => {
-  await window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(window)
   await window.getByRole("button", { name: modelButton }).click()
   await window.getByRole("option", { name: entry.option }).click()
 }

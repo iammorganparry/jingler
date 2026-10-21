@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { appShell, expect, test } from "./fixtures.js"
+import { appShell, expect, test, openModelSettings } from "./fixtures.js"
 
 const binary = resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/agent/fixtures/claude-tools.mjs")
 
@@ -21,14 +21,14 @@ test("native Claude consumes two real Jingler tool results before its final answ
   await expect(appShell(window)).toBeVisible()
   const chat = () => JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))
     .find((session: { id: string }) => session.id === "s_native_claude_tools").chats[0]
-  await window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(window)
   await window.getByRole("button", { name: /^Model:/ }).click()
   await window.getByRole("option", { name: /^Deterministic pi model 1/ }).click()
   await window.getByPlaceholder("Message the agent…").fill("PI first turn")
   await window.getByPlaceholder("Message the agent…").press("Enter")
   await expect.poll(() => chat().continuation?.runtimeId).toBe("pi")
   const chatId = chat().id
-  await window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(window)
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Claude Code", { exact: true })).toBeVisible()
   await window.getByRole("option", { name: /^Opus \(latest\)/ }).click()
@@ -56,7 +56,7 @@ test("native Claude consumes two real Jingler tool results before its final answ
   await composer.press("Enter")
   await expect(window.getByText("Claude completed two workspace tool rounds.", { exact: true })).toHaveCount(2, { timeout: 20_000 })
   expect(chat().continuation).toEqual(continuation)
-  await window.getByRole("button", { name: "Model settings" }).click()
+  await openModelSettings(window)
   await window.getByRole("button", { name: /^Model:/ }).click()
   await window.getByRole("option", { name: /^Deterministic pi model 1/ }).click()
   await expect.poll(() => chat().continuation ?? null).toBeNull()
