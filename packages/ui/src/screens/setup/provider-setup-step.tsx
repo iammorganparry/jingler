@@ -60,6 +60,34 @@ const failureText = (failure: "loadFailed" | "completionFailed" | null, error: s
 const continueBlockedText = (busy: boolean, canContinue: boolean): string | null =>
   busy ? "Finishing sign-in…" : canContinue ? null : "Connect a provider to continue, or skip for now.";
 
+type CatalogConnection = NonNullable<ProviderSetupStepProps["catalog"]>["connections"][number]["connection"]
+
+const accountKey = (connection: CatalogConnection) =>
+  `${connection.providerId}:${connection.authKind}:${connection.account?.fingerprint ?? ""}`
+
+/** Authenticated connections, plus deduped unconfirmed ones no authenticated attempt supersedes. */
+function splitConnections(catalog: ProviderSetupStepProps["catalog"]) {
+  const all = catalog?.connections ?? []
+  const authenticatedConnections = all.filter(({ connection }) => connection.status === "authenticated")
+  const authenticatedAccounts = new Set(authenticatedConnections.map(({ connection }) => accountKey(connection)))
+  const seenUnconfirmed = new Set<string>()
+  const unconfirmedConnections = all.filter(({ connection }) => {
+    if (connection.status !== "entitlement-unconfirmed") return false
+    const key = accountKey(connection)
+    if (authenticatedAccounts.has(key) || seenUnconfirmed.has(key)) return false
+    seenUnconfirmed.add(key)
+    return true
+  })
+  return { authenticatedConnections, unconfirmedConnections }
+}
+
+const connectionDetail = (connection: CatalogConnection): string =>
+  [
+    connection.account?.displayLabel ?? connection.account?.fingerprint ?? connection.id,
+    connection.subscription.planLabel,
+    connection.subscription.confirmedBillingRoute
+  ].filter(Boolean).join(" · ")
+
 export function ProviderSetupStep({
   catalog,
   endpointCatalog = null,
@@ -79,31 +107,7 @@ export function ProviderSetupStep({
 }: ProviderSetupStepProps) {
   const detectedEndpoints = endpointCatalog?.endpoints ?? []
   const canContinue = canUseProviderCatalog(catalog, detectedEndpoints)
-  const authenticatedConnections =
-    catalog?.connections.filter(
-      ({ connection }) => connection.status === "authenticated",
-    ) ?? [];
-  const accountKey = (connection: {
-    providerId: string;
-    authKind: AuthKind;
-    account: { fingerprint: string } | null;
-  }) =>
-    `${connection.providerId}:${connection.authKind}:${connection.account?.fingerprint ?? ""}`;
-  const authenticatedAccounts = new Set(
-    authenticatedConnections.map(({ connection }) => accountKey(connection)),
-  );
-  const seenUnconfirmed = new Set<string>();
-  const unconfirmedConnections = (catalog?.connections ?? []).filter(
-    ({ connection }) => {
-      if (connection.status !== "entitlement-unconfirmed") return false;
-      const key = accountKey(connection);
-      // A later authenticated attempt supersedes stale unconfirmed duplicates.
-      if (authenticatedAccounts.has(key)) return false;
-      if (seenUnconfirmed.has(key)) return false;
-      seenUnconfirmed.add(key);
-      return true;
-    },
-  );
+  const { authenticatedConnections, unconfirmedConnections } = splitConnections(catalog)
   const continueBlockedReason = continueBlockedText(busy, canContinue)
   const progressLabel = providerProgressLabel(pendingAuthKind)
 
@@ -182,9 +186,7 @@ export function ProviderSetupStep({
                 key={connection.id}
                 providerId={connection.providerId}
                 name={providerAuthRouteLabel(connection.authKind)}
-                detail={`${connection.account?.displayLabel ?? connection.account?.fingerprint ?? connection.id}${
-                  connection.subscription.planLabel ? ` · ${connection.subscription.planLabel}` : ""
-                }${connection.subscription.confirmedBillingRoute ? ` · ${connection.subscription.confirmedBillingRoute}` : ""}`}
+                detail={connectionDetail(connection)}
                 status="ready"
               />
             ))}
