@@ -137,12 +137,12 @@ test("selects and removes one of several linked Linear issues from the header", 
     await openLinearIssueTab(launched.window)
     await launched.window.getByRole("button", { name: "Select linked Linear issue" }).click()
     await launched.window.getByRole("option", { name: /ENG-124 Document retry policy/ }).click()
-    await expect(launched.window.getByRole("heading", { name: "Document retry policy" })).toBeVisible({
+    await expect(launched.window.getByRole("heading", { name: /Document retry policy/ })).toBeVisible({
       timeout: 20_000
     })
 
     await launched.window.getByRole("button", { name: "Unlink", exact: true }).click()
-    await expect(launched.window.getByRole("heading", { name: "Retry failed payments" })).toBeVisible({
+    await expect(launched.window.getByRole("heading", { name: /Retry failed payments/ })).toBeVisible({
       timeout: 20_000
     })
 
@@ -188,7 +188,11 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
     await expect(launched.window.getByText("Document retry policy", { exact: true })).toBeVisible()
     await launched.window.getByRole("button", { name: "Link ENG-124" }).click()
     await expect(linkRow.getByLabel("Linked issue ENG-124")).toBeVisible()
-    await expect(launched.window.getByRole("heading", { name: "Document retry policy" })).toBeVisible()
+    const linked = launched.window.getByRole("heading", { name: /Document retry policy/ })
+    await expect(linked).toBeVisible()
+    await expect(linked).toContainText("ENG-124")
+    await expect(launched.window.getByTestId("reading-shell")).toBeVisible()
+    await expect(launched.window.getByTestId("comment-composer")).toBeVisible()
 
     await launched.window.getByRole("button", { name: "Unlink", exact: true }).click()
     await expect(linkRow.getByLabel("Linked issue ENG-124")).toHaveCount(0)
@@ -202,7 +206,7 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
       .fill("Reconcile duplicate payment charges without losing the audit trail.")
     await launched.window.getByRole("button", { name: "Create and link" }).click()
 
-    await expect(launched.window.getByRole("heading", { name: "Reconcile duplicate charges" })).toBeVisible({
+    await expect(launched.window.getByRole("heading", { name: /Reconcile duplicate charges/ })).toBeVisible({
       timeout: 20_000
     })
     await expect(linkRow.getByLabel(LINKED_LINEAR_ISSUE)).toBeVisible()

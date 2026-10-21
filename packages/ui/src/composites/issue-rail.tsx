@@ -16,6 +16,8 @@ export interface IssueRailData {
   readonly workspace?: { readonly title: string; readonly onOpen?: () => void }
   readonly onOpenPullRequest?: (url: string) => void
   readonly provider: string
+  /** Logo beside the provider name; defaults to the GitHub mark. */
+  readonly providerMark?: ReactNode
   readonly repository: string
 }
 
@@ -29,7 +31,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /** 280px-rail body for an issue; sections with nothing to show are not rendered. */
-export function IssueRail({ assignees = [], labels = [], pullRequests = [], workspace, onOpenPullRequest, provider, repository }: IssueRailData) {
+export function IssueRail({ assignees = [], labels = [], pullRequests = [], workspace, onOpenPullRequest, provider, providerMark, repository }: IssueRailData) {
   return (
     <div data-testid="issue-rail" className="flex flex-col gap-4">
       {assignees.length > 0 && (
@@ -67,7 +69,7 @@ export function IssueRail({ assignees = [], labels = [], pullRequests = [], work
         </Section>
       )}
       <Section title="Provider">
-        <span className="flex items-center gap-2 text-[12.5px] text-text"><GithubMark size={14} /> {provider}</span>
+        <span className="flex items-center gap-2 text-[12.5px] text-text">{providerMark ?? <GithubMark size={14} />} {provider}</span>
         <span className="font-mono text-[11.5px] text-muted-foreground">{repository}</span>
       </Section>
     </div>
