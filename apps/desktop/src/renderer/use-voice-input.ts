@@ -1,12 +1,16 @@
 import { useMachine } from "@xstate/react"
 import type { ComposerVoiceInput } from "@jingler/ui"
-import { rpc } from "./rpc-client.js"
 import { getDraft, setDraft } from "./draft-store.js"
 import { startRecording } from "./voice-capture.js"
 import { voiceInputMachine } from "./voice-input-machine.js"
 
 /** Mic button state for one chat's composer; the transcript is appended to the draft, never sent. */
-export function useVoiceInput(chatId: string): ComposerVoiceInput {
+export interface VoiceRpc {
+  voiceRequestMicrophone: () => Promise<boolean>
+  voiceTranscribe: (wavBase64: string) => Promise<{ text: string }>
+}
+
+export function useVoiceInput(chatId: string, rpc: VoiceRpc): ComposerVoiceInput {
   const [state, send] = useMachine(voiceInputMachine, {
     input: {
       start: async () => {
