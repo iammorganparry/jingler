@@ -37,22 +37,22 @@ test("#561: a child that opens a PR appears in the header PRs chip without a rel
 })
 
 test("#560: Changes agent scope aggregates a child's worktree, filters to it, and Main hides it", async ({ launchApp }) => {
-  const childTree = mkdtempSync(join(tmpdir(), "jingler-child-tree-"))
+  // A real `git worktree` of the session repo, like a subagent's own tree:
+  // Sessions.diff refuses any path git doesn't list as one of the repo's worktrees.
+  const childRoot = mkdtempSync(join(tmpdir(), "jingler-child-tree-"))
+  const childTree = join(childRoot, "child")
   try {
-    execFileSync("git", ["init", "-b", "main"], { cwd: childTree })
-    execFileSync("git", ["config", "user.email", "e2e@jingler.dev"], { cwd: childTree })
-    execFileSync("git", ["config", "user.name", "Jingler E2E"], { cwd: childTree })
-    writeFileSync(join(childTree, "child.txt"), "one\n")
-    execFileSync("git", ["add", "-A"], { cwd: childTree })
-    execFileSync("git", ["commit", "-m", "init", "--no-gpg-sign"], { cwd: childTree })
-    writeFileSync(join(childTree, "child.txt"), "two\n")
 
     const { window } = await launchApp({
       configured: true,
       withRepo: true,
       sessions: seededSessions,
       e2eEnv: { JINGLER_E2E_SUBAGENT_WORKSPACE: childTree },
-      seed: ({ repoPath }) => writeFileSync(join(repoPath, "README.md"), "# e2e repo\nmain change\n")
+      seed: ({ repoPath }) => {
+        execFileSync("git", ["worktree", "add", "-b", "child/a", childTree], { cwd: repoPath })
+        writeFileSync(join(childTree, "child.txt"), "child change\n")
+        writeFileSync(join(repoPath, "README.md"), "# e2e repo\nmain change\n")
+      }
     })
     await expect(appShell(window)).toBeVisible()
     const composer = window.getByPlaceholder("Message the agent…")
@@ -76,6 +76,6 @@ test("#560: Changes agent scope aggregates a child's worktree, filters to it, an
     await expect(list.getByRole("option", { name: /README\.md/ })).toBeVisible()
     await expect(list.getByRole("option", { name: /child\.txt/ })).toHaveCount(0)
   } finally {
-    rmSync(childTree, { recursive: true, force: true })
+    rmSync(childRoot, { recursive: true, force: true })
   }
 })

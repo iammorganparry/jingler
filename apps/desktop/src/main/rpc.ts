@@ -122,7 +122,7 @@ import {
   runString
 } from "@jingler/cli-adapters";
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
@@ -626,10 +626,18 @@ export const sessionDiff = (id: string, checkoutId?: string, workspacePath?: str
       const anchor = session?.worktreePath ?? session?.repoPath;
       if (!anchor || !isAbsolute(workspacePath)) return EMPTY_REVIEW_DIFF;
       const porcelain = yield* runString("git", "-C", anchor, "worktree", "list", "--porcelain");
-      const target = resolve(workspacePath);
+      // Real paths: macOS tmp dirs are symlinks (/var → /private/var) and git reports the real one.
+      const real = (p: string) => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return resolve(p);
+        }
+      };
+      const target = real(workspacePath);
       const known = (porcelain ?? "")
         .split("\n")
-        .some((line) => line.startsWith("worktree ") && resolve(line.slice(9)) === target);
+        .some((line) => line.startsWith("worktree ") && real(line.slice(9)) === target);
       if (!known) return EMPTY_REVIEW_DIFF;
       return yield* WorkspaceService.diff(target);
     }
