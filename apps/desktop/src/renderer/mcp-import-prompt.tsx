@@ -226,20 +226,13 @@ export function McpImportPrompt({
           {state.matches("importFailed") ? <div role="alert" className="mt-3"><Callout tone="red">{state.context.error}</Callout></div> : null}
         </DialogBody>
         <DialogFooter className="justify-between px-5">
-          {done ? <span /> : <Button variant="ghost" size="sm" onClick={dismiss}>Not now</Button>}
-          {done ? (
-            <Button onClick={dismiss}>Done</Button>
-          ) : state.matches("detectFailed") ? (
-            <Button onClick={() => send({ type: "RETRY" })}>Retry</Button>
-          ) : state.matches("importFailed") ? (
-            <Button onClick={() => send({ type: "RETRY" })}>Retry import</Button>
-          ) : (
-            <Button disabled={state.matches("importing")} onClick={() => send({ type: "IMPORT" })}>
-              {state.matches("importing")
-                ? "Importing…"
-                : `Import ${candidates.length} server${candidates.length === 1 ? "" : "s"}`}
-            </Button>
-          )}
+          <ImportFooter
+            phase={done ? "done" : state.matches("detectFailed") ? "detectFailed" : state.matches("importFailed") ? "importFailed" : state.matches("importing") ? "importing" : "reviewing"}
+            count={candidates.length}
+            onDismiss={dismiss}
+            onRetry={() => send({ type: "RETRY" })}
+            onImport={() => send({ type: "IMPORT" })}
+          />
         </DialogFooter>
       </DialogContent>
       <McpServerDetailDialog
@@ -252,6 +245,34 @@ export function McpImportPrompt({
         oauthAccount={null}
       />
     </Dialog>
+    </>
+  )
+}
+
+/** The dialog's footer actions for each import phase. */
+function ImportFooter({
+  phase,
+  count,
+  onDismiss,
+  onRetry,
+  onImport
+}: {
+  readonly phase: "done" | "detectFailed" | "importFailed" | "importing" | "reviewing"
+  readonly count: number
+  readonly onDismiss: () => void
+  readonly onRetry: () => void
+  readonly onImport: () => void
+}) {
+  if (phase === "done") return <><span /><Button onClick={onDismiss}>Done</Button></>
+  const notNow = <Button variant="ghost" size="sm" onClick={onDismiss}>Not now</Button>
+  if (phase === "detectFailed") return <>{notNow}<Button onClick={onRetry}>Retry</Button></>
+  if (phase === "importFailed") return <>{notNow}<Button onClick={onRetry}>Retry import</Button></>
+  return (
+    <>
+      {notNow}
+      <Button disabled={phase === "importing"} onClick={onImport}>
+        {phase === "importing" ? "Importing…" : `Import ${count} server${count === 1 ? "" : "s"}`}
+      </Button>
     </>
   )
 }
