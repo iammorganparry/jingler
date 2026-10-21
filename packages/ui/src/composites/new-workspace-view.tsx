@@ -87,9 +87,11 @@ function EnvironmentStartupProgress({
   phase,
   error,
   environment,
+  onRetry,
 }: {
   phase: SessionCreationPhase | null;
   error?: string | null;
+  onRetry?: () => void;
   environment: Pick<Environment, "kind" | "name">;
 }) {
   const renderStartupStep = ((step, index) => {
@@ -192,6 +194,7 @@ function EnvironmentStartupProgress({
           {error}
         </p>
       )}
+      {error && onRetry && <div className="mt-4 flex justify-end"><Button onClick={onRetry}>Retry</Button></div>}
     </section>
   );
 }
@@ -402,7 +405,7 @@ function ProgressPane({ props, context, send, startup, failed, environment }: {
   props: NewWorkspaceViewProps; context: NewWorkspaceContext; send: WorkspaceSend; startup: boolean; failed: boolean; environment: Environment | undefined
 }) {
   const { provisioningPhase, failedPhase, error } = context
-  if (startup) return <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, environment)} />
+  if (startup) return <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, environment)} onRetry={() => send({ type: "RETRY_PROVISION" })} />
   return <WorkspaceProvisioning phase={provisioningPhase} failedPhase={failed ? (failedPhase ?? provisioningPhase) : null} error={error} onCancel={() => send({ type: "CANCEL_PROVISION" })} onRetry={() => send({ type: "RETRY_PROVISION" })} onEdit={() => send({ type: "EDIT_AFTER_FAILURE" })} />
 }
 
