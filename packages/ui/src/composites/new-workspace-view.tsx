@@ -398,9 +398,17 @@ function WorkspaceStartFrom({ props, context, send, icon, label, loading }: {
   return <StartFromList kind={source === "pr" ? "pr" : "issue"} icon={icon} label={label} search={search} mine={mine} pullRequests={pullRequests} issues={issues} selectedPr={selectedPr?.number ?? null} selectedIssue={selectedIssue?.id ?? null} loading={loading} error={sourceError} providerConnected={providerConnected} linkedSessions={linkedSessions} onSearch={(value) => send({ type: "SET_SEARCH", search: value })} onMine={() => send({ type: "SET_MINE", mine: !mine })} onRetry={() => send({ type: "RETRY_SOURCE" })} onConnect={props.onConnectIssueProvider} onOpenSession={props.onOpenSession} onPr={(pr) => send({ type: "SELECT_PR", pr })} onIssue={(issue) => send({ type: "SELECT_ISSUE", issue })} />
 }
 
-function WakeChip({ environment, onWake }: { environment: Environment | undefined; onWake?: () => void }) {
+function ProgressPane({ props, context, send, startup, failed, environment }: {
+  props: NewWorkspaceViewProps; context: NewWorkspaceContext; send: WorkspaceSend; startup: boolean; failed: boolean; environment: Environment | undefined
+}) {
+  const { provisioningPhase, failedPhase, error } = context
+  if (startup) return <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, environment)} />
+  return <WorkspaceProvisioning phase={provisioningPhase} failedPhase={failed ? (failedPhase ?? provisioningPhase) : null} error={error} onCancel={() => send({ type: "CANCEL_PROVISION" })} onRetry={() => send({ type: "RETRY_PROVISION" })} onEdit={() => send({ type: "EDIT_AFTER_FAILURE" })} />
+}
+
+function WakeChip({ environment, onWake }: { environment: Environment | undefined; onWake?: (environmentId: string) => void }) {
   if (environment?.kind !== "managed" || !showsWakeChip(environment.state)) return null
-  return <EnvironmentWakeChip state={environment.state} onWake={onWake} />
+  return <EnvironmentWakeChip state={environment.state} onWake={onWake && (() => onWake(environment.id))} />
 }
 
 function NewWorkspaceContent({ props, context, send, submitting, failed, loading, sourceLoading, selectedEnvironment, selectedSource, sourceLabel, catalog, unavailableReason, selectedProject, projectOptions, sourceOptions, checkoutOptions, branchOptions }: {
@@ -413,11 +421,9 @@ function NewWorkspaceContent({ props, context, send, submitting, failed, loading
   const { source, search, mine, pullRequests, issues, selectedPr, selectedIssue, draft, provisioningPhase, error } = context
   const startup = props.environmentStartup || (submitting && selectedEnvironment !== undefined)
   return <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="new-session-view">
-    <div className="flex h-12 flex-none items-center border-b border-hairline px-5"><h1 className="text-[13px] font-semibold text-text-bright">New session</h1><span className="flex-1" /><WakeChip environment={selectedEnvironment} onWake={props.onWakeEnvironment && selectedEnvironment ? () => props.onWakeEnvironment?.(selectedEnvironment.id) : undefined} /><Button variant="ghost" size="icon" aria-label="Close new session" disabled={submitting && !props.environmentStartup?.error} onClick={() => send({ type: "CLOSE" })}><X size={15} /></Button></div>
-    <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">{startup
-      ? <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, selectedEnvironment)} />
-      : submitting || failed
-      ? <WorkspaceProvisioning phase={provisioningPhase} failedPhase={failed ? context.failedPhase ?? provisioningPhase : null} error={error} onCancel={() => send({ type: "CANCEL_PROVISION" })} onRetry={() => send({ type: "RETRY_PROVISION" })} onEdit={() => send({ type: "EDIT_AFTER_FAILURE" })} />
+    <div className="flex h-12 flex-none items-center border-b border-hairline px-5"><h1 className="text-[13px] font-semibold text-text-bright">New session</h1><span className="flex-1" /><WakeChip environment={selectedEnvironment} onWake={props.onWakeEnvironment} /><Button variant="ghost" size="icon" aria-label="Close new session" disabled={submitting && !props.environmentStartup?.error} onClick={() => send({ type: "CLOSE" })}><X size={15} /></Button></div>
+    <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">{startup || submitting || failed
+      ? <ProgressPane props={props} context={context} send={send} startup={Boolean(startup)} failed={failed} environment={selectedEnvironment} />
       : <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
           <div className="flex items-center gap-3"><div><h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">What are we working on?</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Choose where the work starts, configure its checkout, then send the first message.</p></div><span className="flex-1" />{props.onAddProject && <Button variant="secondary" onClick={props.onAddProject}><FolderGit2 size={14} /> Add project</Button>}</div>
           <WorkspaceStartFrom props={props} context={context} send={send} icon={selectedSource?.icon} label={sourceLabel} loading={sourceLoading} />

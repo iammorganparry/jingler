@@ -844,7 +844,7 @@ export const Ready: Story = {}
 
 /** Provisioning: phase list with a spinner on the current row and Cancel. */
 export const Provisioning: Story = {
-  args: { onCreate: () => new Promise<void>(() => {}) },
+  args: { onCreate: fn(() => new Promise<void>(() => {})) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(await canvas.findByRole("button", { name: /Create workspace/ }))
@@ -853,7 +853,7 @@ export const Provisioning: Story = {
 
 /** Failure: the failing row carries the red icon; Retry / Edit keep the form values. */
 export const ProvisioningFailed: Story = {
-  args: { onCreate: async () => { throw new Error("git worktree add failed") } },
+  args: { onCreate: fn(async () => { throw new Error("git worktree add failed") }) },
   play: Provisioning.play
 }
 
