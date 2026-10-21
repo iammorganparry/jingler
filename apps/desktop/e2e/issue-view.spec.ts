@@ -51,7 +51,7 @@ test("issue tab renders through the shared reading shell and closes via the ⋯ 
       "  fs.writeFileSync(posted, JSON.stringify(list))",
       `  fs.appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n'); process.exit(0)`,
       "}",
-      `if (args[0] === 'issue' && args[1] === 'close') { fs.appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n'); process.exit(0) }`,
+      `if (args[0] === 'issue' && (args[1] === 'close' || args[1] === 'reopen')) { fs.appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n'); process.exit(0) }`,
       "console.error('unsupported gh command: ' + args.join(' '))",
       "process.exit(1)"
     ].join("\n"))
@@ -93,6 +93,12 @@ test("issue tab renders through the shared reading shell and closes via the ⋯ 
     await window.getByRole("menuitem", { name: "Close issue" }).click()
     await expect.poll(() => readFileSync(log, "utf8")).toContain("issue close 1 --repo acme/widget")
     await expect(window.getByTestId("issue-meta-line")).toContainText("Closed")
+    await expect(window.getByTestId("issue-rail")).toContainText("acme/widget")
+    await expect(window.getByTestId("issue-rail-labels")).toContainText("bug")
+    await expect(window.getByTestId("issue-rail-assignees")).toHaveCount(0)
+    await window.getByRole("button", { name: "Reopen", exact: true }).click()
+    await expect.poll(() => readFileSync(log, "utf8")).toContain("issue reopen 1 --repo acme/widget")
+    await expect(window.getByTestId("issue-meta-line")).toContainText("Open")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

@@ -23,7 +23,7 @@
  * having been opened in any of them.
  */
 import { useEffect, useState } from "react"
-import { CircleDot, ExternalLink, MessageSquare, Unlink } from "lucide-react"
+import { ExternalLink, MessageSquare, Unlink } from "lucide-react"
 import {
   definePlugin,
   useHost,
@@ -36,17 +36,18 @@ import {
   Avatar,
   Badge,
   Button,
+  ClosedIssueBanner,
   CommentComposer,
   githubAvatarUrl,
   GithubMark,
   // The app's own chip, not a copy. A local port drifted by a font size within
   // one commit, which is the whole argument against porting it.
-  IssueLabelChip,
+  IssueRail,
+  IssueStateView,
   Markdown,
   ReadingActionsMenu,
   ReadingShell,
-  relativeTime,
-  Spinner
+  relativeTime
 } from "@jingler/plugin-sdk/ui"
 import { manifest } from "./manifest.js"
 
@@ -67,6 +68,7 @@ interface Issue {
   readonly author?: IssueUser
   readonly labels?: ReadonlyArray<{ name: string; color?: string }>
   readonly assignees?: ReadonlyArray<IssueUser>
+  readonly linkedPrs?: ReadonlyArray<{ number: number; state: string; url: string }>
   readonly comments?: ReadonlyArray<IssueComment>
   readonly createdAt: string
   readonly updatedAt?: string
@@ -119,6 +121,8 @@ function IssueTab({ session }: TabProps) {
   const [loading, setLoading] = useState(true)
   const [unlinking, setUnlinking] = useState(false)
   const [closing, setClosing] = useState(false)
+  const [reopening, setReopening] = useState(false)
+  const [reloads, setReloads] = useState(0)
 
   const linkedIssue = session.linkedIssue
   const issueNumber =
@@ -151,37 +155,14 @@ function IssueTab({ session }: TabProps) {
     return () => {
       cancelled = true
     }
-  }, [host, session.repo, session.worktreePath, issueNumber])
+  }, [host, session.repo, session.worktreePath, issueNumber, reloads])
 
-  if (loading && !issue) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-editor text-dim">
-        <Spinner size={20} />
-      </div>
-    )
-  }
-
+  if (loading && !issue) return <IssueStateView state={{ kind: "loading" }} />
   if (error) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 bg-editor px-8 text-dim">
-        <CircleDot size={24} className="text-line" />
-        <span className="text-[13px] text-text">This issue couldn&apos;t be loaded.</span>
-        <span className="max-w-[420px] text-center font-mono text-[11.5px] leading-[1.5]">
-          {error}
-        </span>
-      </div>
-    )
+    return <IssueStateView state={{ kind: "error", reason: error, onRetry: () => setReloads((n) => n + 1) }} />
   }
-
-  if (!issue) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 bg-editor text-dim">
-        <CircleDot size={24} className="text-line" />
-        <span className="text-[13px]">No issue is linked to this session.</span>
-      </div>
-    )
-  }
-
+  // No `onLink`: the SDK has no action that opens the link picker, so the button is hidden.
+  if (!issue) return <IssueStateView state={{ kind: "unlinked" }} />
 
   const reference = { repo: session.repo, issueNumber, worktreePath: session.worktreePath }
   const open = issue.state === "open"
@@ -191,6 +172,17 @@ function IssueTab({ session }: TabProps) {
       title={issue.title}
       identifier={`#${issue.number}`}
       meta={<IssueMetaLine issue={issue} />}
+      rail={
+        <IssueRail
+          assignees={issue.assignees}
+          labels={issue.labels}
+          pullRequests={issue.linkedPrs}
+          onOpenPullRequest={(url) => void host.openExternal(url)}
+          workspace={{ title: session.title }}
+          provider="GitHub"
+          repository={session.repo}
+        />
+      }
       actions={
         <>
           <Button
@@ -261,12 +253,20 @@ function IssueTab({ session }: TabProps) {
       }
     >
       <div data-testid="github-issues-body" className="flex flex-col gap-[18px]">
-        {(issue.labels?.length ?? 0) > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {issue.labels?.map((label) => (
-              <IssueLabelChip key={label.name} name={label.name} color={label.color} />
-            ))}
-          </div>
+        {!open && (
+          <ClosedIssueBanner
+            reopening={reopening}
+            onReopen={() => {
+              setReopening(true)
+              void host
+                .invoke("github-issues.reopen", reference)
+                .then(() => setIssue({ ...issue, state: "open" }))
+                .catch((cause: unknown) => {
+                  setError(cause instanceof Error ? cause.message : String(cause))
+                })
+                .finally(() => setReopening(false))
+            }}
+          />
         )}
 
         <div className="flex flex-col gap-3">

@@ -51,6 +51,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | HtmlPreview | `components/html-preview.tsx` | Opt-in preview for an html fenced block in agent output. | — | yes | — |
 | IconButtonGroup | `components/icon-button-group.tsx` | One bordered unit of icon buttons with tooltips, pressed state and arrow-key focus (browser toolbar). | items, label, className | yes | #366 (2.1) |
 | Input | `components/input.tsx` | Plain text field (BeUI Input geometry). | — | no | — |
+| IssueRail, IssueStateView, ClosedIssueBanner | `composites/issue-rail.tsx` | Issue rail (assignees, one-line labels, linked workspace / PR, provider + repository; empty sections hidden), whole-tab states (loading skeleton, not linked + Link issue, load error + mono reason + Retry) and a neutral closed banner with Reopen. | assignees, labels, workspace, state, onReopen | yes | #447 (6.25) |
 | CommentComposer | `components/comment-composer.tsx` (+ `comment-composer-machine.ts`) | Issue comment box under a thread: Textarea, `Comment` primary, `Close with comment` secondary; failed post keeps the draft and shows an inline error. | post, canClose | yes | #446 (6.24) |
 | Textarea | `components/textarea.tsx` | Multi-line field sharing Input's border, focus ring and disabled states. | — | yes | #446 (6.24) |
 | Kbd, KbdChip | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). KbdChip formats `mod+k` as ⌘K on macOS, Ctrl+K elsewhere. | shortcut, mac, onFill | yes | #361 (1.3), #374 (2.9) |

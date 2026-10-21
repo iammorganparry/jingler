@@ -1002,6 +1002,8 @@ export const rpc = {
     run((c) => c.Github.issueCommentBySlug({ repository, number, body })),
   githubIssueCloseBySlug: (repository: string, number: number): Promise<void> =>
     run((c) => c.Github.issueCloseBySlug({ repository, number })),
+  githubReopenIssue: (repository: string, number: number): Promise<void> =>
+    runAssetList((c) => c.Github.reopenIssue({ repository, number })),
   githubListPrs: (
     repoPath: string,
     opts: { mine: boolean; search: string; githubSlug?: string }

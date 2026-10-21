@@ -192,6 +192,7 @@ export interface GitHubApiClient {
   readonly closeIssue: (cwd: string, number: number) => Promise<void>
   readonly issueCommentBySlug: (slug: string, number: number, body: string) => Promise<void>
   readonly issueCloseBySlug: (slug: string, number: number) => Promise<void>
+  readonly issueReopenBySlug: (slug: string, number: number) => Promise<void>
 }
 
 export interface GitHubApiClientOptions {
@@ -1160,7 +1161,16 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     issueCommentBySlug: (slug, issueNumber, body) =>
       client.issueComment(`github-slug:${slug}`, issueNumber, body),
     issueCloseBySlug: (slug, issueNumber) =>
-      client.closeIssue(`github-slug:${slug}`, issueNumber)
+      client.closeIssue(`github-slug:${slug}`, issueNumber),
+    issueReopenBySlug: async (slug, issueNumber) => {
+      await repositoryCall(
+        `github-slug:${slug}`,
+        "PATCH",
+        "/repos/{owner}/{repo}/issues/{issue_number}",
+        { issue_number: issueNumber, state: "open" },
+        ["issues:write"]
+      )
+    }
   }
   return client
 }
@@ -1314,6 +1324,8 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         mutate(`github-slug:${slug}`, cli.issueCommentBySlug(slug, number, body), () => client.issueCommentBySlug(slug, number, body)),
       issueCloseBySlug: (slug: string, number: number) =>
         mutate(`github-slug:${slug}`, cli.issueCloseBySlug(slug, number), () => client.issueCloseBySlug(slug, number)),
+      issueReopenBySlug: (slug: string, number: number) =>
+        mutate(`github-slug:${slug}`, cli.issueReopenBySlug(slug, number), () => client.issueReopenBySlug(slug, number)),
       repository: (cwd: string) =>
         preferCli(cli.repository(cwd), () => client.repository(cwd)),
       rateLimit: () => Effect.sync(client.rateLimit),
