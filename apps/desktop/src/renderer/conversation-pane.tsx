@@ -58,6 +58,8 @@ import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, 
 import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
+import { useConnectivity } from "./connectivity.js"
+import { DeviceOfflineBanner } from "@jingler/ui"
 import { useTurnCheckpointIds } from "./use-turn-checkpoints.js"
 import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js"
 import { clearInterruptedChat, useInterruptedChats } from "./interrupted-chats.js"
@@ -439,6 +441,32 @@ function useTurnRevert(session: Session, busy: boolean) {
   }
 }
 
+type PromptImages = ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }> | undefined
+type WaitingSend = { readonly id: string; readonly text: string; readonly images: PromptImages; readonly agentContext: string }
+
+/** Holds provider sends while offline and replays them, in order, on reconnect. */
+function useOfflineSendQueue(send: (text: string, images?: PromptImages, agentContext?: string) => void) {
+  const { offline } = useConnectivity()
+  const [waiting, setWaiting] = useState<ReadonlyArray<WaitingSend>>([])
+  useEffect(() => {
+    if (offline || waiting.length === 0) return
+    setWaiting([])
+    for (const w of waiting) send(w.text, w.images, w.agentContext)
+  }, [offline, waiting, send])
+  const hold = (text: string, images?: PromptImages, agentContext = "") =>
+    setWaiting((w) => [...w, { id: `w_${Date.now()}_${w.length}`, text, images, agentContext }])
+  return { offline, waiting, setWaiting, hold }
+}
+
+function offlineDeviceOf(
+  environments: ReadonlyArray<{ readonly id: string; readonly name: string; readonly state: string }>,
+  environmentId: string | null | undefined,
+  continueLocally: () => void
+): { name: string; continueLocally: () => void } | null {
+  const env = environments.find((e) => e.id === environmentId)
+  return env?.state === "offline" ? { name: env.name, continueLocally } : null
+}
+
 export function ConversationPane({
   session,
   view = "conversation",
@@ -538,6 +566,7 @@ export function ConversationPane({
   const convo = useConversation(session, activeChat.id)
   const turnRevert = useTurnRevert(session, convo.busy)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
+  const offlineDevice = offlineDeviceOf(environments, session.environmentId, () => continueEnvironmentMutation.mutate(undefined))
   const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   const toggleFollowAgent = useCallback(
     (enabled: boolean) => {
@@ -784,6 +813,7 @@ export function ConversationPane({
   }, [activeChat.id, session.id, session.initialPrompt])
 
   const pendingReviewId = plannotatorReviewId(convo.plannotator)
+  const { offline, waiting, setWaiting, hold } = useOfflineSendQueue(convo.sendPrompt)
   const sendPrompt: typeof convo.sendPrompt = (text, images) => {
     // Structured ranges stay out of the editable textarea, but every harness
     // receives the same deterministic plain-text context at the turn boundary.
@@ -812,7 +842,7 @@ export function ConversationPane({
       })
       return
     }
-    return convo.sendPrompt(text, images, agentContext)
+    return (offline ? hold : convo.sendPrompt)(text, images, agentContext)
   }
 
   const createChat = () => {
@@ -1123,6 +1153,7 @@ export function ConversationPane({
         it; this outer row did not, so the constraint stopped one level short. */}
     <div ref={planSplitRowRef} className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
       <div ref={mainColumnRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {offlineDevice && <DeviceOfflineBanner device={offlineDevice.name} onContinueLocally={offlineDevice.continueLocally} />}
       {renderEnvironmentNotices({
               convo,
               continuationEnvironmentId,
@@ -1232,6 +1263,9 @@ export function ConversationPane({
                 agentEndpointCatalog: sessionEndpointCatalog,
                 composerDisabledReason: effectiveComposerDisabledReason,
                 sendPrompt,
+                waiting,
+                setWaiting,
+                offlineDevice,
                 onOpenPlanReview,
                 previewReady: previewRevealed && onSelectBrowser ? { onOpen: onSelectBrowser } : null,
                 onForkOntoBranchStable,
@@ -1411,6 +1445,9 @@ function renderMainConversation({
   agentEndpointCatalog,
   composerDisabledReason,
   sendPrompt,
+  waiting,
+  setWaiting,
+  offlineDevice,
   onOpenPlanReview,
   previewReady,
   onForkOntoBranchStable,
@@ -1453,6 +1490,9 @@ function renderMainConversation({
   providerCatalog: ProviderCatalog | null | undefined;
   agentEndpointCatalog: AgentEndpointCatalog | null | undefined;
   composerDisabledReason: string | undefined;
+  waiting: ReadonlyArray<WaitingSend>;
+  setWaiting: (value: ReadonlyArray<WaitingSend>) => void;
+  offlineDevice: { name: string; continueLocally: () => void } | null;
   sendPrompt: (text: string, images?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }>, agentContext?: string) => void;
   onOpenPlanReview: ((stepId?: string) => void) | undefined;
   previewReady: { readonly onOpen: () => void } | null;
@@ -1521,8 +1561,9 @@ function renderMainConversation({
         .catch(() => setRequested(false))
     }}
     runStartedAt={convo.runStartedAt}
-    queued={convo.queued}
-    onUnqueue={convo.unqueue}
+    queued={[...convo.queued, ...waiting.map((w) => ({ id: w.id, text: w.text, images: w.images ?? [] }))]}
+    waitingIds={waiting.map((w) => w.id)}
+    onUnqueue={(id) => (waiting.some((w) => w.id === id) ? setWaiting(waiting.filter((w) => w.id !== id)) : convo.unqueue(id))}
     onSendNow={convo.sendNow}
     onEditQueued={convo.editQueued}
     onHandoffQueued={handoffQueued}

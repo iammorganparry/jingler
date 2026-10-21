@@ -151,6 +151,7 @@ import {
   Scope,
   Stream
 } from "effect"
+import { reportRpcResult } from "./connectivity.js"
 import { unwrapRpcFailure } from "./rpc-failure.js"
 
 /**
@@ -225,7 +226,12 @@ const run = <A>(
 ): Promise<A> =>
   clientPromise
     .then((client) => coreRuntime.runPromise(f(client), { signal }))
-    .catch((error) => Promise.reject(unwrapRpcFailure(error)))
+    .then((value) => { reportRpcResult(); return value })
+    .catch((error) => {
+      const failure = unwrapRpcFailure(error)
+      if (!signal?.aborted) reportRpcResult(failure)
+      return Promise.reject(failure)
+    })
 
 const runAssetList = <A>(
   f: (

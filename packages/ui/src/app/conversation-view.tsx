@@ -39,6 +39,7 @@ import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import {
   isSubagentSpawnMessage,
+  McpAuthContext,
   MessageTurn,
   PlanProgressContext,
   ToolStopContext
@@ -292,6 +293,8 @@ export interface ConversationViewProps {
    * captured at render time can point at a different message by the time it is used.
    */
   queued?: ReadonlyArray<{ id: string; text: string; images: ReadonlyArray<Attachment> }>
+  /** Queued ids held back until the connection returns ("Waiting for connection"). */
+  waitingIds?: ReadonlyArray<string>
   /** Drop a queued message before it's sent. */
   onUnqueue?: (id: string) => void
   /**
@@ -400,7 +403,7 @@ const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: Con
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, waitingIds, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     checkpointCount: 0,
     loadingHistory: false,
@@ -475,6 +478,7 @@ function renderSessionAnalytics() {
                         images={item.images.length}
                         handoffHint={handoffHint}
                         sending={sending}
+                        waiting={waitingIds?.includes(item.id) ?? false}
                         {...actions}
                       />
                     )
@@ -724,6 +728,10 @@ function renderSessionAnalytics() {
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
+  const mcpAuth = useMemo(
+    () => onAuthorizeMcp === undefined ? null : { servers: mcpServers ?? [], authorize: onAuthorizeMcp },
+    [mcpServers, onAuthorizeMcp]
+  )
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => viewport,
@@ -846,6 +854,7 @@ function renderSessionAnalytics() {
             </div>
           )}
           <PlanProgressContext.Provider value={planDocument}>
+          <McpAuthContext.Provider value={mcpAuth}>
           <ToolStopContext.Provider value={busy ? (onStop ?? null) : null}>
           <div
             ref={transcriptRef}
@@ -905,6 +914,7 @@ function renderSessionAnalytics() {
             })}
           </div>
           </ToolStopContext.Provider>
+          </McpAuthContext.Provider>
           </PlanProgressContext.Provider>
           {props.previewReady ? (
             <div className="mx-auto mt-2 flex w-full max-w-[760px] justify-start">

@@ -38,6 +38,15 @@ export const ToolCallsWithIntent: Story = {
   )
 }
 
+/** A failed MCP call classified as an auth failure offers sign-in. */
+export const ToolCallNeedsSignIn: Story = {
+  render: () => (
+    <div className="flex w-96 flex-col gap-2">
+      <ToolCall status="error" name="List pods" target="runpod" signIn={{ label: "Sign in to RunPod", onClick: () => {} }} />
+    </div>
+  )
+}
+
 export const Thought: Story = {
   render: () => (
     <div className="w-80">

@@ -106,6 +106,8 @@ export interface ToolCallProps {
    * the expanded body below.
    */
   detail?: ReactNode
+  /** A failed MCP call that needs auth: shows a sign-in action on the row. */
+  signIn?: { readonly label: string; readonly onClick: () => void }
   className?: string
 }
 
@@ -194,6 +196,7 @@ export function ToolCall({
   onToggle,
   onStop,
   detail,
+  signIn,
   className
 }: ToolCallProps) {
          function renderToolHeading() {
@@ -259,6 +262,11 @@ export function ToolCall({
           </Button>
         ) : (
           <div className={cn(headerClass, "min-w-0 flex-1")}>{header}</div>
+        )}
+        {signIn && status === "error" && (
+          <Button variant="ghost" size="sm" onClick={signIn.onClick} className="my-auto mr-2 flex-none">
+            {signIn.label}
+          </Button>
         )}
         {onStop && status === "running" && (
           <Button
