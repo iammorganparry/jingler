@@ -46,4 +46,11 @@ describe("Composer model chip", () => {
     ).toBe(false)
     expect(onSend).not.toHaveBeenCalled()
   })
+
+  it("shows the first-run line and Select model opens the popover when no model is chosen", () => {
+    render(<Composer providerCatalog={catalog} connectionId={null} modelId={null} />)
+    expect(screen.getByText("Choose a model to start")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Select model" }))
+    expect(screen.getByRole("textbox", { name: "Search models" })).toBeTruthy()
+  })
 })

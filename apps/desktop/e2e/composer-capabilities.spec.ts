@@ -52,6 +52,7 @@ test("offers certified models with canonical route identity", async ({ launchApp
   })
   await expect(appShell(launched.window)).toBeVisible()
 
+  await launched.window.getByRole("button", { name: "Model settings" }).click()
   await launched.window.getByRole("button", { name: /^Model: Deterministic pi model/ }).click()
   const search = launched.window.getByRole("textbox", { name: "Search models" })
   const listbox = launched.window.getByRole("listbox")
@@ -157,6 +158,7 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
     piFixture: PI_FIXTURE
   })
   await expect(appShell(reopened.window)).toBeVisible()
+  await reopened.window.getByRole("button", { name: "Model settings" }).click()
   await expect(reopened.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Auto" })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
@@ -190,6 +192,7 @@ test("configures canonical model, mode, and reasoning before creating a session"
   expect(projectWidth).toBeGreaterThanOrEqual(210)
   expect(otherWidths).toEqual([projectWidth, projectWidth])
 
+  await launched.window.getByRole("button", { name: "Model settings" }).click()
   await expect(
     launched.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })
   ).toBeVisible()
@@ -251,4 +254,25 @@ test("the @ menu shows a Files header, keyboard footer and a No matches state", 
 
   await composer.press("Escape")
   await expect(window.getByRole("status").filter({ hasText: "No matches" })).toHaveCount(0)
+})
+
+test("changes reasoning from the model popover and the next send uses it", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions: sessions("s_popover_reasoning")
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await expect(launched.window.getByRole("button", { name: "Thinking strength" })).toHaveCount(0)
+  await launched.window.getByRole("button", { name: "Model settings" }).click()
+  await launched.window.getByRole("button", { name: "Thinking strength" }).click()
+  await launched.window.getByRole("option", { name: "High", exact: true }).click()
+  const composer = launched.window.getByPlaceholder("Message the agent…")
+  await composer.fill("use popover reasoning")
+  await composer.press("Enter")
+  await expect.poll(() => {
+    const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
+    return persisted.chats[0].reasoning
+  }).toEqual({ enabled: true, effort: "high" })
 })

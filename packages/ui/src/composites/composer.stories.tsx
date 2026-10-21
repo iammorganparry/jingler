@@ -282,3 +282,23 @@ export const ProductionLayout: Story = {
     </main>
   )
 }
+
+function OpenModelPopoverFixture({ noModel = false }: { noModel?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() =>
+      ref.current?.querySelector<HTMLButtonElement>('button[aria-label="Model settings"], button[aria-label="Select model"]')?.click()
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  return (
+    <main className="flex h-screen min-h-[620px] items-end justify-center bg-editor p-[30px] text-text">
+      <div ref={ref} className="w-full max-w-[760px]">
+        {noModel ? <Composer providerCatalog={catalog} connectionId={null} modelId={null} onSetModel={() => {}} onSend={() => {}} /> : <ComposerFixture />}
+      </div>
+    </main>
+  )
+}
+
+export const ModelPopoverWithReasoningAndEnvironment: Story = { render: () => <OpenModelPopoverFixture /> }
+export const ModelPopoverNoModel: Story = { render: () => <OpenModelPopoverFixture noModel /> }

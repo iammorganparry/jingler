@@ -261,6 +261,7 @@ test("thinking strength is a compact per-session composer control", async ({ lau
     sessions: seededSessions
   })
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
+  await window.getByRole("button", { name: "Model settings" }).click()
   const thinking = window.getByRole("button", { name: "Thinking strength" })
 
   await expect(thinking).toContainText("Default")

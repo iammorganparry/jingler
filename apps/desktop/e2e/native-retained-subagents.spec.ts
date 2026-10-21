@@ -91,6 +91,7 @@ const send = async (window: Page, prompt: string) => {
 }
 
 const selectRuntime = async (window: Page, entry: RuntimeCase) => {
+  await window.getByRole("button", { name: "Model settings" }).click()
   await window.getByRole("button", { name: modelButton }).click()
   await window.getByRole("option", { name: entry.option }).click()
 }

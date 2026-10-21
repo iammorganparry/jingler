@@ -72,6 +72,7 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await expect(
     app.window.getByRole("heading", { name: "New session" }),
   ).toBeVisible();
+  await app.window.getByRole("button", { name: "Model settings" }).click();
   await app.window
     .getByRole("button", { name: "Execution environment" })
     .click();
@@ -135,6 +136,7 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await expect(
     app.window.getByRole("button", { name: "Stop", exact: true }),
   ).toBeVisible();
+  await app.window.getByRole("button", { name: "Model settings" }).click();
   await app.window
     .getByRole("button", { name: "Execution environment" })
     .click();
