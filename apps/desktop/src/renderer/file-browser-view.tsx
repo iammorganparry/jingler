@@ -906,6 +906,8 @@ function ReviewDiffCanvas({
         reviewThreads={review.reviewThreads}
         review={review.source === "pr" ? adversarial.review : null}
         sentFindingIds={adversarial.sentFindingIds}
+        dismissedFindingIds={adversarial.dismissedFindingIds}
+        onDismissFinding={adversarial.dismissFinding}
         connected={connected}
         routeTargetSession={sessionTitle}
         focused={changes.focused}

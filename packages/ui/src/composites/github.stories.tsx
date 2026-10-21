@@ -10,7 +10,7 @@ import { PullRequestView } from "./pull-request-view.js"
 import { PrReviewGroup } from "./pr-review-group.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
 import { ReadinessChecklist } from "./readiness-checklist.js"
-import { ReviewFindingRow } from "./review-findings.js"
+import { FindingsList, ReviewFindingRow } from "./review-findings.js"
 import { SettingsView } from "./settings-view.js"
 
 const meta: Meta = { title: "GitHub", parameters: { layout: "fullscreen" } }
@@ -419,6 +419,21 @@ export const ReviewFindingCards: Story = {
       </div>
     )
   }
+}
+
+/** Dismissed findings collapse into a "Dismissed (N) · Show" row; Show reveals them with Restore. */
+export const ReviewFindingsDismissed: Story = {
+  render: () => (
+    <div className="w-[420px] bg-editor p-6">
+      <FindingsList
+        findings={adversarialReview.findings}
+        review={adversarialReview}
+        canRoute
+        dismissedFindingIds={new Set(adversarialReview.findings.slice(0, 2).map((f) => f.id))}
+        onDismissFinding={() => {}}
+      />
+    </div>
+  )
 }
 
 /** A clean review — the reviewer argued and found nothing. */
