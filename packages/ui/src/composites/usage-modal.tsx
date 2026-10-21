@@ -230,7 +230,10 @@ function ReportSection({ report, onExport }: { report: UsageReport; onExport?: (
 
   const onSort = (key: ModelPerformanceSortKey) => {
     if (key === sortBy) setDirection(direction === "asc" ? "desc" : "asc")
-    else (setSortBy(key), setDirection("desc"))
+    else {
+      setSortBy(key)
+      setDirection("desc")
+    }
   }
 
   return (
