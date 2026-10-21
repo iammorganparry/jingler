@@ -27,3 +27,13 @@ describe("PrReviewComposer draft preservation", () => {
     expect(box.value).toBe("")
   })
 })
+
+describe("PrReviewComposer own-PR guard", () => {
+  it("disables Approve and Request changes on your own PR but keeps Comment and the agent toggle", () => {
+    render(<PrReviewComposer connected selfAuthored onSubmit={async () => {}} />)
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Request changes" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Comment" }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByText("Also send to agent")).toBeDefined()
+  })
+})

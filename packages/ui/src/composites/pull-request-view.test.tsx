@@ -513,3 +513,17 @@ describe("PullRequestView draft side panel", () => {
     expect(screen.queryByRole("button", { name: "Mark ready for review" })).toBeNull()
   })
 })
+
+describe("PullRequestView conversation", () => {
+  it("shows a placeholder when the description is null", () => {
+    render(<WidthTierValue width={1200}><PullRequestView pr={{ ...pr, body: null }} connected /></WidthTierValue>)
+    expect(screen.getByText("No description provided.")).toBeDefined()
+  })
+
+  it("disables Approve and Request changes when the viewer authored the PR", () => {
+    render(<WidthTierValue width={1200}><PullRequestView pr={pr} connected viewerLogin="morgan" onSubmitReview={vi.fn()} /></WidthTierValue>)
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Request changes" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Comment" }) as HTMLButtonElement).disabled).toBe(false)
+  })
+})
