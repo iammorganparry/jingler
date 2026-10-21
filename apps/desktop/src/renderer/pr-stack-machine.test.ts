@@ -54,16 +54,40 @@ describe("prStackMachine merge progress", () => {
     expect(actor.getSnapshot().context.merged).toBe(3)
   })
 
-  test("a failure keeps progress and a retry restarts it", () => {
+  test("a failure keeps progress and Resume continues from the failed layer", () => {
     const actor = start()
     actor.send({ type: "MERGE_STACK" })
     actor.send({ type: "LAYER_MERGED" })
     actor.send({ type: "MERGE_FAILED", message: "conflict" })
     expect(actor.getSnapshot().value).toBe("failed")
     expect(actor.getSnapshot().context).toMatchObject({ merged: 1, mergeError: "conflict" })
+    // A failed run never restarts from 0: that would re-merge layers that already merged.
     actor.send({ type: "MERGE_STACK" })
-    expect(actor.getSnapshot().context).toMatchObject({ merged: 0, mergeError: null })
+    expect(actor.getSnapshot().value).toBe("failed")
+    expect(actor.getSnapshot().context.merged).toBe(1)
+    actor.send({ type: "RESUME" })
+    expect(actor.getSnapshot().context).toMatchObject({ merged: 1, mergeError: null })
     expect(actor.getSnapshot().value).toBe("merging")
+  })
+
+  test("MERGE_STACK starts after already-merged base layers", () => {
+    const actor = start()
+    actor.send({ type: "MERGE_STACK", merged: 1 })
+    expect(actor.getSnapshot().context.merged).toBe(1)
+  })
+
+  test("a squash/rebase merge restacks before the next layer; a restack failure fails the run", () => {
+    const actor = start()
+    actor.send({ type: "MERGE_STACK" })
+    actor.send({ type: "LAYER_MERGED", restackAfter: 480 })
+    expect(actor.getSnapshot().value).toBe("restacking")
+    expect(actor.getSnapshot().context.restackAfter).toBe(480)
+    actor.send({ type: "RESTACK_DONE" })
+    expect(actor.getSnapshot().value).toBe("merging")
+    expect(actor.getSnapshot().context.restackAfter).toBeNull()
+    actor.send({ type: "LAYER_MERGED", restackAfter: 481 })
+    actor.send({ type: "MERGE_FAILED", message: "conflict" })
+    expect(actor.getSnapshot().value).toBe("failed")
   })
 
   test("a failing layer stops the run: later LAYER_MERGED events are ignored once failed", () => {

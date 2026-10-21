@@ -714,6 +714,9 @@ function CheckEvidence({ pr, stack }: { pr: PullRequest; stack?: PrStackNav }) {
         merged={stack.merged}
         mergeError={stack.mergeError}
         onMergeStack={stack.onMergeStack}
+        onResume={stack.onResume}
+        mergeMethod={stack.mergeMethod}
+        onMergeMethod={stack.onMergeMethod}
         restacking={stack.restacking}
         onRestack={stack.onRestack}
       />

@@ -198,6 +198,48 @@ test("Restack retargets and rebases every upper layer after the base merges", as
   await expect(window.getByTestId("restack-cta")).toHaveText("Restack")
 })
 
+test("Merge stack merges in order; a failure stops the run and Resume continues it", async ({ launchApp }) => {
+  const pr = (number: number, headRefName: string, baseRefName: string) => ({
+    number, title: `Layer ${number}`, headRefName, baseRefName, author: { login: "e2e-user" },
+    checks: [{ name: `check-${number}`, conclusion: "success" }]
+  })
+  const { window, githubServer } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{
+      id: "s_resume", repo: "widget", githubSlug: "acme/widget", branch: "stack/ui", title: "Stack session", status: "idle",
+      diff: { added: 0, removed: 0 }, prNumber: 482, costUsd: 0, tokens: 0, updatedAt: "2026-10-12T10:00:00.000Z",
+      prs: [
+        { number: 480, branch: "stack/model", base: "main" },
+        { number: 481, branch: "stack/api", base: "stack/model" },
+        { number: 482, branch: "stack/ui", base: "stack/api" }
+      ],
+      githubInstallationId: "101", githubRepositoryId: "301", worktreePath: context.repoPath
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [pr(480, "stack/model", "main"), pr(481, "stack/api", "stack/model"), pr(482, "stack/ui", "stack/api")]
+    }
+  })
+  await window.getByTestId("session-row-s_resume").click()
+  await window.getByTestId("header-link-pr").click()
+  await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
+
+  await expect(window.getByTestId("pr-stack-merge-first-482")).toContainText("Merge #481 first")
+  const merges = () => githubServer.operations.filter((op) => /^pr merge/.test(op))
+  githubServer.failNext("merge-pr")
+  await window.getByTestId("merge-stack-cta").click()
+
+  // The base layer's merge fails: the run stops with nothing merged.
+  await expect(window.getByTestId("merge-stack-resume")).toBeVisible()
+  await expect(window.getByTestId("merge-stack-error")).toBeVisible()
+  expect(merges()).toHaveLength(0)
+
+  await window.getByTestId("merge-stack-resume").click()
+  await expect.poll(() => merges(), { timeout: 15_000 }).toEqual(["pr merge 480 --merge", "pr merge 481 --merge", "pr merge 482 --merge"])
+})
+
 test("Selecting a layer in the Changes PR filter shows only that layer's files", async ({ launchApp }) => {
   const pr = (number: number, headRefName: string, baseRefName: string, files: string[]) => ({
     number, title: `Layer ${number}`, headRefName, baseRefName, files, author: { login: "e2e-user" }

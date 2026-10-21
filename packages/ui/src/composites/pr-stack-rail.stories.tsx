@@ -74,6 +74,7 @@ export const MergeStackFailed: Story = {
         merged={1}
         mergeError="Failed to merge #481: merge conflict"
         onMergeStack={() => {}}
+        onResume={() => {}}
       />
     </div>
   )
@@ -93,6 +94,32 @@ export const Restacking: Story = {
   render: () => (
     <div className="bg-panel p-6">
       <PrStackRail layers={LAYERS} selected={482} onSelect={() => {}} onRestack={() => {}} restacking />
+    </div>
+  )
+}
+
+/** Restacking: #480 was squash-merged, layers above are being rebased before #481 merges. */
+export const MergeStackRestacking: Story = {
+  render: () => (
+    <div className="bg-panel p-6">
+      <PrStackRail
+        layers={MERGING_LAYERS}
+        selected={482}
+        onSelect={() => {}}
+        mergeState="restacking"
+        merged={1}
+        onMergeStack={() => {}}
+        mergeMethod="squash"
+      />
+    </div>
+  )
+}
+
+/** Idle with a squash merge method chosen; upper PRs read "Merge #N first". */
+export const MergeStackSquash: Story = {
+  render: () => (
+    <div className="bg-panel p-6">
+      <PrStackRail layers={UNMERGED_LAYERS} selected={482} onSelect={() => {}} onMergeStack={() => {}} mergeMethod="squash" onMergeMethod={() => {}} />
     </div>
   )
 }
