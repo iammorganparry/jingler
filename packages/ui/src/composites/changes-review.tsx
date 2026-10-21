@@ -188,6 +188,9 @@ export interface ChangedFilesExplorerProps {
    * two or more switches to the agent scope filter and per-agent rows.
    */
   readonly agentTrees?: readonly AgentTreeChanges[]
+  /** Agent scope (CHANGES_SCOPE_ALL, CHANGES_SCOPE_MAIN or a subagent id); local state when omitted. */
+  readonly agentScope?: string
+  readonly onAgentScopeChange?: (scope: string) => void
   readonly omittedFiles?: readonly ReviewOmittedFile[]
   readonly diffLineLimit?: number
   readonly drafts: readonly ReviewDraft[]
@@ -256,14 +259,17 @@ function PrFilterBar({
 /** The changed-files list once two or more agent trees exist: scope filter plus per-agent rows. */
 function AgentScopedFileList({
   trees,
+  scope,
+  onScopeChange,
   activePath,
   onSelectFile
 }: {
   readonly trees: readonly AgentTreeChanges[]
+  readonly scope: string
+  readonly onScopeChange: (scope: string) => void
   readonly activePath: string | null
   readonly onSelectFile: (path: string) => void
 }) {
-  const [scope, setScope] = useState(CHANGES_SCOPE_ALL)
   const rows = useMemo(() => mergeAgentTrees(trees, scope), [trees, scope])
   const totals = useMemo(() => sumAgentRows(rows), [rows])
   const activeKey = rows.find((row) => row.file.path === activePath)?.key ?? null
@@ -274,7 +280,7 @@ function AgentScopedFileList({
         <DiffStat added={totals.added} removed={totals.removed} className="text-[10.5px]" />
       </div>
       <div className="flex-none border-b border-hairline p-2">
-        <AgentScopeFilter trees={trees} value={scope} onChange={setScope} />
+        <AgentScopeFilter trees={trees} value={scope} onChange={onScopeChange} />
       </div>
       <AgentFileRows rows={rows} activeKey={activeKey} onSelectRow={(row) => onSelectFile(row.file.path)} />
     </>
@@ -354,6 +360,8 @@ function ChangedFilesBody({
   onPrNumberChange,
   multiAgent,
   agentTrees,
+  agentScope,
+  onAgentScopeChange,
   activePath,
   onSelectFile,
   onDiscardFile,
@@ -370,6 +378,8 @@ function ChangedFilesBody({
   readonly onPrNumberChange: ((number: number) => void) | undefined
   readonly multiAgent: boolean
   readonly agentTrees: readonly AgentTreeChanges[]
+  readonly agentScope: string
+  readonly onAgentScopeChange: (scope: string) => void
   readonly activePath: string | null
   readonly onSelectFile: (path: string) => void
   readonly onDiscardFile: ((path: string) => void) | undefined
@@ -386,7 +396,7 @@ function ChangedFilesBody({
         {allFiles.length === 0 ? (
           <ChangedFilesEmptyState hasPrLayers={prLayers.length >= 2} />
         ) : multiAgent ? (
-          <AgentScopedFileList trees={agentTrees} activePath={activePath} onSelectFile={onSelectFile} />
+          <AgentScopedFileList trees={agentTrees} scope={agentScope} onScopeChange={onAgentScopeChange} activePath={activePath} onSelectFile={onSelectFile} />
         ) : (
           <ReviewFileRail
             files={files}
@@ -436,8 +446,11 @@ export function ChangedFilesExplorer({
   loading = false,
   error = null,
   onRetry,
-  agentTrees = []
+  agentTrees = [],
+  agentScope,
+  onAgentScopeChange
 }: ChangedFilesExplorerProps) {
+  const [localScope, setLocalScope] = useState(CHANGES_SCOPE_ALL)
   const controls = useCodeReviewView()
   // More than one tree (main + at least one subagent worktree) switches the
   // list to the agent-scoped rows; a single tree renders exactly as before.
@@ -472,6 +485,8 @@ export function ChangedFilesExplorer({
       onPrNumberChange={onPrNumberChange}
       multiAgent={multiAgent}
       agentTrees={agentTrees}
+      agentScope={agentScope ?? localScope}
+      onAgentScopeChange={onAgentScopeChange ?? setLocalScope}
       activePath={activePath}
       onSelectFile={onSelectFile}
       onDiscardFile={onDiscardFile}

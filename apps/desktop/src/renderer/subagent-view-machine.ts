@@ -6,12 +6,15 @@ export interface SubagentViewContext {
   readonly selectedId: string | null
   readonly mainDraft: string
   readonly mainScrollTop: number
+  /** Changes agent scope: "all", "main", or a subagent id. */
+  readonly changesScope: string
 }
 
 export type SubagentViewEvent =
   | { readonly type: "OPEN_SUBAGENT"; readonly id: string }
   | { readonly type: "SWITCH_SIBLING"; readonly id: string }
   | { readonly type: "BACK" }
+  | { readonly type: "SET_CHANGES_SCOPE"; readonly scope: string }
   | { readonly type: "SAVE_MAIN_VIEW"; readonly draft: string; readonly scrollTop: number }
 
 export const subagentViewMachine = setup({
@@ -31,6 +34,9 @@ export const subagentViewMachine = setup({
         ? { selectedId: event.id }
         : {}
     ),
+    setChangesScope: assign(({ event }) =>
+      event.type === "SET_CHANGES_SCOPE" ? { changesScope: event.scope } : {}
+    ),
     clearSelection: assign({ selectedId: null }),
     saveMainView: assign(({ event }) =>
       event.type === "SAVE_MAIN_VIEW"
@@ -45,8 +51,10 @@ export const subagentViewMachine = setup({
     chatId: input.chatId,
     selectedId: null,
     mainDraft: "",
-    mainScrollTop: 0
+    mainScrollTop: 0,
+    changesScope: "all"
   }),
+  on: { SET_CHANGES_SCOPE: { actions: "setChangesScope" } },
   states: {
     main: {
       on: {

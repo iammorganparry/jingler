@@ -125,7 +125,7 @@ import { appendFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   AssetUnsupportedError,
   prEventMessage,
@@ -616,9 +616,14 @@ const mcpReveal = () =>
  * a broken worktree for a clean one.
  * Exported for tests.
  */
-export const sessionDiff = (id: string, checkoutId?: string) =>
+export const sessionDiff = (id: string, checkoutId?: string, workspacePath?: string) =>
   Effect.gen(function* () {
     const session = yield* resolveCheckoutSession(id, checkoutId);
+    // A subagent worktree: only for a known session, and only an absolute path.
+    if (workspacePath !== undefined) {
+      if (!session || !isAbsolute(workspacePath)) return EMPTY_REVIEW_DIFF;
+      return yield* WorkspaceService.diff(workspacePath);
+    }
     if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
     return yield* WorkspaceService.diff(session.worktreePath);
   });
@@ -5325,7 +5330,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }
       return null;
     }).pipe(Effect.orElseSucceed(() => null)),
-  "Sessions.diff": ({ id, checkoutId }) =>
+  "Sessions.diff": ({ id, checkoutId, workspacePath }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(id);
       const remote = yield* RemoteSessionService;
@@ -5333,7 +5338,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Sessions.diff",
         {},
-        { execute: () => sessionDiff(id, checkoutId) },
+        { execute: () => sessionDiff(id, checkoutId, workspacePath) },
         {
           execute: () =>
             remote

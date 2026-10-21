@@ -44,4 +44,15 @@ describe("subagentViewMachine", () => {
     actor.send({ type: "OPEN_SUBAGENT", id: "a" })
     expect(actor.getSnapshot()).toBe(before)
   })
+
+  it("keeps the Changes agent scope across subagent swaps and BACK", () => {
+    const actor = start()
+    expect(actor.getSnapshot().context.changesScope).toBe("all")
+    actor.send({ type: "SET_CHANGES_SCOPE", scope: "main" })
+    actor.send({ type: "OPEN_SUBAGENT", id: "a" })
+    expect(actor.getSnapshot().context.changesScope).toBe("main")
+    actor.send({ type: "SET_CHANGES_SCOPE", scope: "a" })
+    actor.send({ type: "BACK" })
+    expect(actor.getSnapshot().context.changesScope).toBe("a")
+  })
 })

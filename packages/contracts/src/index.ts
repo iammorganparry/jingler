@@ -1012,7 +1012,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.diff", {
     success: SessionReviewDiff,
     error: GitError,
-    payload: { id: Schema.String, checkoutId: Schema.optional(Schema.String) }
+    payload: {
+      id: Schema.String,
+      checkoutId: Schema.optional(Schema.String),
+      /** A subagent's own worktree to diff instead of the session checkout. */
+      workspacePath: Schema.optional(Schema.String)
+    }
   }),
 
   /** Lightweight totals for badges and the Changes tab. */
