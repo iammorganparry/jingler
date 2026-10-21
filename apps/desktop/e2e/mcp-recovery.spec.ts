@@ -115,3 +115,29 @@ test("a server's detail dialog shows the log tail and tool count, and refreshes 
   await window.getByRole("button", { name: "Details" }).click()
   await expect(window.getByRole("dialog").getByRole("log", { name: "Server log" })).toBeVisible()
 })
+
+test("MCP sign-in waits for the browser and Cancel returns to Needs sign-in", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [session("s_mcp_signin", "Sign-in session")],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.invalid/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await openSessionByTitle(window, "Sign-in session")
+  const card = window.getByRole("region", { name: "MCP server recovery" })
+  await expect(card.getByText(/^Needs sign-in\./)).toBeVisible()
+  await card.getByRole("button", { name: "Authorize", exact: true }).click()
+  await expect(card.getByText(/^Waiting for browser/)).toBeVisible()
+  await card.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(card.getByText(/^Needs sign-in\./)).toBeVisible()
+  await expect(card.getByRole("button", { name: "Authorize", exact: true })).toBeVisible()
+})

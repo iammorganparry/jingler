@@ -105,3 +105,29 @@ export const Runtime: Story = {
     onInspect: () => {}
   }
 }
+
+const mcpState = (message: string, actionLabel: string, failed = false): Story => ({
+  render: () => (
+    <div className="w-[640px] bg-panel p-4">
+      <RuntimeRecoveryCard
+        label="MCP server recovery"
+        kind="MCP server"
+        title="Reconnect runpod"
+        message={message}
+        icon={<Server size={13} />}
+        failed={failed}
+        actionLabel={actionLabel}
+        onAction={() => {}}
+      />
+    </div>
+  )
+})
+
+/** MCP sign-in: Needs sign-in · Connect. */
+export const McpNeedsSignIn: Story = mcpState("Needs sign-in. The runpod MCP server needs authorization before its tools can run.", "Authorize")
+/** MCP sign-in: Waiting for browser… · Cancel. */
+export const McpWaitingForBrowser: Story = mcpState("Waiting for browser… Finish signing in there, or cancel.", "Cancel")
+/** MCP sign-in: Connected (auto-hides). */
+export const McpConnected: Story = mcpState("Connected. runpod tools are available.", "Done")
+/** MCP sign-in: Sign-in failed · Retry. */
+export const McpSignInFailed: Story = mcpState("Sign-in failed. Check the browser sign-in and try again.", "Retry", true)
