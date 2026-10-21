@@ -14,7 +14,7 @@ import {
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
-import { providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
+import { providerLimitOf, providerRebindCandidatesOf, providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
 
 describe("conversation/plan split ratio", () => {
   it("starts with two thirds for the plan and resizes continuously", () => {
@@ -192,5 +192,30 @@ describe("provider rebind", () => {
   it("refuses a rebind onto a different provider's connection", () => {
     const catalog = catalogOf(entry("connection_claude", { providerId: "claude" }))
     expect(providerRebindOf(catalog, selection("connection_gone"))).toBeUndefined()
+  })
+})
+
+describe("provider recovery cards", () => {
+  it("offers an in-place Reconnect for a signed-out subscription and never mentions an API-key fallback", () => {
+    const catalog = catalogOf(entry("connection_pinned", { status: "expired" }))
+    const recovery = providerRecoveryOf(catalog, selection("connection_pinned"))
+    expect(recovery).toMatchObject({ kind: "signed-out", connectionId: "connection_pinned" })
+    expect(recovery?.message).toContain("never falls back to an API key")
+  })
+
+  it("lists every signed-in account for an ambiguous rebind and auto-picks none", () => {
+    const catalog = catalogOf(entry("connection_a"), entry("connection_b"))
+    expect(providerRebindCandidatesOf(catalog, selection("connection_gone")).map(({ id }) => id)).toEqual([
+      "connection_a",
+      "connection_b"
+    ])
+    expect(providerRebindOf(catalog, selection("connection_gone"))).toBeUndefined()
+  })
+
+  it("reads the usage-limit banner text from the rate-limit label", () => {
+    const limited = entry("connection_pinned")
+    ;(limited.connection.subscription as { rateLimitLabel: string | null }).rateLimitLabel = "Limited until 16:40 (resets)"
+    expect(providerLimitOf(catalogOf(limited), "connection_pinned" as Session["connectionId"])).toBe("Limited until 16:40")
+    expect(providerLimitOf(catalogOf(entry("connection_pinned")), "connection_pinned" as Session["connectionId"])).toBeUndefined()
   })
 })
