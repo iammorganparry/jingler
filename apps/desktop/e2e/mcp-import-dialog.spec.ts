@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { expect, test } from "./fixtures.js"
+import { startFakeOAuthMcpServer } from "./fake-oauth-mcp-server.js"
 
 test("presents discovered MCP servers with a readable stacked header", async ({ launchApp }) => {
   const { window } = await launchApp({
@@ -104,23 +105,32 @@ test("offers servers only in ~/.claude/settings.json and managed-mcp.json, label
 })
 
 test("shows neutral import results with Connect for OAuth and View log for a failed server", async ({ launchApp }) => {
-  const { window } = await launchApp({
-    configured: true,
-    seed: ({ home }) => {
-      writeFileSync(join(home, ".claude.json"), JSON.stringify({
-        mcpServers: {
-          broken: { command: "jingler-no-such-binary-488" },
-          linear: { type: "http", url: "https://linear.example/mcp" }
-        }
-      }))
-    }
-  })
+  // A real 401 from the fake OAuth server makes the probe report needs-auth, not a network failure.
+  const mcp = await startFakeOAuthMcpServer()
+  try {
+    const { window } = await launchApp({
+      configured: true,
+      seed: ({ home }) => {
+        writeFileSync(join(home, ".claude.json"), JSON.stringify({
+          mcpServers: { broken: { command: "jingler-no-such-binary-488" } }
+        }))
+        // opencode's `oauth` key is what makes an imported server managed OAuth.
+        mkdirSync(join(home, ".config", "opencode"), { recursive: true })
+        writeFileSync(join(home, ".config", "opencode", "opencode.json"), JSON.stringify({
+          mcp: { linear: { type: "remote", url: mcp.url, oauth: {} } }
+        }))
+      }
+    })
 
-  const dialog = window.getByRole("dialog")
-  await dialog.getByRole("button", { name: "Import 2 servers" }).click()
-  await expect(dialog.getByRole("heading", { name: "Import complete" })).toBeVisible()
-  await expect(dialog.getByText("Failed to start")).toBeVisible()
-  await expect(dialog.getByRole("button", { name: "Connect" })).toBeVisible()
-  await dialog.getByRole("button", { name: "View log" }).click()
-  await expect(window.getByRole("log", { name: "Server log" })).toBeVisible()
+    const dialog = window.getByRole("dialog")
+    await dialog.getByRole("button", { name: "Import 2 servers" }).click()
+    await expect(dialog.getByRole("heading", { name: "Import complete" })).toBeVisible()
+    await expect(dialog.getByText("Failed to start")).toHaveCount(1)
+    await expect(dialog.getByText("Needs sign-in")).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Connect" })).toBeVisible()
+    await dialog.getByRole("button", { name: "View log" }).click()
+    await expect(window.getByRole("log", { name: "Server log" })).toBeVisible()
+  } finally {
+    await mcp.close()
+  }
 })
