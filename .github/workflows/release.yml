@@ -266,6 +266,16 @@ jobs:
           node apps/desktop/scripts/materialize-plannotator-ext.mjs
           pnpm --filter @jingler/desktop run build
 
+      # whisper-cli for voice input: built from a pinned whisper.cpp tag with the
+      # runner's cmake. The key hashes the script, which holds the tag + commit.
+      - name: Cache whisper.cpp build
+        uses: actions/cache@v4
+        with:
+          path: .cache/whisper.cpp
+          key: whisper-cpp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/distribution/build-whisper.mjs') }}
+      - name: Build whisper-cli
+        run: node scripts/distribution/build-whisper.mjs
+
       - name: Install Azure Trusted Signing
         if: runner.os == 'Windows' && env.AZURE_CLIENT_SECRET != ''
         shell: pwsh
