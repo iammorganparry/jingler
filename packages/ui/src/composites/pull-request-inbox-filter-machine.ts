@@ -1,6 +1,6 @@
 import { assign, setup } from "xstate"
 
-export type PullRequestInboxFilter = "all" | "created" | "assigned" | "review-requested"
+export type PullRequestInboxFilter = "all" | "created" | "assigned" | "review-requested" | "this-session"
 export interface PullRequestInboxFacets {
   repository: string
   author: string
