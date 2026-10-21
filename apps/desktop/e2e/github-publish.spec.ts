@@ -200,6 +200,9 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
   expect(
     githubServer.credentialRequests.some(({ permissions }) => permissions.includes("workflows:write"))
   ).toBe(false)
+  // Publish completion leaves exactly one persisted transcript card.
+  await expect(window.getByText(/^Opened #900/)).toHaveCount(1)
+  await expect(window.getByRole("button", { name: "View PRs", exact: true })).toBeVisible()
 })
 
 test("publishes a migration-era established jingler branch without renaming it", async ({

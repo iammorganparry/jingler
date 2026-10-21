@@ -5156,7 +5156,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       );
     }),
   "Sessions.rename": ({ sessionId, title }) => renameSession(sessionId, title),
-  "Sessions.recordPrEvent": ({ sessionId, kind, number }) => recordPrEvent(sessionId, kind, number),
   "Sessions.setStatus": ({ sessionId, status }) =>
     setSessionStatus(sessionId, status),
   "Sessions.setPersistent": ({ sessionId, persistent }) =>
@@ -6058,6 +6057,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
 });
 
 const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
+  "Github.recordPrEvent": ({ sessionId, kind, number }) => recordPrEvent(sessionId, kind, number),
   "Github.inbox": () => githubPrInbox(),
   "Github.teams": () => GitHubApi.teams(),
   "Github.teamPrs": (input) => GitHubApi.teamPrs(input),

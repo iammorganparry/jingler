@@ -844,13 +844,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
-  /** Persist one PR lifecycle card (opened/merged) in the transcript. Null when that card already exists. */
-  Rpc.make("Sessions.recordPrEvent", {
-    success: Schema.NullOr(Message),
-    error: GitError,
-    payload: { sessionId: Schema.String, kind: Schema.Literal("opened", "merged"), number: Schema.Number }
-  }),
-
   /** Manually rename a session — pins the title (stops auto-retitling). */
   Rpc.make("Sessions.rename", {
     success: Session,
@@ -1734,6 +1727,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
 /** Review, preview, theme, and plugin half of the renderer RPC client. */
 export class JinglerReviewRpcs extends RpcGroup.make(
+  /** Persist one PR lifecycle card (opened/merged) in the transcript. Null when that card already exists. */
+  Rpc.make("Github.recordPrEvent", {
+    success: Schema.NullOr(Message),
+    error: GitError,
+    payload: { sessionId: Schema.String, kind: Schema.Literal("opened", "merged"), number: Schema.Number }
+  }),
+
   /**
    * Run an adversarial review of the session's linked PR: a reviewer agent runs
    * READ-ONLY in the session's worktree, on the configured review model (Fable by
