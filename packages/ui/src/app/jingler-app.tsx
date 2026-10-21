@@ -799,6 +799,9 @@ function getActiveTabContext(active: Session) {
               onImportSessions={props.onImportSessions}
               projects={projects}
               environments={environments}
+              sessions={sessions}
+              onConnectIssueProvider={() => openSettings("plugins")}
+              onOpenSession={selectSession}
               environmentStartup={pendingEnvironmentSession}
               defaultProjectId={selectedProjectId ?? projects.find((project) => project.path === defaultRepoPath)?.id}
               requestedProjectId={requestedNewSession?.projectId}
@@ -980,7 +983,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<
-    "providers" | "github" | "agents" | "runtime" | "projects"
+    "providers" | "github" | "agents" | "runtime" | "projects" | "plugins"
   >("providers")
   const openSettings = useCallback(
     (section: typeof settingsSection = settingsSection) => {

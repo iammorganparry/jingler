@@ -39,6 +39,7 @@ test("browses, filters, comments on and closes issues through authenticated gh",
       "if (args[0] === 'auth' && args[1] === 'status') process.exit(0)",
       "if (args[0] === 'api' && args[1] === 'graphql' && joined.includes('is:issue')) { console.log(JSON.stringify(inbox)); process.exit(0) }",
       "if (args[0] === 'issue' && args[1] === 'view') { console.log(JSON.stringify(detail)); process.exit(0) }",
+      "if (args[0] === 'api' && String(args[1]).endsWith('/timeline')) { console.log('[[]]'); process.exit(0) }",
       "if (args[0] === 'issue' && (args[1] === 'comment' || args[1] === 'close')) {",
       `  fs.appendFileSync(${JSON.stringify(log)}, args.slice(0, 5).join(' ') + '\\n'); process.exit(0)`,
       "}",
@@ -76,6 +77,26 @@ test("browses, filters, comments on and closes issues through authenticated gh",
 
     await issues.getByRole("button", { name: "Close issue" }).click()
     await expect.poll(() => readFileSync(log, "utf8")).toContain("issue close 1 --repo acme/widget")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("new session GitHub issue source shows Couldn't load issues with Retry when gh fails", async ({ launchApp }) => {
+  const root = mkdtempSync(join(tmpdir(), "jingler-e2e-issues-fail-"))
+  try {
+    const bin = join(root, "bin")
+    mkdirSync(bin)
+    writeFileSync(join(bin, "gh"), "#!/usr/bin/env node\nconst a = process.argv.slice(2)\nif (a[0] === 'auth' && a[1] === 'status') process.exit(0)\nconsole.error('boom'); process.exit(1)\n")
+    chmodSync(join(bin, "gh"), 0o755)
+    const { window } = await launchApp({ configured: true, withRepo: true, e2eEnv: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` } })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByTestId("new-session").click()
+    const view = window.getByTestId("new-session-view")
+    await view.getByRole("button", { name: "Session source", exact: true }).click()
+    await window.getByRole("option", { name: /GitHub issue/ }).click()
+    await expect(view.getByText("Couldn't load issues")).toBeVisible({ timeout: 20_000 })
+    await expect(view.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
