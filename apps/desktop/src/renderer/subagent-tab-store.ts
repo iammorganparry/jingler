@@ -232,6 +232,23 @@ export const registerMainViewReader = (
   }
 }
 
+/** The child shown in a lane, from any tab snapshot of that chat. */
+export const viewedChild = (
+  snapshots: ReadonlyArray<SubagentTabSnapshot>,
+  chatId: string,
+  nodeId: string | null | undefined
+): SubagentFleetNode | null => {
+  if (nodeId == null) return null
+  const snapshot = snapshots.find((candidate) => candidate.chatId === chatId)
+  return [...(snapshot?.active ?? []), ...(snapshot?.completed ?? [])].find((n) => n.id === nodeId) ?? null
+}
+
+/** Content scope for entering a child: its subagent id when it owns a worktree, else the aggregate (shared checkout has no per-file data). */
+export const scopeForChild = (chatId: string, nodeId: string): string => {
+  const node = viewedChild(Object.values(allSessionSnapshots).flat(), chatId, nodeId)
+  return node?.workspace ? node.subagentId : "all"
+}
+
 /** Every entry point (chip, View, transcript row, ⌘K, sidebar) swaps the chat lane through here. */
 export const selectSubagentTab = (
   _sessionId: string,
@@ -247,7 +264,7 @@ export const selectSubagentTab = (
     const view = mainViewReaders.get(chatId)?.()
     if (view) actor.send({ type: "SAVE_MAIN_VIEW", draft: view.draft, scrollTop: view.scrollTop })
   }
-  actor.send({ type: "OPEN_SUBAGENT", id: nodeId })
+  actor.send({ type: "OPEN_SUBAGENT", id: nodeId, scope: scopeForChild(chatId, nodeId) })
 }
 
 export const useSessionSubagentTabs = (
@@ -302,4 +319,10 @@ export const clearSubagentTabs = (sessionId: string): void => {
   const { [sessionId]: _removed, ...rest } = allSessionSnapshots
   allSessionSnapshots = rest
   publish()
+}
+
+/** The child currently swapped into the session's active chat lane, or null on the main view. */
+export const useViewedChild = (sessionId: string, chatId: string): SubagentFleetNode | null => {
+  const selectedId = useSubagentViewSelections()[chatId]
+  return viewedChild(useSessionSubagentTabs(sessionId), chatId, selectedId)
 }

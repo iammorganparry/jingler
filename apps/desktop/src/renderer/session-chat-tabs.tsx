@@ -12,6 +12,7 @@ import { useAgentRoster } from "./agent-roster.js"
 import { rpc } from "./rpc-client.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import {
+  scopeForChild,
   selectSubagentTab,
   subagentViewActor,
   useAllSessionSubagentTabs,
@@ -95,7 +96,7 @@ export function SubagentLaneViewProvider({ children }: { readonly children: Reac
         siblings: [...(snapshot?.active ?? []), ...(snapshot?.completed ?? [])].map(
           ({ id, agent, task }) => ({ id, agent, task })
         ),
-        onSwitch: (id) => actor.send({ type: "SWITCH_SIBLING", id }),
+        onSwitch: (id) => actor.send({ type: "SWITCH_SIBLING", id, scope: scopeForChild(chatId, id) }),
         onBack: () => actor.send({ type: "BACK" })
       }
     },
