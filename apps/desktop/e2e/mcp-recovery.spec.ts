@@ -46,7 +46,7 @@ test("an MCP reconnect card is labelled as MCP and can be dismissed", async ({ l
   await expect(card.getByText("Reconnect runpod")).toBeVisible()
   await expect(card.getByRole("button", { name: "Authorize" })).toBeVisible()
 
-  await card.getByRole("button", { name: "Dismiss: Reconnect runpod" }).click()
+  await card.getByRole("button", { name: "Dismiss", exact: true }).click()
   await expect(card).toHaveCount(0)
 
   // Stays dismissed when the conversation pane remounts for another session.
@@ -74,7 +74,7 @@ test("a dismissed MCP reconnect card stays hidden after the window reloads", asy
   await openSessionByTitle(window, "First session")
   const card = window.getByRole("region", { name: "MCP server recovery" })
   await expect(card).toBeVisible()
-  await card.getByRole("button", { name: "Dismiss: Reconnect runpod" }).click()
+  await card.getByRole("button", { name: "Dismiss", exact: true }).click()
   await expect(card).toHaveCount(0)
 
   await window.reload()
