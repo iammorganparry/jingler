@@ -148,6 +148,54 @@ describe("SetupScreen", () => {
     expect(onChooseDir).toHaveBeenCalledTimes(1);
   });
 
+  it("offers Try again and Skip for now when GitHub errors", () => {
+    const onRetryGithub = vi.fn();
+    const onSkipGithub = vi.fn();
+    render(
+      <SetupScreen
+        {...props({
+          step: "github",
+          github: { ...github, mode: "error", error: "timeout" },
+          onRetryGithub,
+          onSkipGithub,
+        })}
+      />,
+    );
+    expect(screen.getByText("GitHub didn't respond")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(onRetryGithub).toHaveBeenCalledTimes(1);
+    expect(onSkipGithub).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows login and installation count when connected", () => {
+    render(
+      <SetupScreen
+        {...props({
+          step: "github",
+          github: {
+            ...github,
+            mode: "connected",
+            connected: true,
+            user: { id: "1", login: "octocat", name: null, avatarUrl: null },
+            installations: [
+              {
+                id: "9",
+                account: { id: "2", login: "acme", type: "Organization", avatarUrl: null },
+                repositorySelection: "all",
+                permissions: {},
+                status: "active",
+                suspendedAt: null,
+              },
+            ],
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("Connected as @octocat")).toBeTruthy();
+    expect(screen.getByText(/1 installation · @acme/u)).toBeTruthy();
+  });
+
   it("shows the 3-step stepper on step 1 and 2", () => {
     const { rerender } = render(<SetupScreen {...props()} />);
     const current = () => screen.getByRole("list", { name: "Progress" }).querySelector("[aria-current=step]")?.textContent;
