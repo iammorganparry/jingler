@@ -953,6 +953,10 @@ export const rpc = {
     run((c) => c.Notify.permission()),
   notifyOpenSystemSettings: (): Promise<void> =>
     run((c) => c.Notify.openSystemSettings()),
+  voiceRequestMicrophone: (): Promise<boolean> =>
+    runAssetList((c) => c.Voice.requestMicrophone()),
+  voiceTranscribe: (wavBase64: string): Promise<{ text: string }> =>
+    runAssetList((c) => c.Voice.transcribe({ wavBase64 })),
   configSetStarredRepos: (
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>
