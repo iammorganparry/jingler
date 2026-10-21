@@ -145,7 +145,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step, { timeout: 25_000 }).toBe("complete")
   await expect(restarted.window.getByRole("heading", { name: "Implement deterministic publishing" })).toBeVisible()
   await expect(
-    restarted.window.getByRole("button", { name: "Open on GitHub ↗" })
+    restarted.window.getByRole("button", { name: "Open on GitHub", exact: true })
   ).toBeVisible()
 
   const recovered = sessionsAt(home)[0]!
