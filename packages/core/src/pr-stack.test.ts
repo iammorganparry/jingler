@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { layerRangeByNumber, prLayerRanges } from "./pr-stack.js"
+import { layerRangeByNumber, mergedBaseOf, prLayerRanges, restackPlan } from "./pr-stack.js"
 
 const stack = [
   { number: 480, branch: "feat/a", base: "main" },
@@ -40,5 +40,21 @@ describe("layerRangeByNumber", () => {
 
   it("returns null when the number isn't in the stack", () => {
     expect(layerRangeByNumber(prLayerRanges(stack, "main"), 999)).toBeNull()
+  })
+})
+
+describe("restackPlan", () => {
+  const at = (...states: string[]) => states.map((state, i) => ({ number: 480 + i, state }))
+  it("is null with nothing merged or everything merged", () => {
+    expect(restackPlan(at("open", "open"))).toBeNull()
+    expect(restackPlan(at("merged", "merged"))).toBeNull()
+  })
+  it("retargets the layer above the merged base and rebases every upper layer", () => {
+    expect(restackPlan(at("merged", "open", "open"))).toEqual({ mergedPr: 480, retarget: 481, rebase: [481, 482] })
+    expect(restackPlan(at("merged", "merged", "draft", "open"))).toEqual({ mergedPr: 481, retarget: 482, rebase: [482, 483] })
+  })
+  it("marks only the unmerged layer sitting on a merged one", () => {
+    const layers = at("merged", "open", "open")
+    expect([0, 1, 2].map((i) => mergedBaseOf(layers, i))).toEqual([null, 480, null])
   })
 })

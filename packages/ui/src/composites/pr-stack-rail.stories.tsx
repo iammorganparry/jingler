@@ -78,3 +78,21 @@ export const MergeStackFailed: Story = {
     </div>
   )
 }
+
+/** Base merged: #480 landed, so #481 carries the badge and a "Rebase onto main" action; header shows bulk Restack. */
+export const BaseMerged: Story = {
+  render: () => (
+    <div className="bg-panel p-6">
+      <PrStackRail layers={LAYERS} selected={482} onSelect={() => {}} onRestack={() => {}} />
+    </div>
+  )
+}
+
+/** Restacking: the RPC is in flight, both actions disabled. */
+export const Restacking: Story = {
+  render: () => (
+    <div className="bg-panel p-6">
+      <PrStackRail layers={LAYERS} selected={482} onSelect={() => {}} onRestack={() => {}} restacking />
+    </div>
+  )
+}
