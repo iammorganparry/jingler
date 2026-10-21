@@ -307,7 +307,6 @@ function renderConflictActions() {
           </div>)
          }
 
-  const failing = pr.checks.filter((c) => c.status === "fail").length
   const blocked = pr.mergeBlockers.length > 0
   const behind = pr.mergeStateStatus === "BEHIND"
   const merged = pr.state === "merged"
@@ -327,6 +326,46 @@ function renderConflictActions() {
       )}
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+      <RailInfoSections pr={pr} linkedIssue={linkedIssue} stack={stack} />
+
+      {/* Workflow — collapsed by default; omitted entirely when there's nothing to show. */}
+      {workflow && <WorkflowSection {...workflow} />}
+
+      {/* Adversarial review */}
+      {renderAdversarialReview()}
+
+      </div>
+
+      {/* Merge box — outside the scroll container, so it's always in reach. */}
+      {!readOnly && <div className="flex-none border-t border-hairline bg-panel p-4">
+        {getMerged()}
+        {!merged && !closed && onClosePr && (
+          <div className="mt-3 flex flex-col gap-2 border-t border-hairline pt-3">
+            <Button
+              variant="danger"
+              className="w-full justify-center"
+              disabled={!connected || closing}
+              onClick={onClosePr}
+            >
+              {closing ? "Closing…" : "Close pull request"}
+            </Button>
+            {closeError && <Callout tone="red">{closeError}</Callout>}
+          </div>
+        )}
+      </div>}
+    </div>
+  )
+}
+
+/** The data sections above the merge box; each is hidden when it has nothing to show. */
+function RailInfoSections({
+  pr,
+  linkedIssue,
+  stack
+}: Pick<PrSidePanelProps, "pr" | "linkedIssue" | "stack">) {
+  const failing = pr.checks.filter((c) => c.status === "fail").length
+  return (
+    <>
       {pr.reviewers.length > 0 && (
         <RailSection title="Reviewers">
           {pr.reviewers.map((r) => <ReviewerRow key={r.login} reviewer={r} />)}
@@ -381,32 +420,6 @@ function renderConflictActions() {
           ))}
         </RailSection>
       )}
-
-      {/* Workflow — collapsed by default; omitted entirely when there's nothing to show. */}
-      {workflow && <WorkflowSection {...workflow} />}
-
-      {/* Adversarial review */}
-      {renderAdversarialReview()}
-
-      </div>
-
-      {/* Merge box — outside the scroll container, so it's always in reach. */}
-      {!readOnly && <div className="flex-none border-t border-hairline bg-panel p-4">
-        {getMerged()}
-        {!merged && !closed && onClosePr && (
-          <div className="mt-3 flex flex-col gap-2 border-t border-hairline pt-3">
-            <Button
-              variant="danger"
-              className="w-full justify-center"
-              disabled={!connected || closing}
-              onClick={onClosePr}
-            >
-              {closing ? "Closing…" : "Close pull request"}
-            </Button>
-            {closeError && <Callout tone="red">{closeError}</Callout>}
-          </div>
-        )}
-      </div>}
-    </div>
+    </>
   )
 }
