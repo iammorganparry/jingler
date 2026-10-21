@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { appShell, expect, test } from "./fixtures.js"
+import { appShell, expect, test, openModelSettings } from "./fixtures.js"
 
 const binary = resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/codex/fixtures/app-server.mjs")
 
@@ -20,6 +20,7 @@ test("selects native Codex beside PI and preserves native continuation after rel
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
+  await openModelSettings(window)
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Codex CLI", { exact: true })).toBeVisible()
   await expect(window.getByText(/^PI ·/).first()).toBeVisible()

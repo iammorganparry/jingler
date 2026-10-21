@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
-import { addProject, appShell, expect, sessionRow, test, type LaunchedApp, type SeedSession } from "./fixtures.js"
+import { addProject, appShell, expect, sessionRow, test, type LaunchedApp, type SeedSession, openModelSettings } from "./fixtures.js"
 
 const addFixtureOrigin = ({ reposDir, repoPath }: { reposDir: string; repoPath: string }) => {
   const origin = join(reposDir, "widget-origin.git")
@@ -56,6 +56,7 @@ const enrollBuildbox = async (app: LaunchedApp): Promise<void> => {
 }
 
 const selectComposerEnvironment = async (window: Page, name = "buildbox") => {
+  await openModelSettings(window)
   await window.getByRole("button", { name: "Execution environment" }).click()
   await window.getByRole("option", { name: new RegExp(name) }).click()
 }
@@ -64,6 +65,7 @@ const createRemoteWorkspace = async (window: Page, projectPath: string): Promise
   await window.getByTestId("new-session").click()
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
   await addProject(window, projectPath)
+  await openModelSettings(window)
   await window.getByRole("button", { name: "Execution environment" }).click()
   await window.getByRole("option", { name: "buildbox" }).click()
   await expect(window.getByRole("button", { name: "Create workspace" })).toBeEnabled({ timeout: 20_000 })
@@ -106,6 +108,7 @@ test("selects an account-owned environment from the composer and reflects it in 
     sessions: ({ repoPath }) => [localSession(repoPath)]
   })
   await enrollBuildbox(app)
+  await openModelSettings(app.window)
   await expect(
     app.window.getByRole("button", { name: "Execution environment" }).locator('[data-environment-icon="local"]')
   ).toBeVisible()
@@ -151,6 +154,7 @@ test("returns a new session to Local while remote project preparation is pending
   const environment = app.window.getByRole("button", { name: "Execution environment" })
   await app.window.getByRole("button", { name: "Auto", exact: true }).click()
   await app.window.getByRole("option", { name: "Ask Before Actions" }).click()
+  await openModelSettings(app.window)
   await app.window.getByRole("button", { name: "Thinking strength" }).click()
   await app.window.getByRole("option", { name: "High", exact: true }).click()
   await expect(environment).toBeEnabled()
@@ -176,6 +180,7 @@ test("offers a confirmed environment handoff during an active turn", async ({ la
   await composer.fill("[[queue-hold]] Hold the environment while this runs")
   await composer.press("Enter")
   await expect(app.window.getByTestId("session-row-session_local_abcdefgh").getByText(/Thinking|Running/)).toBeVisible()
+  await openModelSettings(app.window)
   const environment = app.window.getByRole("button", { name: "Execution environment" })
   await expect(environment).toContainText("Local")
   await environment.click()
@@ -274,6 +279,7 @@ test("revokes an account-owned environment while preserving local sessions", asy
   await expect(app.window.getByText("buildbox", { exact: true })).toHaveCount(0)
   await app.window.getByRole("button", { name: "Close settings" }).click()
   await expect(sessionRow(app.window, "Local session")).toBeVisible()
+  await openModelSettings(app.window)
   await app.window.getByRole("button", { name: "Execution environment" }).click()
   await expect(app.window.getByRole("option", { name: /buildbox/ })).toHaveCount(0)
 })
@@ -325,6 +331,7 @@ test(`refreshes a ${status} remote-only endpoint and selects it on its target`, 
   await app.window.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(app.window.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled({ timeout: 15_000 })
   await app.window.getByRole("button", { name: "Close settings" }).click()
+  await openModelSettings(app.window)
   const model = app.window.getByRole("button", { name: /^Model:/ })
   await expect(model).toBeDisabled()
 
@@ -337,6 +344,8 @@ test(`refreshes a ${status} remote-only endpoint and selects it on its target`, 
   await app.window.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(app.window.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled({ timeout: 15_000 })
   await app.window.getByRole("button", { name: "Close settings" }).click()
+  // Settings closed the popover; reopen it before picking the model.
+  await openModelSettings(app.window)
   await model.click()
   await expect(app.window.getByText("Remote-only Claude", { exact: true })).toBeVisible()
   await app.window.getByRole("option", { name: /^Remote-only Opus/ }).click()

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { testProviderCatalog } from "../test-support.js"
 import { Composer } from "./composer.js"
@@ -19,6 +19,8 @@ describe("Composer model chip", () => {
       />
     )
 
+    fireEvent.click(screen.getByRole("button", { name: "Model settings" }))
+
     expect(screen.getByRole("button", { name: "Model: GPT Test" })).toBeTruthy()
   })
 
@@ -38,9 +40,17 @@ describe("Composer model chip", () => {
       (screen.getByPlaceholderText(/certification is stale/) as HTMLTextAreaElement).disabled
     ).toBe(true)
     expect(screen.queryByRole("button", { name: "Send ↵" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Model settings" }))
     expect(
       (screen.getByRole("button", { name: "Model: GPT Test" }) as HTMLButtonElement).disabled
     ).toBe(false)
     expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("shows the first-run line and Select model opens the popover when no model is chosen", () => {
+    render(<Composer providerCatalog={catalog} connectionId={null} modelId={null} />)
+    expect(screen.getByText("Choose a model to start")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Select model" }))
+    expect(screen.getByRole("button", { name: "Model: Choose model" })).toBeTruthy()
   })
 })

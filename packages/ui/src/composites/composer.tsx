@@ -689,12 +689,30 @@ export function Composer(props: ComposerProps) {
   }
 
   function renderInlineSettings() {
+    const noModel = modelCatalog !== undefined && !selectedModel
     return (<>
-              {onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
-              {modelCatalog && <ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} placement="top" className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
+              {modelCatalog && <MorphPopover open={settingsOpen} onOpenChange={setSettingsOpen}>
+                <MorphPopoverTrigger>
+                  {noModel
+                    ? <Button type="button" variant="ghost" size="sm" aria-label="Select model" className="gap-1.5 px-2 text-muted-foreground"><span>Choose a model to start</span><span className="text-text-bright">Select model</span></Button>
+                    : <Button type="button" variant="ghost" size="sm" aria-label="Model settings" className={cn("min-w-0 gap-1.5 px-2 text-muted-foreground", roomy ? "max-w-[220px]" : "max-w-[132px]")}><span className="truncate">{selectedModel?.label}</span>{reasoningEfforts.length > 0 && <SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />}</Button>}
+                </MorphPopoverTrigger>
+                <MorphPopoverContent side="top" align="start" sideOffset={8} radius={12} className="w-80 max-w-[calc(100vw-24px)] p-2">
+                  {modelPopoverBody()}
+                </MorphPopoverContent>
+              </MorphPopover>}
+              {!modelCatalog && onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
               <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
-              {(!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
+              {!modelCatalog && (!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
             </>)
+  }
+
+  function modelPopoverBody() {
+    return (<div className="space-y-1.5">
+      {modelCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
+      {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} inlineContent className="w-full max-w-none" /></div>}
+      {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
+    </div>)
   }
 
   function renderCompactSettings() {
@@ -710,7 +728,7 @@ export function Composer(props: ComposerProps) {
                   {modelCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
                   {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
                   <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Permission</div><ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} inlineContent className="w-full max-w-none" /></div>
-                  {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" inlineContent className="w-full max-w-none" /></div>}
+                  {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} inlineContent className="w-full max-w-none" /></div>}
                 </div>
               </MorphPopoverContent>
             </MorphPopover>)

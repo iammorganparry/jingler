@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { appShell, expect, test } from "./fixtures.js"
+import { appShell, expect, test, openModelSettings } from "./fixtures.js"
 
 const claudeBinary = join(import.meta.dirname, "fake-claude-enterprise-cli.mjs")
 const sessions = ({ repoPath }: { repoPath: string }) => [{
@@ -51,6 +51,7 @@ test("native Claude spend sums each resumed run's own cost", async ({ launchApp 
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
+  await openModelSettings(window)
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Claude Code", { exact: true })).toBeVisible()
   await window.getByRole("option", { name: /^Opus \(latest\)/ }).click()

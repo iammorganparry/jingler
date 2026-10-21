@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { appShell, expect, test } from "./fixtures.js"
+import { appShell, expect, test, openModelSettings } from "./fixtures.js"
 
 const binary = resolve(import.meta.dirname, "fake-claude-models-cli.mjs")
 
@@ -18,6 +18,8 @@ test("the Claude model picker lists what the installed CLI reports, not a fixed 
     }]
   })
   await expect(appShell(window)).toBeVisible()
+
+  await openModelSettings(window)
 
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Claude Code", { exact: true })).toBeVisible()

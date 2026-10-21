@@ -1,4 +1,4 @@
-import { appShell, expect, test, type SeedSession } from "./fixtures.js";
+import { appShell, expect, test, type SeedSession, openModelSettings } from "./fixtures.js";
 import { execFileSync } from "node:child_process";
 import {
   E2E_PI_CONNECTION_ID,
@@ -72,6 +72,7 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await expect(
     app.window.getByRole("heading", { name: "New session" }),
   ).toBeVisible();
+  await openModelSettings(app.window);
   await app.window
     .getByRole("button", { name: "Execution environment" })
     .click();
@@ -135,6 +136,7 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await expect(
     app.window.getByRole("button", { name: "Stop", exact: true }),
   ).toBeVisible();
+  await openModelSettings(app.window);
   await app.window
     .getByRole("button", { name: "Execution environment" })
     .click();
@@ -172,6 +174,7 @@ test("rejects an incompatible Cloud runtime before workspace provisioning", asyn
     });
     await expect(appShell(app.window)).toBeVisible();
     await app.window.getByTestId("new-session").click();
+    await openModelSettings(app.window)
     await app.window.getByRole("button", { name: "Execution environment" }).click();
     await app.window.getByRole("option", { name: "Cloud" }).click();
     await app.window.getByRole("button", { name: "Create workspace" }).click();
