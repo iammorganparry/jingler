@@ -6,7 +6,7 @@
  * does not unmount the agent stream.
  */
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   AgentEndpointCatalog,
   Environment,
@@ -15,6 +15,7 @@ import type {
   McpServer,
   Message,
   ProviderCatalog,
+  ProviderConnectionId,
   Session,
   SubagentFleetControlAction,
   SubagentFleetControlOutcome,
@@ -42,6 +43,11 @@ import {
   McpBrand,
   ResizeHandle,
   RuntimeRecoveryCard,
+  ProviderSignedOutCard,
+  ProviderResumeCard,
+  ProviderLimitBanner,
+  ProviderAccountChoice,
+  ProviderConnectSheet,
   PlanReview,
   useContainerWidth,
   OPEN_THREAD_SWITCHER_EVENT
@@ -100,7 +106,8 @@ import {
   rpcFailureReason,
   rpcFailureTag
 } from "./rpc-failure.js"
-import { providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
+import type { ProviderRecovery } from "./provider-recovery.js"
+import { providerLimitOf, providerRebindCandidatesOf, providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
 
@@ -245,6 +252,123 @@ const useEnvironmentHandoff = (sessionId: string, busy: boolean) => {
 }
 
 /** Resume card for a chat whose last run was cut off by a restart (#520). */
+/** Signed-out recovery: Reconnect opens the Connect sheet in place; Resume run follows once the catalog shows the account signed in again. */
+function ProviderSignedOutRecovery({
+  session,
+  chatId,
+  recovery
+}: {
+  session: Session
+  chatId: string
+  recovery: ProviderRecovery | undefined
+}) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
+  const signedOut = recovery?.kind === "signed-out" ? recovery : undefined
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["provider-catalog"] })
+  if (signedOut === undefined && reconnecting) {
+    return (
+      <ProviderResumeCard
+        onResume={() => {
+          setReconnecting(false)
+          getConversationActor(session, chatId).send({ type: "SEND", text: "Continue" })
+        }}
+      />
+    )
+  }
+  if (signedOut?.connectionId === undefined || signedOut.providerId === undefined) return null
+  const connectionId = signedOut.connectionId
+  const providerId = signedOut.providerId
+  return (
+    <>
+      <ProviderSignedOutCard
+        title={signedOut.title}
+        message={signedOut.message}
+        onReconnect={() => {
+          setReconnecting(true)
+          setOpen(true)
+        }}
+      />
+      <ProviderConnectSheet
+        open={open}
+        onOpenChange={setOpen}
+        providerId={providerId}
+        providerLabel={signedOut.title.replace(/ signed out.*$/u, "")}
+        onStartOauth={async () => {
+          await rpc.providerStartCodexLogin({ id: connectionId, targetId: "desktop", method: "browser" })
+          void refresh()
+          return connectionId
+        }}
+        onStartDeviceCode={async () => {
+          await rpc.providerStartCodexLogin({ id: connectionId, targetId: "desktop", method: "device-code" })
+          void refresh()
+          return connectionId
+        }}
+        onCancelLogin={async () => {
+          await rpc.providerCancelLogin(connectionId)
+          void refresh()
+        }}
+        onReopenBrowser={() => {}}
+        onSaveApiKey={async (apiKey) => {
+          try {
+            await rpc.providerSetApiKey({ id: connectionId, providerId, apiKey, targetId: "desktop" })
+            void refresh()
+            return { ok: true as const }
+          } catch (error) {
+            return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+          }
+        }}
+      />
+    </>
+  )
+}
+
+function ProviderRecoveryLane({
+  session,
+  chatId,
+  recovery,
+  limit,
+  candidates,
+  onOpenProviderSettings,
+  onUseAccount
+}: {
+  session: Session
+  chatId: string
+  recovery: ProviderRecovery | undefined
+  limit: string | undefined
+  candidates: ReadonlyArray<{ id: ProviderConnectionId; account: { displayLabel: string | null } | null }>
+  onOpenProviderSettings?: () => void
+  onUseAccount: (id: ProviderConnectionId) => void
+}) {
+  return (
+    <>
+      {recovery !== undefined && recovery.kind !== "signed-out" && (
+        <RuntimeRecoveryCard
+          title={recovery.title}
+          message={recovery.message}
+          actionLabel="Open providers"
+          onAction={() => onOpenProviderSettings?.()}
+        />
+      )}
+      <ProviderSignedOutRecovery session={session} chatId={chatId} recovery={recovery} />
+      {limit !== undefined && (
+        <ProviderLimitBanner
+          limit={limit}
+          onSwitchModel={() => onOpenProviderSettings?.()}
+          onSwitchAccount={() => onOpenProviderSettings?.()}
+        />
+      )}
+      {candidates.length > 1 && (
+        <ProviderAccountChoice
+          accounts={candidates.map(({ id, account }) => ({ id, label: account?.displayLabel ?? id }))}
+          onUse={(id) => onUseAccount(id as ProviderConnectionId)}
+        />
+      )}
+    </>
+  )
+}
+
 function InterruptedRunCard({ session, chatId, busy }: { session: Session; chatId: string; busy: boolean }) {
   const interrupted = useInterruptedChats().some((c) => c.sessionId === session.id && c.chatId === chatId)
   if (!interrupted || busy) return null
@@ -467,7 +591,7 @@ export function ConversationPane({
   const sessionEndpointCatalog = endpointCatalogForSession(session, environments, agentEndpointCatalog)
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
-  const { providerRecovery, rebindConnectionId, composerDisabledReason } = conversationProviderRecovery(
+  const { providerRecovery, rebindConnectionId, rebindCandidates, providerLimit, composerDisabledReason } = conversationProviderRecovery(
     session,
     convo,
     providerCatalog,
@@ -974,14 +1098,18 @@ export function ConversationPane({
               setHandoffAfterStop,
               setContinuationEnvironmentId
             })}
-      {typeof providerRecovery !== "string" && providerRecovery !== undefined && (
-        <RuntimeRecoveryCard
-          title={providerRecovery.title}
-          message={providerRecovery.message}
-          actionLabel="Open providers"
-          onAction={() => onOpenProviderSettings?.()}
-        />
-      )}
+      <ProviderRecoveryLane
+        session={session}
+        chatId={activeChat.id}
+        recovery={typeof providerRecovery === "string" ? undefined : providerRecovery}
+        limit={providerLimit}
+        candidates={rebindCandidates}
+        onOpenProviderSettings={onOpenProviderSettings}
+        onUseAccount={(connectionId) => {
+          if (convoProviderId == null || convoModelId == null) return
+          setModel("pi", piEndpointId(sessionTargetId, connectionId), connectionId, convoProviderId, convoModelId)
+        }}
+      />
       <InterruptedRunCard session={session} chatId={activeChat.id} busy={convo.busy} />
       <McpRecoveryCards
         servers={localMcpConfig.servers}
@@ -1626,7 +1754,7 @@ function conversationProviderRecovery(
       models.some((model) => model.id === convo.modelId && model.providerId === convo.providerId && model.selectable)
   ) === true
   if (nativeReady) {
-    return { providerRecovery: undefined, rebindConnectionId: undefined, composerDisabledReason: undefined }
+    return { providerRecovery: undefined, rebindConnectionId: undefined, rebindCandidates: [], providerLimit: undefined, composerDisabledReason: undefined }
   }
   const providerSelection = {
     ...convo,
@@ -1645,10 +1773,12 @@ function conversationProviderRecovery(
   const rebindConnectionId = providerCatalog
     ? providerRebindOf(providerCatalog, providerSelection)
     : undefined
+  const rebindCandidates = providerCatalog ? providerRebindCandidatesOf(providerCatalog, providerSelection) : []
+  const providerLimit = providerCatalog ? providerLimitOf(providerCatalog, convo.connectionId) : undefined
   const composerDisabledReason = typeof providerRecovery === "string"
     ? providerRecovery
     : providerRecovery?.message
-  return { providerRecovery, rebindConnectionId, composerDisabledReason }
+  return { providerRecovery, rebindConnectionId, rebindCandidates, providerLimit, composerDisabledReason }
 }
 
 function contextReadiness(context: Awaited<ReturnType<typeof rpc.contextState>> | undefined) {

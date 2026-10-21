@@ -556,3 +556,81 @@ test("detects native Claude during onboarding without a PI connection", async ({
   await launched.window.reload()
   await expect(appShell(launched.window)).toBeVisible()
 })
+
+test("a signed-out subscription offers Reconnect in place and never falls back to an API key", async ({
+  launchApp,
+}) => {
+  const connectionId = "codex-signed-out";
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-reauthentication",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+    },
+    sessions: [
+      {
+        id: "s_signed_out",
+        repo: "widget",
+        branch: "chore/signed-out",
+        title: "Signed out run",
+        status: "idle",
+        diff: { added: 0, removed: 0 },
+        prNumber: null,
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: "2026-09-26T00:00:00.000Z",
+        chats: [
+          {
+            id: "c_signed_out",
+            title: null,
+            createdAt: "2026-09-26T00:00:00.000Z",
+            updatedAt: "2026-09-26T00:00:00.000Z",
+            connectionId,
+            providerId: "openai-codex",
+            modelId: "openai-codex/gpt-5.6-sol",
+          },
+        ],
+      },
+    ],
+    seed: ({ home }) => {
+      const runtime = join(home, "jingler", "runtime");
+      mkdirSync(runtime, { recursive: true });
+      writeFileSync(
+        join(runtime, "provider-connections.json"),
+        JSON.stringify([
+          {
+            id: connectionId,
+            providerId: "openai-codex",
+            authKind: "openai-codex-oauth",
+            account: { fingerprint: "signed-out", displayLabel: null },
+            targetId: "desktop",
+            status: "expired",
+            subscription: {
+              entitlement: "active",
+              planLabel: "Test subscription",
+              expiresAt: null,
+              quotaLabel: null,
+              rateLimitLabel: null,
+              confirmedBillingRoute: "subscription",
+            },
+            createdAt: "2026-08-12T09:32:36.863Z",
+            updatedAt: "2026-08-12T09:32:36.863Z",
+          },
+        ]),
+      );
+    },
+  });
+
+  await window.getByText("Signed out run").first().click();
+  const card = window.getByRole("region", { name: "Provider signed out" });
+  await expect(card).toContainText("signed out during this run");
+  await expect(card).toContainText("never falls back to an API key");
+  await card.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await window.getByRole("dialog").getByRole("button", { name: "Open browser" }).click();
+  await expect(
+    window.getByRole("region", { name: "Provider reconnected" }).getByRole("button", { name: "Resume run", exact: true }),
+  ).toBeVisible();
+});
