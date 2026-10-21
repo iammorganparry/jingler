@@ -948,6 +948,36 @@ describe("RPC handlers", () => {
       expect(patch).toEqual(EMPTY_REVIEW_DIFF);
     });
 
+    it("refuses a workspacePath git does not list as one of the session's worktrees", async () => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "scoped",
+            repo: "widget",
+            branch: "feature",
+            title: "Scoped",
+            status: "idle",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: "2026-08-08T10:00:00.000Z",
+            worktreePath: dir,
+            chats: [],
+            activeChatId: null,
+          },
+        ]),
+      );
+      const patch = await Effect.runPromise(
+        sessionDiff("scoped", undefined, "/etc").pipe(
+          Effect.provide(Layer.mergeAll(base, SessionStore.Default, WorkspaceService.Default)),
+        ),
+      );
+      expect(patch).toEqual(EMPTY_REVIEW_DIFF);
+    });
+
     it("surfaces git failures instead of reporting no changes", async () => {
       mkdirSync(root, { recursive: true });
       writeFileSync(

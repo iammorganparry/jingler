@@ -118,7 +118,8 @@ import {
   scanClaudeCodeSessions,
   scanCodexSessions,
   scanConductorSessions,
-  scanT3CodeSessions
+  scanT3CodeSessions,
+  runString
 } from "@jingler/cli-adapters";
 
 import { appendFileSync } from "node:fs";
@@ -619,10 +620,18 @@ const mcpReveal = () =>
 export const sessionDiff = (id: string, checkoutId?: string, workspacePath?: string) =>
   Effect.gen(function* () {
     const session = yield* resolveCheckoutSession(id, checkoutId);
-    // A subagent worktree: only for a known session, and only an absolute path.
+    // A subagent worktree: only one git lists as a worktree of this session's
+    // repo, so the renderer can't ask for a diff of an arbitrary directory.
     if (workspacePath !== undefined) {
-      if (!session || !isAbsolute(workspacePath)) return EMPTY_REVIEW_DIFF;
-      return yield* WorkspaceService.diff(workspacePath);
+      const anchor = session?.worktreePath ?? session?.repoPath;
+      if (!anchor || !isAbsolute(workspacePath)) return EMPTY_REVIEW_DIFF;
+      const porcelain = yield* runString("git", "-C", anchor, "worktree", "list", "--porcelain");
+      const target = resolve(workspacePath);
+      const known = (porcelain ?? "")
+        .split("\n")
+        .some((line) => line.startsWith("worktree ") && resolve(line.slice(9)) === target);
+      if (!known) return EMPTY_REVIEW_DIFF;
+      return yield* WorkspaceService.diff(target);
     }
     if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
     return yield* WorkspaceService.diff(session.worktreePath);
