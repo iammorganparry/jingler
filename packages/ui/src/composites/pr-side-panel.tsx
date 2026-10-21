@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react"
-import type { PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@jingler/core"
+import type { IssueReference, PrLabel, PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@jingler/core"
 import { conflictResolutionPrompt } from "@jingler/core"
 import type { BadgeProps } from "../components/badge.js"
 import { cn } from "../lib/cn.js"
@@ -10,7 +10,7 @@ import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { Spinner } from "../components/loading.js"
 import { MergeSplitButton } from "./merge-split-button.js"
-import { PrCheckRow } from "./pr-check-row.js"
+import type { PrStackNav } from "./pr-stack-rail.js"
 import { ReviewFindings, type ReviewFindingsProps } from "./review-findings.js"
 import { WorkflowSection, type WorkflowSectionProps } from "./workflow-section.js"
 
@@ -26,6 +26,38 @@ const reviewerBadge: Record<PrReviewKind, { tone: BadgeProps["tone"]; label: str
 const BEHIND_BLOCKER = "Branch is out of date with the base"
 /** Matches `collectMergeBlockers`'s "Merge conflicts" string in `github-mappers.ts`. */
 const CONFLICTS_BLOCKER = "Merge conflicts"
+
+/** A single PR label chip, tinted with the label's own colour when known. */
+export function LabelChip({ label }: { label: PrLabel }) {
+  if (!label.color) {
+    return (
+      <Badge tone="neutral" size="sm">
+        {label.name}
+      </Badge>
+    )
+  }
+  const hex = `#${label.color.replace(/^#/, "")}`
+  return (
+    <span
+      className="rounded-md px-[9px] py-0.5 text-[10.5px]"
+      style={{ color: hex, backgroundColor: `${hex}22` }}
+    >
+      {label.name}
+    </span>
+  )
+}
+
+function RailSection({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex flex-none flex-col gap-[11px] border-b border-hairline p-4">
+      <div className="flex items-center gap-2">
+        <Eyebrow className="flex-1">{title}</Eyebrow>
+        {aside}
+      </div>
+      {children}
+    </div>
+  )
+}
 
 function BlockerRow({ blocker, action }: { blocker: string; action?: ReactNode }) {
   return (
@@ -94,6 +126,10 @@ export interface PrSidePanelProps {
    * left the PR body about 88px of reading column after its own 60px gutters.
    */
   width?: number
+  /** The issue this PR closes — the section is hidden without one. */
+  linkedIssue?: IssueReference
+  /** The session PR stack — the section is hidden unless there are two or more layers. */
+  stack?: Pick<PrStackNav, "layers" | "selected" | "onSelect">
   /** Hide session-bound lifecycle and merge controls. */
   readOnly?: boolean
   /** Extra classes — how the caller turns the rail into a floating sheet. */
@@ -119,7 +155,9 @@ export function PrSidePanel({
   onResolveConflicts,
   review,
   workflow,
-  width = 352,
+  width = 280,
+  linkedIssue,
+  stack,
   readOnly = false,
   className
 }: PrSidePanelProps) {
@@ -289,30 +327,60 @@ function renderConflictActions() {
       )}
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-      {/* Reviewers */}
-      <div className="flex flex-none flex-col gap-[11px] border-b border-hairline p-4">
-        <Eyebrow>Reviewers</Eyebrow>
-        {pr.reviewers.length === 0 ? (
-          <span className="text-[12px] text-dim">No reviewers yet</span>
-        ) : (
-          pr.reviewers.map((r) => <ReviewerRow key={r.login} reviewer={r} />)
-        )}
-      </div>
+      {pr.reviewers.length > 0 && (
+        <RailSection title="Reviewers">
+          {pr.reviewers.map((r) => <ReviewerRow key={r.login} reviewer={r} />)}
+        </RailSection>
+      )}
 
-      {/* Checks */}
-      <div className="flex flex-none flex-col gap-3 border-b border-hairline p-4">
-        <div className="flex items-center gap-2">
-          <Eyebrow className="flex-1">Checks</Eyebrow>
-          {failing > 0 && (
-            <span className="font-mono text-[10.5px] text-red">{failing} failing</span>
-          )}
-        </div>
-        {pr.checks.length === 0 ? (
-          <span className="text-[12px] text-dim">No checks reported</span>
-        ) : (
-          pr.checks.map((c) => <PrCheckRow key={c.name} check={c} />)
-        )}
-      </div>
+      {pr.labels.length > 0 && (
+        <RailSection title="Labels">
+          <div className="flex flex-nowrap gap-1.5 overflow-hidden">
+            {pr.labels.map((label) => <LabelChip key={label.name} label={label} />)}
+          </div>
+        </RailSection>
+      )}
+
+      {pr.checks.length > 0 && (
+        <RailSection
+          title="Checks"
+          aside={failing > 0 && <span className="font-mono text-[10.5px] text-red">{failing} failing</span>}
+        >
+          <span className="text-[12px] text-text">
+            {pr.checks.filter((c) => c.status === "pass").length}/{pr.checks.length} passing
+          </span>
+        </RailSection>
+      )}
+
+      {linkedIssue && (
+        <RailSection title="Linked issue">
+          <a
+            href={linkedIssue.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[12px] text-text hover:text-text-bright"
+          >
+            <span className="font-mono text-dim">{linkedIssue.identifier}</span> {linkedIssue.title}
+          </a>
+        </RailSection>
+      )}
+
+      {stack && stack.layers.length > 1 && (
+        <RailSection title="Stack">
+          {stack.layers.map((layer) => (
+            <Button
+              key={layer.number}
+              variant={layer.number === stack.selected ? "secondary" : "ghost"}
+              size="sm"
+              className="justify-start"
+              onClick={() => stack.onSelect(layer.number)}
+            >
+              #{layer.number}
+              {layer.title ? ` ${layer.title}` : ""}
+            </Button>
+          ))}
+        </RailSection>
+      )}
 
       {/* Workflow — collapsed by default; omitted entirely when there's nothing to show. */}
       {workflow && <WorkflowSection {...workflow} />}

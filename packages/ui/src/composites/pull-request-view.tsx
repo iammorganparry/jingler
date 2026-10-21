@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react"
 import type {
-  PrLabel,
+  IssueReference,
   PrMergeMethod,
   SessionPr,
   PrReviewThread,
@@ -13,7 +13,8 @@ import type {
 import { GitCommit, GitPullRequest, PanelRight } from "lucide-react"
 import { Stepper } from "../components/status-row.js"
 import { cn } from "../lib/cn.js"
-import { atLeast, useWidthTier } from "../hooks/width-tier.js"
+import { useContainerWidth } from "../hooks/use-container-width.js"
+import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from "../components/drawer.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
@@ -30,7 +31,7 @@ import { PrCheckRow } from "./pr-check-row.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { PrReviewGroup } from "./pr-review-group.js"
 import { ReadinessChecklist } from "./readiness-checklist.js"
-import { PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
+import { LabelChip, PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
 import { WorkflowSection } from "./workflow-section.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
 import { PrStackRail, type PrStackNav } from "./pr-stack-rail.js"
@@ -54,26 +55,6 @@ const evidenceTabs = (pr: PullRequest, onOpenFiles: (() => void) | undefined, fi
   { value: "files", label: `Files ${pr.changedFiles}`, disabled: !(onOpenFiles ?? filesPanel) },
   { value: "checks", label: checksLabel(pr) }
 ]
-
-/** A single PR label chip, tinted with the label's own colour when known. */
-function LabelChip({ label }: { label: PrLabel }) {
-  if (!label.color) {
-    return (
-      <Badge tone="neutral" size="sm">
-        {label.name}
-      </Badge>
-    )
-  }
-  const hex = `#${label.color.replace(/^#/, "")}`
-  return (
-    <span
-      className="rounded-md px-[9px] py-0.5 text-[10.5px]"
-      style={{ color: hex, backgroundColor: `${hex}22` }}
-    >
-      {label.name}
-    </span>
-  )
-}
 
 /**
  * One entry in the merged timeline: either a top-level review / issue comment,
@@ -230,6 +211,8 @@ export interface PullRequestViewProps {
   onResolveConflicts?: PrSidePanelProps["onResolveConflicts"]
   /** The workspace setup/run lifecycle — collapsed Workflow section in the rail. */
   workflow?: PrSidePanelProps["workflow"]
+  /** The issue this PR closes, shown in the rail. */
+  linkedIssue?: IssueReference
 }
 
 /**
@@ -268,7 +251,24 @@ function PrDescriptionCard({ pr, repository }: { pr: PullRequest; repository?: s
   )
 }
 
-export function PullRequestView({
+/** Below this container width the rail collapses into a sheet. */
+const RAIL_COLLAPSE_BELOW = 900
+
+/**
+ * Measures its own box (not the window) so a narrow split pane collapses the
+ * rail even on a wide display. Width 0 is the pre-measurement frame: stay docked.
+ */
+export function PullRequestView(props: PullRequestViewProps) {
+  const [ref, width] = useContainerWidth<HTMLDivElement>()
+  return (
+    <div ref={ref} className="flex min-h-0 min-w-0 flex-1">
+      <PullRequestViewBody {...props} compact={width !== 0 && width < RAIL_COLLAPSE_BELOW} />
+    </div>
+  )
+}
+
+function PullRequestViewBody({
+  compact,
   pr,
   connected,
   connectionMessage,
@@ -314,30 +314,23 @@ export function PullRequestView({
   review,
   conflictedFiles,
   onResolveConflicts,
-  workflow
-}: PullRequestViewProps) {
+  workflow,
+  linkedIssue
+}: PullRequestViewProps & { compact: boolean }) {
          function renderDetailsToggle() {
-           return (!roomy && (
-        <button
-          type="button"
-          aria-label={railOpen ? "Close pull request details" : "Pull request details"}
-          aria-pressed={railOpen}
-          title={
-            railOpen
-              ? "Close details"
-              : readOnly && !onMerge
-                ? "Reviewers and checks"
-                : "Reviewers, checks and merge"
-          }
-          onClick={() => setRailOpen((v) => !v)}
-          className={cn(
-            "absolute right-2 top-2 z-40 flex size-7 items-center justify-center rounded-md border border-line bg-sunken shadow-lg transition-colors",
-            railOpen ? "text-blue" : "text-dim hover:text-text-bright"
-          )}
-        >
-          <PanelRight size={15} />
-        </button>
-      ))
+           return (
+        <DrawerTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Pull request details"
+            title={readOnly && !onMerge ? "Reviewers and checks" : "Reviewers, checks and merge"}
+            className="absolute right-2 top-2 z-40 size-7"
+          >
+            <PanelRight size={15} />
+          </Button>
+        </DrawerTrigger>
+      )
          }
 
   function renderPullRequestBody(pr: NonNullable<PullRequestViewProps["pr"]>) {
@@ -584,7 +577,6 @@ return (evidence === "checks" ? (
   // Below `wide` the 352px rail floats instead of docking: the centre column is a
   // 760px reading measure with 60px of gutter, so a docked rail in a 500px pane
   // left roughly 88px of it — narrower than the PR title.
-  const roomy = atLeast(useWidthTier(), "wide")
   const [railOpen, setRailOpen] = useState(false)
   // Base branch choice for stacking PRs
   const [selectedBase, setSelectedBase] = useState<string | undefined>(() => {
@@ -594,16 +586,8 @@ return (evidence === "checks" ? (
   const [evidence, setEvidence] = useState<PrEvidence>("overview")
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   useEffect(() => {
-    if (roomy) setRailOpen(false)
-  }, [roomy])
-  useEffect(() => {
-    if (!railOpen) return
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setRailOpen(false)
-    }
-    window.addEventListener("keydown", close)
-    return () => window.removeEventListener("keydown", close)
-  }, [railOpen])
+    if (!compact) setRailOpen(false)
+  }, [compact])
 
   const loadView = renderLoadState(pr, connected, busy, loadError, onRetryLoad)
   if (loadView) return loadView
@@ -628,6 +612,33 @@ return (evidence === "checks" ? (
   const feed = buildFeed(pr)
   const repository = /github\.com\/([^/]+\/[^/]+)\//.exec(pr.url)?.[1]
 
+  const sidePanel = (
+    <PrSidePanel
+        className={compact ? "min-h-0 flex-1 border-l-0" : undefined}
+        pr={pr}
+        connected={connected}
+        onMerge={onMerge}
+        merging={merging}
+        mergeError={mergeError}
+        onClosePr={onClosePr ? () => setCloseConfirmOpen(true) : undefined}
+        closing={closing}
+        closeError={closeError}
+        onMarkReady={onMarkReady}
+        markingReady={markingReady}
+        markReadyError={markReadyError}
+        onUpdateBranch={onUpdateBranch}
+        updatingBranch={updatingBranch}
+        updateBranchError={updateBranchError}
+        review={review}
+        conflictedFiles={conflictedFiles}
+        onResolveConflicts={onResolveConflicts}
+        workflow={workflow}
+        readOnly={readOnly && !onMerge}
+        linkedIssue={linkedIssue}
+        stack={stack}
+      />
+  )
+
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1">
       {onClosePr && (
@@ -651,34 +662,19 @@ return (evidence === "checks" ? (
       {/* Centre column: header + timeline + sticky composer */}
       {renderPullRequestBody(pr)}
 
-      {/* Right rail — docked when there's room, a floating sheet when not. */}
-      {renderDetailsToggle()}
-      <PrSidePanel
-        // The rail holds the merge button, so it can't just be dropped at narrow
-        // widths — it has to remain reachable, which is what the toggle above is
-        // for. Hidden rather than unmounted so its scroll position and merge-
-        // method choice survive being closed.
-        className={cn(!roomy && "absolute inset-y-0 right-0 z-30 shadow-2xl", !(roomy || railOpen) && "hidden")}
-        pr={pr}
-        connected={connected}
-        onMerge={onMerge}
-        merging={merging}
-        mergeError={mergeError}
-        onClosePr={onClosePr ? () => setCloseConfirmOpen(true) : undefined}
-        closing={closing}
-        closeError={closeError}
-        onMarkReady={onMarkReady}
-        markingReady={markingReady}
-        markReadyError={markReadyError}
-        onUpdateBranch={onUpdateBranch}
-        updatingBranch={updatingBranch}
-        updateBranchError={updateBranchError}
-        review={review}
-        conflictedFiles={conflictedFiles}
-        onResolveConflicts={onResolveConflicts}
-        workflow={workflow}
-        readOnly={readOnly && !onMerge}
-      />
+      {/* Right rail — docked at 280px, or a sheet below 900px opened from the header button. */}
+      {compact ? (
+        <Drawer open={railOpen} onOpenChange={setRailOpen}>
+          {renderDetailsToggle()}
+          <DrawerContent className="w-[280px]">
+            <DrawerTitle className="sr-only">Pull request details</DrawerTitle>
+            <DrawerDescription className="sr-only">Reviewers, checks and merge</DrawerDescription>
+            {sidePanel}
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        sidePanel
+      )}
     </div>
   )
 }
