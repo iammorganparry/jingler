@@ -24,7 +24,7 @@ const publish = (patch: Partial<Snapshot> = {}) => {
   const next = { ...snapshot, offline: isOffline({ navigatorOnline, consecutiveRpcFailures }), ...patch }
   if (next.offline === snapshot.offline && next.relayQuotaReached === snapshot.relayQuotaReached) return
   snapshot = next
-  listeners.forEach((l) => l())
+  for (const l of listeners) l()
 }
 publish()
 
