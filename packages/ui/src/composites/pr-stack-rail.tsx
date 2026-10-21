@@ -1,5 +1,6 @@
-import type { PrCheckStatus, PrState } from "@jingler/core"
+import { mergedBaseOf, restackPlan, type PrCheckStatus, type PrState } from "@jingler/core"
 import { Check, X } from "lucide-react"
+import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Loader } from "../components/beui/loader.js"
@@ -34,6 +35,10 @@ export interface PrStackNav {
   readonly mergeError: string | null
   /** Merge every unmerged layer base-up, one RPC per layer; stops on the first failure. */
   readonly onMergeStack: () => void
+  /** True while `Github.restack` is running. */
+  readonly restacking?: boolean
+  /** Retarget and rebase every layer above `mergedPr` (from `restackPlan`). */
+  readonly onRestack?: (mergedPr: number) => void
 }
 
 /** Node on the rail: a tick for merged, a cross for failing checks, otherwise a hollow ring. Red is the only colour. */
@@ -65,6 +70,8 @@ export function PrStackRail({
   merged = 0,
   mergeError = null,
   onMergeStack,
+  restacking = false,
+  onRestack,
   className
 }: {
   /** Ordered bottom layer first. */
@@ -76,18 +83,32 @@ export function PrStackRail({
   merged?: number
   mergeError?: string | null
   onMergeStack?: () => void
+  restacking?: boolean
+  /** Omit to hide the restack actions. */
+  onRestack?: (mergedPr: number) => void
   className?: string
 }) {
+  const plan = onRestack ? restackPlan(layers) : null
   const everyLayerMerged = layers.length > 0 && layers.every((layer) => layer.state === "merged")
   return (
     <nav aria-label="Pull request stack" data-testid="pr-stack-rail" className={cn("relative flex w-[220px] flex-none flex-col", className)}>
       {/* The connector runs through the node centres (px-2 + half of size-3.5). */}
       <span aria-hidden className="absolute bottom-[18px] left-[15px] top-[18px] w-px bg-line" />
-      {layers.map((layer) => {
+      {plan && (
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[11px] text-dim">Stack</span>
+          <Button variant="secondary" size="sm" data-testid="restack-cta" disabled={restacking} onClick={() => onRestack?.(plan.mergedPr)}>
+            {restacking && <Loader size={13} />}
+            {restacking ? "Restacking…" : "Restack"}
+          </Button>
+        </div>
+      )}
+      {layers.map((layer, index) => {
         const current = layer.number === selected
+        const baseMerged = mergedBaseOf(layers, index) !== null
         return (
+          <div key={layer.number} className="flex flex-col">
           <Button
-            key={layer.number}
             variant="ghost"
             aria-current={current ? "true" : undefined}
             data-testid={`pr-stack-layer-${layer.number}`}
@@ -101,8 +122,21 @@ export function PrStackRail({
             <LayerNode layer={layer} />
             <span className="font-mono text-[12px]">#{layer.number}</span>
             <span className="min-w-0 flex-1 truncate text-[12px]">{layer.title ?? layer.branch}</span>
-            {layer.state && <span className="text-[11px] text-dim">{PR_STATE_LABEL[layer.state]}</span>}
+            {baseMerged ? <Badge tone="yellow" size="xs">Base merged</Badge> : layer.state && <span className="text-[11px] text-dim">{PR_STATE_LABEL[layer.state]}</span>}
           </Button>
+          {baseMerged && onRestack && (
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid={`pr-stack-rebase-${layer.number}`}
+              disabled={restacking}
+              onClick={() => onRestack(mergedBaseOf(layers, index)!)}
+              className="ml-6 h-7 justify-start px-2 text-[11px]"
+            >
+              Rebase onto main
+            </Button>
+          )}
+          </div>
         )
       })}
       {/*

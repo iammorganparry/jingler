@@ -160,3 +160,40 @@ test("Merge stack CTA merges layers base-up and shows progress", async ({ launch
   await expect.poll(() => githubServer.operations.filter((op) => op.startsWith("pr merge")).length, { timeout: 15_000 }).toBe(3)
   await expect(window.getByTestId("merge-stack-cta")).toHaveText("Merge stack")
 })
+
+test("Restack retargets and rebases every upper layer after the base merges", async ({ launchApp }) => {
+  const pr = (number: number, headRefName: string, baseRefName: string, state: string) => ({
+    number, title: `Layer ${number}`, headRefName, baseRefName, state, author: { login: "e2e-user" },
+    checks: [{ name: `check-${number}`, conclusion: "success" }]
+  })
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{
+      id: "s_restack", repo: "widget", githubSlug: "acme/widget", branch: "stack/ui", title: "Stack session", status: "idle",
+      diff: { added: 0, removed: 0 }, prNumber: 482, costUsd: 0, tokens: 0, updatedAt: "2026-10-12T10:00:00.000Z",
+      prs: [
+        { number: 480, branch: "stack/model", base: "main" },
+        { number: 481, branch: "stack/api", base: "stack/model" },
+        { number: 482, branch: "stack/ui", base: "stack/api" }
+      ],
+      githubInstallationId: "101", githubRepositoryId: "301", worktreePath: context.repoPath
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [pr(480, "stack/model", "main", "MERGED"), pr(481, "stack/api", "stack/model", "OPEN"), pr(482, "stack/ui", "stack/api", "OPEN")]
+    }
+  })
+  await window.getByTestId("session-row-s_restack").click()
+  await window.getByTestId("header-link-pr").click()
+  await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
+
+  await expect(window.getByTestId("pr-stack-layer-481")).toContainText("Base merged")
+  await expect(window.getByTestId("pr-stack-rebase-481")).toBeVisible()
+  await window.getByTestId("restack-cta").click()
+
+  // GAP: the fake GitHub cannot serve the installation-token fetch (git URL rewrites are refused), so the
+  // retarget/rebase itself is covered by rpc-restack.test.ts; here we assert the action runs and settles.
+  await expect(window.getByTestId("restack-cta")).toHaveText("Restack")
+})
