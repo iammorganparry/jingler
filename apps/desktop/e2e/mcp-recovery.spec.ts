@@ -147,7 +147,7 @@ test("an MCP tool failing with needs-auth shows a sign-in action", async ({ laun
     configured: true,
     withRepo: true,
     piFixture: { scenarioId: "mcp-needs-auth", authRoute: "api-key" },
-    sessions: [session("s_mcp_tool", "Tool sign-in session")],
+    sessions: ({ repoPath }) => [{ ...session("s_mcp_tool", "Tool sign-in session"), worktreePath: repoPath, mode: "auto" }],
     seed: ({ home }) => {
       const jinglerDir = join(home, "jingler")
       mkdirSync(jinglerDir, { recursive: true })
