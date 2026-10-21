@@ -79,7 +79,9 @@ export function PullRequestPane({
     error: reviewError,
     runReview,
     sendFindingToAgent,
-    sentFindingIds
+    sentFindingIds,
+    dismissedFindingIds,
+    dismissFinding
   } = useAdversarialReview(session, { connected })
 
   return (
@@ -133,7 +135,9 @@ export function PullRequestPane({
         error: reviewError,
         onRun: runReview,
         onSendFindingToAgent: sendFindingToAgent,
-        sentFindingIds
+        sentFindingIds,
+        dismissedFindingIds,
+        onDismissFinding: dismissFinding
       }}
       workflow={{
         lifecycle: workflow.lifecycle,

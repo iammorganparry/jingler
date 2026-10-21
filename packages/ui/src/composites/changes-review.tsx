@@ -39,7 +39,7 @@ import {
   type AgentTreeChanges
 } from "./review-agent-scope.js"
 import { ReviewFileRail } from "./review-file-rail.js"
-import { ReviewFindingRow, rankFindings } from "./review-findings.js"
+import { FindingsList, rankFindings } from "./review-findings.js"
 import { createReviewCodeFiles, ReviewCodeView } from "./review-code-view.js"
 import { narrowToTurn, type ReviewTurn } from "./review-turns.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
@@ -490,6 +490,8 @@ export interface ReviewFileDiffProps {
   readonly reviewThreads?: readonly PrReviewThread[]
   readonly review?: AdversarialReview | null
   readonly sentFindingIds?: ReadonlySet<string>
+  readonly dismissedFindingIds?: ReadonlySet<string>
+  readonly onDismissFinding?: (findingId: string, dismissed?: boolean) => void
   readonly connected: boolean
   readonly routeTargetSession: string | null
   readonly focused: boolean
@@ -520,6 +522,8 @@ export function ReviewFileDiff({
   reviewThreads = [],
   review = null,
   sentFindingIds,
+  dismissedFindingIds,
+  onDismissFinding,
   connected,
   routeTargetSession,
   focused,
@@ -587,6 +591,8 @@ export function ReviewFileDiff({
           findingsByPath={findingsByPath}
           review={activeReview}
           sentFindingIds={sentFindingIds}
+          dismissedFindingIds={dismissedFindingIds}
+          onDismissFinding={onDismissFinding}
           connected={connected}
           routeTargetSession={routeTargetSession}
           compactActions={false}
@@ -615,6 +621,8 @@ export interface ReviewSidebarProps {
   readonly connectionActionLabel?: string
   readonly review?: AdversarialReview | null
   readonly sentFindingIds?: ReadonlySet<string>
+  readonly dismissedFindingIds?: ReadonlySet<string>
+  readonly onDismissFinding?: (findingId: string, dismissed?: boolean) => void
   readonly routeTargetSession: string | null
   /** Paths that are part of this review; findings elsewhere are "general". */
   readonly paths: ReadonlySet<string>
@@ -637,6 +645,8 @@ export function ReviewSidebar({
   connectionActionLabel = "Connect GitHub",
   review = null,
   sentFindingIds,
+  dismissedFindingIds,
+  onDismissFinding,
   routeTargetSession,
   paths,
   onConnectGithub,
@@ -676,16 +686,15 @@ export function ReviewSidebar({
           <span className="text-[11px] font-semibold uppercase tracking-[0.4px] text-dim">
             Review · general
           </span>
-          {general.map((finding) => (
-            <ReviewFindingRow
-              key={finding.id}
-              finding={finding}
-              sent={sentFindingIds?.has(finding.id) ?? false}
-              canRoute={routeTargetSession !== null}
-              review={activeReview}
-              onSendToAgent={onSendFindingToAgent}
-            />
-          ))}
+          <FindingsList
+            findings={general}
+            review={activeReview}
+            sentFindingIds={sentFindingIds}
+            canRoute={routeTargetSession !== null}
+            onSendFindingToAgent={onSendFindingToAgent}
+            dismissedFindingIds={dismissedFindingIds}
+            onDismissFinding={onDismissFinding}
+          />
         </div>
       ) : null}
       <div className={cn("flex min-h-0 flex-1", drafts.length === 0 && "hidden")}>

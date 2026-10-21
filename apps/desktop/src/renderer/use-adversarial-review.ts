@@ -15,6 +15,7 @@ import { getConversationActor } from "./conversation-registry.js"
 import { markRouted, useRoutedEntries } from "./routed-store.js"
 import { resolveSentIds, reviewQueryKey, routedKey } from "./review-routing.js"
 import { routeReviewToCurrentAgent } from "./auto-route.js"
+import { emitFindingDismissed } from "./finding-dismiss-toast.js"
 import { findingFingerprint } from "./dismissed-findings-store.js"
 import { setFindingDismissed, useSessionReviewState } from "./review-store.js"
 
@@ -196,7 +197,14 @@ export function useAdversarialReview(
   const dismissFinding = useCallback(
     (findingId: string, dismissed = true) => {
       const finding = review?.findings.find((f) => f.id === findingId)
-      if (finding) setFindingDismissed(session.id, session.prNumber, findingFingerprint(finding), dismissed)
+      if (!finding) return
+      const fingerprint = findingFingerprint(finding)
+      setFindingDismissed(session.id, session.prNumber, fingerprint, dismissed)
+      if (dismissed) {
+        emitFindingDismissed(finding.title, () =>
+          setFindingDismissed(session.id, session.prNumber, fingerprint, false)
+        )
+      }
     },
     [review, session.id, session.prNumber]
   )
