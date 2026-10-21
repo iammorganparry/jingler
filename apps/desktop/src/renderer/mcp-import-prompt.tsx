@@ -18,6 +18,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  ImportCard,
+  deriveImportCard,
   McpImportResult,
   McpServerDetailDialog,
   type McpImportResultRow,
@@ -27,25 +29,9 @@ import {
 import { useMachine } from "@xstate/react"
 import { ServerCog } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { resolveImportDismissed } from "./mcp-import-dismissal.js"
 
-const COMPLETED_KEY = "jingler:mcp-import-prompt:v1"
 const SOURCES: ReadonlyArray<McpImportSourceId> = ["claude", "codex", "opencode"]
-
-const completed = (): boolean => {
-  try {
-    return localStorage.getItem(COMPLETED_KEY) === "done"
-  } catch {
-    return false
-  }
-}
-
-const markCompleted = (): void => {
-  try {
-    localStorage.setItem(COMPLETED_KEY, "done")
-  } catch {
-    // The prompt may repeat when storage is unavailable; imports still work.
-  }
-}
 
 type Candidate = McpImportCandidateView & { readonly conflict: boolean }
 
@@ -82,7 +68,9 @@ export function McpImportPrompt({
   apply,
   probe,
   startAuthorization,
-  logTail
+  logTail,
+  isDismissed,
+  persistDismissed
 }: {
   readonly ready: boolean
   readonly servers: ReadonlyArray<McpServer>
@@ -95,7 +83,10 @@ export function McpImportPrompt({
   readonly probe: () => Promise<ReadonlyArray<McpServerStatus>>
   readonly startAuthorization: (name: string) => Promise<void>
   readonly logTail: (name: string) => Promise<{ readonly lines: ReadonlyArray<string> }>
+  readonly isDismissed: () => Promise<boolean>
+  readonly persistDismissed: () => Promise<void>
 }) {
+  const [reviewOpen, setReviewOpen] = useState(false)
   const started = useRef(false)
   const serversRef = useRef(servers)
   serversRef.current = servers
@@ -140,21 +131,39 @@ export function McpImportPrompt({
   const candidates = state.context.candidates as ReadonlyArray<Candidate>
 
   useEffect(() => {
-    if (!ready || started.current || completed()) return
+    if (!ready || started.current) return
     started.current = true
-    send({ type: "START" })
-  }, [ready, send])
+    void resolveImportDismissed(isDismissed, persistDismissed).then((dismissed) => {
+      if (!dismissed) send({ type: "START" })
+    })
+  }, [ready, send, isDismissed, persistDismissed])
 
-  const open = state.matches("reviewing") || state.matches("detectFailed") || state.matches("importing") || state.matches("importFailed") || state.matches("done")
+  const open = reviewOpen && (state.matches("reviewing") || state.matches("detectFailed") || state.matches("importing") || state.matches("importFailed") || state.matches("done"))
   const done = state.matches("done")
 
 
   const dismiss = () => {
-    markCompleted()
+    setReviewOpen(false)
+    void persistDismissed().catch(() => {})
     send({ type: "DISMISS" })
   }
 
+  const card = deriveImportCard({
+    machineState: String(state.value),
+    count: candidates.length,
+    error: state.context.error
+  })
+
   return (
+    <>
+    {card !== null && !reviewOpen ? (
+      <ImportCard
+        state={card}
+        onReview={() => setReviewOpen(true)}
+        onRetry={() => send({ type: "RETRY" })}
+        onDismiss={dismiss}
+      />
+    ) : null}
     <Dialog open={open} onOpenChange={(next) => !next && dismiss()}>
       <DialogContent>
         <DialogHeader className="items-start gap-3 px-5 py-4 pr-14">
@@ -243,5 +252,6 @@ export function McpImportPrompt({
         oauthAccount={null}
       />
     </Dialog>
+    </>
   )
 }

@@ -791,3 +791,15 @@ export const disposeChatActor = (sessionId: string, chatId: string): void => {
   publishChatActivity(sessionId, chatId, null)
   recomputeSession(sessionId)
 }
+
+/** Home › Allow for a session blocked on an approval gate: reuses the conversation machine's DECIDE_GATE; undefined when no gate is pending. */
+export const allowPendingGate = (sessionId: string): (() => void) | undefined => {
+  for (const [key, snap] of snapshots) {
+    if (!key.startsWith(`${sessionId}:`)) continue
+    const last = snap.context.messages.at(-1)
+    const gate = last?.role === "assistant" ? last.parts.find((p) => p._tag === "Gate" && p.gate.status === "pending") : undefined
+    const actor = registry.get(key)
+    if (gate?._tag === "Gate" && actor) return () => actor.send({ type: "DECIDE_GATE", gateId: gate.gate.id, decision: "allow" })
+  }
+  return undefined
+}

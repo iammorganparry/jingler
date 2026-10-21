@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import type { Session, SessionActivity } from "@jingler/core"
 import { HomeCards } from "../composites/home-cards.js"
 import { Spin } from "../components/spin.js"
@@ -16,11 +17,16 @@ export function EmptyConversation({
   onOpenRepo,
   sessions,
   liveActivity,
-  onOpenSession
+  onOpenSession,
+  allowFor,
+  importCard
 }: {
   sessions?: ReadonlyArray<Session>
   liveActivity?: Record<string, SessionActivity>
   onOpenSession?: (sessionId: string) => void
+  allowFor?: (sessionId: string) => (() => void) | undefined
+  /** Home › the MCP import card, owned by the host (null = none). */
+  importCard?: ReactNode
   version?: string
   onNewSession?: () => void
   onOpenRepo?: () => void
@@ -65,9 +71,11 @@ export function EmptyConversation({
             )}
           </div>
 
+          {importCard ? <div className="mt-7 w-full max-w-[452px] text-left">{importCard}</div> : null}
+
           {sessions && liveActivity && onOpenSession ? (
             <div className="mt-7 w-full">
-              <HomeCards sessions={sessions} liveActivity={liveActivity} onOpenSession={onOpenSession} />
+              <HomeCards sessions={sessions} liveActivity={liveActivity} onOpenSession={onOpenSession} allowFor={allowFor} />
             </div>
           ) : null}
         </div>

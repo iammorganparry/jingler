@@ -55,11 +55,14 @@ export function RunningRow({ title, activity, onOpen }: { readonly title: string
 export function HomeCards({
   sessions,
   liveActivity,
-  onOpenSession
+  onOpenSession,
+  allowFor
 }: {
   readonly sessions: ReadonlyArray<Session>
   readonly liveActivity: Readonly<Record<string, SessionActivity>>
   readonly onOpenSession: (sessionId: string) => void
+  /** The Allow action for a session blocked on an approval gate; undefined when it is not. */
+  readonly allowFor?: (sessionId: string) => (() => void) | undefined
 }) {
   const [seen, setSeen] = useState<ReadonlySet<string>>(new Set())
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set())
@@ -81,6 +84,7 @@ export function HomeCards({
           title={card.title}
           text={card.text}
           stale={card.stale}
+          onAllow={card.stale ? undefined : allowFor?.(card.sessionId)}
           onAnswer={() => onOpenSession(card.sessionId)}
           onDismiss={() => dismiss(card.sessionId)}
         />

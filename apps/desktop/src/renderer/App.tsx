@@ -119,6 +119,7 @@ import {
   onSessionBlocked,
   isChatUntouched,
   useAllChatActivities,
+  allowPendingGate,
 } from "./conversation-registry.js";
 import { notificationTarget } from "./notification-target.js";
 import { addDraftCodeReference, clearDraft, getDraft } from "./draft-store.js";
@@ -507,6 +508,20 @@ function AuthedApp({
   );
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
   const mcp = useMcpSettings();
+  const decideGateAllowFor = allowPendingGate;
+  const homeImportCard = (
+    <McpImportPrompt
+      ready={!mcp.loading && mcp.parseError === null}
+      servers={mcp.servers}
+      load={mcp.importCandidates}
+      apply={mcp.applyImport}
+      probe={async () => rpc.mcpStatus()}
+      startAuthorization={mcp.startAuthorization}
+      logTail={mcp.logTail}
+      isDismissed={rpc.mcpImportDismissed}
+      persistDismissed={rpc.mcpDismissImport}
+    />
+  );
   const environmentController = useEnvironments();
   const providerCatalog = useProviderCatalog(environmentController.environments);
   const agentsSettings = useAgentsSettings();
@@ -1727,6 +1742,8 @@ function AuthedApp({
         onGithubRefresh={github.refresh}
         onGithubDisconnect={github.disconnect}
         liveActivity={liveActivity}
+        allowFor={decideGateAllowFor}
+        importCard={homeImportCard}
         interruptedSessions={interruptedSessions}
         chatActivities={chatActivities}
         prStates={prStates}
@@ -2170,15 +2187,6 @@ function AuthedApp({
           </button>
         </div>
       )}
-      <McpImportPrompt
-        ready={!mcp.loading && mcp.parseError === null}
-        servers={mcp.servers}
-        load={mcp.importCandidates}
-        apply={mcp.applyImport}
-        probe={async () => rpc.mcpStatus()}
-        startAuthorization={mcp.startAuthorization}
-        logTail={mcp.logTail}
-      />
       <ArchiveConfirmation state={archiveState} send={sendArchive} />
       <Dialog open={importSessionsDialogOpen} onOpenChange={setImportSessionsDialogOpen}>
         <DialogContent>

@@ -21,8 +21,9 @@ describe("McpImportPrompt", () => {
     )
     const apply = vi.fn(async () => [])
 
-    render(<McpImportPrompt ready servers={[]} load={load} apply={apply} probe={async () => []} startAuthorization={async () => {}} logTail={async () => ({ lines: [] })} />)
+    render(<McpImportPrompt ready servers={[]} load={load} apply={apply} probe={async () => []} startAuthorization={async () => {}} logTail={async () => ({ lines: [] })} isDismissed={async () => false} persistDismissed={async () => {}} />)
 
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }))
     expect(await screen.findByRole("dialog")).toBeTruthy()
     expect(screen.getByText("linear")).toBeTruthy()
     expect(screen.getByText("docs")).toBeTruthy()
@@ -65,8 +66,10 @@ describe("McpImportPrompt", () => {
       }]}
       apply={async () => []}
       probe={async () => []} startAuthorization={async () => {}} logTail={async () => ({ lines: [] })}
+      isDismissed={async () => false} persistDismissed={async () => {}}
     />)
 
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }))
     expect(await screen.findByRole("dialog")).toBeTruthy()
     expect(screen.getByText("Conflict")).toBeTruthy()
   })
@@ -84,7 +87,10 @@ describe("McpImportPrompt", () => {
       probe={async () => [status("bad", "failed"), status("oauth", "needs-auth")]}
       startAuthorization={startAuthorization}
       logTail={logTail}
+      isDismissed={async () => false}
+      persistDismissed={async () => {}}
     />)
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }))
     fireEvent.click(await screen.findByText("Import 2 servers"))
     fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
     expect(startAuthorization).toHaveBeenCalledWith("oauth")

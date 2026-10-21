@@ -42,7 +42,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   ] as const
   // A saved false (or zero) is a real value, not an absent section.
   const definedKeys = [
-    "connectionSelectionRequired", "providerSetupCompleted", "planAutoRun", "adhdMode", "fontScale",
+    "connectionSelectionRequired", "providerSetupCompleted", "planAutoRun", "adhdMode", "mcpImportDismissed", "fontScale",
     "subagentDelegationEnabled"
   ] as const
   return Object.fromEntries([
@@ -218,6 +218,8 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       const setPlanAutoRun = (planAutoRun: boolean) => patch({ planAutoRun })
 
       /** Whether final completion summaries are shaped for an ADHD reader. */
+      const setMcpImportDismissed = (mcpImportDismissed: boolean) => patch({ mcpImportDismissed })
+
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
 
       /**
@@ -343,6 +345,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setSubagentModel,
         setPlanAutoRun,
         setAdhdMode,
+        setMcpImportDismissed,
         setFontScale,
         setStarredRepos,
         setHeaderViews,
