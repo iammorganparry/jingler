@@ -1013,6 +1013,8 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
       execute(null, ["issue", "comment", String(number), "--repo", repository, "--body-file", "-"], body).pipe(Effect.asVoid),
     issueCloseBySlug: (repository: string, number: number) =>
       execute(null, ["issue", "close", String(number), "--repo", repository]).pipe(Effect.asVoid),
+    issueReopenBySlug: (repository: string, number: number) =>
+      execute(null, ["issue", "reopen", String(number), "--repo", repository]).pipe(Effect.asVoid),
     issueInbox: () =>
       Effect.gen(function* () {
         const raw = yield* json(null, [

@@ -1728,6 +1728,12 @@ export class AssetListRpcs extends RpcGroup.make(
   Rpc.make("Mcp.reveal", {
     success: Schema.Void,
     error: ConfigError
+  }),
+
+  /** Reopen a closed issue by repository slug (`gh issue reopen <n> --repo <slug>`). */
+  Rpc.make("Github.reopenIssue", {
+    error: GitHubApiError,
+    payload: { repository: Schema.String, number: Schema.Number }
   })
 ) {}
 
