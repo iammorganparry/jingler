@@ -390,8 +390,7 @@ return (evidence === "checks" ? (
             + timestamp are what let you tell a stale description from a current
             one.
           */}
-          {pr.body !== null && pr.body.trim().length > 0 && (
-            <Card>
+          <Card>
               <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-[11px]">
                 <Avatar
                   initial={pr.author.login.charAt(0).toUpperCase()}
@@ -409,10 +408,13 @@ return (evidence === "checks" ? (
                 </span>
               </div>
               <div className="px-[14px] py-[11px]">
-                <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
+                {pr.body?.trim() ? (
+                  <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
+                ) : (
+                  <p className="text-[13.5px] text-muted-foreground">No description provided.</p>
+                )}
               </div>
-            </Card>
-          )}
+          </Card>
 
           {/* Timeline — top-level reviews/comments and inline thread groups, interleaved */}
           <Eyebrow>Timeline</Eyebrow>

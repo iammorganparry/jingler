@@ -34,3 +34,12 @@ export const Files: Story = {
     </WidthTierValue>
   )
 }
+
+/** Conversation with no description, on the viewer's own PR: Approve / Request changes disabled. */
+export const ConversationOwnPrNoDescription: Story = {
+  render: () => (
+    <WidthTierValue width={1200}>
+      <PullRequestView pr={{ ...PR, body: null }} connected viewerLogin="morgan" onSubmitReview={() => {}} />
+    </WidthTierValue>
+  )
+}
