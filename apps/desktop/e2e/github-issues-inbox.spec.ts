@@ -80,3 +80,23 @@ test("browses, filters, comments on and closes issues through authenticated gh",
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("new session GitHub issue source shows Couldn't load issues with Retry when gh fails", async ({ launchApp }) => {
+  const root = mkdtempSync(join(tmpdir(), "jingler-e2e-issues-fail-"))
+  try {
+    const bin = join(root, "bin")
+    mkdirSync(bin)
+    writeFileSync(join(bin, "gh"), "#!/usr/bin/env node\nconst a = process.argv.slice(2)\nif (a[0] === 'auth' && a[1] === 'status') process.exit(0)\nconsole.error('boom'); process.exit(1)\n")
+    chmodSync(join(bin, "gh"), 0o755)
+    const { window } = await launchApp({ configured: true, withRepo: true, e2eEnv: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` } })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByTestId("new-session").click()
+    const view = window.getByTestId("new-session-view")
+    await view.getByRole("button", { name: "Session source", exact: true }).click()
+    await window.getByRole("option", { name: /GitHub issue/ }).click()
+    await expect(view.getByText("Couldn't load issues")).toBeVisible({ timeout: 20_000 })
+    await expect(view.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

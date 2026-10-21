@@ -400,3 +400,16 @@ test("a renamed project folder shows the missing-folder state until it is locate
   await projects.getByRole("button", { name: "widget", exact: true }).click({ button: "right" })
   await expect(launched.window.getByRole("menuitem", { name: "Locate folder…" })).toHaveCount(0)
 })
+
+test("new session hides the environment chip without remote environments and shows the Linear load-failure state", async ({ launchApp }) => {
+  const launched = await launchApp({ configured: true })
+  await expect(appShell(launched.window)).toBeVisible()
+  await launched.window.getByTestId("new-session").click()
+  const view = launched.window.getByTestId("new-session-view")
+  await expect(view.getByRole("heading", { name: "New session" })).toBeVisible()
+  await expect(view.getByRole("button", { name: "Execution environment", exact: true })).toHaveCount(0)
+  await view.getByRole("button", { name: "Session source", exact: true }).click()
+  await launched.window.getByRole("option", { name: /^Linear issue/ }).click()
+  await expect(view.getByText("Couldn't load issues")).toBeVisible({ timeout: 20_000 })
+  await expect(view.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+})
