@@ -399,41 +399,41 @@ export const rpc = {
   mcpList: (): Promise<{
     readonly servers: ReadonlyArray<McpServer>
     readonly error: string | null
-  }> => run((c) => c.Mcp.list()),
+  }> => runAssetList((c) => c.Mcp.list()),
   mcpStatus: (): Promise<ReadonlyArray<McpServerStatus>> =>
-    run((c) => c.Mcp.status()),
+    runAssetList((c) => c.Mcp.status()),
   mcpLogTail: (server: string, lines?: number): Promise<{ readonly lines: ReadonlyArray<string> }> =>
-    run((c) => c.Mcp.logTail({ server, lines })),
+    runAssetList((c) => c.Mcp.logTail({ server, lines })),
   mcpWrite: (name: string, entry: McpConfigEntry): Promise<void> =>
-    run((c) => c.Mcp.write({ name, entry })),
+    runAssetList((c) => c.Mcp.write({ name, entry })),
   mcpRemove: (name: string): Promise<void> =>
-    run((c) => c.Mcp.remove({ name })),
+    runAssetList((c) => c.Mcp.remove({ name })),
   mcpSetEnabled: (name: string, enabled: boolean): Promise<void> =>
-    run((c) => c.Mcp.setEnabled({ name, enabled })),
+    runAssetList((c) => c.Mcp.setEnabled({ name, enabled })),
   mcpSetAuth: (name: string, auth: McpRemoteAuth): Promise<void> =>
-    run((c) => c.Mcp.setAuth({ name, auth })),
+    runAssetList((c) => c.Mcp.setAuth({ name, auth })),
   mcpSetDisabledTools: (name: string, disabledTools: ReadonlyArray<string>): Promise<void> =>
-    run((c) => c.Mcp.setDisabledTools({ name, disabledTools })),
+    runAssetList((c) => c.Mcp.setDisabledTools({ name, disabledTools })),
   mcpSignOut: (name: string): Promise<void> =>
-    run((c) => c.Mcp.signOut({ name })),
+    runAssetList((c) => c.Mcp.signOut({ name })),
   mcpSetApiKey: (name: string, apiKey: string): Promise<void> =>
-    run((c) => c.Mcp.setApiKey({ name, apiKey })),
+    runAssetList((c) => c.Mcp.setApiKey({ name, apiKey })),
   mcpStartAuthorization: (name: string) =>
-    run((c) => c.Mcp.startAuthorization({ name })),
+    runAssetList((c) => c.Mcp.startAuthorization({ name })),
   mcpImportCandidates: (
     source: McpImportSourceId,
     connectors?: boolean
   ): Promise<ReadonlyArray<McpImportCandidateView>> =>
-    run((c) => c.Mcp.importCandidates({ source, connectors })),
+    runAssetList((c) => c.Mcp.importCandidates({ source, connectors })),
   mcpApplyImport: (
     source: McpImportSourceId,
     names: ReadonlyArray<string>,
     resolutions?: Readonly<Record<string, McpImportResolution>>,
     connectors?: boolean
   ): Promise<ReadonlyArray<string>> =>
-    run((c) => c.Mcp.applyImport({ source, names, resolutions, connectors })),
-  appRevealLogs: (): Promise<void> => run((c) => c.App.revealLogs()),
-  mcpReveal: (): Promise<void> => run((c) => c.Mcp.reveal()),
+    runAssetList((c) => c.Mcp.applyImport({ source, names, resolutions, connectors })),
+  appRevealLogs: (): Promise<void> => runAssetList((c) => c.App.revealLogs()),
+  mcpReveal: (): Promise<void> => runAssetList((c) => c.Mcp.reveal()),
   agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>
     run((c) => c.AgentResources.remove(selector)),
   agentResourcesSetEnabled: (
@@ -1574,10 +1574,10 @@ export const rpc = {
    * the tab update without restarting the app.
    */
   // Window controls (Windows/Linux custom title bar)
-  windowMinimize: (): Promise<void> => run((c) => c.Window.minimize()),
-  windowToggleMaximize: (): Promise<void> => run((c) => c.Window.toggleMaximize()),
-  windowClose: (): Promise<void> => run((c) => c.Window.close()),
-  windowIsMaximized: (): Promise<boolean> => run((c) => c.Window.isMaximized()),
+  windowMinimize: (): Promise<void> => runAssetList((c) => c.Window.minimize()),
+  windowToggleMaximize: (): Promise<void> => runAssetList((c) => c.Window.toggleMaximize()),
+  windowClose: (): Promise<void> => runAssetList((c) => c.Window.close()),
+  windowIsMaximized: (): Promise<boolean> => runAssetList((c) => c.Window.isMaximized()),
 
     pluginsWatch: (onCatalog: (catalog: PluginCatalog) => void): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null

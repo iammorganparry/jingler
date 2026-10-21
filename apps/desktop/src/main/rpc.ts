@@ -5776,74 +5776,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       ),
     ),
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
-  "Mcp.list": () => mcpList(),
-  "Mcp.status": () => mcpStatus(),
-  "Mcp.logTail": ({ server, lines }) =>
-    Effect.succeed({ lines: mcpLogTail(server, lines) }),
-  "Mcp.write": ({ name, entry }) =>
-    McpConfigService.write(name, entry).pipe(
-      Effect.mapError((cause) => mcpError(cause.message, cause)),
-    ),
-  "Mcp.remove": ({ name }) =>
-    Effect.gen(function* () {
-      yield* McpConfigService.remove(name).pipe(
-        Effect.mapError((cause) => mcpError(cause.message, cause)),
-      );
-      const secretStore = yield* SecretStore;
-      yield* new McpAuthStore(secretStore).delete(name);
-    }),
-  "Mcp.setEnabled": ({ name, enabled }) =>
-    McpConfigService.setEnabled(name, enabled).pipe(
-      Effect.mapError((cause) => mcpError(cause.message, cause)),
-    ),
-  "Mcp.setAuth": ({ name, auth }) =>
-    McpConfigService.setAuth(name, auth).pipe(
-      Effect.mapError((cause) => mcpError(cause.message, cause)),
-    ),
-  "Mcp.setDisabledTools": ({ name, disabledTools }) =>
-    McpConfigService.setDisabledTools(name, disabledTools).pipe(
-      Effect.mapError((cause) => mcpError(cause.message, cause)),
-    ),
-  "Mcp.signOut": ({ name }) =>
-    Effect.gen(function* () {
-      const secretStore = yield* SecretStore;
-      yield* McpConfigService.signOut(name, secretStore).pipe(
-        Effect.mapError((cause) => mcpError(cause.message, cause)),
-      );
-    }),
-  "Mcp.setApiKey": ({ name, apiKey }) => mcpSetApiKey(name, apiKey),
-  "Mcp.startAuthorization": ({ name }) => mcpStartAuthorization(name),
-  "Mcp.importCandidates": ({ source, connectors }) =>
-    mcpImportParse(source, connectors === true).pipe(
-      Effect.map((candidates) =>
-        candidates.map((candidate) => ({
-          name: candidate.name,
-          source: candidate.source,
-          origin: candidate.origin ?? "user",
-          target: mcpCandidateTarget(candidate),
-          problem: candidate.problem,
-          needsSignIn:
-            candidate.entry?.type === "remote" && candidate.entry.auth?.type === "oauth",
-          needsSecrets:
-            candidate.entry !== null && entryNeedsSecrets(candidate.entry, process.env),
-        })),
-      ),
-    ),
-  "Mcp.applyImport": ({ source, names, resolutions, connectors }) =>
-    mcpApplyImport(source, names, resolutions ?? {}, connectors === true),
-  "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
-
-  "Window.minimize": () => Effect.sync(() => appWindow()?.minimize()),
-  "Window.toggleMaximize": () =>
-    Effect.sync(() => {
-      const window = appWindow()
-      if (!window) return
-      if (window.isMaximized()) window.unmaximize()
-      else window.maximize()
-    }),
-  "Window.close": () => Effect.sync(() => appWindow()?.close()),
-  "Window.isMaximized": () => Effect.sync(() => appWindow()?.isMaximized() ?? false),
-  "Mcp.reveal": () => mcpReveal(),
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via
   // the absolute path discovery found.
@@ -6455,6 +6387,74 @@ const AssetListHandlersLayer = AssetListRpcs.toLayer({
       ),
     ),
   "Voice.requestMicrophone": () => Effect.promise(() => requestMicrophone()),
+  "Mcp.list": () => mcpList(),
+  "Mcp.status": () => mcpStatus(),
+  "Mcp.logTail": ({ server, lines }) =>
+    Effect.succeed({ lines: mcpLogTail(server, lines) }),
+  "Mcp.write": ({ name, entry }) =>
+    McpConfigService.write(name, entry).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.remove": ({ name }) =>
+    Effect.gen(function* () {
+      yield* McpConfigService.remove(name).pipe(
+        Effect.mapError((cause) => mcpError(cause.message, cause)),
+      );
+      const secretStore = yield* SecretStore;
+      yield* new McpAuthStore(secretStore).delete(name);
+    }),
+  "Mcp.setEnabled": ({ name, enabled }) =>
+    McpConfigService.setEnabled(name, enabled).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.setAuth": ({ name, auth }) =>
+    McpConfigService.setAuth(name, auth).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.setDisabledTools": ({ name, disabledTools }) =>
+    McpConfigService.setDisabledTools(name, disabledTools).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.signOut": ({ name }) =>
+    Effect.gen(function* () {
+      const secretStore = yield* SecretStore;
+      yield* McpConfigService.signOut(name, secretStore).pipe(
+        Effect.mapError((cause) => mcpError(cause.message, cause)),
+      );
+    }),
+  "Mcp.setApiKey": ({ name, apiKey }) => mcpSetApiKey(name, apiKey),
+  "Mcp.startAuthorization": ({ name }) => mcpStartAuthorization(name),
+  "Mcp.importCandidates": ({ source, connectors }) =>
+    mcpImportParse(source, connectors === true).pipe(
+      Effect.map((candidates) =>
+        candidates.map((candidate) => ({
+          name: candidate.name,
+          source: candidate.source,
+          origin: candidate.origin ?? "user",
+          target: mcpCandidateTarget(candidate),
+          problem: candidate.problem,
+          needsSignIn:
+            candidate.entry?.type === "remote" && candidate.entry.auth?.type === "oauth",
+          needsSecrets:
+            candidate.entry !== null && entryNeedsSecrets(candidate.entry, process.env),
+        })),
+      ),
+    ),
+  "Mcp.applyImport": ({ source, names, resolutions, connectors }) =>
+    mcpApplyImport(source, names, resolutions ?? {}, connectors === true),
+  "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
+
+  "Window.minimize": () => Effect.sync(() => appWindow()?.minimize()),
+  "Window.toggleMaximize": () =>
+    Effect.sync(() => {
+      const window = appWindow()
+      if (!window) return
+      if (window.isMaximized()) window.unmaximize()
+      else window.maximize()
+    }),
+  "Window.close": () => Effect.sync(() => appWindow()?.close()),
+  "Window.isMaximized": () => Effect.sync(() => appWindow()?.isMaximized() ?? false),
+  "Mcp.reveal": () => mcpReveal(),
 });
 
 

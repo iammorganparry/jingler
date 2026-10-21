@@ -238,28 +238,6 @@ export class VoiceError extends Schema.TaggedError<VoiceError>()("VoiceError", {
   message: Schema.String
 }) {}
 
-export class AssetListRpcs extends RpcGroup.make(
-  Rpc.make("Asset.list", {
-    success: Schema.Array(AssetFileEntry),
-    error: Schema.Union(
-      AssetOutsideWorktreeError,
-      GitError,
-      SessionNotFoundError
-    ),
-    payload: { sessionId: Schema.String }
-  }),
-  /** Transcribe a 16 kHz mono WAV (base64) locally with whisper.cpp. Macs prompt for mic access first. */
-  Rpc.make("Voice.transcribe", {
-    success: Schema.Struct({ text: Schema.String }),
-    error: VoiceError,
-    payload: { wavBase64: Schema.String }
-  }),
-
-  /** macOS mic permission (`askForMediaAccess`); other platforms resolve true. */
-  Rpc.make("Voice.requestMicrophone", {
-    success: Schema.Boolean
-  })
-) {}
 
 /**
  * The Jingler RPC surface — a single source of truth shared by the Electron
@@ -1253,141 +1231,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
-  // ── MCP servers — the operator's ~/jingler/mcp.json ────────────────────────
-
-  /**
-   * The redacted server list plus the file's parse problem, if any. Entries
-   * carry header/env NAMES only — mcp.json itself never crosses this boundary.
-   */
-  Rpc.make("Mcp.list", {
-    success: Schema.Struct({
-      servers: Schema.Array(McpServer),
-      /** Why mcp.json could not be parsed; `servers` is empty then. */
-      error: Schema.NullOr(Schema.String)
-    })
-  }),
-
-  /**
-   * Live probe of every configured server (`initialize` + `tools/list`).
-   * User-initiated only — probing spawns stdio server commands.
-   */
-  Rpc.make("Mcp.status", {
-    success: Schema.Array(McpServerStatus),
-    error: ConfigError
-  }),
-
-  /**
-   * The last `lines` (default 200, max 500) stderr lines the most recent probe saw
-   * from a stdio server. Empty for an unknown, remote or never-probed server.
-   */
-  Rpc.make("Mcp.logTail", {
-    success: Schema.Struct({ lines: Schema.Array(Schema.String) }),
-    payload: { server: Schema.String, lines: Schema.optional(Schema.Number) }
-  }),
-
-  /** Create or replace one entry. Values travel INBOUND only. */
-  Rpc.make("Mcp.write", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String, entry: McpConfigEntry }
-  }),
-
-  Rpc.make("Mcp.remove", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String }
-  }),
-
-  Rpc.make("Mcp.setEnabled", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String, enabled: Schema.Boolean }
-  }),
-
-  Rpc.make("Mcp.setAuth", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String, auth: McpRemoteAuth }
-  }),
-
-  /** Persist the set of tool names disabled for one server; the runtime skips them on registration. */
-  Rpc.make("Mcp.setDisabledTools", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String, disabledTools: Schema.Array(Schema.String) }
-  }),
-
-  /** Clear a server's stored OAuth credential only — the server config and other servers are untouched. */
-  Rpc.make("Mcp.signOut", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String }
-  }),
-
-  /** Save or replace one API key in the encrypted device credential document. */
-  Rpc.make("Mcp.setApiKey", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: SetMcpApiKeyInput.fields
-  }),
-
-  /** Begin OAuth in the system browser; completion lands on a loopback callback. */
-  Rpc.make("Mcp.startAuthorization", {
-    success: McpAuthorizationStart,
-    error: ConfigError,
-    payload: { name: Schema.String }
-  }),
-
-  /** Parse one source config into redacted candidates for confirmation. */
-  Rpc.make("Mcp.importCandidates", {
-    success: Schema.Array(McpImportCandidateView),
-    error: ConfigError,
-    payload: {
-      source: McpImportSourceId,
-      /** Also run `claude mcp list` for claude.ai connectors and plugin servers (slow). */
-      connectors: Schema.optional(Schema.Boolean)
-    }
-  }),
-
-  /**
-   * Import the confirmed candidates by name. The source file is re-parsed in
-   * the main process, so secret values never round-trip through the renderer.
-   * Returns the names actually written; existing names are skipped.
-   */
-  Rpc.make("Mcp.applyImport", {
-    success: Schema.Array(Schema.String),
-    error: ConfigError,
-    payload: {
-      source: McpImportSourceId,
-      names: Schema.Array(Schema.String),
-      /** Per-name conflict resolution; a conflicting name with no entry keeps the existing server. */
-      resolutions: Schema.optional(Schema.Record({ key: Schema.String, value: McpImportResolution })),
-      connectors: Schema.optional(Schema.Boolean)
-    }
-  }),
-
-  /** Open the app's log folder in the file manager (crash screen "Open logs"). */
-  Rpc.make("App.revealLogs", {}),
-
-  /** Minimize the main window (Windows/Linux custom controls). */
-  Rpc.make("Window.minimize", {}),
-
-  /** Toggle maximize/restore on the main window (Windows/Linux custom controls). */
-  Rpc.make("Window.toggleMaximize", {}),
-
-  /** Close the main window (Windows/Linux custom controls). */
-  Rpc.make("Window.close", {}),
-
-  /** Check if the main window is currently maximized (Windows/Linux custom controls). */
-  Rpc.make("Window.isMaximized", {
-    success: Schema.Boolean
-  }),
-
-  /** Reveal mcp.json in the file manager, creating an empty file if absent. */
-  Rpc.make("Mcp.reveal", {
-    success: Schema.Void,
-    error: ConfigError
-  }),
 
   /** Provider usage / rate-limit windows for the Usage & limits modal. */
   Rpc.make("Usage.get", {
@@ -1723,6 +1566,169 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { template: PlanTemplateConfig }
   }),
 
+) {}
+
+/**
+ * Asset, voice, MCP and window RPCs. Split from the core group because inferring
+ * one client over every RPC exceeds TypeScript's instantiation depth (TS2589).
+ */
+export class AssetListRpcs extends RpcGroup.make(
+  Rpc.make("Asset.list", {
+    success: Schema.Array(AssetFileEntry),
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      GitError,
+      SessionNotFoundError
+    ),
+    payload: { sessionId: Schema.String }
+  }),
+  /** Transcribe a 16 kHz mono WAV (base64) locally with whisper.cpp. Macs prompt for mic access first. */
+  Rpc.make("Voice.transcribe", {
+    success: Schema.Struct({ text: Schema.String }),
+    error: VoiceError,
+    payload: { wavBase64: Schema.String }
+  }),
+
+  /** macOS mic permission (`askForMediaAccess`); other platforms resolve true. */
+  Rpc.make("Voice.requestMicrophone", {
+    success: Schema.Boolean
+  }),
+
+  // ── MCP servers — the operator's ~/jingler/mcp.json ────────────────────────
+
+  /**
+   * The redacted server list plus the file's parse problem, if any. Entries
+   * carry header/env NAMES only — mcp.json itself never crosses this boundary.
+   */
+  Rpc.make("Mcp.list", {
+    success: Schema.Struct({
+      servers: Schema.Array(McpServer),
+      /** Why mcp.json could not be parsed; `servers` is empty then. */
+      error: Schema.NullOr(Schema.String)
+    })
+  }),
+
+  /**
+   * Live probe of every configured server (`initialize` + `tools/list`).
+   * User-initiated only — probing spawns stdio server commands.
+   */
+  Rpc.make("Mcp.status", {
+    success: Schema.Array(McpServerStatus),
+    error: ConfigError
+  }),
+
+  /**
+   * The last `lines` (default 200, max 500) stderr lines the most recent probe saw
+   * from a stdio server. Empty for an unknown, remote or never-probed server.
+   */
+  Rpc.make("Mcp.logTail", {
+    success: Schema.Struct({ lines: Schema.Array(Schema.String) }),
+    payload: { server: Schema.String, lines: Schema.optional(Schema.Number) }
+  }),
+
+  /** Create or replace one entry. Values travel INBOUND only. */
+  Rpc.make("Mcp.write", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, entry: McpConfigEntry }
+  }),
+
+  Rpc.make("Mcp.remove", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String }
+  }),
+
+  Rpc.make("Mcp.setEnabled", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, enabled: Schema.Boolean }
+  }),
+
+  Rpc.make("Mcp.setAuth", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, auth: McpRemoteAuth }
+  }),
+
+  /** Persist the set of tool names disabled for one server; the runtime skips them on registration. */
+  Rpc.make("Mcp.setDisabledTools", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, disabledTools: Schema.Array(Schema.String) }
+  }),
+
+  /** Clear a server's stored OAuth credential only — the server config and other servers are untouched. */
+  Rpc.make("Mcp.signOut", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String }
+  }),
+
+  /** Save or replace one API key in the encrypted device credential document. */
+  Rpc.make("Mcp.setApiKey", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: SetMcpApiKeyInput.fields
+  }),
+
+  /** Begin OAuth in the system browser; completion lands on a loopback callback. */
+  Rpc.make("Mcp.startAuthorization", {
+    success: McpAuthorizationStart,
+    error: ConfigError,
+    payload: { name: Schema.String }
+  }),
+
+  /** Parse one source config into redacted candidates for confirmation. */
+  Rpc.make("Mcp.importCandidates", {
+    success: Schema.Array(McpImportCandidateView),
+    error: ConfigError,
+    payload: {
+      source: McpImportSourceId,
+      /** Also run `claude mcp list` for claude.ai connectors and plugin servers (slow). */
+      connectors: Schema.optional(Schema.Boolean)
+    }
+  }),
+
+  /**
+   * Import the confirmed candidates by name. The source file is re-parsed in
+   * the main process, so secret values never round-trip through the renderer.
+   * Returns the names actually written; existing names are skipped.
+   */
+  Rpc.make("Mcp.applyImport", {
+    success: Schema.Array(Schema.String),
+    error: ConfigError,
+    payload: {
+      source: McpImportSourceId,
+      names: Schema.Array(Schema.String),
+      /** Per-name conflict resolution; a conflicting name with no entry keeps the existing server. */
+      resolutions: Schema.optional(Schema.Record({ key: Schema.String, value: McpImportResolution })),
+      connectors: Schema.optional(Schema.Boolean)
+    }
+  }),
+
+  /** Open the app's log folder in the file manager (crash screen "Open logs"). */
+  Rpc.make("App.revealLogs", {}),
+
+  /** Minimize the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.minimize", {}),
+
+  /** Toggle maximize/restore on the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.toggleMaximize", {}),
+
+  /** Close the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.close", {}),
+
+  /** Check if the main window is currently maximized (Windows/Linux custom controls). */
+  Rpc.make("Window.isMaximized", {
+    success: Schema.Boolean
+  }),
+
+  /** Reveal mcp.json in the file manager, creating an empty file if absent. */
+  Rpc.make("Mcp.reveal", {
+    success: Schema.Void,
+    error: ConfigError
+  })
 ) {}
 
 /** Review, preview, theme, and plugin half of the renderer RPC client. */
