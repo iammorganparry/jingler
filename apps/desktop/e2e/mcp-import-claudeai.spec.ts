@@ -42,7 +42,7 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
       }
     })
     await expect(appShell(window)).toBeVisible()
-    const notNow = window.getByRole("button", { name: "Not now" })
+    const notNow = window.getByTestId("import-card").getByRole("button", { name: "Not now" })
     if (await notNow.isVisible().catch(() => false)) await notNow.click()
 
     await window.getByRole("button", { name: "Account menu" }).click()
@@ -53,7 +53,7 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
     const openImport = async () => {
       await window.getByRole("button", { name: "Claude", exact: true }).click()
       await window.getByRole("button", { name: "Include claude.ai connectors & plugins" }).click()
-      await expect(window.getByText("claude-ai-linear")).toBeVisible({ timeout: 30_000 })
+      await expect(window.getByText("claude-ai-linear", { exact: true })).toBeVisible({ timeout: 30_000 })
     }
     await openImport()
     for (const name of ["user-docs", "claude-ai-linear", "claude-ai-supabase-gtm-grid", "plugin-eng-notion"]) {
@@ -81,7 +81,7 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
         ;(globalThis as unknown as { __opened: string[] }).__opened.push(url)
       }
     })
-    await window.getByRole("button", { name: "Authorize" }).first().click()
+    await window.getByRole("button", { name: "Connect" }).first().click()
     await expect.poll(() => app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened.length)).toBe(1)
     const [authorizationUrl] = await app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)
     const callback = await fetch(authorizationUrl!)

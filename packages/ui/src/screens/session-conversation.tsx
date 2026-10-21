@@ -148,6 +148,10 @@ export interface SessionConversationProps {
   patch?: string
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
+  /** Home › Allow action for a session blocked on an approval gate. */
+  allowFor?: (sessionId: string) => (() => void) | undefined
+  /** Home › the MCP import card element. */
+  importCard?: ReactNode
   /** Sessions whose last run was cut off by a restart. */
   interruptedSessions?: ReadonlySet<string>
   /** Live activity by session, then chat, for the sidebar tree. */
@@ -346,6 +350,8 @@ export function SessionConversation(props: SessionConversationProps) {
             onNewSession={openNewSession}
             sessions={props.sessions}
             liveActivity={props.liveActivity}
+            allowFor={props.allowFor}
+            importCard={props.importCard}
             onOpenSession={(sessionId) => {
               // The session may already be active while another project is selected: switch the project too.
               const session = props.sessions.find((candidate) => candidate.id === sessionId)

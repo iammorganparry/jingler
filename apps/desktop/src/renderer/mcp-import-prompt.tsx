@@ -18,6 +18,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  ImportCard,
+  deriveImportCard,
   McpImportResult,
   McpServerDetailDialog,
   type McpImportResultRow,
@@ -27,25 +29,9 @@ import {
 import { useMachine } from "@xstate/react"
 import { ServerCog } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { resolveImportDismissed } from "./mcp-import-dismissal.js"
 
-const COMPLETED_KEY = "jingler:mcp-import-prompt:v1"
 const SOURCES: ReadonlyArray<McpImportSourceId> = ["claude", "codex", "opencode"]
-
-const completed = (): boolean => {
-  try {
-    return localStorage.getItem(COMPLETED_KEY) === "done"
-  } catch {
-    return false
-  }
-}
-
-const markCompleted = (): void => {
-  try {
-    localStorage.setItem(COMPLETED_KEY, "done")
-  } catch {
-    // The prompt may repeat when storage is unavailable; imports still work.
-  }
-}
 
 type Candidate = McpImportCandidateView & { readonly conflict: boolean }
 
@@ -74,6 +60,8 @@ function useResultActions(startAuthorization: ResultProps["startAuthorization"],
   return { logName, setLogName, logLines, logLoading, actionError, viewLog, connect }
 }
 
+const DIALOG_STATES = ["reviewing", "detectFailed", "importing", "importFailed", "done"] as const
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI maps mutually exclusive machine states (review, importing, failed, result) to their controls.
 export function McpImportPrompt({
   ready,
@@ -82,7 +70,9 @@ export function McpImportPrompt({
   apply,
   probe,
   startAuthorization,
-  logTail
+  logTail,
+  isDismissed,
+  persistDismissed
 }: {
   readonly ready: boolean
   readonly servers: ReadonlyArray<McpServer>
@@ -95,7 +85,10 @@ export function McpImportPrompt({
   readonly probe: () => Promise<ReadonlyArray<McpServerStatus>>
   readonly startAuthorization: (name: string) => Promise<void>
   readonly logTail: (name: string) => Promise<{ readonly lines: ReadonlyArray<string> }>
+  readonly isDismissed: () => Promise<boolean>
+  readonly persistDismissed: () => Promise<void>
 }) {
+  const [reviewOpen, setReviewOpen] = useState(false)
   const started = useRef(false)
   const serversRef = useRef(servers)
   serversRef.current = servers
@@ -140,21 +133,39 @@ export function McpImportPrompt({
   const candidates = state.context.candidates as ReadonlyArray<Candidate>
 
   useEffect(() => {
-    if (!ready || started.current || completed()) return
+    if (!ready || started.current) return
     started.current = true
-    send({ type: "START" })
-  }, [ready, send])
+    void resolveImportDismissed(isDismissed, persistDismissed).then((dismissed) => {
+      if (!dismissed) send({ type: "START" })
+    })
+  }, [ready, send, isDismissed, persistDismissed])
 
-  const open = state.matches("reviewing") || state.matches("detectFailed") || state.matches("importing") || state.matches("importFailed") || state.matches("done")
+  const open = reviewOpen && DIALOG_STATES.some((name) => state.matches(name))
   const done = state.matches("done")
 
 
   const dismiss = () => {
-    markCompleted()
+    setReviewOpen(false)
+    void persistDismissed().catch(() => {})
     send({ type: "DISMISS" })
   }
 
+  const card = deriveImportCard({
+    machineState: String(state.value),
+    count: candidates.length,
+    error: state.context.error
+  })
+
   return (
+    <>
+    {card !== null && !reviewOpen ? (
+      <ImportCard
+        state={card}
+        onReview={() => setReviewOpen(true)}
+        onRetry={() => send({ type: "RETRY" })}
+        onDismiss={dismiss}
+      />
+    ) : null}
     <Dialog open={open} onOpenChange={(next) => !next && dismiss()}>
       <DialogContent>
         <DialogHeader className="items-start gap-3 px-5 py-4 pr-14">
@@ -217,20 +228,13 @@ export function McpImportPrompt({
           {state.matches("importFailed") ? <div role="alert" className="mt-3"><Callout tone="red">{state.context.error}</Callout></div> : null}
         </DialogBody>
         <DialogFooter className="justify-between px-5">
-          {done ? <span /> : <Button variant="ghost" size="sm" onClick={dismiss}>Not now</Button>}
-          {done ? (
-            <Button onClick={dismiss}>Done</Button>
-          ) : state.matches("detectFailed") ? (
-            <Button onClick={() => send({ type: "RETRY" })}>Retry</Button>
-          ) : state.matches("importFailed") ? (
-            <Button onClick={() => send({ type: "RETRY" })}>Retry import</Button>
-          ) : (
-            <Button disabled={state.matches("importing")} onClick={() => send({ type: "IMPORT" })}>
-              {state.matches("importing")
-                ? "Importing…"
-                : `Import ${candidates.length} server${candidates.length === 1 ? "" : "s"}`}
-            </Button>
-          )}
+          <ImportFooter
+            phase={done ? "done" : state.matches("detectFailed") ? "detectFailed" : state.matches("importFailed") ? "importFailed" : state.matches("importing") ? "importing" : "reviewing"}
+            count={candidates.length}
+            onDismiss={dismiss}
+            onRetry={() => send({ type: "RETRY" })}
+            onImport={() => send({ type: "IMPORT" })}
+          />
         </DialogFooter>
       </DialogContent>
       <McpServerDetailDialog
@@ -243,5 +247,34 @@ export function McpImportPrompt({
         oauthAccount={null}
       />
     </Dialog>
+    </>
+  )
+}
+
+/** The dialog's footer actions for each import phase. */
+function ImportFooter({
+  phase,
+  count,
+  onDismiss,
+  onRetry,
+  onImport
+}: {
+  readonly phase: "done" | "detectFailed" | "importFailed" | "importing" | "reviewing"
+  readonly count: number
+  readonly onDismiss: () => void
+  readonly onRetry: () => void
+  readonly onImport: () => void
+}) {
+  if (phase === "done") return <><span /><Button onClick={onDismiss}>Done</Button></>
+  const notNow = <Button variant="ghost" size="sm" onClick={onDismiss}>Not now</Button>
+  if (phase === "detectFailed") return <>{notNow}<Button onClick={onRetry}>Retry</Button></>
+  if (phase === "importFailed") return <>{notNow}<Button onClick={onRetry}>Retry import</Button></>
+  return (
+    <>
+      {notNow}
+      <Button disabled={phase === "importing"} onClick={onImport}>
+        {phase === "importing" ? "Importing…" : `Import ${count} server${count === 1 ? "" : "s"}`}
+      </Button>
+    </>
   )
 }

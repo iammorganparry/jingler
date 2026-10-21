@@ -16,6 +16,8 @@ test("presents discovered MCP servers with a readable stacked header", async ({ 
     }
   })
 
+  await window.getByTestId("import-card").getByRole("button", { name: "Review" }).click()
+
   const dialog = window.getByRole("dialog")
   await expect(dialog).toBeVisible()
   const title = dialog.getByRole("heading", { name: "Import MCP servers" })
@@ -45,6 +47,8 @@ test("flags a discovered server that clashes with an existing one with a read-on
     }
   })
 
+  await window.getByTestId("import-card").getByRole("button", { name: "Review" }).click()
+
   const dialog = window.getByRole("dialog")
   await expect(dialog).toBeVisible()
   await expect(dialog.getByText("Conflict")).toBeVisible()
@@ -67,6 +71,8 @@ test("imports a conflicting server as a new name when the operator picks Keep bo
       }))
     }
   })
+
+  await window.getByTestId("import-card").getByRole("button", { name: "Review" }).click()
 
   const dialog = window.getByRole("dialog")
   await expect(dialog).toBeVisible()
@@ -93,6 +99,8 @@ test("offers servers only in ~/.claude/settings.json and managed-mcp.json, label
       }))
     }
   })
+
+  await window.getByTestId("import-card").getByRole("button", { name: "Review" }).click()
 
   const dialog = window.getByRole("dialog")
   await expect(dialog.getByText(/Found 2 servers/)).toBeVisible()
@@ -121,6 +129,8 @@ test("shows neutral import results with Connect for OAuth and View log for a fai
         }))
       }
     })
+
+    await window.getByTestId("import-card").getByRole("button", { name: "Review" }).click()
 
     const dialog = window.getByRole("dialog")
     await dialog.getByRole("button", { name: "Import 2 servers" }).click()

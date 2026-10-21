@@ -414,6 +414,8 @@ export const rpc = {
     runAssetList((c) => c.Mcp.setAuth({ name, auth })),
   mcpSetDisabledTools: (name: string, disabledTools: ReadonlyArray<string>): Promise<void> =>
     runAssetList((c) => c.Mcp.setDisabledTools({ name, disabledTools })),
+  mcpImportDismissed: (): Promise<boolean> => runAssetList((c) => c.Mcp.importDismissed()),
+  mcpDismissImport: (): Promise<void> => runAssetList((c) => c.Mcp.dismissImport()),
   mcpSignOut: (name: string): Promise<void> =>
     runAssetList((c) => c.Mcp.signOut({ name })),
   mcpSetApiKey: (name: string, apiKey: string): Promise<void> =>

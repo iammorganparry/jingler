@@ -1637,6 +1637,18 @@ export class AssetListRpcs extends RpcGroup.make(
    * The redacted server list plus the file's parse problem, if any. Entries
    * carry header/env NAMES only — mcp.json itself never crosses this boundary.
    */
+  /** Has the operator dismissed the Home MCP-import card? */
+  Rpc.make("Mcp.importDismissed", {
+    success: Schema.Boolean,
+    error: ConfigError
+  }),
+
+  /** Persist that the Home MCP-import card is dismissed for good. */
+  Rpc.make("Mcp.dismissImport", {
+    success: Schema.Void,
+    error: ConfigError
+  }),
+
   Rpc.make("Mcp.list", {
     success: Schema.Struct({
       servers: Schema.Array(McpServer),
