@@ -1,6 +1,6 @@
 import { Spin } from "../components/spin.js"
 import { createContext, memo, type ReactNode, useContext, useState } from "react"
-import type { ContentPart, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
+import type { McpServer, ContentPart, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import {
   AlertCircle,
   CheckCircle2,
@@ -30,6 +30,7 @@ import { ToolCall } from "./tool-call.js"
 import { StreamingText } from "./streaming-text.js"
 import { InlineError } from "../components/feedback.js"
 import { toolDisplayName } from "../lib/tool-names.js"
+import { mcpToolAuthServer } from "../lib/mcp-tool-auth.js"
 
 // Parts fill the transcript's centered content column (width is owned by
 // ConversationView), so nothing here caps its own width.
@@ -224,6 +225,22 @@ function MessageText({
  * (ConversationView) so a running Bash card can carry a stop button without
  * threading the callback through every nested renderer (ToolGroup, PartView).
  */
+/** MCP servers plus the sign-in starter, so a failed MCP tool row can offer sign-in. */
+export const McpAuthContext = createContext<{
+  readonly servers: ReadonlyArray<McpServer>
+  readonly authorize: (name: string) => Promise<void>
+} | null>(null)
+
+const useMcpSignIn = (tool: ToolCallModel) => {
+  const mcpAuth = useContext(McpAuthContext)
+  const server = mcpAuth === null ? null : mcpToolAuthServer(tool, mcpAuth.servers)
+  if (mcpAuth === null || server === null) return undefined
+  return {
+    label: `Sign in to ${server.displayName}`,
+    onClick: () => { void mcpAuth.authorize(server.name).catch(() => undefined) }
+  }
+}
+
 export const ToolStopContext = createContext<(() => void) | null>(null)
 
 /**
@@ -315,6 +332,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
       expanded={expanded}
       onToggle={openable ? () => setExpanded((v) => !v) : undefined}
       onStop={onStop}
+      signIn={signIn}
       className={WIDTH}
     >
       {canonicalChanges.length > 0 && (
@@ -378,6 +396,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
 
   const stopTool = useContext(ToolStopContext)
   const subagentEntry = useContext(SubagentEntryContext)
+  const signIn = useMcpSignIn(tool)
   const [expanded, setExpanded] = useState(tool.status === "running")
   const canonicalChanges = tool.fileChanges?.changes ?? []
   const legacyPreview = canonicalChanges.length === 0 ? tool.preview : null

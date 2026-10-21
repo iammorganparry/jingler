@@ -919,6 +919,11 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
         }),
         fauxAssistantMessage("Browser workflow completed through pi.")
       ]
+    case "mcp-needs-auth":
+      return [
+        fauxAssistantMessage(fauxToolCall("mcp__runpod__list_pods", {}), { stopReason: "toolUse" }),
+        fauxAssistantMessage("RunPod needs sign-in.")
+      ]
     case "context-compaction":
       return Array.from({ length: 20 }, () => contextCompactionResponse)
     default:

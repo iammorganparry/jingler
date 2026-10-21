@@ -39,6 +39,7 @@ import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import {
   isSubagentSpawnMessage,
+  McpAuthContext,
   MessageTurn,
   PlanProgressContext,
   ToolStopContext
@@ -725,6 +726,10 @@ function renderSessionAnalytics() {
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
+  const mcpAuth = useMemo(
+    () => onAuthorizeMcp === undefined ? null : { servers: mcpServers ?? [], authorize: onAuthorizeMcp },
+    [mcpServers, onAuthorizeMcp]
+  )
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => viewport,
@@ -847,6 +852,7 @@ function renderSessionAnalytics() {
             </div>
           )}
           <PlanProgressContext.Provider value={planDocument}>
+          <McpAuthContext.Provider value={mcpAuth}>
           <ToolStopContext.Provider value={busy ? (onStop ?? null) : null}>
           <div
             ref={transcriptRef}
@@ -906,6 +912,7 @@ function renderSessionAnalytics() {
             })}
           </div>
           </ToolStopContext.Provider>
+          </McpAuthContext.Provider>
           </PlanProgressContext.Provider>
           {props.previewReady ? (
             <div className="mx-auto mt-2 flex w-full max-w-[760px] justify-start">
