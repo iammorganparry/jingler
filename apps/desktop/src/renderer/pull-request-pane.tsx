@@ -13,6 +13,9 @@ import { useAdversarialReview } from "./use-adversarial-review.js"
 import { usePublish } from "./use-publish.js"
 import { usePrStack } from "./use-pr-stack.js"
 import { clearSessionPrRequest, useSessionPrRequest } from "./session-pr-request.js"
+import { scopedPrNumber } from "./subagent-scope.js"
+import { useViewedChild } from "./subagent-tab-store.js"
+import { useSubagentView } from "./use-subagent-view.js"
 import { useWorkspaceWorkflow } from "./use-workspace-workflow.js"
 
 export function PullRequestPane({
@@ -47,7 +50,10 @@ export function PullRequestPane({
   const stack = usePrStack(session, connected)
   // Session-level writes (merge, review, close…) act on the session's own PR, so a lower layer is read-only.
   const requestedPr = useSessionPrRequest(session.id)
-  const shownPr = requestedPr ?? stack.selected
+  const { changesScope } = useSubagentView(session.activeChatId)
+  // Viewing a child that opened a PR: show that PR, read-only like any non-session layer.
+  const childPr = scopedPrNumber(useViewedChild(session.id, session.activeChatId), changesScope)
+  const shownPr = childPr ?? requestedPr ?? stack.selected
   const viewingLowerLayer = shownPr !== null && shownPr !== session.prNumber
   const {
     pr,

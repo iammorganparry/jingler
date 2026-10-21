@@ -6,8 +6,9 @@
  */
 import { useCallback, useMemo } from "react"
 import { useSelector } from "@xstate/react"
-import type { Session } from "@jingler/core"
+import type { Session, SubagentFleetNode } from "@jingler/core"
 import { activeCheckoutOf, checkoutsOf, hasNoRepo, workspaceModeOf } from "@jingler/core"
+import type { AgentTreeChanges } from "@jingler/ui"
 import { ChangedFilesExplorer, EmptyState, SubagentScopeBar, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
 import {
@@ -23,6 +24,7 @@ import { useAdversarialReview } from "./use-adversarial-review.js"
 import { useAgentTrees } from "./use-agent-trees.js"
 import { useReview } from "./use-review.js"
 import { useViewedChild } from "./subagent-tab-store.js"
+import { scopeBarState } from "./subagent-scope.js"
 import { useSubagentView } from "./use-subagent-view.js"
 
 /** The instruction handed to the session's agent to clean up one file. */
@@ -99,6 +101,28 @@ export function useReviewTurns(session: Session) {
   return { turns, turn, setTurn }
 }
 
+function ViewedChildScopeBar({
+  viewed,
+  agentTrees,
+  onShowAll
+}: {
+  readonly viewed: SubagentFleetNode
+  readonly agentTrees: ReadonlyArray<AgentTreeChanges>
+  readonly onShowAll: () => void
+}) {
+  const fileCount = agentTrees.find((tree) => tree.agentId === viewed.subagentId)?.files.length ?? 0
+  return (
+    <SubagentScopeBar
+      agent={viewed.agent}
+      branch={viewed.workspace?.branch ?? null}
+      prNumber={viewed.prNumber}
+      state={scopeBarState(viewed, fileCount)}
+      baseRef={viewed.workspace?.baseRef ?? null}
+      onShowAll={onShowAll}
+    />
+  )
+}
+
 function CheckoutChangesList({
   session,
   connected,
@@ -130,14 +154,7 @@ function CheckoutChangesList({
   const scoped = active && viewed !== null && changesScope === viewed.subagentId
   return (
     <>
-    {scoped && (
-      <SubagentScopeBar
-        agent={viewed.agent}
-        branch={viewed.workspace?.branch ?? null}
-        prNumber={viewed.prNumber}
-        onShowAll={() => setChangesScope("all")}
-      />
-    )}
+    {scoped && <ViewedChildScopeBar viewed={viewed} agentTrees={agentTrees} onShowAll={() => setChangesScope("all")} />}
     <ChangedFilesExplorer
       turns={active ? turns : []}
       turnId={active ? (turn?.id ?? null) : null}

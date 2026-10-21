@@ -60,4 +60,12 @@ describe("subagentViewMachine", () => {
     actor.send({ type: "BACK" })
     expect(actor.getSnapshot().context).toMatchObject({ selectedId: null, changesScope: "all" })
   })
+
+  it("Esc (BACK) from a scoped child restores all agents in one transition", () => {
+    const actor = start()
+    actor.send({ type: "OPEN_SUBAGENT", id: "n1", scope: "a" })
+    actor.send({ type: "BACK" })
+    expect(actor.getSnapshot().value).toBe("main")
+    expect(actor.getSnapshot().context.changesScope).toBe("all")
+  })
 })

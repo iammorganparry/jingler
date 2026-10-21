@@ -12,3 +12,6 @@ type Story = StoryObj<typeof meta>
 
 export const WithPr: Story = {}
 export const NoPr: Story = { args: { prNumber: null } }
+export const NoChangesYet: Story = { args: { state: "empty" } }
+export const WorktreeRemoved: Story = { args: { state: "removed" } }
+export const WorktreeRemovedWithBase: Story = { args: { state: "removed", baseRef: "main" } }
