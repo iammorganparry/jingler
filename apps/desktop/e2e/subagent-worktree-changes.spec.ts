@@ -79,3 +79,33 @@ test("#560: Changes agent scope aggregates a child's worktree, filters to it, an
     rmSync(childRoot, { recursive: true, force: true })
   }
 })
+
+test("#563: viewing a child with a worktree scopes Changes to it and Esc restores all agents", async ({ launchApp }) => {
+  const childRoot = mkdtempSync(join(tmpdir(), "jingler-child-tree-"))
+  const childTree = join(childRoot, "child")
+  try {
+    const { window } = await launchApp({
+      configured: true,
+      withRepo: true,
+      sessions: seededSessions,
+      e2eEnv: { JINGLER_E2E_SUBAGENT_WORKSPACE: childTree },
+      seed: ({ repoPath }) => {
+        execFileSync("git", ["worktree", "add", "-b", "child/a", childTree], { cwd: repoPath })
+        writeFileSync(join(childTree, "child.txt"), "child change\n")
+      }
+    })
+    await expect(appShell(window)).toBeVisible()
+    const composer = window.getByPlaceholder("Message the agent…")
+    await composer.fill("[[held-subagents]] survey the app")
+    await composer.press("Enter")
+    await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+    await window.getByRole("button", { name: "View", exact: true }).first().click()
+    await window.getByRole("button", { name: "Changes" }).first().click()
+    await expect(window.getByTestId("subagent-scope-bar")).toContainText("child/a", { timeout: 30_000 })
+    await window.keyboard.press("Escape")
+    await expect(window.getByTestId("subagent-scope-bar")).toHaveCount(0)
+    await expect(window.getByTestId("subagent-breadcrumb")).toHaveCount(0)
+  } finally {
+    rmSync(childRoot, { recursive: true, force: true })
+  }
+})

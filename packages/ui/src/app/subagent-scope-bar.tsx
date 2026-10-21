@@ -4,13 +4,19 @@ export interface SubagentScopeBarProps {
   readonly agent: string
   readonly branch: string | null
   readonly prNumber: number | null
+  /** "removed": the child's worktree is gone; "empty": it has no changes yet. */
+  readonly state?: "active" | "empty" | "removed"
+  readonly baseRef?: string | null
   /** Widen content back to all agents without leaving the child view. */
   readonly onShowAll: () => void
 }
 
 /** One-line bar atop the content area while it is scoped to the viewed subagent. */
-export function SubagentScopeBar({ agent, branch, prNumber, onShowAll }: SubagentScopeBarProps) {
+export function SubagentScopeBar({ agent, branch, prNumber, state = "active", baseRef = null, onShowAll }: SubagentScopeBarProps) {
   const parts = [`Scoped to ${agent}`, branch, prNumber === null ? null : `PR #${prNumber}`]
+  const note =
+    state === "removed" ? (baseRef ? `Worktree removed (changes may be merged into ${baseRef})` : "Worktree removed") : state === "empty" ? "No changes yet" : null
+  if (note) parts.push(note)
   return (
     <div
       data-testid="subagent-scope-bar"
