@@ -142,14 +142,17 @@ function TurnFiltered() {
 /** "All turns ▾" narrows the file list to what one agent turn changed. */
 export const ExplorerTurnFilter: Story = { render: () => <TurnFiltered /> }
 
-function AgentScoped() {
+function AgentScoped({ scope }: { readonly scope?: string }) {
   const [active, setActive] = useState<string | null>(null)
+  const [picked, setPicked] = useState(scope ?? "all")
   return (
     <Frame width={320}>
       <ChangedFilesExplorer
         files={agentTrees.flatMap((tree) => tree.files)}
         fileDiffs={diffs(prChanges)}
         agentTrees={agentTrees}
+        agentScope={picked}
+        onAgentScopeChange={setPicked}
         drafts={[]}
         activePath={active}
         onSelectFile={setActive}
@@ -164,6 +167,12 @@ function AgentScoped() {
  * tree that touched it.
  */
 export const ExplorerAgentScoped: Story = { render: () => <AgentScoped /> }
+
+/** Scope "Main": child worktree files are hidden. */
+export const ExplorerAgentScopedMain: Story = { render: () => <AgentScoped scope="main" /> }
+
+/** Scope one agent: only that subagent's worktree. */
+export const ExplorerAgentScopedSingle: Story = { render: () => <AgentScoped scope="agent-refresh" /> }
 
 /** The change list is loading: rows at real height, nothing shifts on load. */
 export const ExplorerLoading: Story = {
