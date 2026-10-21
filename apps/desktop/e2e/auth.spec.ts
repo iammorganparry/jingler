@@ -236,3 +236,22 @@ test("an offline boot shows the app with the unreachable banner, not the sign-in
   await expect(window.getByText("Can't reach Jingler — you can keep working locally")).toBeVisible()
   await expect(sessionRow(window, "Seeded session")).toBeVisible()
 })
+
+test("a signed-out launch completes onboarding and the sidebar footer offers Sign in", async ({ launchApp }) => {
+  const { window, app, reposDir } = await launchApp({
+    signedIn: false,
+    withRepo: true,
+    piFixture: { scenarioId: "onboarding-provider-skip", authRoute: "api-key", seedConnection: false }
+  })
+  await app.evaluate(({ dialog }, selected) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] })
+  }, reposDir)
+  await window.getByRole("button", { name: "Choose repos folder" }).click()
+  await window.getByRole("button", { name: "Continue", exact: true }).click()
+  await window.getByRole("button", { name: "Skip for now", exact: true }).click()
+  await window.getByRole("button", { name: "Skip for now", exact: true }).click()
+  await window.getByRole("button", { name: "Skip for now", exact: true }).click()
+  await expect(appShell(window)).toBeVisible()
+  await expect(signInHeading(window)).toHaveCount(0)
+  await openSignIn(window)
+})
