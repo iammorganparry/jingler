@@ -6,13 +6,13 @@ export interface SubagentViewContext {
   readonly selectedId: string | null
   readonly mainDraft: string
   readonly mainScrollTop: number
-  /** Changes agent scope: "all", "main", or a subagent id. */
+  /** Content scope (Changes, PR, terminal cwd): "all", "main", or the viewed subagent id. */
   readonly changesScope: string
 }
 
 export type SubagentViewEvent =
-  | { readonly type: "OPEN_SUBAGENT"; readonly id: string }
-  | { readonly type: "SWITCH_SIBLING"; readonly id: string }
+  | { readonly type: "OPEN_SUBAGENT"; readonly id: string; readonly scope?: string }
+  | { readonly type: "SWITCH_SIBLING"; readonly id: string; readonly scope?: string }
   | { readonly type: "BACK" }
   | { readonly type: "SET_CHANGES_SCOPE"; readonly scope: string }
   | { readonly type: "SAVE_MAIN_VIEW"; readonly draft: string; readonly scrollTop: number }
@@ -31,13 +31,14 @@ export const subagentViewMachine = setup({
   actions: {
     select: assign(({ event }) =>
       event.type === "OPEN_SUBAGENT" || event.type === "SWITCH_SIBLING"
-        ? { selectedId: event.id }
+        ? { selectedId: event.id, changesScope: event.scope ?? "all" }
         : {}
     ),
     setChangesScope: assign(({ event }) =>
       event.type === "SET_CHANGES_SCOPE" ? { changesScope: event.scope } : {}
     ),
-    clearSelection: assign({ selectedId: null }),
+    // BACK restores the aggregate: lane and content scope reset in one transition.
+    clearSelection: assign({ selectedId: null, changesScope: "all" }),
     saveMainView: assign(({ event }) =>
       event.type === "SAVE_MAIN_VIEW"
         ? { mainDraft: event.draft, mainScrollTop: event.scrollTop }

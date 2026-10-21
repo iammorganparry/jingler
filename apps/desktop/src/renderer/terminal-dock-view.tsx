@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react"
 import type { Session } from "@jingler/core"
 import { TerminalPanel, type TerminalTab } from "@jingler/ui"
+import { useViewedChild } from "./subagent-tab-store.js"
 import { useTerminals } from "./use-terminals.js"
 import { XtermView } from "./xterm-view.js"
 
@@ -23,7 +24,9 @@ export function TerminalDockView({
   session,
   visible = true
 }: TerminalDockViewProps) {
-  const cwd = session?.worktreePath ?? undefined
+  const viewed = useViewedChild(session?.id ?? "", session?.activeChatId ?? "")
+  // While the lane shows a child with its own worktree, new terminals start there.
+  const cwd = viewed?.workspace?.path ?? session?.worktreePath ?? undefined
   const terminals = useTerminals(session?.id ?? null, cwd)
   const { create, close, restart, select, markExited, tabs: infos, activeId, hydrated } = terminals
 
