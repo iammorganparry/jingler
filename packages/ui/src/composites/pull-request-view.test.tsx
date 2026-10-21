@@ -74,18 +74,32 @@ describe("PullRequestView evidence navigation", () => {
     expect(screen.getAllByRole("link", { name: "Details for Lint" })[0]!.className).not.toMatch(/red/)
   })
 
-  it("floats the details rail when the PR pane is medium width", () => {
-    render(<WidthTierValue width={700}><PullRequestView pr={pr} connected readOnly /></WidthTierValue>)
-    expect(screen.getByRole("button", { name: "Pull request details" })).toBeTruthy()
+  const measuredWidth = (width: number) =>
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width } as DOMRect)
+
+  it("collapses the rail below 900px of view width and reopens it from the header button", () => {
+    const spy = measuredWidth(700)
+    render(<PullRequestView pr={pr} connected readOnly />)
+    expect(screen.queryByText("Checks")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Pull request details" }))
+    expect(screen.getByText("1/1 passing")).toBeTruthy()
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    expect(screen.queryByText("1/1 passing")).toBeNull()
+    spy.mockRestore()
   })
 
-  it("closes the compact details sheet by button or Escape", () => {
-    render(<WidthTierValue width={480}><PullRequestView pr={pr} connected readOnly /></WidthTierValue>)
-    fireEvent.click(screen.getByRole("button", { name: "Pull request details" }))
-    const close = screen.getByRole("button", { name: "Close pull request details" })
-    expect(close).toBeTruthy()
-    fireEvent.keyDown(window, { key: "Escape" })
-    expect(screen.getByRole("button", { name: "Pull request details" })).toBeTruthy()
+  it("docks the rail at 900px and above, without the header button", () => {
+    const spy = measuredWidth(900)
+    render(<PullRequestView pr={pr} connected readOnly />)
+    expect(screen.queryByRole("button", { name: "Pull request details" })).toBeNull()
+    expect(screen.getByText("1/1 passing")).toBeTruthy()
+    spy.mockRestore()
+  })
+
+  it("hides rail sections that have no data", () => {
+    render(<PullRequestView pr={{ ...pr, checks: [] }} connected readOnly />)
+    for (const title of ["Reviewers", "Labels", "Linked issue", "Stack"]) expect(screen.queryByText(title)).toBeNull()
+    expect(screen.queryByText("No reviewers yet")).toBeNull()
   })
 
   it("hides write controls in read-only views", () => {

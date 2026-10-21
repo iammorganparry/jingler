@@ -43,3 +43,40 @@ export const ConversationOwnPrNoDescription: Story = {
     </WidthTierValue>
   )
 }
+
+const RAIL_PR: PullRequest = {
+  ...PR,
+  labels: [{ name: "bug", color: "d73a4a" }, { name: "ui", color: null }],
+  reviewers: [{ login: "ada", state: "approved" }, { login: "grace", state: "changes_requested" }]
+}
+
+/** Rail docked at 280px with every section populated. */
+export const RailFullData: Story = {
+  render: () => (
+    <div style={{ width: 1200, height: 700, display: "flex" }}>
+      <PullRequestView
+        pr={RAIL_PR}
+        connected
+        linkedIssue={{ providerId: "github", id: "1", identifier: "#12", url: "https://github.com/acme/widget/issues/12", title: "Errors are swallowed", labels: [] }}
+      />
+    </div>
+  )
+}
+
+/** Sparse PR: empty sections (Reviewers, Labels, Linked issue, Stack) are hidden. */
+export const RailSparseData: Story = {
+  render: () => (
+    <div style={{ width: 1200, height: 700, display: "flex" }}>
+      <PullRequestView pr={{ ...PR, checks: [] }} connected />
+    </div>
+  )
+}
+
+/** Below 900px the rail collapses; the header button opens it as a sheet. */
+export const RailCollapsed: Story = {
+  render: () => (
+    <div style={{ width: 700, height: 700, display: "flex" }}>
+      <PullRequestView pr={RAIL_PR} connected />
+    </div>
+  )
+}
