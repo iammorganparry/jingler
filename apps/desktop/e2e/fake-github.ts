@@ -10,6 +10,10 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 
+/** A one-line-added unified diff per file, or undefined when the PR lists none. */
+const filesDiff = (files: ReadonlyArray<string> | undefined): string | undefined =>
+  files?.map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1,2 @@\n one\n+two\n`).join("");
+
 export interface FakeGitHubPr {
   readonly number: number;
   readonly title: string;
@@ -20,6 +24,8 @@ export interface FakeGitHubPr {
   readonly isDraft?: boolean;
   readonly additions?: number;
   readonly deletions?: number;
+  /** Files this PR changes (default: one `src/auth.ts`); each serves `/files` and the diff. */
+  readonly files?: ReadonlyArray<string>;
   readonly updatedAt?: string;
   readonly body?: string;
   readonly labels?: ReadonlyArray<{
@@ -745,6 +751,7 @@ export const startFakeGitHubServer = async (
                   text(
                     res,
                     200,
+                    filesDiff(pr.files) ??
                     options.diff ??
                     "diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1 +1,2 @@\n one\n+two\n",
                   );
@@ -790,14 +797,12 @@ export const startFakeGitHubServer = async (
               matches: () => (tail === "/files" && method === "GET"),
               handle: function listPullFiles() {
                 if (!requirePermissions("pull_requests:read")) return;
-                json(res, 200, [
-                  {
-                    filename: "src/auth.ts",
-                    additions: pr.additions ?? 0,
-                    deletions: pr.deletions ?? 0,
-                    patch: "@@ -1 +1,2 @@\n one\n+two",
-                  },
-                ]);
+                json(res, 200, (pr.files ?? ["src/auth.ts"]).map((filename) => ({
+                  filename,
+                  additions: pr.additions ?? 0,
+                  deletions: pr.deletions ?? 0,
+                  patch: "@@ -1 +1,2 @@\n one\n+two",
+                })));
                 return;
               }
             },

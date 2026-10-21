@@ -27,6 +27,8 @@ export interface SessionReviewState {
   readonly filter: ReviewFilter
   /** The agent turn the Changes list is narrowed to, or null for all turns. */
   readonly turnId: string | null
+  /** The PR stack layer the Changes list is narrowed to, or null for the session's own PR. */
+  readonly prLayer: number | null
   readonly drafts: ReadonlyArray<ReviewDraft>
   readonly viewed: ReadonlySet<string>
   /** Fingerprints (see `findingFingerprint`) of adversarial-review findings the reviewer dismissed. */
@@ -48,6 +50,7 @@ const read = (sessionId: string, prNumber: number | null): SessionReviewState =>
   const initial: SessionReviewState = {
     filter: "all",
     turnId: null,
+    prLayer: null,
     drafts: [],
     viewed: readViewedPaths(sessionId, prNumber),
     dismissedFindings: readDismissedFindings(sessionId, prNumber)
@@ -95,6 +98,15 @@ export const setReviewTurn = (
 ): void =>
   update(sessionId, prNumber, (state) =>
     state.turnId === turnId ? state : { ...state, turnId }
+  )
+
+export const setReviewPrLayer = (
+  sessionId: string,
+  prNumber: number | null,
+  prLayer: number | null
+): void =>
+  update(sessionId, prNumber, (state) =>
+    state.prLayer === prLayer ? state : { ...state, prLayer }
   )
 
 /**

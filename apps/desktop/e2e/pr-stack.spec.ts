@@ -197,3 +197,43 @@ test("Restack retargets and rebases every upper layer after the base merges", as
   // retarget/rebase itself is covered by rpc-restack.test.ts; here we assert the action runs and settles.
   await expect(window.getByTestId("restack-cta")).toHaveText("Restack")
 })
+
+test("Selecting a layer in the Changes PR filter shows only that layer's files", async ({ launchApp }) => {
+  const pr = (number: number, headRefName: string, baseRefName: string, files: string[]) => ({
+    number, title: `Layer ${number}`, headRefName, baseRefName, files, author: { login: "e2e-user" }
+  })
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{
+      id: "s_filter", repo: "widget", githubSlug: "acme/widget", branch: "stack/ui", title: "Stack session", status: "idle",
+      diff: { added: 0, removed: 0 }, prNumber: 482, costUsd: 0, tokens: 0, updatedAt: "2026-10-12T10:00:00.000Z",
+      prs: [
+        { number: 480, branch: "stack/model", base: "main" },
+        { number: 481, branch: "stack/api", base: "stack/model" },
+        { number: 482, branch: "stack/ui", base: "stack/api" }
+      ],
+      githubInstallationId: "101", githubRepositoryId: "301", worktreePath: context.repoPath
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [
+        pr(480, "stack/model", "main", ["src/model.ts"]),
+        pr(481, "stack/api", "stack/model", ["src/api.ts"]),
+        pr(482, "stack/ui", "stack/api", ["src/ui.ts"])
+      ]
+    }
+  })
+  await window.getByTestId("session-row-s_filter").click()
+  await window.getByRole("button", { name: "Changes" }).first().click()
+  const explorer = window.getByTestId("changed-files-explorer")
+  const file = (path: string) => explorer.locator(`[role="treeitem"][data-item-path="${path}"]`)
+  await expect(file("src/ui.ts")).toBeVisible({ timeout: 30_000 })
+  await expect(file("src/api.ts")).toHaveCount(0)
+
+  await explorer.getByRole("button", { name: "Filter by PR layer", exact: true }).click()
+  await window.getByRole("option", { name: /^PR: #481$/ }).click()
+  await expect(file("src/api.ts")).toBeVisible({ timeout: 30_000 })
+  await expect(file("src/ui.ts")).toHaveCount(0)
+})
