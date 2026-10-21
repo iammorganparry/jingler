@@ -49,6 +49,32 @@ const markCompleted = (): void => {
 
 type Candidate = McpImportCandidateView & { readonly conflict: boolean }
 
+type ResultProps = Pick<Parameters<typeof McpImportPrompt>[0], "startAuthorization" | "logTail">
+
+/** View log / Connect handlers for the result step. */
+function useResultActions(startAuthorization: ResultProps["startAuthorization"], logTail: ResultProps["logTail"]) {
+  const [logName, setLogName] = useState<string | null>(null)
+  const [logLines, setLogLines] = useState<ReadonlyArray<string>>([])
+  const [logLoading, setLogLoading] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const viewLog = (name: string) => {
+    setLogName(name)
+    setLogLines([])
+    setLogLoading(true)
+    void logTail(name)
+      .then((result) => setLogLines(result.lines))
+      .finally(() => setLogLoading(false))
+  }
+  const connect = (name: string) => {
+    setActionError(null)
+    void startAuthorization(name).catch((cause) =>
+      setActionError(cause instanceof Error ? cause.message : "Could not start sign-in")
+    )
+  }
+  return { logName, setLogName, logLines, logLoading, actionError, viewLog, connect }
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI maps mutually exclusive machine states (review, importing, failed, result) to their controls.
 export function McpImportPrompt({
   ready,
   servers,
@@ -74,10 +100,10 @@ export function McpImportPrompt({
   const serversRef = useRef(servers)
   serversRef.current = servers
   const [rows, setRows] = useState<ReadonlyArray<McpImportResultRow>>([])
-  const [logName, setLogName] = useState<string | null>(null)
-  const [logLines, setLogLines] = useState<ReadonlyArray<string>>([])
-  const [logLoading, setLogLoading] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const { logName, setLogName, logLines, logLoading, actionError, viewLog, connect } = useResultActions(
+    startAuthorization,
+    logTail
+  )
 
   const [state, send] = useMachine(mcpImportMachine, {
     input: {
@@ -122,20 +148,6 @@ export function McpImportPrompt({
   const open = state.matches("reviewing") || state.matches("detectFailed") || state.matches("importing") || state.matches("importFailed") || state.matches("done")
   const done = state.matches("done")
 
-  const viewLog = (name: string) => {
-    setLogName(name)
-    setLogLines([])
-    setLogLoading(true)
-    void logTail(name)
-      .then((result) => setLogLines(result.lines))
-      .finally(() => setLogLoading(false))
-  }
-  const connect = (name: string) => {
-    setActionError(null)
-    void startAuthorization(name).catch((cause) =>
-      setActionError(cause instanceof Error ? cause.message : "Could not start sign-in")
-    )
-  }
 
   const dismiss = () => {
     markCompleted()

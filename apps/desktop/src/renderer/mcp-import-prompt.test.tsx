@@ -75,7 +75,7 @@ describe("McpImportPrompt", () => {
     const startAuthorization = vi.fn(async () => {})
     const logTail = vi.fn(async () => ({ lines: ["boom"] }))
     const cand = (name: string) => ({ name, source: "claude" as const, origin: "user" as const, target: "x", problem: null, needsSignIn: false, needsSecrets: false })
-    const status = (name: string, state: "failed" | "needs-auth") => ({ name, scope: "user" as const, state, toolCount: null, toolNames: [], error: null })
+    const status = (name: string, state: "failed" | "needs-auth") => ({ name, scope: "user" as const, state, toolCount: null, toolNames: [], error: null, checkedAt: "2026-01-01T00:00:00Z" })
     render(<McpImportPrompt
       ready
       servers={[]}
