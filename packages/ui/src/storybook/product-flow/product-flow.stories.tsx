@@ -466,3 +466,52 @@ export const MutationRecovery: Story = {
     </div>
   )
 }
+
+const providerStep = (props: Partial<React.ComponentProps<typeof SetupScreen>>) => frame(
+  <SetupScreen
+    step="provider"
+    github={disconnectedGithub}
+    onChooseDir={noop}
+    onContinue={noop}
+    onToggleRepo={noop}
+    onToggleAllRepos={noop}
+    onAddProjects={noop}
+    onCloneRepository={noop}
+    onConnectGithub={noop}
+    onSkipGithub={noop}
+    onConnectClaude={noop}
+    onStartCodex={noop}
+    onConnectApi={noop}
+    onContinueProvider={noop}
+    onSkipProvider={noop}
+    onCancelAuth={noop}
+    onRetryProvider={noop}
+    onSkipImportSessions={noop}
+    onContinueImportSessions={noop}
+    {...props}
+  />
+)
+
+/** Step 3 with no provider: Continue is disabled and says why. */
+export const ProviderContinueDisabled: Story = {
+  render: () => providerStep({ providerCatalog: null })
+}
+
+/** Step 3 connected: HarnessCard with logo and Ready pill. */
+export const ProviderHarnessReady: Story = {
+  render: () => providerStep({ providerCatalog: FLOW_PROVIDER_CATALOG })
+}
+
+/** `loadFailed`: "Couldn't load providers · Retry". */
+export const ProviderLoadFailed: Story = {
+  render: () => providerStep({ providerFailure: "loadFailed", error: "rpc timeout" })
+}
+
+/** `completionFailed`: "Couldn't save setup · Retry". */
+export const ProviderCompletionFailed: Story = {
+  render: () => providerStep({
+    providerCatalog: FLOW_PROVIDER_CATALOG,
+    providerFailure: "completionFailed",
+    error: "Config unavailable"
+  })
+}

@@ -356,6 +356,44 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
+  it("recovers from a failed provider catalog load via RETRY_PROVIDER", async () => {
+    let loads = 0;
+    const machine = unconfigured().provide({
+      actors: {
+        loadProviderCatalog: fromPromise<ProviderCatalog>(async () => {
+          loads += 1;
+          if (loads === 1) throw new Error("Catalog unavailable");
+          return providerCatalog;
+        }),
+      },
+    });
+    const actor = createActor(machine).start();
+    await waitFor(actor, (s) => s.matches({ setup: "workspace" }));
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (s) => s.context.reposDir === "/repos");
+    actor.send({ type: "CONTINUE" });
+    actor.send({ type: "SKIP_GITHUB" });
+    await waitFor(actor, (s) => s.matches({ setup: { provider: "loadFailed" } }));
+    expect(actor.getSnapshot().context.error).toBe("Catalog unavailable");
+    actor.send({ type: "RETRY_PROVIDER" });
+    await waitFor(actor, (s) => s.matches({ setup: { provider: "idle" } }));
+    expect(actor.getSnapshot().context.error).toBeNull();
+    actor.stop();
+  });
+
+  it("blocks CONTINUE_PROVIDER while no provider is connected", async () => {
+    const machine = unconfigured().provide({
+      actors: {
+        loadProviderCatalog: fromPromise<ProviderCatalog>(async () => disconnectedCatalog),
+      },
+    });
+    const actor = createActor(machine).start();
+    await reachProvider(actor);
+    actor.send({ type: "CONTINUE_PROVIDER" });
+    expect(actor.getSnapshot().matches({ setup: { provider: "idle" } })).toBe(true);
+    actor.stop();
+  });
+
   it("retries provider setup persistence independently from authentication", async () => {
     let attempts = 0;
     const machine = unconfigured().provide({
