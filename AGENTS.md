@@ -34,6 +34,10 @@ for the full architecture guide; this file is the short list of standing rules.
   production env check needs the same placeholders CI sets (`ci.yml`):
   `BETTER_AUTH_SECRET=ci-only-better-auth-placeholder-at-least-32-bytes BETTER_AUTH_URL=https://ci.invalid CRON_SECRET=ci-only-cron-placeholder-at-least-32-bytes pnpm typecheck`.
 
+- **Sign-in is optional.** The app boots signed out and onboarding never
+  requires auth; sign-in is only offered from the sidebar footer's account
+  menu via the sign-in dialog. Never gate the app or onboarding on a session.
+
 - **Never hardcode a colour in a component** — use the `--sb-*` theme tokens
   (see the Theming section of `CLAUDE.md`).
 
