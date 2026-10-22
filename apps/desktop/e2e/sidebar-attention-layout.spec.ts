@@ -1,5 +1,5 @@
 import { appShell, expect, test } from "./fixtures.js"
-import { openView } from "./views.js"
+import { explorerTree } from "./explorer.js"
 import type { SeedSession } from "./fixtures.js"
 
 const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
@@ -74,24 +74,23 @@ test("groups chats by attention and opens session views in a responsive two-thir
   ])
 
   await window.getByTestId("session-row-s_needs_input").click()
-  await openView(window, "files")
-  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
+  const tree = await explorerTree(window)
+  await tree.locator('[role="treeitem"][data-item-path="README.md"]').click()
 
-  // Files opens in the content group while chat stays visible beside it.
+  // A file opens in the content group while chat stays visible beside it.
   const groups = window.getByTestId("editor-group")
   await expect(groups).toHaveCount(2)
-  await expect(window.getByTestId("editor-tab-view-files")).toBeVisible()
+  await expect(window.getByTestId("editor-tab-file-README.md")).toBeVisible()
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
-  const tree = window.getByRole("region", { name: "Repository files" })
-  await expect(tree).toBeVisible()
   await expect(window.getByRole("region", { name: "Repository browser" })).toHaveCount(0)
 
   await window.setViewportSize({ width: 900, height: 700 })
   await window.waitForTimeout(120)
-  // Below the rail threshold the sidebar (and its Explorer) folds away; the
-  // editor keeps chat and Files open in their separate groups.
-  await expect(groups).toHaveCount(2)
-  await expect(window.getByTestId("editor-tab-view-files")).toBeVisible()
+  // Below 1100px the chat lane folds into an overlay drawer behind the Ask pill;
+  // the file group stays open and chat returns on demand.
+  await expect(groups).toHaveCount(1)
+  await expect(window.getByTestId("editor-tab-file-README.md")).toBeVisible()
+  await window.getByRole("button", { name: "Show chat lane" }).click()
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
