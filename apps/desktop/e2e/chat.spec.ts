@@ -683,7 +683,9 @@ test("a passing check still links to its run", async ({ launchApp }) => {
       ]
     }
   })
-  await openPullRequestDetails(window)
+  // Per-check rows live in the Checks evidence tab; the details rail only summarises ("1/1 passing").
+  await window.getByTestId("header-view-checks").click()
+  await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
 
   const details = window.getByRole("link", { name: "Details for build" })
   await expect(details).toBeVisible({ timeout: 20_000 })
