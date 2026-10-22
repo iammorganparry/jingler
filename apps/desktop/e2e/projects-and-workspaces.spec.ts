@@ -39,7 +39,7 @@ const addProject = async (window: Page, projectPath: string) => {
 
 const createWorkspace = async (
   window: Page,
-  input: { checkout: "Local" | "Worktree"; task?: string; baseBranch?: string }
+  input: { checkout: "This checkout" | "Worktree"; task?: string; baseBranch?: string }
 ) => {
   if (!(await window.getByTestId("new-session-view").isVisible())) {
     await window.getByTestId("new-session").click()
@@ -182,7 +182,7 @@ test("creates a direct workspace from a registered project", async ({ launchApp 
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
   await createWorkspace(launched.window, {
-    checkout: "Local"
+    checkout: "This checkout"
   })
 
   const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
@@ -336,7 +336,7 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
       await expect(dialog).toHaveCount(0)
     }
     await rail.getByRole("button", { name: "Athena", exact: true }).click()
-    await createWorkspace(window, { checkout: "Local" })
+    await createWorkspace(window, { checkout: "This checkout" })
     await expect.poll(() => realpathSync(JSON.parse(readFileSync(join(launched.home, "jingler", "config.json"), "utf8")).lastRepoPath)).toBe(realpathSync(athena))
 
     if (entry === "sidebar") {
@@ -353,7 +353,7 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
       }
     }
     await expect(window.getByRole("button", { name: "Project", exact: true })).toContainText("Jingler")
-    await createWorkspace(window, { checkout: "Local" })
+    await createWorkspace(window, { checkout: "This checkout" })
     const persisted: ReadonlyArray<{ repoPath: string; worktreePath: string }> = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     )
