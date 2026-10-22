@@ -44,11 +44,10 @@ it("keeps an explicit project request ahead of the current default", async () =>
 
 it("follows a project-rail selection while the form is open", async () => {
   const rendered = render(view("alpha"))
-  const picker = await screen.findByRole("button", { name: "Project" })
-  await waitFor(() => expect(picker.textContent).toContain("Alpha"))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("Alpha"))
 
   rendered.rerender(view("beta"))
-  await waitFor(() => expect(picker.textContent).toContain("Beta"))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("Beta"))
 })
 
 it("describes the concise checkpoint-safe checkbox on keyboard focus without changing its default", async () => {
@@ -119,4 +118,18 @@ it("shows send-button submission, ignores duplicate mouse/Enter and retains the 
   await act(async () => resolve())
   expect(onClose).toHaveBeenCalledOnce()
   expect(screen.queryByTestId("workspace-provisioning")).toBeNull()
+})
+
+it("renders one chip row: project, from <branch>, checkout with explainers, and composer-first heading", async () => {
+  render(view("alpha"))
+  const row = await screen.findByTestId("new-workspace-chip-row")
+  await waitFor(() => expect(row.textContent).toContain("from main"))
+  expect(screen.getByRole("heading", { name: "New workspace" })).toBeDefined()
+  expect(screen.queryByRole("button", { name: "Session source" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Start from" }))
+  for (const name of ["Branch", "Pull request"]) if (name === "Branch") expect(await screen.findByRole("tab", { name })).toBeDefined()
+  fireEvent.click(screen.getByRole("button", { name: "Checkout" }))
+  expect(await screen.findByText("Work directly in the project checkout")).toBeDefined()
+  expect(screen.getByText("Isolated Git worktree for this session")).toBeDefined()
 })
