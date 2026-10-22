@@ -1066,6 +1066,11 @@ test("an adversarial review runs beside an active conversation and appears as a 
 
   // …and the reviewer is watchable in the still-visible conversation, mid-run.
   // The reviewer is a child agent: it shows in the lane header's subagent chip.
+  // The narrow-group details drawer is modal (scrim over the header), so dismiss it first; the run continues.
+  if (await window.getByTestId("drawer-scrim").isVisible()) {
+    await window.keyboard.press("Escape")
+    await expect(window.getByTestId("drawer-scrim")).toBeHidden()
+  }
   await window.getByTestId("subagent-chip").first().click()
   await expect(
     window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ })
