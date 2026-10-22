@@ -25,7 +25,6 @@ import {
   GitFork,
   GitPullRequest,
   MessageCircle,
-  Monitor,
   LoaderCircle,
   Server,
   SquarePen,
@@ -34,13 +33,6 @@ import {
 import { Button } from "../components/button.js";
 import { GithubMark } from "../components/github-mark.js";
 import { LinearMark } from "../components/linear-mark.js";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectSearch,
-  SelectTrigger,
-} from "../components/beui/select.js";
 import { cn } from "../lib/cn.js";
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js";
 import { Composer } from "./composer.js";
@@ -255,7 +247,6 @@ const workspacePrompt = (source: NewSessionSource) => source === "pr"
   ? "Add an instruction for this pull request (optional)"
   : source === "branch" ? "What should the agent do on this branch?" : "Message the agent, tag @files, or use /commands and /skills"
 const selectedBranch = (source: NewSessionSource, prBranch: string | undefined, baseBranch: string) => source === "pr" ? (prBranch ?? baseBranch) : baseBranch
-const selectedBranchOption = (source: NewSessionSource, prBranch: string | undefined, baseBranch: string) => source === "pr" ? (prBranch ?? "") : baseBranch
 const remoteEnvironmentId = (environmentId: string) => environmentId === "local" ? undefined : environmentId
 const branchPlaceholder = (loading: boolean, local: boolean) => loading ? (local ? "Loading branches…" : "Preparing on host…") : "Choose branch"
 
@@ -329,7 +320,7 @@ function NewWorkspaceContent({ props, context, send, submitting, failed, loading
   catalog: AgentEndpointCatalog | null | undefined; unavailableReason: string | undefined; selectedProject: Project | undefined
   sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>
 }) {
-  const { source, search, mine, pullRequests, issues, selectedPr, selectedIssue, draft, provisioningPhase, error } = context
+  const { source, draft, error } = context
   const startup = props.environmentStartup || (submitting && selectedEnvironment !== undefined)
   return <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="new-session-view">
     <div className="flex h-12 flex-none items-center border-b border-hairline px-5"><h1 className="text-[13px] font-semibold text-text-bright">New session</h1><span className="flex-1" /><WakeChip environment={selectedEnvironment} onWake={props.onWakeEnvironment} /><Button variant="ghost" size="icon" aria-label="Close new session" disabled={submitting && !props.environmentStartup?.error} onClick={() => send({ type: "CLOSE" })}><X size={15} /></Button></div>
@@ -469,7 +460,6 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     projectId,
     environmentId,
     baseBranch,
-    branches,
     source,
     selectedPr,
     selectedIssue,
