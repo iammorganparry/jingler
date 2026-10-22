@@ -7,7 +7,7 @@ const drafts: ReadonlyArray<ReviewFindingDraft> = [
   { id: "b", severity: "nit", path: "src/b.ts", line: 9, body: "Rename." }
 ]
 const start = () => {
-  const actor = createActor(reviewDrawerMachine).start()
+  const actor = createActor(reviewDrawerMachine, { input: {} }).start()
   actor.send({ type: "SET_DRAFTS", drafts })
   return actor
 }
@@ -23,7 +23,7 @@ describe("reviewDrawerMachine", () => {
   })
 
   it("is plain open with no drafts", () => {
-    const actor = createActor(reviewDrawerMachine).start()
+    const actor = createActor(reviewDrawerMachine, { input: {} }).start()
     actor.send({ type: "TOGGLE" })
     expect(actor.getSnapshot().value).toBe("open")
   })
@@ -68,7 +68,7 @@ describe("reviewDrawerMachine", () => {
 
 describe("reviewDrawerMachine run status", () => {
   it("tracks running, failed with error, and retry back to running", () => {
-    const actor = createActor(reviewDrawerMachine).start()
+    const actor = createActor(reviewDrawerMachine, { input: {} }).start()
     expect(actor.getSnapshot().context.run).toBe("idle")
     actor.send({ type: "RUN", status: "running" })
     expect(actor.getSnapshot().context.run).toBe("running")
@@ -79,7 +79,7 @@ describe("reviewDrawerMachine run status", () => {
   })
 
   it("restores saved decisions for a PR key", () => {
-    saveDecisions("a/b#1", { ...createActor(reviewDrawerMachine).start().getSnapshot().context, added: ["x"], dismissed: ["y"] })
+    saveDecisions("a/b#1", { ...createActor(reviewDrawerMachine, { input: {} }).start().getSnapshot().context, added: ["x"], dismissed: ["y"] })
     const actor = createActor(reviewDrawerMachine, { input: loadDecisions("a/b#1") }).start()
     expect(actor.getSnapshot().context).toMatchObject({ added: ["x"], dismissed: ["y"] })
     expect(loadDecisions("other#2")).toEqual({ added: [], dismissed: [] })
