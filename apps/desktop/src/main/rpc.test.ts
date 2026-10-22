@@ -1616,6 +1616,49 @@ describe("RPC handlers", () => {
     });
   });
 
+  describe("Github.submitReview without a session", () => {
+    it("posts inline comments by repository slug", async () => {
+      let posted: { commitSha: string; body: string; comments: ReadonlyArray<unknown> } | null = null;
+      let slug = "";
+      const github = Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        fakeGithubApi({
+          prHeadShaBySlug: () => Effect.succeed("headsha"),
+          prDiffBySlug: () =>
+            Effect.succeed(
+              ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,1 +1,2 @@", " const x = 1", "+const y = 2"].join("\n"),
+            ),
+          prReviewCommentsBySlug: (s: string, _n: number, input: unknown) =>
+            Effect.sync(() => {
+              slug = s;
+              posted = input as typeof posted;
+            }),
+        }),
+      );
+      const unanchored = await Effect.runPromise(
+        githubSubmitReview({
+          repository: "acme/widget",
+          number: 42,
+          body: "overall",
+          comments: [{ path: "a.ts", line: 2, startLine: null, body: "inline" }],
+        }).pipe(Effect.provide(github)),
+      );
+      expect(unanchored).toBe(0);
+      expect(slug).toBe("acme/widget");
+      expect(posted!.commitSha).toBe("headsha");
+      expect(posted!.body).toContain("overall");
+      expect(posted!.comments).toStrictEqual([{ path: "a.ts", line: 2, startLine: null, body: "inline" }]);
+    });
+
+    it("fails when neither a session nor a repository is given", async () => {
+      const exit = await Effect.runPromiseExit(
+        githubSubmitReview({ comments: [] }).pipe(Effect.provide(Layer.mergeAll(base, SessionStore.Default, fakeGithubApi()))),
+      );
+      expect(exit._tag).toBe("Failure");
+    });
+  });
+
   /**
    * The head-SHA short-circuit is what makes the auto-review trigger safe to
    * fire off a poll loop: an unchanged PR must cost one cheap API read, never

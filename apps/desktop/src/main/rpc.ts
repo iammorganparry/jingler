@@ -3441,6 +3441,41 @@ export const githubMergeBySlug = (input: {
  *
  * Returns the unanchored count so the renderer can say so.
  */
+const reviewApiFor = (
+  target: { repository: string; number: number } | { cwd: string; number: number },
+) =>
+  "repository" in target
+    ? {
+        headSha: GitHubApi.prHeadShaBySlug(target.repository, target.number),
+        diff: GitHubApi.prDiffBySlug(target.repository, target.number),
+        post: (review: Parameters<typeof GitHubApi.prReviewCommentsBySlug>[2]) =>
+          GitHubApi.prReviewCommentsBySlug(target.repository, target.number, review),
+      }
+    : {
+        headSha: GitHubApi.prHeadSha(target.cwd, target.number),
+        diff: GitHubApi.prDiff(target.cwd, target.number),
+        post: (review: Parameters<typeof GitHubApi.prReviewComments>[2]) =>
+          GitHubApi.prReviewComments(target.cwd, target.number, review),
+      };
+
+/** The PR a review targets: a session's worktree, or an inbox PR by slug. */
+const resolveReviewTarget = (input: {
+  sessionId?: string | undefined;
+  repository?: string | undefined;
+  number?: number | undefined;
+}) =>
+  Effect.gen(function* () {
+    if (input.sessionId === undefined) {
+      return input.repository && input.number
+        ? { repository: input.repository, number: input.number }
+        : null;
+    }
+    const session = yield* resolveSession(input.sessionId);
+    return session?.worktreePath && session.prNumber !== null
+      ? { cwd: session.worktreePath, number: session.prNumber }
+      : null;
+  });
+
 export const githubSubmitReview = (input: {
   sessionId?: string | undefined;
   repository?: string | undefined;
@@ -3451,38 +3486,22 @@ export const githubSubmitReview = (input: {
   Effect.gen(function* () {
     const invalid = (message: string) =>
       Effect.fail(new GitHubApiError({ reason: "validation", message }));
-    // An inbox PR has no session: address it by slug instead of a worktree.
-    const bySlug = input.sessionId === undefined;
-    const session = bySlug ? null : yield* resolveSession(input.sessionId!);
-    const target: { repository: string; number: number } | { cwd: string; number: number } | null = bySlug
-      ? input.repository && input.number
-        ? { repository: input.repository, number: input.number }
-        : null
-      : session?.worktreePath && session.prNumber !== null
-        ? { cwd: session.worktreePath, number: session.prNumber }
-        : null;
+    const target = yield* resolveReviewTarget(input);
     if (target === null) return yield* invalid("No linked pull request to review");
-    const headSha = yield* "repository" in target
-      ? GitHubApi.prHeadShaBySlug(target.repository, target.number)
-      : GitHubApi.prHeadSha(target.cwd, target.number);
+    const api = reviewApiFor(target);
+    const headSha = yield* api.headSha;
     if (headSha === null) {
       return yield* invalid(
         "Couldn't resolve the pull request's head commit to anchor comments against",
       );
     }
-    const diff = yield* "repository" in target
-      ? GitHubApi.prDiffBySlug(target.repository, target.number)
-      : GitHubApi.prDiff(target.cwd, target.number);
-    const plan = planDraftPost(input.comments, diff);
+    const plan = planDraftPost(input.comments, yield* api.diff);
     if (plan === null) return 0;
-    const review = {
+    yield* api.post({
       commitSha: headSha,
       body: [input.body?.trim(), plan.body].filter(Boolean).join("\n\n"),
       comments: plan.comments,
-    };
-    yield* "repository" in target
-      ? GitHubApi.prReviewCommentsBySlug(target.repository, target.number, review)
-      : GitHubApi.prReviewComments(target.cwd, target.number, review);
+    });
     return plan.unanchoredCount;
   });
 

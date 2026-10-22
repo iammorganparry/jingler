@@ -1,5 +1,5 @@
 /** PR view header and sub-tabs (#440): opened from the header PR chip. */
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
@@ -113,6 +113,9 @@ const installGh = () => {
     "if (args[0] === 'auth' && args[1] === 'status') process.exit(0)",
     "if (args[0] === 'auth' && args[1] === 'token') { console.log('fixture-token'); process.exit(0) }",
     "if (args[0] === 'api' && args[1] === 'user') { if (args.includes('--jq')) console.log('octocat'); else console.log(JSON.stringify({ id: 1, login: 'octocat' })); process.exit(0) }",
+    "if (args[0] === 'pr' && args[1] === 'view' && joined.includes('headRefOid')) { console.log('abc'); process.exit(0) }",
+    "if (args[0] === 'pr' && args[1] === 'diff') { console.log('diff --git a/src/auth.ts b/src/auth.ts\\n--- a/src/auth.ts\\n+++ b/src/auth.ts\\n@@ -40,3 +40,4 @@\\n a\\n b\\n+c\\n d'); process.exit(0) }",
+    "if (args[0] === 'api' && args.includes('POST') && joined.includes('/reviews')) { require('node:fs').appendFileSync(process.env.REVIEW_LOG || '/dev/null', require('node:fs').readFileSync(0, 'utf8') + '\\n'); process.exit(0) }",
     "if (args[0] === 'pr' && args[1] === 'view') { console.log(JSON.stringify(joined.includes('number,state') ? { number: 42, state: 'OPEN' } : pr)); process.exit(0) }",
     "if (args[0] === 'repo' && args[1] === 'view') { console.log('acme/widget'); process.exit(0) }",
     "if (args[0] === 'api' && args[1] === 'repos/acme/widget') { console.log(JSON.stringify({ id: 7, node_id: 'R_7' })); process.exit(0) }",
@@ -124,7 +127,8 @@ const installGh = () => {
     "  process.exit(0)", "}", "if (args[0] === 'api') { console.log('[[]]'); process.exit(0) }", "console.error(joined)", "process.exit(1)"
   ].join("\n"))
   chmodSync(join(bin, "gh"), 0o755)
-  return { root, env: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` } }
+  const log = join(root, "reviews.log")
+  return { root, log, env: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, REVIEW_LOG: log } }
 }
 
 const sessionFor = (prNumber: number | null) => ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
@@ -159,7 +163,8 @@ test("Review drawer on the inbox PR collapses the rail, hands drafts to the comp
     const drawer = window.getByRole("complementary", { name: "Review #42" })
     await expect(drawer).toBeVisible()
     await expect(drawer.getByText("Read-only", { exact: true })).toBeVisible()
-    await expect(drawer.getByRole("button", { name: "Promote to session" })).toBeDisabled()
+    // Slice 3 enables Promote when the PR's repository is a local project.
+    await expect(drawer.getByRole("button", { name: "Promote to session" })).toBeEnabled()
     await expect(rail).toHaveCount(0)
     await expect(drawer.getByTestId("review-draft")).toHaveCount(2)
 
@@ -208,5 +213,42 @@ test("Review drawer starts a live read-only review, shows the failure with Retry
     await expect(drawer.getByRole("button", { name: "Retry" })).toBeVisible()
     await expect(drawer.getByTestId("review-draft")).toHaveCount(0)
     expect(githubServer.operations).toHaveLength(writes)
+  } finally { rmSync(gh.root, { recursive: true, force: true }) }
+})
+
+test("Add to review then submit posts ONE review with inline path+line comments", async ({ launchApp }) => {
+  test.setTimeout(120_000)
+  const gh = installGh()
+  try {
+    const { window } = await launchApp({
+      configured: true, withRepo: true, sessions: [], githubApp: { connected: true, prs: [] }, e2eEnv: gh.env
+    })
+    const inbox = await openInboxPr(window)
+    await window.setViewportSize({ width: 1440, height: 900 })
+    await inbox.getByRole("button", { name: "Review", exact: true }).click()
+    const drawer = window.getByRole("complementary", { name: "Review #42" })
+    await drawer.getByRole("button", { name: "Add all to review" }).click()
+    await inbox.getByRole("button", { name: "Comment", exact: true }).click()
+    await expect.poll(() => (existsSync(gh.log) ? readFileSync(gh.log, "utf8").trim().split("\n").length : 0)).toBe(1)
+    const review = JSON.parse(readFileSync(gh.log, "utf8"))
+    expect(review.event).toBe("COMMENT")
+    expect(review.comments).toEqual(expect.arrayContaining([expect.objectContaining({ path: "src/auth.ts", line: 42 })]))
+  } finally { rmSync(gh.root, { recursive: true, force: true }) }
+})
+
+test("Promote to session creates a session for the PR branch and opens it", async ({ launchApp }) => {
+  test.setTimeout(120_000)
+  const gh = installGh()
+  try {
+    const { window } = await launchApp({
+      configured: true, withRepo: true, sessions: [], githubApp: { connected: true, prs: [] }, e2eEnv: gh.env
+    })
+    const inbox = await openInboxPr(window)
+    await window.setViewportSize({ width: 1440, height: 900 })
+    await inbox.getByRole("button", { name: "Review", exact: true }).click()
+    await window.getByRole("complementary", { name: "Review #42" }).getByRole("button", { name: "Promote to session" }).click()
+    await expect(window.getByTestId("new-session-view")).toBeVisible()
+    await window.getByRole("button", { name: "Create workspace" }).click()
+    await expect(window.getByTestId(/^session-row-/).first()).toBeVisible({ timeout: 30_000 })
   } finally { rmSync(gh.root, { recursive: true, force: true }) }
 })
