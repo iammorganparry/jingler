@@ -105,12 +105,14 @@ const installGh = () => {
     author: { login: "octocat" }, headRefName: "feature", baseRefName: "main", headRefOid: "abc", isDraft: false, commits: [],
     additions: 3, deletions: 1, labels: [], reviews: [], comments: [], reviewRequests: [], statusCheckRollup: []
   }
-  const empty = (key: string) => `[{ data: { repository: { pullRequest: { ${key}: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } }]`
+  const empty = (key: string) => JSON.stringify([{ data: { repository: { pullRequest: { [key]: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } }])
   writeFileSync(join(bin, "gh"), [
     "#!/usr/bin/env node",
     "const args = process.argv.slice(2)", "const joined = args.join(' ')",
     `const inbox = ${JSON.stringify(inbox)}`, `const pr = ${JSON.stringify(pr)}`,
     "if (args[0] === 'auth' && args[1] === 'status') process.exit(0)",
+    "if (args[0] === 'auth' && args[1] === 'token') { console.log('fixture-token'); process.exit(0) }",
+    "if (args[0] === 'api' && args[1] === 'user') { if (args.includes('--jq')) console.log('octocat'); else console.log(JSON.stringify({ id: 1, login: 'octocat' })); process.exit(0) }",
     "if (args[0] === 'pr' && args[1] === 'view') { console.log(JSON.stringify(joined.includes('number,state') ? { number: 42, state: 'OPEN' } : pr)); process.exit(0) }",
     "if (args[0] === 'repo' && args[1] === 'view') { console.log('acme/widget'); process.exit(0) }",
     "if (args[0] === 'api' && args[1] === 'repos/acme/widget') { console.log(JSON.stringify({ id: 7, node_id: 'R_7' })); process.exit(0) }",
@@ -119,7 +121,7 @@ const installGh = () => {
     "  if (joined.includes('search(query:')) console.log(JSON.stringify(inbox))",
     `  else if (joined.includes('commits(first:100')) console.log(${JSON.stringify(empty("commits"))})`,
     `  else console.log(${JSON.stringify(empty("reviewThreads"))})`,
-    "  process.exit(0)", "}", "process.exit(1)"
+    "  process.exit(0)", "}", "if (args[0] === 'api') { console.log('[[]]'); process.exit(0) }", "console.error(joined)", "process.exit(1)"
   ].join("\n"))
   chmodSync(join(bin, "gh"), 0o755)
   return { root, env: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` } }
@@ -146,18 +148,19 @@ test("Review drawer on the inbox PR collapses the rail, hands drafts to the comp
   const gh = installGh()
   try {
     const { window, githubServer } = await launchApp({
-      configured: true, withRepo: true, sessions: sessionFor(null), githubApp: { connected: true, prs: [] }, e2eEnv: gh.env
+      configured: true, withRepo: true, sessions: [], githubApp: { connected: true, prs: [] }, e2eEnv: gh.env
     })
     const inbox = await openInboxPr(window)
     await window.setViewportSize({ width: 1440, height: 900 })
     const writes = githubServer.operations.length
-    await expect(inbox.getByText("1/1 passing").or(inbox.getByText("Reviewers", { exact: true }))).toBeVisible()
+    const rail = inbox.getByRole("button", { name: "Pull request details", exact: true })
+    await expect(rail).toBeVisible()
     await inbox.getByRole("button", { name: "Review", exact: true }).click()
     const drawer = window.getByRole("complementary", { name: "Review #42" })
     await expect(drawer).toBeVisible()
     await expect(drawer.getByText("Read-only", { exact: true })).toBeVisible()
     await expect(drawer.getByRole("button", { name: "Promote to session" })).toBeDisabled()
-    await expect(inbox.getByText("Reviewers", { exact: true })).toHaveCount(0)
+    await expect(rail).toHaveCount(0)
     await expect(drawer.getByTestId("review-draft")).toHaveCount(2)
 
     await drawer.getByTestId("review-draft").first().getByRole("button", { name: "Add to review" }).click()
@@ -168,6 +171,7 @@ test("Review drawer on the inbox PR collapses the rail, hands drafts to the comp
     await expect(drawer.getByTestId("review-draft")).toHaveCount(2)
     await window.keyboard.press("Escape")
     await expect(drawer).toHaveCount(0)
+    await expect(rail).toBeVisible()
     await expect(inbox.getByTestId("pr-pending-comments")).toContainText("src/auth.ts:42")
     expect(githubServer.operations.filter((op) => op.startsWith("pr review"))).toHaveLength(0)
     expect(githubServer.operations).toHaveLength(writes)
