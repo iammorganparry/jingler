@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { createActor } from "xstate"
-import { addedDrafts, composeReviewBody, reviewDrawerMachine, undecidedDrafts, type ReviewFindingDraft } from "./review-drawer-machine.js"
+import { addedDrafts, composeReviewBody, loadDecisions, reviewDrawerMachine, saveDecisions, undecidedDrafts, type ReviewFindingDraft } from "./review-drawer-machine.js"
 
 const drafts: ReadonlyArray<ReviewFindingDraft> = [
   { id: "a", severity: "issue", path: "src/a.ts", line: 4, body: "Null deref." },
   { id: "b", severity: "nit", path: "src/b.ts", line: 9, body: "Rename." }
 ]
 const start = () => {
-  const actor = createActor(reviewDrawerMachine).start()
+  const actor = createActor(reviewDrawerMachine, { input: {} }).start()
   actor.send({ type: "SET_DRAFTS", drafts })
   return actor
 }
@@ -23,7 +23,7 @@ describe("reviewDrawerMachine", () => {
   })
 
   it("is plain open with no drafts", () => {
-    const actor = createActor(reviewDrawerMachine).start()
+    const actor = createActor(reviewDrawerMachine, { input: {} }).start()
     actor.send({ type: "TOGGLE" })
     expect(actor.getSnapshot().value).toBe("open")
   })
@@ -63,5 +63,25 @@ describe("reviewDrawerMachine", () => {
     expect(composeReviewBody("LGTM", drafts)).toBe(
       "LGTM\n\n- **Issue** `src/a.ts:4` — Null deref.\n\n- **Nit** `src/b.ts:9` — Rename."
     )
+  })
+})
+
+describe("reviewDrawerMachine run status", () => {
+  it("tracks running, failed with error, and retry back to running", () => {
+    const actor = createActor(reviewDrawerMachine, { input: {} }).start()
+    expect(actor.getSnapshot().context.run).toBe("idle")
+    actor.send({ type: "RUN", status: "running" })
+    expect(actor.getSnapshot().context.run).toBe("running")
+    actor.send({ type: "RUN", status: "failed", error: "boom" })
+    expect(actor.getSnapshot().context).toMatchObject({ run: "failed", error: "boom" })
+    actor.send({ type: "RUN", status: "running" })
+    expect(actor.getSnapshot().context).toMatchObject({ run: "running", error: null })
+  })
+
+  it("restores saved decisions for a PR key", () => {
+    saveDecisions("a/b#1", { ...createActor(reviewDrawerMachine, { input: {} }).start().getSnapshot().context, added: ["x"], dismissed: ["y"] })
+    const actor = createActor(reviewDrawerMachine, { input: loadDecisions("a/b#1") }).start()
+    expect(actor.getSnapshot().context).toMatchObject({ added: ["x"], dismissed: ["y"] })
+    expect(loadDecisions("other#2")).toEqual({ added: [], dismissed: [] })
   })
 })

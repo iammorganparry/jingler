@@ -97,7 +97,7 @@ import { requestSessionPr } from "./session-pr-request.js";
 import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
-import { reviewDraftsSource } from "./review-drafts-source.js";
+import { useReviewDrafts } from "./review-drafts-source.js";
 import {
   pullRequestSessionTarget,
   usePullRequestInbox,
@@ -324,6 +324,7 @@ function AuthedApp({
   const pullRequestInbox = usePullRequestInbox(
     github.connection.connected || github.connection.cliAvailable === true,
   );
+  const reviewDrafts = useReviewDrafts(pullRequestInbox.selected);
   const issueInbox = useIssueInbox();
   const [relayError, setRelayError] = useState<string | null>(null);
   const relayStatuses = useRef(
@@ -1705,7 +1706,7 @@ function AuthedApp({
         releaseNotes={releaseNotes}
         whatsNew={whatsNew}
         pullRequestsView={
-          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession, sessionPrKeys)
+          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession, sessionPrKeys, reviewDrafts)
         }
         issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
@@ -2362,7 +2363,8 @@ function renderPullRequestInbox(
   selectedPullRequestTarget: ReturnType<typeof pullRequestSessionTarget> | null,
   openSelectedPullRequestFiles: () => void,
   openSelectedPullRequestSession: () => void,
-  sessionPrKeys: ReadonlySet<string>
+  sessionPrKeys: ReadonlySet<string>,
+  reviewDrafts: ReturnType<typeof useReviewDrafts>
 ) {
   return <PullRequestInbox
     prs={pullRequestInbox.prs}
@@ -2378,7 +2380,8 @@ function renderPullRequestInbox(
       error: pullRequestInbox.discoveryError,
     }}
     sessionPrKeys={sessionPrKeys}
-    reviewDrafts={reviewDraftsSource}
+    reviewDrafts={reviewDrafts.drafts}
+    reviewRun={reviewDrafts.run}
     onActivate={pullRequestInbox.discover}
     warnings={pullRequestInbox.warnings}
     selected={pullRequestInbox.selected ? {

@@ -132,8 +132,8 @@ const sessionFor = (prNumber: number | null) => ({ repoPath }: { repoPath: strin
   prNumber, costUsd: 0, tokens: 0, updatedAt: "2026-10-01T08:00:00.000Z", worktreePath: repoPath, mode: "accept-edits"
 }]
 
-const openInboxPr = async (window: import("@playwright/test").Page) => {
-  await window.evaluate((drafts) => localStorage.setItem("jingler:e2e-review-drafts", JSON.stringify(drafts)), DRAFTS)
+const openInboxPr = async (window: import("@playwright/test").Page, seed = true) => {
+  if (seed) await window.evaluate((drafts) => localStorage.setItem("jingler:e2e-review-drafts", JSON.stringify(drafts)), DRAFTS)
   await window.reload()
   await expect(appShell(window)).toBeVisible()
   await window.getByTestId("pull-requests-sidebar-item").click()
@@ -188,5 +188,25 @@ test("Review button is absent on a PR linked to a session", async ({ launchApp }
     const inbox = await openInboxPr(window)
     await expect(inbox.getByRole("button", { name: "Open session" })).toBeVisible()
     await expect(inbox.getByRole("button", { name: "Review", exact: true })).toHaveCount(0)
+  } finally { rmSync(gh.root, { recursive: true, force: true }) }
+})
+
+test("Review drawer starts a live read-only review, shows the failure with Retry, and posts nothing", async ({ launchApp }) => {
+  test.setTimeout(120_000)
+  const gh = installGh()
+  try {
+    const { window, githubServer } = await launchApp({
+      configured: true, withRepo: true, sessions: [], githubApp: { connected: true, prs: [] }, e2eEnv: gh.env
+    })
+    const inbox = await openInboxPr(window, false)
+    await window.setViewportSize({ width: 1440, height: 900 })
+    const writes = githubServer.operations.length
+    await inbox.getByRole("button", { name: "Review", exact: true }).click()
+    const drawer = window.getByRole("complementary", { name: "Review #42" })
+    // No adversarial review model is configured, so the live run fails fast.
+    await expect(drawer.getByRole("alert")).toContainText("Choose an adversarial review model")
+    await expect(drawer.getByRole("button", { name: "Retry" })).toBeVisible()
+    await expect(drawer.getByTestId("review-draft")).toHaveCount(0)
+    expect(githubServer.operations).toHaveLength(writes)
   } finally { rmSync(gh.root, { recursive: true, force: true }) }
 })
