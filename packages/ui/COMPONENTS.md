@@ -153,6 +153,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | PlanProgressContext, ToolStopContext, SubagentEntryContext, MessageTurn | `composites/message-turn.tsx` | One transcript turn: text, tool calls, thinking. | — | yes | — |
 | ModeSwitch | `composites/mode-switch.tsx` | Plan/Build and permission-mode switch. | — | yes | — |
 | NativeEndpointLogin | `composites/native-endpoint-login.tsx` | Sign-in against a native endpoint. | — | no | — |
+| ChipRow, FromChip | `composites/new-workspace-chips.tsx` | New workspace chip row under the prompt: `project ▾ · from <branch> ▾ · worktree ▾`; the `from` menu has Branch · Pull request · Issue tabs (PR/issue results stay in the Start-from list). | children; label, source, branches, baseBranch, sourceOptions, onSource, onBranch | yes | #477 (9.7) |
 | NewWorkspaceView | `composites/new-workspace-view.tsx` | New workspace screen: composer, chips, Start-from list. | open, projects, environments, providerCatalog, agentEndpointCatalog, defaultConnectionId | yes | — |
 | PhaseNode | `composites/phase-node.tsx` | Workflow phase node. | — | yes | — |
 | PlanApprovalCard, PlanCard | `composites/plan-card.tsx` | Plan card and approval card in the transcript. | — | yes | — |
