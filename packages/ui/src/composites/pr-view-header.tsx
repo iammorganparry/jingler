@@ -104,6 +104,8 @@ export interface PrViewHeaderProps {
   markingReady?: boolean
   /** Ask to close the PR; the parent owns the ConfirmDialog. */
   onRequestClose?: () => void
+  /** Opens the review drawer (⌘⇧R); present only on PRs opened from the sidebar inbox. */
+  onReview?: () => void
   /** The stack switcher, shown beside the title when the session has a PR stack. */
   switcher?: ReactNode
 }
@@ -118,6 +120,7 @@ export function PrViewHeader({
   onMarkReady,
   markingReady,
   onRequestClose,
+  onReview,
   switcher
 }: PrViewHeaderProps) {
   return (
@@ -140,6 +143,11 @@ export function PrViewHeader({
               <Button variant="ghost" size="icon" aria-label="Open on GitHub" className="size-7" onClick={onOpenOnGithub}>
                 <ExternalLink size={15} aria-hidden />
               </Button>
+            </Tooltip>
+          )}
+          {onReview && (
+            <Tooltip label="Review" shortcut="mod+shift+r" side="bottom">
+              <Button variant="secondary" size="sm" onClick={onReview}>Review</Button>
             </Tooltip>
           )}
           {onOpenSession && (

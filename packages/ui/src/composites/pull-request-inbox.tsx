@@ -17,6 +17,7 @@ import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { IssueLabelChip } from "./issue-picker-list.js"
 import { PullRequestView } from "./pull-request-view.js"
+import type { ReviewFindingDraft } from "./review-drawer-machine.js"
 
 export type { PullRequestInboxFilter, PullRequestInboxFacets } from "./pull-request-inbox-filter-machine.js"
 
@@ -97,6 +98,8 @@ export interface PullRequestInboxProps {
   closeError?: string | null
   merging?: boolean
   mergeError?: string | null
+  /** Scripted/agent draft findings for the opened PR; enables the Review drawer. */
+  reviewDrafts?: ReadonlyArray<ReviewFindingDraft>
   sessionAction?: {
     readonly label: string
     readonly onSelect: () => void
@@ -131,6 +134,7 @@ export function PullRequestInbox({
   merging,
   mergeError,
   sessionAction,
+  reviewDrafts,
   loading = false,
   detailLoading = false,
   detailError = null,
@@ -145,6 +149,7 @@ export function PullRequestInbox({
               busy={detailLoading}
               viewerLogin={viewerLogin}
               readOnly
+              reviewDrafts={sessionAction?.label === "Open session" ? undefined : reviewDrafts}
               onOpenSession={sessionAction?.onSelect}
               sessionActionLabel={sessionAction?.label}
               sessionActionDisabledReason={sessionAction?.disabledReason}
