@@ -10,3 +10,4 @@
 | sidebar-identity.spec.ts:55 | stale | 193dbbd7 "restyle the project rail (#390)": rail moved from bg-panel to bg-canvas (--sb-canvas #0b0b0c), no longer equals sidebar bg | toHaveCSS now asserts the rail's canvas rgb(11, 11, 12); other asserts kept. Passes solo. |
 | rich-plan-scratchpad.spec.ts:47, asset-browser.spec.ts:41, projects-and-workspaces.spec.ts:270, multi-chat-perf.spec.ts:116/:159 | not reached | | |
 | chat.spec.ts:75 | known #744 | not fixed | |
+| pr-stack.spec.ts:70 | real regression | 8a448af7 (#561) chip row sets a per-session PR request (session-pr-request.ts) that overrides the machine's selection in pull-request-pane.tsx; ⌥[ stepped the machine's stale selection (482) so the shown PR never changed | stepFromShownPr syncs the machine to the shown PR, clears the request, then steps; unit test session-pr-request.test.ts; spec unchanged and passes solo |
