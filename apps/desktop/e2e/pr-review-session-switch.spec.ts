@@ -29,9 +29,13 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
   const running = window.getByRole("button", { name: /Reading the code…|Thinking…|Writing findings…/ })
   await expect(running).toBeVisible({ timeout: 20_000 })
   // The reviewer is a child agent now: it opens from the lane header's subagent chip.
+  // The narrow-group details drawer is modal (scrim over the header): dismiss it, the run continues.
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("drawer-scrim")).toBeHidden()
   await window.getByTestId("subagent-chip").first().click()
   await window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ }).click()
-  await expect(window.getByRole("textbox", { name: "Inline agents are watch-only — steer them through the main chat." })).toBeVisible()
+  await expect(window.getByTestId("subagent-readonly-bar")).toBeVisible()
+  await showPullRequestDetails(window)
   await expect(running).toBeVisible()
 
   const cdp = await window.context().newCDPSession(window)
@@ -49,7 +53,7 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
       // sheet that starts closed when the session is shown again.
       await showPullRequestDetails(window)
       await expect(running).toBeVisible({ timeout: 5_000 })
-      await expect(window.getByRole("textbox", { name: "Inline agents are watch-only — steer them through the main chat." })).toBeVisible({ timeout: 5_000 })
+      await expect(window.getByTestId("subagent-readonly-bar")).toBeVisible({ timeout: 5_000 })
       durations.push(Date.now() - start)
     }
   } finally {
