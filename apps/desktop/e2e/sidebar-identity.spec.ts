@@ -128,10 +128,8 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   expect(sidebarSurface.radius).toBe(0)
   expect(sidebarSurface.backdrop).toBe("none")
   expect(sidebarSurface.background).toBe(appBackground)
-  await expect(window.getByTestId("project-sidebar")).toHaveCSS(
-    "background-color",
-    sidebarSurface.background
-  )
+  // #390: the project rail sits on --sb-canvas (#0b0b0c), a step darker than the sidebar.
+  await expect(window.getByTestId("project-sidebar")).toHaveCSS("background-color", "rgb(11, 11, 12)")
   await expect(window.getByRole("separator", { name: "Resize sidebar" })).toHaveCSS(
     "background-color",
     "rgba(0, 0, 0, 0)"

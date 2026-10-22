@@ -47,7 +47,7 @@ test("configures, redacts, syncs, and clears WebSearch", async ({ launchApp }) =
     await window.getByRole("menuitem", { name: "Settings" }).click()
     await window.getByRole("button", { name: "General" }).click()
 
-    const section = window.getByRole("region", { name: "Web search" })
+    const section = window.locator("section").filter({ has: window.getByRole("heading", { name: "Web search", level: 3 }) })
     await expect(section).toBeVisible()
     await expect(section.locator("img[data-provider-logo='exa']")).toBeVisible()
     await expect(section.locator("img[data-provider-logo='firecrawl']")).toBeVisible()
