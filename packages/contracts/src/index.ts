@@ -1604,6 +1604,15 @@ export class AssetListRpcs extends RpcGroup.make(
     ),
     payload: { sessionId: Schema.String }
   }),
+  /**
+   * Read-only adversarial review of an inbox PR (no session). Nothing is stored or
+   * posted to GitHub — the findings come back as drafts for the Review drawer.
+   */
+  Rpc.make("Review.draftPr", {
+    success: AdversarialReview,
+    error: Schema.Union(ReviewError, GitHubApiError),
+    payload: { repository: Schema.String, number: Schema.Number }
+  }),
   /** Transcribe a 16 kHz mono WAV (base64) locally with whisper.cpp. Macs prompt for mic access first. */
   Rpc.make("Voice.transcribe", {
     success: Schema.Struct({ text: Schema.String }),

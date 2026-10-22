@@ -1101,6 +1101,9 @@ export const rpc = {
    */
   reviewRun: (sessionId: string, force = false): Promise<AdversarialReview> =>
     run((c) => c.Review.run({ sessionId, force })),
+  /** Read-only review of an inbox PR (no session); the findings are drafts, nothing is posted. */
+  reviewDraftPr: (repository: string, number: number): Promise<AdversarialReview> =>
+    runAssetList((c) => c.Review.draftPr({ repository, number })),
   reviewGet: (sessionId: string): Promise<AdversarialReview | null> =>
     run((c) => c.Review.get({ sessionId })),
   /**

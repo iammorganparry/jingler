@@ -11,7 +11,12 @@ export interface ReviewFindingDraft {
   readonly body: string
 }
 
+export type ReviewRunStatus = "idle" | "running" | "done" | "failed"
+
 export interface ReviewDrawerContext {
+  /** Progress of the read-only review agent that produces `drafts`. */
+  readonly run: ReviewRunStatus
+  readonly error: string | null
   readonly drafts: ReadonlyArray<ReviewFindingDraft>
   /** Drafts moved into the review composer as pending inline comments. */
   readonly added: ReadonlyArray<string>
@@ -24,6 +29,7 @@ type ReviewDrawerEvent =
   | { type: "TOGGLE" }
   | { type: "PROMOTE" }
   | { type: "SET_DRAFTS"; drafts: ReadonlyArray<ReviewFindingDraft> }
+  | { type: "RUN"; status: ReviewRunStatus; error?: string }
   | { type: "ADD"; id: string }
   | { type: "ADD_ALL" }
   | { type: "DISMISS"; id: string }
@@ -41,6 +47,12 @@ export function composeReviewBody(body: string, pending: ReadonlyArray<ReviewFin
   return [body, ...lines].filter(Boolean).join("\n\n")
 }
 
+/** Decisions survive PR switches (the view remounts per PR), keyed by `repo#number`. */
+const savedDecisions = new Map<string, Pick<ReviewDrawerContext, "added" | "dismissed">>()
+export const saveDecisions = (key: string, context: ReviewDrawerContext) =>
+  savedDecisions.set(key, { added: context.added, dismissed: context.dismissed })
+export const loadDecisions = (key: string) => savedDecisions.get(key) ?? { added: [], dismissed: [] }
+
 const union = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => [...new Set([...a, ...b])]
 
 /**
@@ -50,6 +62,7 @@ const union = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => [...new Se
 export const reviewDrawerMachine = setup({
   types: {
     context: {} as ReviewDrawerContext,
+    input: {} as Partial<Pick<ReviewDrawerContext, "added" | "dismissed">>,
     events: {} as ReviewDrawerEvent
   },
   guards: {
@@ -58,10 +71,11 @@ export const reviewDrawerMachine = setup({
   }
 }).createMachine({
   id: "review-drawer",
-  context: { drafts: [], added: [], dismissed: [] },
+  context: ({ input }) => ({ drafts: [], added: input?.added ?? [], dismissed: input?.dismissed ?? [], run: "idle", error: null }),
   initial: "closed",
   on: {
     SET_DRAFTS: { actions: assign({ drafts: ({ event }) => event.drafts }) },
+    RUN: { actions: assign({ run: ({ event }) => event.status, error: ({ event }) => event.error ?? null }) },
     ADD: { actions: assign({ added: ({ context, event }) => union(context.added, [event.id]) }) },
     ADD_ALL: { actions: assign({ added: ({ context }) => union(context.added, undecidedDrafts(context).map((d) => d.id)) }) },
     DISMISS: { actions: assign({ dismissed: ({ context, event }) => union(context.dismissed, [event.id]) }) },

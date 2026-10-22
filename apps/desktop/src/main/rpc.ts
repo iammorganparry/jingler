@@ -2349,6 +2349,57 @@ export const reviewRun = (sessionId: string, force: boolean) =>
   }).pipe(Effect.scoped);
 
 /**
+ * `Review.draftPr` handler — a read-only review of an inbox PR with no session.
+ * Deliberately skips `postReviewToPr` and `ReviewStore.set`: drafts stay local
+ * until the operator submits them.
+ *
+ * Exported for tests.
+ */
+export const reviewDraftPr = (repository: string, number: number) =>
+  Effect.gen(function* () {
+    const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null));
+    const configured = config?.github?.adversarialReviewModel;
+    const runtime = configured === undefined ? null : configuredReviewRuntime(configured);
+    if (runtime === null) {
+      return yield* Effect.fail(
+        new ReviewError({
+          message: "Choose an adversarial review model in GitHub settings before running a review.",
+        }),
+      );
+    }
+    const githubTarget = `github-slug:${repository}`;
+    const headSha = yield* GitHubApi.prHeadSha(githubTarget, number);
+    if (headSha === null) {
+      return yield* Effect.fail(
+        new ReviewError({ message: "Could not resolve the pull request's head commit." }),
+      );
+    }
+    const diff = yield* GitHubApi.prDiff(githubTarget, number);
+    const cwd = yield* Effect.acquireRelease(
+      Effect.promise(() => mkdtemp(resolve(tmpdir(), "jingler-adversarial-review-"))),
+      (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })).pipe(
+        Effect.orElseSucceed(() => undefined),
+      ),
+    );
+    return yield* ReviewService.run({
+      sessionId: `pr-draft-${repository.replace("/", "-")}-${number}`,
+      prNumber: number,
+      headSha,
+      cwd,
+      repo: repository,
+      branch: "",
+      baseBranch: null,
+      runtimeId: runtime.runtimeId,
+      endpointId: runtime.endpointId,
+      ...(runtime.connectionId === undefined ? {} : { connectionId: runtime.connectionId }),
+      providerId: runtime.providerId,
+      modelId: runtime.modelId,
+      targetId: runtime.targetId,
+      diff,
+    });
+  }).pipe(Effect.scoped);
+
+/**
  * Post a review's low-severity findings to the PR, returning the review stamped
  * with the outcome.
  *
@@ -6423,6 +6474,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
 const AssetListHandlersLayer = AssetListRpcs.toLayer({
   "Asset.list": (input) => assetList(input),
+  "Review.draftPr": ({ repository, number }) => reviewDraftPr(repository, number),
   "Voice.models": () => Effect.promise(() => voiceModels()),
   "Voice.downloadModel": ({ id }) =>
     Effect.tryPromise({

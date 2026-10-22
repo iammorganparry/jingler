@@ -37,7 +37,7 @@ import { PrTimelineEntry } from "./pr-timeline-entry.js"
 import { PrStackRail, type PrStackNav } from "./pr-stack-rail.js"
 import { PrSwitcher } from "./pr-switcher.js"
 import { PrViewHeader } from "./pr-view-header.js"
-import { ReviewDrawer, useReviewDrawer } from "./review-drawer.js"
+import { ReviewDrawer, useReviewDrawer, type ReviewRun } from "./review-drawer.js"
 import { addedDrafts, type ReviewFindingDraft } from "./review-drawer-machine.js"
 
 type PrEvidence = "overview" | "commits" | "checks" | "files"
@@ -217,6 +217,8 @@ export interface PullRequestViewProps {
   linkedIssue?: IssueReference
   /** Draft review findings. Supplying this (even empty) enables the Review drawer — sidebar inbox only. */
   reviewDrafts?: ReadonlyArray<ReviewFindingDraft>
+  /** The live review producing `reviewDrafts`; started when the drawer first opens. */
+  reviewRun?: ReviewRun
 }
 
 /**
@@ -320,9 +322,10 @@ function PullRequestViewBody({
   onResolveConflicts,
   workflow,
   linkedIssue,
-  reviewDrafts
+  reviewDrafts,
+  reviewRun
 }: PullRequestViewProps & { compact: boolean }) {
-  const drawer = useReviewDrawer(reviewDrafts)
+  const drawer = useReviewDrawer(reviewDrafts, reviewRun)
   const onReview = drawer.enabled ? () => drawer.send({ type: "TOGGLE" }) : undefined
          function renderDetailsToggle() {
            return (

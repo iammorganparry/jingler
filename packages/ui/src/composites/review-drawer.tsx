@@ -4,21 +4,39 @@ import type { PullRequest } from "@jingler/core"
 import { X } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
-import { EmptyState } from "../components/feedback.js"
+import { EmptyState, InlineError, InlineStatus } from "../components/feedback.js"
 import { Pill } from "../components/pill.js"
-import { reviewDrawerMachine, undecidedDrafts, type ReviewFindingDraft } from "./review-drawer-machine.js"
+import { loadDecisions, reviewDrawerMachine, saveDecisions, undecidedDrafts, type ReviewFindingDraft, type ReviewRunStatus } from "./review-drawer-machine.js"
+
+/** The live read-only review behind the drawer: started on first open, retried on failure. */
+export interface ReviewRun {
+  /** `repo#number` — decisions are remembered per key across PR switches. */
+  readonly key: string
+  readonly status: ReviewRunStatus
+  readonly error?: string
+  readonly onStart: () => void
+}
 
 /**
  * Drawer state for the PR view. Enabled only when `drafts` is supplied (the PR was opened
  * from the sidebar inbox). ⌘⇧R toggles; Esc closes.
  */
-export function useReviewDrawer(drafts: ReadonlyArray<ReviewFindingDraft> | undefined) {
-  const [snapshot, send] = useMachine(reviewDrawerMachine)
+export function useReviewDrawer(drafts: ReadonlyArray<ReviewFindingDraft> | undefined, run?: ReviewRun) {
+  const [snapshot, send] = useMachine(reviewDrawerMachine, { input: run ? loadDecisions(run.key) : {} })
   const enabled = drafts !== undefined
   const open = !snapshot.matches("closed")
   useEffect(() => {
     send({ type: "SET_DRAFTS", drafts: drafts ?? [] })
   }, [drafts, send])
+  useEffect(() => {
+    if (run) send({ type: "RUN", status: run.status, ...(run.error ? { error: run.error } : {}) })
+  }, [run?.status, run?.error, send])
+  useEffect(() => {
+    if (run) saveDecisions(run.key, snapshot.context)
+  }, [run?.key, snapshot.context.added, snapshot.context.dismissed])
+  useEffect(() => {
+    if (open && run?.status === "idle" && drafts?.length === 0) run.onStart()
+  }, [open, run?.status])
   useEffect(() => {
     if (!enabled) return
     const onKey = (event: KeyboardEvent) => {
@@ -31,7 +49,7 @@ export function useReviewDrawer(drafts: ReadonlyArray<ReviewFindingDraft> | unde
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [enabled, open, send])
-  return { enabled, open, context: snapshot.context, send }
+  return { enabled, open, context: snapshot.context, send, retry: run?.onStart }
 }
 
 export type ReviewDrawerState = ReturnType<typeof useReviewDrawer>
@@ -64,7 +82,9 @@ export function ReviewDrawer({ pr, drawer }: { pr: PullRequest; drawer: ReviewDr
             Add all to review
           </Button>
         )}
-        {context.drafts.length === 0 && <EmptyState title="No findings yet" description="Draft findings from the review agent appear here." />}
+        {context.run === "running" && <InlineStatus variant="loading">Reviewing the diff…</InlineStatus>}
+        {context.run === "failed" && <InlineError message={context.error ?? "The review failed"} onRetry={drawer.retry} />}
+        {context.run !== "running" && context.run !== "failed" && context.drafts.length === 0 && <EmptyState title="No findings yet" description="Draft findings from the review agent appear here." />}
         {context.drafts.map((draft) => (
           <DraftCard key={draft.id} draft={draft} added={context.added.includes(draft.id)} dismissed={context.dismissed.includes(draft.id)} send={send} />
         ))}
