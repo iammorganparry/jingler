@@ -34,3 +34,5 @@
 | multi-chat-perf.spec.ts:116, :161 | stale | Page snapshot: sidebar chat rows are `button "Idle Stress 1"` containing title span + owner avatar "j", so `button.textContent === chat.title` never matches (not a removed control; same 24/36 operations still run) | Locate the title span and take its closest button; all benchmark/assert logic unchanged. Both pass solo. |
 | pr-review-session-switch.spec.ts:6 | stale | f872b3c8 (#462) subagent read-only bar replaces the composer, so the `textarea[disabled]` ready selector in measureSessionSwitch never exists (snapshot: "Subagent of review session · read-only") | Ready selector -> `[data-testid="subagent-readonly-bar"]`; same latency assert. Passes solo. |
 | plan-mode.spec.ts:228, toasts.spec.ts:24 | flaky | passed solo | none |
+
+| pr-review-session-switch.spec.ts:6 (after fix) | open: perf budget | Ready selector fixed; median switch latency now measured at 107ms and 110ms against the 100ms budget (spec:68), reproducible solo. Budget left unchanged. | Needs perf investigation (pnpm perf renders) |
