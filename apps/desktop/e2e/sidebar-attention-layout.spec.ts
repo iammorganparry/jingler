@@ -1,4 +1,5 @@
 import { appShell, expect, test } from "./fixtures.js"
+import { openView } from "./views.js"
 import type { SeedSession } from "./fixtures.js"
 
 const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
@@ -73,7 +74,7 @@ test("groups chats by attention and opens session views in a responsive two-thir
   ])
 
   await window.getByTestId("session-row-s_needs_input").click()
-  await window.getByRole("button", { name: "Files", exact: true }).click()
+  await openView(window, "files")
   await window.getByRole("tab", { name: "Explorer", exact: true }).click()
 
   // Files opens in the content group while chat stays visible beside it.

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, type SeedSession, test } from "./fixtures.js"
+import { openView } from "./views.js"
 
 // The agent publishes an architecture figure to the Explanation view and adopts
 // a plan carrying the same figure as an ```architecture fence. Both surfaces
@@ -73,7 +74,7 @@ test("architecture figures render in the explanation and plan views", async ({ l
     await expect(readout).toContainText("primary + replica")
   }
 
-  await window.getByRole("button", { name: "Explanation", exact: true }).click()
+  await openView(window, "explanation")
   await checkFigure()
 
   await window.getByRole("button", { name: "Plan", exact: true }).click()

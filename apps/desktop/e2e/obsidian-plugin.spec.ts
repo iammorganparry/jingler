@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFi
 import { mkdir, realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { appShell, expect, type SeedSession, test } from "./fixtures.js"
+import { openView } from "./views.js"
 
 test("Obsidian previews a configured local vault and refreshes external edits", async ({ launchApp }) => {
   const { window, home } = await launchApp({ configured: true, withRepo: true, seed: ({ home }) => {
@@ -29,7 +30,7 @@ test("Obsidian previews a configured local vault and refreshes external edits", 
   await writeFile(join(vault, "two.md"), "# Second note")
   await writeFile(join(vault, "ignored.txt"), "not a note")
   await window.getByTestId("session-row-obsidian-preview").click()
-  await window.getByRole("button", { name: "Obsidian", exact: true }).click()
+  await openView(window, "obsidian.notes")
   await expect(window.getByTestId("obsidian-vault-choices")).toHaveCSS("max-height", "192px")
   await expect(window.getByLabel("Vault path")).toHaveValue("")
   await window.getByRole("button", { name: `vault ${vault}`, exact: true }).click()
@@ -58,7 +59,7 @@ test("Obsidian previews a configured local vault and refreshes external edits", 
   await window.setViewportSize({ width: 1500, height: 900 })
   await window.reload()
   await window.getByTestId("session-row-obsidian-preview").click()
-  await window.getByRole("button", { name: "Obsidian", exact: true }).click()
+  await openView(window, "obsidian.notes")
   await expect(window.getByLabel("Vault path")).toHaveValue(vault)
   await window.getByLabel("Vault path").fill("relative")
   await window.getByRole("button", { name: "Save vault" }).click()
@@ -79,7 +80,7 @@ test("Obsidian previews a configured local vault and refreshes external edits", 
   await expect(preview.getByRole("heading", { name: "Updated externally" })).toBeVisible()
   await window.reload()
   await window.getByTestId("session-row-obsidian-preview").click()
-  await window.getByRole("button", { name: "Obsidian", exact: true }).click()
+  await openView(window, "obsidian.notes")
   await expect(window.getByLabel("Vault path")).toHaveValue(vault)
   await expect(preview.getByRole("heading", { name: "Known vault note" })).toBeVisible()
 })
@@ -128,7 +129,7 @@ test("published explanations are saved to the Obsidian vault folder when the tog
   await expect(appShell(window)).toBeVisible()
 
   await window.getByTestId("session-row-s_obsidian_explain").click()
-  await window.getByRole("button", { name: "Obsidian", exact: true }).click()
+  await openView(window, "obsidian.notes")
   await window.getByLabel("Vault path").fill(vault)
   await window.getByRole("button", { name: "Save vault" }).click()
   await expect(window.getByText("Notes · 0")).toBeVisible()
