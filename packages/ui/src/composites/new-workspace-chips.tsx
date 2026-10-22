@@ -15,7 +15,7 @@ export function ChipRow({ children }: { children: React.ReactNode }) {
 export interface FromSourceOption {
   value: NewSessionSource
   label: string
-  description: string
+  description?: string
   icon: React.ReactNode
 }
 
@@ -90,7 +90,7 @@ export function FromChip({ label, source, branches, baseBranch, sourceOptions, d
                     {option.icon}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{option.label}</span>
-                      <span className="block truncate text-[10.5px] text-muted-foreground">{option.description}</span>
+                      {option.description && <span className="block truncate text-[10.5px] text-muted-foreground">{option.description}</span>}
                     </span>
                     {option.value === source && <Check size={13} className="flex-none text-blue" aria-hidden />}
                   </CommandItem>
