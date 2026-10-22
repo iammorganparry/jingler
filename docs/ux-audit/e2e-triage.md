@@ -31,4 +31,6 @@
 | Test | Verdict | Evidence | Fix |
 |---|---|---|---|
 | asset-browser.spec.ts:41 | flaky (already fixed upstream) | fb74e412 "asset-browser asserts selected file tab" already retargeted the spec; on current epic/redesign (2e6701bb) the full file passes (2 passed) including the generated/file-1199.ts textbox assert; tree click after scroll opens the file | none needed |
+| multi-chat-perf.spec.ts:116, :161 | stale | Page snapshot: sidebar chat rows are `button "Idle Stress 1"` containing title span + owner avatar "j", so `button.textContent === chat.title` never matches (not a removed control; same 24/36 operations still run) | Locate the title span and take its closest button; all benchmark/assert logic unchanged. Both pass solo. |
+| pr-review-session-switch.spec.ts:6 | stale | f872b3c8 (#462) subagent read-only bar replaces the composer, so the `textarea[disabled]` ready selector in measureSessionSwitch never exists (snapshot: "Subagent of review session · read-only") | Ready selector -> `[data-testid="subagent-readonly-bar"]`; same latency assert. Passes solo. |
 | plan-mode.spec.ts:228, toasts.spec.ts:24 | flaky | passed solo | none |
