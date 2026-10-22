@@ -683,7 +683,9 @@ test("a passing check still links to its run", async ({ launchApp }) => {
       ]
     }
   })
-  await openPullRequestDetails(window)
+  // Per-check rows live in the Checks evidence tab; the details rail only summarises ("1/1 passing").
+  await window.getByTestId("header-view-checks").click()
+  await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
 
   const details = window.getByRole("link", { name: "Details for build" })
   await expect(details).toBeVisible({ timeout: 20_000 })
@@ -1064,6 +1066,11 @@ test("an adversarial review runs beside an active conversation and appears as a 
 
   // …and the reviewer is watchable in the still-visible conversation, mid-run.
   // The reviewer is a child agent: it shows in the lane header's subagent chip.
+  // The narrow-group details drawer is modal (scrim over the header), so dismiss it first; the run continues.
+  if (await window.getByTestId("drawer-scrim").isVisible()) {
+    await window.keyboard.press("Escape")
+    await expect(window.getByTestId("drawer-scrim")).toBeHidden()
+  }
   await window.getByTestId("subagent-chip").first().click()
   await expect(
     window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ })

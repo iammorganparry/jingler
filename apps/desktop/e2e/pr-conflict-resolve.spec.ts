@@ -35,6 +35,11 @@ test("Ask agent to resolve conflicts sends the conflict prompt into the session'
 
   // Routed to the session's own agent as a normal conversation turn, naming
   // the file the fake GitHub server's /files endpoint reports as changed.
+  // A narrow group's details drawer is modal (covers the header); dismiss it to reach the conversation.
+  if (await window.getByTestId("drawer-scrim").isVisible()) {
+    await window.keyboard.press("Escape")
+    await expect(window.getByTestId("drawer-scrim")).toBeHidden()
+  }
   await window.getByTestId("header-view-checks").click()
   await expect(window.getByTestId("conversation-scroll").getByText(/Resolve the merge conflicts/)).toBeVisible({ timeout: 10_000 })
   await expect(window.getByTestId("conversation-scroll").getByText("src/auth.ts")).toBeVisible()

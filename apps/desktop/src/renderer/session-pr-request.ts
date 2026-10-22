@@ -21,3 +21,15 @@ export const clearSessionPrRequest = (sessionId: string): void => {
 
 export const useSessionPrRequest = (sessionId: string): number | undefined =>
   useSyncExternalStore((l) => (listeners.add(l), () => listeners.delete(l)), () => requests[sessionId])
+
+/** ⌥[ / ⌥] step from the PR on screen: a chip-requested PR overrides the machine's selection, so sync it first and drop the request. */
+export const stepFromShownPr = (
+  sessionId: string,
+  shownPr: number | null,
+  nav: { onSelect: (n: number) => void; onStep: (delta: -1 | 1) => void } | undefined,
+  delta: -1 | 1
+): void => {
+  clearSessionPrRequest(sessionId)
+  if (shownPr !== null) nav?.onSelect(shownPr)
+  nav?.onStep(delta)
+}
