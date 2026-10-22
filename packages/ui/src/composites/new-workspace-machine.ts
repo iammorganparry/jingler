@@ -80,7 +80,7 @@ export interface NewWorkspaceContext {
 
 export type NewWorkspaceEvent =
   | { type: "SET_CHECKPOINT_SAFE_MODE"; enabled: boolean }
-  | { type: "OPEN"; projectId?: string; pr?: PrSummary; issue?: IssueSummary }
+  | { type: "OPEN"; projectId?: string; pr?: PrSummary; issue?: IssueSummary; draft?: string }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
   | { type: "SET_ENVIRONMENT"; environmentId: string }
@@ -418,7 +418,7 @@ export const newWorkspaceMachine = setup({
         ...(requestedIssue
           ? { source: "github" as const, issues: [requestedIssue], selectedIssue: requestedIssue }
           : {}),
-        draft: requestedIssue ? [requestedIssue.title, requestedIssue.body].filter(Boolean).join("\n\n") : "",
+        draft: requestedIssue ? [requestedIssue.title, requestedIssue.body].filter(Boolean).join("\n\n") : (event.type === "OPEN" ? event.draft : undefined) ?? "",
         attachments: [] as ReadonlyArray<Attachment>,
         ...provider,
         mode: deps.defaultMode ?? "auto",

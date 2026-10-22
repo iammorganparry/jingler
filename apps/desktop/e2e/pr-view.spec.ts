@@ -113,6 +113,8 @@ const installGh = () => {
     "if (args[0] === 'auth' && args[1] === 'status') process.exit(0)",
     "if (args[0] === 'auth' && args[1] === 'token') { console.log('fixture-token'); process.exit(0) }",
     "if (args[0] === 'api' && args[1] === 'user') { if (args.includes('--jq')) console.log('octocat'); else console.log(JSON.stringify({ id: 1, login: 'octocat' })); process.exit(0) }",
+    "if (args[0] === 'pr' && args[1] === 'view' && args.includes('--jq')) { console.log('abc'); process.exit(0) }",
+    `if (args[0] === 'pr' && args[1] === 'diff') { process.stdout.write(${JSON.stringify(DIFF)}); process.exit(0) }`,
     "if (args[0] === 'pr' && args[1] === 'view') { console.log(JSON.stringify(joined.includes('number,state') ? { number: 42, state: 'OPEN' } : pr)); process.exit(0) }",
     "if (args[0] === 'repo' && args[1] === 'view') { console.log('acme/widget'); process.exit(0) }",
     "if (args[0] === 'api' && args[1] === 'repos/acme/widget') { console.log(JSON.stringify({ id: 7, node_id: 'R_7' })); process.exit(0) }",
@@ -132,6 +134,15 @@ const sessionFor = (prNumber: number | null) => ({ repoPath }: { repoPath: strin
   prNumber, costUsd: 0, tokens: 0, updatedAt: "2026-10-01T08:00:00.000Z", worktreePath: repoPath, mode: "accept-edits"
 }]
 
+/** Registers the e2e repo as a local project so "Promote to session" can open a session. */
+const seedProject = ({ home, repoPath }: { home: string; repoPath: string }) =>
+  writeFileSync(join(home, "jingler", "projects.json"), JSON.stringify([{
+    id: "project-widget", name: "widget", path: repoPath, imported: true, availability: "available",
+    createdAt: "2026-01-01", updatedAt: "2026-01-01"
+  }]))
+
+const DIFF = "diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -40,3 +40,4 @@\n a\n b\n+c\n d\n"
+
 const openInboxPr = async (window: import("@playwright/test").Page, seed = true) => {
   if (seed) await window.evaluate((drafts) => localStorage.setItem("jingler:e2e-review-drafts", JSON.stringify(drafts)), DRAFTS)
   await window.reload()
@@ -148,7 +159,7 @@ test("Review drawer on the inbox PR collapses the rail, hands drafts to the comp
   const gh = installGh()
   try {
     const { window, githubServer } = await launchApp({
-      configured: true, withRepo: true, sessions: [], githubApp: { connected: true, prs: [] }, e2eEnv: gh.env
+      configured: true, withRepo: true, sessions: [], seed: seedProject, githubApp: { connected: true, prs: [] }, e2eEnv: gh.env
     })
     const inbox = await openInboxPr(window)
     await window.setViewportSize({ width: 1440, height: 900 })
@@ -159,7 +170,8 @@ test("Review drawer on the inbox PR collapses the rail, hands drafts to the comp
     const drawer = window.getByRole("complementary", { name: "Review #42" })
     await expect(drawer).toBeVisible()
     await expect(drawer.getByText("Read-only", { exact: true })).toBeVisible()
-    await expect(drawer.getByRole("button", { name: "Promote to session" })).toBeDisabled()
+    // Slice 3 enables Promote when the PR's repository is a local project.
+    await expect(drawer.getByRole("button", { name: "Promote to session" })).toBeEnabled()
     await expect(rail).toHaveCount(0)
     await expect(drawer.getByTestId("review-draft")).toHaveCount(2)
 
@@ -208,5 +220,42 @@ test("Review drawer starts a live read-only review, shows the failure with Retry
     await expect(drawer.getByRole("button", { name: "Retry" })).toBeVisible()
     await expect(drawer.getByTestId("review-draft")).toHaveCount(0)
     expect(githubServer.operations).toHaveLength(writes)
+  } finally { rmSync(gh.root, { recursive: true, force: true }) }
+})
+
+test("Add to review then submit posts ONE review with inline path+line comments", async ({ launchApp }) => {
+  test.setTimeout(120_000)
+  const gh = installGh()
+  try {
+    const { window, githubServer } = await launchApp({
+      configured: true, withRepo: true, sessions: [], githubApp: { connected: true, prs: [{ number: 42, title: "Drawer PR", headRefName: "feature", baseRefName: "main", author: { login: "octocat" }, additions: 3, deletions: 1, checks: [] }] }, e2eEnv: gh.env
+    })
+    const inbox = await openInboxPr(window)
+    await window.setViewportSize({ width: 1440, height: 900 })
+    await inbox.getByRole("button", { name: "Review", exact: true }).click()
+    const drawer = window.getByRole("complementary", { name: "Review #42" })
+    await drawer.getByRole("button", { name: "Add all to review" }).click()
+    await inbox.getByRole("button", { name: "Comment", exact: true }).click()
+    await expect.poll(() => githubServer.reviews.length).toBe(1)
+    const [review] = githubServer.reviews
+    expect(review?.event).toBe("COMMENT")
+    expect(review?.comments).toEqual(expect.arrayContaining([expect.objectContaining({ path: "src/auth.ts", line: 42 })]))
+  } finally { rmSync(gh.root, { recursive: true, force: true }) }
+})
+
+test("Promote to session creates a session for the PR branch and opens it", async ({ launchApp }) => {
+  test.setTimeout(120_000)
+  const gh = installGh()
+  try {
+    const { window } = await launchApp({
+      configured: true, withRepo: true, sessions: [], seed: seedProject, githubApp: { connected: true, prs: [{ number: 42, title: "Drawer PR", headRefName: "feature", baseRefName: "main", author: { login: "octocat" }, additions: 3, deletions: 1, checks: [] }] }, e2eEnv: gh.env
+    })
+    const inbox = await openInboxPr(window)
+    await window.setViewportSize({ width: 1440, height: 900 })
+    await inbox.getByRole("button", { name: "Review", exact: true }).click()
+    await window.getByRole("complementary", { name: "Review #42" }).getByRole("button", { name: "Promote to session" }).click()
+    await expect(window.getByTestId("new-session-view")).toBeVisible()
+    await window.getByRole("button", { name: /^Send/ }).click()
+    await expect(window.getByTestId(/^session-row-/).first()).toBeVisible({ timeout: 30_000 })
   } finally { rmSync(gh.root, { recursive: true, force: true }) }
 })

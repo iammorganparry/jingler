@@ -325,6 +325,8 @@ export interface NewWorkspaceViewProps {
   requestedProjectId?: string | null;
   requestedPr?: PrSummary | null;
   requestedIssue?: IssueSummary | null;
+  /** First message to seed the New Session composer with. */
+  requestedDraft?: string | null;
   prepareProject: NewWorkspaceDeps["prepareProject"];
   loadBranches: NewWorkspaceDeps["loadBranches"];
   issueProviders?: NewWorkspaceDeps["issueProviders"];
@@ -524,9 +526,10 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
           : {}),
         ...(props.requestedPr ? { pr: props.requestedPr } : {}),
         ...(props.requestedIssue ? { issue: props.requestedIssue } : {}),
+        ...(props.requestedDraft ? { draft: props.requestedDraft } : {}),
       });
     else send({ type: "CLOSE" });
-  }, [props.open, props.requestedPr, props.requestedIssue, props.requestedProjectId, send]);
+  }, [props.open, props.requestedPr, props.requestedIssue, props.requestedProjectId, props.requestedDraft, send]);
 
   const projectRequest = props.requestedProjectId ?? props.defaultProjectId;
   const previousProjectRequest = React.useRef(projectRequest);

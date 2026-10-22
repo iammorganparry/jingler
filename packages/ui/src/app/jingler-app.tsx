@@ -404,6 +404,7 @@ export interface JinglerAppProps {
     readonly projectId: string
     readonly pr?: PrSummary
     readonly issue?: IssueSummary
+    readonly draft?: string
     readonly githubCliAccountId?: string
     readonly githubSlug?: string
     readonly tabId?: TabKey
@@ -824,6 +825,7 @@ function getActiveTabContext(active: Session) {
               requestedProjectId={requestedNewSession?.projectId}
               requestedPr={requestedNewSession?.pr}
               requestedIssue={requestedNewSession?.issue}
+              requestedDraft={requestedNewSession?.draft}
               providerCatalog={providerConnections?.catalog}
               agentEndpointCatalog={agentEndpointCatalog}
               defaultConnectionId={providerConnections?.defaultConnectionId}

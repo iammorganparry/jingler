@@ -2164,7 +2164,12 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.Number,
     error: GitHubApiError,
     payload: {
-      sessionId: Schema.String,
+      /** A session's PR; omit it and pass `repository` + `number` for an inbox PR with no session. */
+      sessionId: Schema.optional(Schema.String),
+      repository: Schema.optional(Schema.String),
+      number: Schema.optional(Schema.Number),
+      /** The operator's own text, posted above the inline comments. */
+      body: Schema.optional(Schema.String),
       comments: Schema.Array(ReviewComment)
     }
   }),

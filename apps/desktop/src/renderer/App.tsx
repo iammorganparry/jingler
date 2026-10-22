@@ -400,6 +400,7 @@ function AuthedApp({
     projectId: string;
     pr?: PrSummary;
     issue?: IssueSummary;
+    draft?: string;
     githubCliAccountId?: string;
     githubSlug?: string;
     tabId?: string;
@@ -1635,7 +1636,7 @@ function AuthedApp({
         sessions,
       )
     : null;
-  const openSelectedPullRequestTarget = (tabId?: string) => {
+  const openSelectedPullRequestTarget = (tabId?: string, draft?: string) => {
     if (!(selectedPullRequest && selectedPullRequestTarget)) return;
     const existingSession = selectedPullRequestTarget.session;
     if (existingSession) {
@@ -1648,19 +1649,9 @@ function AuthedApp({
     }
     const project = selectedPullRequestTarget.project;
     if (project) {
-      setNewSessionRequest((previous) => ({
-        projectId: project.id,
-        pr: pullRequestInbox.detail ? { ...selectedPullRequest,
-          headRefName: pullRequestInbox.detail.headRefName,
-          baseRefName: pullRequestInbox.detail.baseRefName,
-        } : selectedPullRequest,
-        ...(pullRequestInbox.cliAccountId ? {
-          githubCliAccountId: pullRequestInbox.cliAccountId,
-          githubSlug: selectedPullRequest.repository,
-        } : {}),
-        ...(tabId ? { tabId } : {}),
-        nonce: (previous?.nonce ?? 0) + 1,
-      }));
+      setNewSessionRequest((previous) =>
+        newPullRequestSessionRequest(previous, project.id, selectedPullRequest, pullRequestInbox, { tabId, draft }),
+      );
     }
   };
   const selectedIssue = issueInbox.selected;
@@ -1706,7 +1697,7 @@ function AuthedApp({
         releaseNotes={releaseNotes}
         whatsNew={whatsNew}
         pullRequestsView={
-          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession, sessionPrKeys, reviewDrafts)
+          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession, sessionPrKeys, reviewDrafts, (summary) => openSelectedPullRequestTarget(undefined, summary))
         }
         issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
@@ -2357,6 +2348,27 @@ function renderIssueInbox(
     error={issueInbox.error} />;
 }
 
+function newPullRequestSessionRequest(
+  previous: { nonce: number } | null,
+  projectId: string,
+  selected: NonNullable<ReturnType<typeof usePullRequestInbox>["selected"]>,
+  inbox: ReturnType<typeof usePullRequestInbox>,
+  extra: { tabId?: string; draft?: string },
+) {
+  return {
+    projectId,
+    pr: inbox.detail
+      ? { ...selected, headRefName: inbox.detail.headRefName, baseRefName: inbox.detail.baseRefName }
+      : selected,
+    ...(inbox.cliAccountId
+      ? { githubCliAccountId: inbox.cliAccountId, githubSlug: selected.repository }
+      : {}),
+    ...(extra.draft ? { draft: extra.draft } : {}),
+    ...(extra.tabId ? { tabId: extra.tabId } : {}),
+    nonce: (previous?.nonce ?? 0) + 1,
+  };
+}
+
 function renderPullRequestInbox(
   pullRequestInbox: ReturnType<typeof usePullRequestInbox>,
   github: ReturnType<typeof useGitHubConnection>,
@@ -2364,7 +2376,8 @@ function renderPullRequestInbox(
   openSelectedPullRequestFiles: () => void,
   openSelectedPullRequestSession: () => void,
   sessionPrKeys: ReadonlySet<string>,
-  reviewDrafts: ReturnType<typeof useReviewDrafts>
+  reviewDrafts: ReturnType<typeof useReviewDrafts>,
+  promoteReview: (summary: string) => void
 ) {
   return <PullRequestInbox
     prs={pullRequestInbox.prs}
@@ -2382,6 +2395,8 @@ function renderPullRequestInbox(
     sessionPrKeys={sessionPrKeys}
     reviewDrafts={reviewDrafts.drafts}
     reviewRun={reviewDrafts.run}
+    onPromoteReview={selectedPullRequestTarget?.project ? promoteReview : undefined}
+    onSubmitInlineReview={pullRequestInbox.submitInlineReview}
     onActivate={pullRequestInbox.discover}
     warnings={pullRequestInbox.warnings}
     selected={pullRequestInbox.selected ? {

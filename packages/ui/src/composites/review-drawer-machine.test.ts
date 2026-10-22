@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createActor } from "xstate"
-import { addedDrafts, composeReviewBody, loadDecisions, reviewDrawerMachine, saveDecisions, undecidedDrafts, type ReviewFindingDraft } from "./review-drawer-machine.js"
+import { addedDrafts, composeReviewBody, draftsToReviewComments, promotionSummary, loadDecisions, reviewDrawerMachine, saveDecisions, undecidedDrafts, type ReviewFindingDraft } from "./review-drawer-machine.js"
 
 const drafts: ReadonlyArray<ReviewFindingDraft> = [
   { id: "a", severity: "issue", path: "src/a.ts", line: 4, body: "Null deref." },
@@ -57,6 +57,23 @@ describe("reviewDrawerMachine", () => {
     actor.send({ type: "SUBMITTED" })
     expect(actor.getSnapshot().context.added).toEqual([])
     expect(undecidedDrafts(actor.getSnapshot().context)).toEqual([])
+  })
+
+  it("promotion summary carries added and undecided drafts but not dismissed ones", () => {
+    const actor = start()
+    actor.send({ type: "OPEN" })
+    actor.send({ type: "ADD", id: "a" })
+    actor.send({ type: "DISMISS", id: "b" })
+    actor.send({ type: "PROMOTE" })
+    expect(actor.getSnapshot().value).toBe("promoted")
+    const summary = promotionSummary({ number: 7, title: "T" }, actor.getSnapshot().context)
+    expect(summary).toContain("PR #7")
+    expect(summary).toContain("`src/a.ts:4`")
+    expect(summary).not.toContain("src/b.ts")
+  })
+
+  it("maps drafts to inline review comments", () => {
+    expect(draftsToReviewComments(drafts)[0]).toEqual({ path: "src/a.ts", line: 4, startLine: null, body: "**Issue** — Null deref." })
   })
 
   it("composes pending inline comments after the operator's text", () => {

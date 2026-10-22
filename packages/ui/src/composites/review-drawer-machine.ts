@@ -47,6 +47,17 @@ export function composeReviewBody(body: string, pending: ReadonlyArray<ReviewFin
   return [body, ...lines].filter(Boolean).join("\n\n")
 }
 
+/** Drafts as inline review comments: `line` is the range end, nothing here spans lines. */
+export const draftsToReviewComments = (drafts: ReadonlyArray<ReviewFindingDraft>) =>
+  drafts.map((d) => ({ path: d.path, line: d.line, startLine: null, body: `**${d.severity === "issue" ? "Issue" : "Nit"}** — ${d.body}` }))
+
+/** First message for a session promoted from the drawer: added and undecided drafts as markdown. */
+export function promotionSummary(pr: { number: number; title: string }, context: ReviewDrawerContext): string {
+  const carried = [...addedDrafts(context), ...undecidedDrafts(context)]
+  const header = `Continue my review of PR #${pr.number} (${pr.title}).`
+  return carried.length === 0 ? header : `${header}\n\nFindings so far:\n\n${composeReviewBody("", carried)}`
+}
+
 /** Decisions survive PR switches (the view remounts per PR), keyed by `repo#number`. */
 const savedDecisions = new Map<string, Pick<ReviewDrawerContext, "added" | "dismissed">>()
 export const saveDecisions = (key: string, context: ReviewDrawerContext) =>

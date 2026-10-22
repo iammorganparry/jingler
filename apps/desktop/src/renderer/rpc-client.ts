@@ -1177,6 +1177,14 @@ export const rpc = {
     comments: ReadonlyArray<ReviewComment>
   ): Promise<number> =>
     run((c) => c.Github.submitReview({ sessionId, comments })),
+  /** Same as `githubSubmitReview` for an inbox PR that has no session. */
+  githubSubmitReviewBySlug: (
+    repository: string,
+    number: number,
+    comments: ReadonlyArray<ReviewComment>,
+    body?: string
+  ): Promise<number> =>
+    run((c) => c.Github.submitReview({ repository, number, comments, ...(body ? { body } : {}) })),
   githubResolveThread: (
     sessionId: string,
     threadId: string,

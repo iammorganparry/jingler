@@ -936,6 +936,11 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
       ]).pipe(Effect.map((raw) => mapPrState(raw, mapPrView(raw).checks))),
     prHeadSha: (cwd: string, number: number) =>
       execute(cwd, ["pr", "view", String(number), "--json", "headRefOid", "--jq", ".headRefOid"]),
+    prHeadShaBySlug: (repository: string, number: number) =>
+      execute(null, ["pr", "view", String(number), "--repo", repository, "--json", "headRefOid", "--jq", ".headRefOid"]),
+    prDiffBySlug: (repository: string, number: number) => execute(null, ["pr", "diff", String(number), "--repo", repository]),
+    prReviewCommentsBySlug: (repository: string, number: number, input: Parameters<typeof reviewPayload>[0]) =>
+      writeJson(null, ["api", "-X", "POST", `repos/${repository}/pulls/${number}/reviews`, "--input", "-"], reviewPayload(input)),
     prView: (cwd: string, number: number) => prView(cwd, null, number),
     prViewBySlug: (repository: string, number: number) => prView(null, repository, number),
     prFiles: (cwd: string, number: number): Effect.Effect<ReadonlyArray<PrFileChange>, GitHubApiError, CommandExecutor.CommandExecutor> =>

@@ -8,6 +8,7 @@ import type {
   PublishCheckpoint,
   PublishStep,
   PullRequest,
+  ReviewComment,
   ReviewSubmitKind
 } from "@jingler/core"
 import { GitCommit, GitPullRequest, PanelRight } from "lucide-react"
@@ -38,7 +39,7 @@ import { PrStackRail, type PrStackNav } from "./pr-stack-rail.js"
 import { PrSwitcher } from "./pr-switcher.js"
 import { PrViewHeader } from "./pr-view-header.js"
 import { ReviewDrawer, useReviewDrawer, type ReviewRun } from "./review-drawer.js"
-import { addedDrafts, type ReviewFindingDraft } from "./review-drawer-machine.js"
+import { addedDrafts, draftsToReviewComments, type ReviewFindingDraft } from "./review-drawer-machine.js"
 
 type PrEvidence = "overview" | "commits" | "checks" | "files"
 
@@ -219,6 +220,10 @@ export interface PullRequestViewProps {
   reviewDrafts?: ReadonlyArray<ReviewFindingDraft>
   /** The live review producing `reviewDrafts`; started when the drawer first opens. */
   reviewRun?: ReviewRun
+  /** Promote the drawer review to a session; receives the markdown summary of the drafts. */
+  onPromoteReview?: (summary: string) => void
+  /** Post added drafts as inline comments on a PR with no session (inbox). */
+  onSubmitInlineReview?: (input: { body: string; comments: ReadonlyArray<ReviewComment> }) => Promise<void> | void
 }
 
 /**
@@ -323,7 +328,9 @@ function PullRequestViewBody({
   workflow,
   linkedIssue,
   reviewDrafts,
-  reviewRun
+  reviewRun,
+  onPromoteReview,
+  onSubmitInlineReview
 }: PullRequestViewProps & { compact: boolean }) {
   const drawer = useReviewDrawer(reviewDrafts, reviewRun)
   const onReview = drawer.enabled ? () => drawer.send({ type: "TOGGLE" }) : undefined
@@ -466,7 +473,9 @@ return (evidence === "checks" ? (
                 onSubmitted={() => drawer.send({ type: "SUBMITTED" })}
                 selfAuthored={Boolean(viewerLogin) && viewerLogin === pr.author.login}
                 onSubmit={(input) =>
-                  readOnly ? onComment?.(input.body) : onSubmitReview?.(input)
+                  readOnly && onSubmitInlineReview && input.pending.length > 0
+                    ? onSubmitInlineReview({ body: input.inlineBody, comments: draftsToReviewComments(input.pending) })
+                    : readOnly ? onComment?.(input.body) : onSubmitReview?.(input)
                 }
               />
             </div>
@@ -626,7 +635,7 @@ return (evidence === "checks" ? (
   const repository = /github\.com\/([^/]+\/[^/]+)\//.exec(pr.url)?.[1]
 
   function renderRail(pr: PullRequest) {
-    if (drawer.open) return <ReviewDrawer pr={pr} drawer={drawer} />
+    if (drawer.open) return <ReviewDrawer pr={pr} drawer={drawer} onPromote={onPromoteReview} />
     if (!compact) return sidePanel
     return (
       <Drawer open={railOpen} onOpenChange={setRailOpen}>

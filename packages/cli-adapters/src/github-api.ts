@@ -140,6 +140,13 @@ export interface GitHubApiClient {
   readonly prViewBySlug: (slug: string, number: number) => Promise<PullRequest | null>
   readonly prFiles: (cwd: string, number: number) => Promise<ReadonlyArray<PrFileChange>>
   readonly prDiff: (cwd: string, number: number) => Promise<string>
+  readonly prHeadShaBySlug: (slug: string, number: number) => Promise<string | null>
+  readonly prDiffBySlug: (slug: string, number: number) => Promise<string>
+  readonly prReviewCommentsBySlug: (
+    slug: string,
+    number: number,
+    input: Parameters<GitHubApiClient["prReviewComments"]>[2]
+  ) => Promise<void>
   readonly prCheckout: (cwd: string, number: number) => Promise<GitHubPullRequestHead>
   readonly prCreate: (
     cwd: string,
@@ -1031,6 +1038,10 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     },
     prCommentBySlug: (slug, pullNumber, body) =>
       client.prComment(`github-slug:${slug}`, pullNumber, body),
+    prHeadShaBySlug: (slug, pullNumber) => client.prHeadSha(`github-slug:${slug}`, pullNumber),
+    prDiffBySlug: (slug, pullNumber) => client.prDiff(`github-slug:${slug}`, pullNumber),
+    prReviewCommentsBySlug: (slug, pullNumber, input) =>
+      client.prReviewComments(`github-slug:${slug}`, pullNumber, input),
     prCloseBySlug: async (slug, pullNumber) => {
       await repositoryCall(
         `github-slug:${slug}`,
@@ -1359,6 +1370,17 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         preferCli(cli.prFiles(cwd, number), () => client.prFiles(cwd, number)),
       prDiff: (cwd: string, number: number) =>
         preferCli(cli.prDiff(cwd, number), () => client.prDiff(cwd, number)),
+      prHeadShaBySlug: (slug: string, number: number) =>
+        preferCliNullable(cli.prHeadShaBySlug(slug, number), () => client.prHeadShaBySlug(slug, number)),
+      prDiffBySlug: (slug: string, number: number) =>
+        preferCli(cli.prDiffBySlug(slug, number), () => client.prDiffBySlug(slug, number)),
+      prReviewCommentsBySlug: (
+        slug: string,
+        number: number,
+        input: Parameters<GitHubApiClient["prReviewComments"]>[2]
+      ) =>
+        mutate(`github-slug:${slug}`, cli.prReviewCommentsBySlug(slug, number, input), () =>
+          client.prReviewCommentsBySlug(slug, number, input)),
       prCheckout: (cwd: string, number: number) =>
         preferCli(cli.prCheckout(cwd, number), () => client.prCheckout(cwd, number)),
       prCreate: (cwd: string, input: Parameters<GitHubApiClient["prCreate"]>[1]) =>

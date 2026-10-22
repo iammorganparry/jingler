@@ -87,6 +87,8 @@ export interface FakeGitHubServer {
   readonly requests: ReadonlyArray<{ method: string; path: string }>;
   /** Semantic write operations for assertions such as selected merge method. */
   readonly operations: ReadonlyArray<string>;
+  /** Bodies of submitted pull request reviews (inline comments included). */
+  readonly reviews: ReadonlyArray<Record<string, unknown>>;
   /** Requested installation permissions, excluding the repository qualifier. */
   readonly credentialRequests: ReadonlyArray<{
     readonly repository: string;
@@ -207,6 +209,7 @@ export const startFakeGitHubServer = async (
   const issues = [...(options.issues ?? [])];
   const requests: Array<{ method: string; path: string }> = [];
   const operations: string[] = [];
+  const reviews: Record<string, unknown>[] = [];
   const credentialRequests: Array<{
     repository: string;
     permissions: ReadonlyArray<string>;
@@ -824,8 +827,9 @@ export const startFakeGitHubServer = async (
             },
             {
               matches: () => (tail === "/reviews" && method === "POST"),
-              handle: function submitPullReview() {
+              handle: async function submitPullReview() {
                 if (!requirePermissions("pull_requests:write")) return;
+                reviews.push(await requestBody(req));
                 operations.push(`pr review ${number}`);
                 json(res, 200, {});
                 return;
@@ -989,6 +993,7 @@ export const startFakeGitHubServer = async (
     url,
     requests,
     operations,
+    reviews,
     credentialRequests,
     connect: () => {
       connected = true;
