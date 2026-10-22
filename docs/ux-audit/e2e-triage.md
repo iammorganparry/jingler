@@ -16,3 +16,4 @@
 | Test | Verdict | Evidence | Fix |
 |---|---|---|---|
 | architecture-figure.spec.ts:46 | stale | Plan is no longer a pinned header button: header shows Changes/Terminal/Browser + "More views" (page snapshot; packages/ui/src/app/view-overflow-menu.tsx:102, tab-contributions.ts:256) | `openView(window, "plan")`; same figure asserts. Passes solo. |
+| browser-control-mcp.spec.ts:26 | stale | 549e0568 (#327): chats are no longer `role=tab`/`editor-tab-chat-*`; chat-only group renders `region "Editor group: Chat 1"` with the composer (page snapshot; packages/ui/src/app/editor-groups.tsx:459) | Click composer inside the chat editor-group region; rest unchanged. Passes solo. |
