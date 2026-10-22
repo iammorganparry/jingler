@@ -323,6 +323,7 @@ function PullRequestViewBody({
   reviewDrafts
 }: PullRequestViewProps & { compact: boolean }) {
   const drawer = useReviewDrawer(reviewDrafts)
+  const onReview = drawer.enabled ? () => drawer.send({ type: "TOGGLE" }) : undefined
          function renderDetailsToggle() {
            return (
         <DrawerTrigger asChild>
@@ -376,7 +377,7 @@ function PullRequestViewBody({
               onMarkReady={readOnly && !onMerge ? undefined : onMarkReady}
               markingReady={markingReady}
               onRequestClose={onClosePr && !(readOnly && !onMerge) ? () => setCloseConfirmOpen(true) : undefined}
-              onReview={drawer.enabled ? () => drawer.send({ type: "TOGGLE" }) : undefined}
+              onReview={onReview}
               switcher={stack ? <PrSwitcher {...stack} /> : undefined}
             />
             {pr.labels.length > 0 && (
@@ -621,6 +622,21 @@ return (evidence === "checks" ? (
   const feed = buildFeed(pr)
   const repository = /github\.com\/([^/]+\/[^/]+)\//.exec(pr.url)?.[1]
 
+  function renderRail(pr: PullRequest) {
+    if (drawer.open) return <ReviewDrawer pr={pr} drawer={drawer} />
+    if (!compact) return sidePanel
+    return (
+      <Drawer open={railOpen} onOpenChange={setRailOpen}>
+        {renderDetailsToggle()}
+        <DrawerContent className="w-[280px]">
+          <DrawerTitle className="sr-only">Pull request details</DrawerTitle>
+          <DrawerDescription className="sr-only">Reviewers, checks and merge</DrawerDescription>
+          {sidePanel}
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
   const sidePanel = (
     <PrSidePanel
         className={compact ? "min-h-0 flex-1 border-l-0" : undefined}
@@ -672,19 +688,7 @@ return (evidence === "checks" ? (
       {renderPullRequestBody(pr)}
 
       {/* Right rail — docked at 280px, or a sheet below 900px opened from the header button. */}
-      {drawer.open && <ReviewDrawer pr={pr} drawer={drawer} />}
-      {drawer.open ? null : compact ? (
-        <Drawer open={railOpen} onOpenChange={setRailOpen}>
-          {renderDetailsToggle()}
-          <DrawerContent className="w-[280px]">
-            <DrawerTitle className="sr-only">Pull request details</DrawerTitle>
-            <DrawerDescription className="sr-only">Reviewers, checks and merge</DrawerDescription>
-            {sidePanel}
-          </DrawerContent>
-        </Drawer>
-      ) : (
-        sidePanel
-      )}
+      {renderRail(pr)}
     </div>
   )
 }
