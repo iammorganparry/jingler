@@ -168,6 +168,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | PrStatusGlyph | `composites/pr-glyph.tsx` | PR state glyph (PrStatusGlyph). | — | yes | #381 (2.16) |
 | PrPickerList | `composites/pr-picker-list.tsx` | Open-PR results list for new-session-from-PR. | — | yes | — |
 | PrReviewComposer | `composites/pr-review-composer.tsx` | Sticky PR review composer. | — | no | — |
+| ReviewDrawer | `composites/review-drawer.tsx` | ⅓ read-only review drawer on a sidebar-opened PR: header, context strip, draft findings (Add to review / Dismiss / Add all). State in `review-drawer-machine.ts`. | prNumber, drafts, context, onAddToReview, onClose | yes | — |
 | PrReviewGroup | `composites/pr-review-group.tsx` | Group of review threads from one review. | — | no | — |
 | PrReviewThreadView | `composites/pr-review-thread.tsx` | Inline review thread with reply/resolve. | — | no | — |
 | MergeSplitButton | `composites/merge-split-button.tsx` | `Squash and merge ▾` split button: merge, squash or rebase; choice remembered; disabled with the first blocker as tooltip; `mergeError` shown under it. | connected, onMerge, merging, blockedReason, mergeError | yes | #435 (6.13) |

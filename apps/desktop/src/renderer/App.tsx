@@ -97,6 +97,7 @@ import { requestSessionPr } from "./session-pr-request.js";
 import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
+import { reviewDraftsSource } from "./review-drafts-source.js";
 import {
   pullRequestSessionTarget,
   usePullRequestInbox,
@@ -2377,6 +2378,7 @@ function renderPullRequestInbox(
       error: pullRequestInbox.discoveryError,
     }}
     sessionPrKeys={sessionPrKeys}
+    reviewDrafts={reviewDraftsSource}
     onActivate={pullRequestInbox.discover}
     warnings={pullRequestInbox.warnings}
     selected={pullRequestInbox.selected ? {

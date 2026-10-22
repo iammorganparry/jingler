@@ -37,6 +37,8 @@ import { PrTimelineEntry } from "./pr-timeline-entry.js"
 import { PrStackRail, type PrStackNav } from "./pr-stack-rail.js"
 import { PrSwitcher } from "./pr-switcher.js"
 import { PrViewHeader } from "./pr-view-header.js"
+import { ReviewDrawer, useReviewDrawer } from "./review-drawer.js"
+import { addedDrafts, type ReviewFindingDraft } from "./review-drawer-machine.js"
 
 type PrEvidence = "overview" | "commits" | "checks" | "files"
 
@@ -213,6 +215,8 @@ export interface PullRequestViewProps {
   workflow?: PrSidePanelProps["workflow"]
   /** The issue this PR closes, shown in the rail. */
   linkedIssue?: IssueReference
+  /** Draft review findings. Supplying this (even empty) enables the Review drawer — sidebar inbox only. */
+  reviewDrafts?: ReadonlyArray<ReviewFindingDraft>
 }
 
 /**
@@ -315,8 +319,11 @@ function PullRequestViewBody({
   conflictedFiles,
   onResolveConflicts,
   workflow,
-  linkedIssue
+  linkedIssue,
+  reviewDrafts
 }: PullRequestViewProps & { compact: boolean }) {
+  const drawer = useReviewDrawer(reviewDrafts)
+  const onReview = drawer.enabled ? () => drawer.send({ type: "TOGGLE" }) : undefined
          function renderDetailsToggle() {
            return (
         <DrawerTrigger asChild>
@@ -370,6 +377,7 @@ function PullRequestViewBody({
               onMarkReady={readOnly && !onMerge ? undefined : onMarkReady}
               markingReady={markingReady}
               onRequestClose={onClosePr && !(readOnly && !onMerge) ? () => setCloseConfirmOpen(true) : undefined}
+              onReview={onReview}
               switcher={stack ? <PrSwitcher {...stack} /> : undefined}
             />
             {pr.labels.length > 0 && (
@@ -451,6 +459,8 @@ return (evidence === "checks" ? (
               <PrReviewComposer
                 connected={connected}
                 commentOnly={readOnly}
+                pending={addedDrafts(drawer.context)}
+                onSubmitted={() => drawer.send({ type: "SUBMITTED" })}
                 selfAuthored={Boolean(viewerLogin) && viewerLogin === pr.author.login}
                 onSubmit={(input) =>
                   readOnly ? onComment?.(input.body) : onSubmitReview?.(input)
@@ -612,6 +622,21 @@ return (evidence === "checks" ? (
   const feed = buildFeed(pr)
   const repository = /github\.com\/([^/]+\/[^/]+)\//.exec(pr.url)?.[1]
 
+  function renderRail(pr: PullRequest) {
+    if (drawer.open) return <ReviewDrawer pr={pr} drawer={drawer} />
+    if (!compact) return sidePanel
+    return (
+      <Drawer open={railOpen} onOpenChange={setRailOpen}>
+        {renderDetailsToggle()}
+        <DrawerContent className="w-[280px]">
+          <DrawerTitle className="sr-only">Pull request details</DrawerTitle>
+          <DrawerDescription className="sr-only">Reviewers, checks and merge</DrawerDescription>
+          {sidePanel}
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
   const sidePanel = (
     <PrSidePanel
         className={compact ? "min-h-0 flex-1 border-l-0" : undefined}
@@ -663,18 +688,7 @@ return (evidence === "checks" ? (
       {renderPullRequestBody(pr)}
 
       {/* Right rail — docked at 280px, or a sheet below 900px opened from the header button. */}
-      {compact ? (
-        <Drawer open={railOpen} onOpenChange={setRailOpen}>
-          {renderDetailsToggle()}
-          <DrawerContent className="w-[280px]">
-            <DrawerTitle className="sr-only">Pull request details</DrawerTitle>
-            <DrawerDescription className="sr-only">Reviewers, checks and merge</DrawerDescription>
-            {sidePanel}
-          </DrawerContent>
-        </Drawer>
-      ) : (
-        sidePanel
-      )}
+      {renderRail(pr)}
     </div>
   )
 }
