@@ -3442,44 +3442,47 @@ export const githubMergeBySlug = (input: {
  * Returns the unanchored count so the renderer can say so.
  */
 export const githubSubmitReview = (input: {
-  sessionId: string;
+  sessionId?: string | undefined;
+  repository?: string | undefined;
+  number?: number | undefined;
+  body?: string | undefined;
   comments: ReadonlyArray<ReviewComment>;
 }) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(input.sessionId);
-    if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(
-        new GitHubApiError({
-          reason: "validation",
-          message: "No linked pull request to review",
-        }),
-      );
-    }
-    const headSha = yield* GitHubApi.prHeadSha(
-      session.worktreePath,
-      session.prNumber,
-    );
+    const invalid = (message: string) =>
+      Effect.fail(new GitHubApiError({ reason: "validation", message }));
+    // An inbox PR has no session: address it by slug instead of a worktree.
+    const bySlug = input.sessionId === undefined;
+    const session = bySlug ? null : yield* resolveSession(input.sessionId!);
+    const target: { repository: string; number: number } | { cwd: string; number: number } | null = bySlug
+      ? input.repository && input.number
+        ? { repository: input.repository, number: input.number }
+        : null
+      : session?.worktreePath && session.prNumber !== null
+        ? { cwd: session.worktreePath, number: session.prNumber }
+        : null;
+    if (target === null) return yield* invalid("No linked pull request to review");
+    const headSha = yield* "repository" in target
+      ? GitHubApi.prHeadShaBySlug(target.repository, target.number)
+      : GitHubApi.prHeadSha(target.cwd, target.number);
     if (headSha === null) {
-      return yield* Effect.fail(
-        new GitHubApiError({
-          reason: "validation",
-          message:
-            "Couldn't resolve the pull request's head commit to anchor comments against",
-        }),
+      return yield* invalid(
+        "Couldn't resolve the pull request's head commit to anchor comments against",
       );
     }
-    const diff = yield* GitHubApi.prDiff(
-      session.worktreePath,
-      session.prNumber,
-    );
+    const diff = yield* "repository" in target
+      ? GitHubApi.prDiffBySlug(target.repository, target.number)
+      : GitHubApi.prDiff(target.cwd, target.number);
     const plan = planDraftPost(input.comments, diff);
     if (plan === null) return 0;
-
-    yield* GitHubApi.prReviewComments(session.worktreePath, session.prNumber, {
+    const review = {
       commitSha: headSha,
-      body: plan.body,
+      body: [input.body?.trim(), plan.body].filter(Boolean).join("\n\n"),
       comments: plan.comments,
-    });
+    };
+    yield* "repository" in target
+      ? GitHubApi.prReviewCommentsBySlug(target.repository, target.number, review)
+      : GitHubApi.prReviewComments(target.cwd, target.number, review);
     return plan.unanchoredCount;
   });
 
