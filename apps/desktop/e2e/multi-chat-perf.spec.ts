@@ -68,8 +68,10 @@ const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sess
           .find((candidate) => !paneFor(candidate.id))
         if (!chat) throw new Error("No unopened benchmark chat")
         openedChatId = chat.id
-        return [...document.querySelectorAll<HTMLButtonElement>("button")]
-          .find((button) => button.getClientRects().length > 0 && button.textContent === chat.title)
+        // Sidebar chat rows now append an owner avatar ("j") to the title text.
+        return [...document.querySelectorAll<HTMLElement>("button span")]
+          .find((label) => label.getClientRects().length > 0 && label.textContent === chat.title)
+          ?.closest("button")
       }
       return document.querySelector<HTMLButtonElement>(
         `[data-testid="session-tree-chat-${openedChatId}"] button[aria-label$=" everywhere"]`
