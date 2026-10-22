@@ -38,7 +38,8 @@ test("Auto: a session created with no repo shows \"No repo\" until the agent att
   await window.getByTestId("new-session").click()
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
   if ((await window.getByTestId("new-session-view").getByText("Add a project before starting a session.").count()) > 0) {
-    await window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+    await window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
+    await window.getByRole("option", { name: "Add project…" }).click()
     await window.getByRole("option", { name: /^Local repository/ }).click()
     const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…")
     await directorySearch.fill(repoPath)

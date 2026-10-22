@@ -164,7 +164,7 @@ test("returns a new session to Local while remote project preparation is pending
   await expect(environment).toContainText("Local")
   await expect(app.window.getByRole("button", { name: "Ask Before Actions" })).toBeVisible()
   await expect(app.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
-  await expect(app.window.getByRole("button", { name: "Base branch" })).toContainText("main")
+  await expect(app.window.getByRole("button", { name: "Start from" })).toContainText("main")
   await expect(app.window.getByRole("button", { name: "Create workspace" })).toBeEnabled()
 })
 
