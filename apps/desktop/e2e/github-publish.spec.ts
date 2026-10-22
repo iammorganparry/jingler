@@ -302,7 +302,8 @@ test("a draft PR shows the Draft pill and Mark ready for review removes it", asy
   await window.getByTestId("header-view-checks").click()
   await showPullRequestDetails(window)
 
-  const pill = window.getByRole("heading", { level: 2 }).getByText("Draft", { exact: true })
+  // In a narrow group the details drawer is modal, so the PR header behind it is aria-hidden.
+  const pill = window.getByRole("heading", { level: 2, includeHidden: true }).getByText("Draft", { exact: true })
   await expect(pill).toBeVisible({ timeout: 20_000 })
   await window.getByRole("button", { name: "Mark ready for review" }).click()
   await expect.poll(() => githubServer.operations, { timeout: 15_000 }).toContain("pr ready")
