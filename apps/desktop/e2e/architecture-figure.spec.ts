@@ -77,6 +77,6 @@ test("architecture figures render in the explanation and plan views", async ({ l
   await openView(window, "explanation")
   await checkFigure()
 
-  await window.getByRole("button", { name: "Plan", exact: true }).click()
+  await openView(window, "plan")
   await checkFigure()
 })

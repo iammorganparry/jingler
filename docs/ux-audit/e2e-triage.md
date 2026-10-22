@@ -10,3 +10,9 @@
 | sidebar-identity.spec.ts:55 | stale | 193dbbd7 "restyle the project rail (#390)": rail moved from bg-panel to bg-canvas (--sb-canvas #0b0b0c), no longer equals sidebar bg | toHaveCSS now asserts the rail's canvas rgb(11, 11, 12); other asserts kept. Passes solo. |
 | rich-plan-scratchpad.spec.ts:47, asset-browser.spec.ts:41, projects-and-workspaces.spec.ts:270, multi-chat-perf.spec.ts:116/:159 | not reached | | |
 | chat.spec.ts:75 | known #744 | not fixed | |
+
+## lane e2e-editor
+
+| Test | Verdict | Evidence | Fix |
+|---|---|---|---|
+| architecture-figure.spec.ts:46 | stale | Plan is no longer a pinned header button: header shows Changes/Terminal/Browser + "More views" (page snapshot; packages/ui/src/app/view-overflow-menu.tsx:102, tab-contributions.ts:256) | `openView(window, "plan")`; same figure asserts. Passes solo. |
