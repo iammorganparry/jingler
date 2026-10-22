@@ -32,7 +32,7 @@ export function PrReviewComposer({
   /** Findings added from the review drawer; sent with the review body, nothing posts until submit. */
   pending?: ReadonlyArray<ReviewFindingDraft>
   onSubmitted?: () => void
-  onSubmit: (input: { body: string; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
+  onSubmit: (input: { body: string; inlineBody: string; pending: ReadonlyArray<ReviewFindingDraft>; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
 }) {
   const [body, setBody] = React.useState("")
   const [routeToAgent, setRouteToAgent] = React.useState(!commentOnly)
@@ -43,7 +43,7 @@ export function PrReviewComposer({
     setError(null)
     const submitted = body
     try {
-      await onSubmit({ body: composeReviewBody(submitted.trim(), pending), kind, routeToAgent })
+      await onSubmit({ body: composeReviewBody(submitted.trim(), pending), inlineBody: submitted.trim(), pending, kind, routeToAgent })
       onSubmitted?.()
       // Text typed while the request was pending is unsent; keep it.
       setBody((current) => (current === submitted ? "" : current))

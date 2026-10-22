@@ -400,6 +400,7 @@ function AuthedApp({
     projectId: string;
     pr?: PrSummary;
     issue?: IssueSummary;
+    draft?: string;
     githubCliAccountId?: string;
     githubSlug?: string;
     tabId?: string;
@@ -1635,7 +1636,7 @@ function AuthedApp({
         sessions,
       )
     : null;
-  const openSelectedPullRequestTarget = (tabId?: string) => {
+  const openSelectedPullRequestTarget = (tabId?: string, draft?: string) => {
     if (!(selectedPullRequest && selectedPullRequestTarget)) return;
     const existingSession = selectedPullRequestTarget.session;
     if (existingSession) {
@@ -1658,6 +1659,7 @@ function AuthedApp({
           githubCliAccountId: pullRequestInbox.cliAccountId,
           githubSlug: selectedPullRequest.repository,
         } : {}),
+        ...(draft ? { draft } : {}),
         ...(tabId ? { tabId } : {}),
         nonce: (previous?.nonce ?? 0) + 1,
       }));
@@ -1706,7 +1708,7 @@ function AuthedApp({
         releaseNotes={releaseNotes}
         whatsNew={whatsNew}
         pullRequestsView={
-          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession, sessionPrKeys, reviewDrafts)
+          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession, sessionPrKeys, reviewDrafts, (summary) => openSelectedPullRequestTarget(undefined, summary))
         }
         issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
@@ -2364,7 +2366,8 @@ function renderPullRequestInbox(
   openSelectedPullRequestFiles: () => void,
   openSelectedPullRequestSession: () => void,
   sessionPrKeys: ReadonlySet<string>,
-  reviewDrafts: ReturnType<typeof useReviewDrafts>
+  reviewDrafts: ReturnType<typeof useReviewDrafts>,
+  promoteReview: (summary: string) => void
 ) {
   return <PullRequestInbox
     prs={pullRequestInbox.prs}
@@ -2382,6 +2385,8 @@ function renderPullRequestInbox(
     sessionPrKeys={sessionPrKeys}
     reviewDrafts={reviewDrafts.drafts}
     reviewRun={reviewDrafts.run}
+    onPromoteReview={selectedPullRequestTarget?.project ? promoteReview : undefined}
+    onSubmitInlineReview={pullRequestInbox.submitInlineReview}
     onActivate={pullRequestInbox.discover}
     warnings={pullRequestInbox.warnings}
     selected={pullRequestInbox.selected ? {

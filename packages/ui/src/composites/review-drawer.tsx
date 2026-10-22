@@ -6,7 +6,7 @@ import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { EmptyState, InlineError, InlineStatus } from "../components/feedback.js"
 import { Pill } from "../components/pill.js"
-import { loadDecisions, reviewDrawerMachine, saveDecisions, undecidedDrafts, type ReviewFindingDraft, type ReviewRunStatus } from "./review-drawer-machine.js"
+import { loadDecisions, promotionSummary, reviewDrawerMachine, saveDecisions, undecidedDrafts, type ReviewFindingDraft, type ReviewRunStatus } from "./review-drawer-machine.js"
 
 /** The live read-only review behind the drawer: started on first open, retried on failure. */
 export interface ReviewRun {
@@ -57,7 +57,7 @@ export type ReviewDrawerState = ReturnType<typeof useReviewDrawer>
 const checksPassed = (pr: PullRequest) => pr.checks.filter((check) => check.status === "pass").length
 
 /** The ⅓ read-only review panel: context strip plus draft findings the operator adds to the review or dismisses. */
-export function ReviewDrawer({ pr, drawer }: { pr: PullRequest; drawer: ReviewDrawerState }) {
+export function ReviewDrawer({ pr, drawer, onPromote }: { pr: PullRequest; drawer: ReviewDrawerState; onPromote?: (summary: string) => void }) {
   const { context, send } = drawer
   const undecided = undecidedDrafts(context)
   return (
@@ -66,7 +66,15 @@ export function ReviewDrawer({ pr, drawer }: { pr: PullRequest; drawer: ReviewDr
         <h2 className="text-[13px] font-semibold text-text-bright">Review #{pr.number}</h2>
         <Pill tone="blue" dot={false}>Read-only</Pill>
         <div className="flex-1" />
-        <Button variant="secondary" size="sm" disabled title="Promote this review to a session — coming soon">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!onPromote}
+          onClick={() => {
+            send({ type: "PROMOTE" })
+            onPromote?.(promotionSummary(pr, context))
+          }}
+        >
           Promote to session
         </Button>
         <Button variant="ghost" size="icon" className="size-7" aria-label="Close review drawer" onClick={() => send({ type: "CLOSE" })}>

@@ -2,7 +2,7 @@ import { type ReactNode, useMemo, useState } from "react"
 import { useMachine } from "@xstate/react"
 import { Select, SelectContent, SelectItem, SelectSearch, SelectTrigger } from "../components/beui/select.js"
 import { initialInboxFilters, pullRequestInboxFilterMachine, type PullRequestInboxFacets, type PullRequestInboxFilter } from "./pull-request-inbox-filter-machine.js"
-import type { GitHubTeam, GitHubTeamQueue, PrMergeMethod, PullRequest, PullRequestListItem } from "@jingler/core"
+import type { GitHubTeam, GitHubTeamQueue, PrMergeMethod, PullRequest, PullRequestListItem, ReviewComment } from "@jingler/core"
 import { ArrowLeft, GitPullRequest, MessageSquare } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
@@ -102,6 +102,8 @@ export interface PullRequestInboxProps {
   /** Scripted/agent draft findings for the opened PR; enables the Review drawer. */
   reviewDrafts?: ReadonlyArray<ReviewFindingDraft>
   reviewRun?: ReviewRun
+  onPromoteReview?: (summary: string) => void
+  onSubmitInlineReview?: (input: { body: string; comments: ReadonlyArray<ReviewComment> }) => Promise<void> | void
   sessionAction?: {
     readonly label: string
     readonly onSelect: () => void
@@ -138,6 +140,8 @@ export function PullRequestInbox({
   sessionAction,
   reviewDrafts,
   reviewRun,
+  onPromoteReview,
+  onSubmitInlineReview,
   loading = false,
   detailLoading = false,
   detailError = null,
@@ -154,6 +158,8 @@ export function PullRequestInbox({
               readOnly
               reviewDrafts={sessionAction?.label === "Open session" ? undefined : reviewDrafts}
               reviewRun={reviewRun}
+              onPromoteReview={onPromoteReview}
+              onSubmitInlineReview={onSubmitInlineReview}
               onOpenSession={sessionAction?.onSelect}
               sessionActionLabel={sessionAction?.label}
               sessionActionDisabledReason={sessionAction?.disabledReason}
