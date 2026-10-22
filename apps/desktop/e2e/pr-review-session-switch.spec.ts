@@ -48,7 +48,7 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
       const start = Date.now()
       switchLatencies.push(await measureSessionSwitch(window, "s_other", 'textarea[placeholder="Message the agent…"]'))
       await expect(window.locator('[data-session="s_other"]:visible')).toHaveCount(1, { timeout: 5_000 })
-      switchLatencies.push(await measureSessionSwitch(window, "s_review", 'textarea[disabled]'))
+      switchLatencies.push(await measureSessionSwitch(window, "s_review", '[data-testid="subagent-readonly-bar"]'))
       // The PR pane is narrow beside the chat, so its details are a floating
       // sheet that starts closed when the session is shown again.
       await showPullRequestDetails(window)
