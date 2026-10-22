@@ -77,7 +77,7 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
         BrowserWindow.getAllWindows()[0]?.isFocused() ?? false)).toBe(true)
     }
 
-    await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+    await window.getByRole("region", { name: /^Editor group: Chat/ }).getByPlaceholder(/message/i).click()
     const composer = window.getByPlaceholder(/message/i)
     await composer.fill(`Navigate the operator's Preview. [[browser-url=${targetUrl}]]`)
     await composer.press("Enter")
