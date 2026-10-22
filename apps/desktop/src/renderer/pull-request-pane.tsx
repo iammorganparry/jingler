@@ -12,7 +12,7 @@ import { usePullRequest } from "./use-pull-request.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { usePublish } from "./use-publish.js"
 import { usePrStack } from "./use-pr-stack.js"
-import { clearSessionPrRequest, useSessionPrRequest } from "./session-pr-request.js"
+import { clearSessionPrRequest, stepFromShownPr, useSessionPrRequest } from "./session-pr-request.js"
 import { scopedPrNumber } from "./subagent-scope.js"
 import { useViewedChild } from "./subagent-tab-store.js"
 import { useSubagentView } from "./use-subagent-view.js"
@@ -117,7 +117,9 @@ export function PullRequestPane({
         onSelect: (number) => {
           clearSessionPrRequest(session.id)
           stack.nav?.onSelect(number)
-        }
+        },
+        // A chip-requested PR overrides the machine's selection, so step from the PR on screen, then drop the request.
+        onStep: (delta) => stepFromShownPr(session.id, shownPr, stack.nav, delta)
       }}
       readOnly={viewingLowerLayer}
       sessionTitle={session.title}
