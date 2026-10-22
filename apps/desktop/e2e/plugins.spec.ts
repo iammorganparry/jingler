@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
+import { expectViewListed, openView } from "./views.js"
 import type { SeedSession } from "./fixtures.js"
 /**
  * The plugin system, through the real built app.
@@ -206,15 +207,15 @@ test("a plugin dropped into ~/jingler/plugins contributes a working tab", async 
   await openSession(window)
 
   // Nothing installed yet.
-  await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0)
+  await expectViewListed(window, "e2e-tab.main", false)
 
   await seedPlugin(home)
 
   // No restart. The watcher notices, the catalog re-emits, the loader imports
   // the module over `jingler-plugin://`, and the tab appears.
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await expectViewListed(window, "e2e-tab.main", true)
 
-  await window.getByRole("button", { name: "E2E" }).click()
+  await openView(window, "e2e-tab.main")
   await expect(window.getByTestId("e2e-tab-body")).toBeVisible()
 
   // `useSession` resolved — so the plugin got the app's SDK instance, its React
@@ -232,7 +233,7 @@ test("Settings lists the plugin, and disabling it removes the tab", async ({ lau
   })
   await seedPlugin(home)
   await openSession(window)
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await expectViewListed(window, "e2e-tab.main", true)
 
   await openPluginSettings(window)
 
@@ -242,7 +243,7 @@ test("Settings lists the plugin, and disabling it removes the tab", async ({ lau
   await window.getByRole("button", { name: "Close settings" }).click()
   // A disabled plugin runs no code and contributes nothing — otherwise the
   // switch would be advisory.
-  await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0, { timeout: 15_000 })
+  await expectViewListed(window, "e2e-tab.main", false)
 })
 
 test("Settings saves, masks, replaces and removes a manifest-declared plugin secret", async ({
@@ -395,8 +396,8 @@ export default definePlugin(
   })
 
   await openSession(window)
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
-  await window.getByRole("button", { name: "E2E" }).click()
+  await expectViewListed(window, "e2e-tab.main", true)
+  await openView(window, "e2e-tab.main")
 
   // The error boundary names the plugin rather than blanking the window.
   await expect(window.getByTestId("plugin-error-e2e-tab")).toBeVisible()
@@ -494,8 +495,8 @@ export default definePlugin(
   await window.getByRole("button", { name: "Close settings" }).click()
 
   await openSession(window)
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
-  await window.getByRole("button", { name: "E2E" }).click()
+  await expectViewListed(window, "e2e-tab.main", true)
+  await openView(window, "e2e-tab.main")
 
   // 42 means: the process spawned, reported ready, imported main.js, ran
   // activate(), registered the command, and round-tripped an invoke.
@@ -519,14 +520,14 @@ test("a plugin is served from the throwaway home, not the developer's own", asyn
     ui: UI_MODULE.replace(/e2e-tab/g, "scoped-to-home").replace(/"E2E"/g, '"Scoped"') })
 
   await openSession(window)
-  await expect(window.getByRole("button", { name: "Scoped" })).toBeVisible({ timeout: 15_000 })
+  await expectViewListed(window, "scoped-to-home.main", true)
 
   // And it goes away with the home, rather than lingering in a real one.
   await rm(join(home, "jingler", "plugins", "scoped-to-home"), {
     recursive: true,
     force: true
   })
-  await expect(window.getByRole("button", { name: "Scoped" })).toHaveCount(0, { timeout: 15_000 })
+  await expectViewListed(window, "scoped-to-home.main", false)
 })
 
 test("a plugin built in dev mode renders — jsxDEV resolves", async ({ launchApp }) => {
@@ -572,8 +573,8 @@ export default definePlugin(
   })
 
   await openSession(window)
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
-  await window.getByRole("button", { name: "E2E" }).click()
+  await expectViewListed(window, "e2e-tab.main", true)
+  await openView(window, "e2e-tab.main")
 
   const body = window.getByTestId("dev-built-body")
   await expect(body).toBeVisible()
@@ -606,16 +607,16 @@ test("two plugins share one React — both render, neither throws", async ({ lau
 
   await openSession(window)
 
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
-  await expect(window.getByRole("button", { name: "Second" })).toBeVisible({ timeout: 15_000 })
+  await expectViewListed(window, "e2e-tab.main", true)
+  await expectViewListed(window, "second-plugin.main", true)
 
   // The first plugin's hooks still resolve with a second one loaded.
-  await window.getByRole("button", { name: "E2E" }).click()
+  await openView(window, "e2e-tab.main")
   await expect(window.getByTestId("e2e-tab-repo")).toHaveText("widget")
 
   // And the second's `useState` returns its value rather than throwing
   // "Invalid hook call" — which is what a duplicate React produces.
-  await window.getByRole("button", { name: "Second" }).click()
+  await openView(window, "second-plugin.main")
   await expect(window.getByTestId("second-tab-state")).toHaveText("7")
   await expect(window.getByTestId("second-tab-repo")).toHaveText("widget")
 
@@ -638,14 +639,12 @@ test("a disabled plugin stays disabled after a restart", async ({ launchApp }) =
   await seedPlugin(first.home)
 
   await openSession(first.window)
-  await expect(first.window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await expectViewListed(first.window, "e2e-tab.main", true)
 
   await openPluginSettings(first.window)
   await first.window.getByLabel("Enable E2E Tab").click()
   await first.window.getByRole("button", { name: "Close settings" }).click()
-  await expect(first.window.getByRole("button", { name: "E2E" })).toHaveCount(0, {
-    timeout: 15_000
-  })
+  await expectViewListed(first.window, "e2e-tab.main", false)
   await first.app.close()
 
   // Same ~/jingler, nothing re-seeded: the plugin folder is still on disk, so a
@@ -663,7 +662,7 @@ test("a disabled plugin stays disabled after a restart", async ({ launchApp }) =
   await expect(second.window.getByTestId("chat-lane-header")).toBeVisible({
     timeout: 15_000
   })
-  await expect(second.window.getByRole("button", { name: "E2E" })).toHaveCount(0)
+  await expectViewListed(second.window, "e2e-tab.main", false)
 
   // And Settings agrees it is off, rather than the tab merely failing to load.
   await openPluginSettings(second.window)
@@ -686,7 +685,7 @@ test("Uninstall removes the plugin from disk and the tab from the session", asyn
   const dir = await seedPlugin(home)
 
   await openSession(window)
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await expectViewListed(window, "e2e-tab.main", true)
 
   await openPluginSettings(window)
   await window.getByTestId("plugin-uninstall-e2e-tab").click()
@@ -701,7 +700,7 @@ test("Uninstall removes the plugin from disk and the tab from the session", asyn
   expect(existsSync(dir)).toBe(false)
 
   await window.getByRole("button", { name: "Close settings" }).click()
-  await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0, { timeout: 15_000 })
+  await expectViewListed(window, "e2e-tab.main", false)
 })
 
 test("Install from folder copies a plugin in and it starts contributing", async ({
@@ -749,7 +748,7 @@ test("Install from folder copies a plugin in and it starts contributing", async 
 
   await window.getByRole("button", { name: "Close settings" }).click()
   await openSession(window)
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await expectViewListed(window, "e2e-tab.main", true)
 })
 
 test("cancelling the install picker changes nothing", async ({ launchApp }) => {
@@ -932,10 +931,8 @@ export default definePlugin(
   )
 
   await openSession(first.window)
-  await expect(first.window.getByRole("button", { name: "Store" })).toBeVisible({
-    timeout: 15_000
-  })
-  await first.window.getByRole("button", { name: "Store" }).click()
+  await expectViewListed(first.window, "store-plugin.main", true)
+  await openView(first.window, "store-plugin.main")
 
   // The UI half reading a value only the HOST half ever wrote.
   await expect(first.window.getByTestId("store-seen")).toHaveText("from-the-host", {
@@ -950,7 +947,7 @@ export default definePlugin(
     withRepo: true
   })
   await openSession(second.window)
-  await second.window.getByRole("button", { name: "Store" }).click()
+  await openView(second.window, "store-plugin.main")
   await expect(second.window.getByTestId("store-seen")).toHaveText("from-the-host", {
     timeout: 20_000
   })
@@ -981,7 +978,7 @@ test("bumping the version re-imports the module, so an edit is visible", async (
 
   await seedPlugin(home, withLabel("1.0.0", "first version"))
   await openSession(window)
-  await window.getByRole("button", { name: "E2E" }).click({ timeout: 15_000 })
+  await openView(window, "e2e-tab.main")
   await expect(window.getByText("first version")).toBeVisible({ timeout: 15_000 })
 
   // Rewrite the module AND bump the version, exactly as `pnpm build` would.
@@ -1064,7 +1061,7 @@ export default definePlugin(
   )
 
   await openSession(window)
-  await window.getByRole("button", { name: "E2E" }).click({ timeout: 15_000 })
+  await openView(window, "e2e-tab.main")
   await expect(window.getByTestId("exec-out")).toHaveText("ran:2|code=0", { timeout: 25_000 })
 })
 
@@ -1131,7 +1128,7 @@ test("declaring a keybinding fails loudly rather than doing nothing", async ({ l
   await expect(window.getByTestId("chat-lane-header")).toBeVisible({
     timeout: 15_000
   })
-  await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0)
+  await expectViewListed(window, "e2e-tab.main", false)
 })
 
 test("declaring untrusted-repo capabilities fails loudly, because nothing honours them", async ({
@@ -1173,7 +1170,7 @@ test("declaring untrusted-repo capabilities fails loudly, because nothing honour
   })
   // Crucially the restricted contribution is NOT mounted. Loading the plugin and
   // ignoring the restriction is the failure this refusal exists to prevent.
-  await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0)
+  await expectViewListed(window, "e2e-tab.main", false)
 })
 
 test("a plugin built for a newer API is refused with a version, not a stack trace", async ({
@@ -1265,13 +1262,13 @@ export default definePlugin(
   )
 
   await openSession(window)
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await expectViewListed(window, "e2e-tab.main", true)
 
   // Not activated yet: the tab exists but has never been opened, and lazy
   // activation is the whole point of declaring an event.
   expect(existsSync(marker)).toBe(false)
 
-  await window.getByRole("button", { name: "E2E" }).click()
+  await openView(window, "e2e-tab.main")
   await expect(window.getByTestId("e2e-tab-repo")).toHaveText("widget")
 
   await expect
@@ -1619,7 +1616,7 @@ export default definePlugin(
   })
 
   await openSession(window)
-  await window.getByRole("button", { name: "Linked" }).click({ timeout: 15_000 })
+  await openView(window, "unlink-plugin.issue")
 
   // The snapshot carries the linked issue, so the tab has something to unlink.
   await expect(window.getByTestId("unlink-issue-number")).toHaveText("128", {
@@ -1646,7 +1643,7 @@ export default definePlugin(
     withRepo: true
   })
   await second.window.getByTestId(`session-row-${SESSION.id}`).click()
-  await second.window.getByRole("button", { name: "Linked" }).click({ timeout: 15_000 })
+  await openView(second.window, "unlink-plugin.issue")
   await expect(second.window.getByTestId("unlink-issue-number")).toHaveText("none", {
     timeout: 15_000
   })
@@ -1699,8 +1696,8 @@ test("a plugin declaring the CURRENT api version loads normally", async ({ launc
   await seedPlugin(home, { manifest: manifest({ apiVersion: 1 }) })
 
   await openSession(window)
-  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
-  await window.getByRole("button", { name: "E2E" }).click()
+  await expectViewListed(window, "e2e-tab.main", true)
+  await openView(window, "e2e-tab.main")
   await expect(window.getByTestId("e2e-tab-repo")).toHaveText("widget")
 })
 
@@ -1775,15 +1772,13 @@ export default definePlugin(
   await openSession(window)
 
   // The tab is there because the session has an issue — that is the `when`.
-  await window.getByRole("button", { name: "Linked" }).click({ timeout: 15_000 })
+  await openView(window, "hasissue-plugin.issue")
   await expect(window.getByTestId("hasissue-body")).toBeVisible({ timeout: 15_000 })
 
   await window.getByTestId("hasissue-unlink").click()
 
   // The tab removes itself, because its own condition is now false.
-  await expect(window.getByRole("button", { name: "Linked" })).toHaveCount(0, {
-    timeout: 15_000
-  })
+  await expectViewListed(window, "hasissue-plugin.issue", false)
 
   // And the pane falls back to a real tab rather than rendering nothing or a
   // boundary card — the failure this test exists for.

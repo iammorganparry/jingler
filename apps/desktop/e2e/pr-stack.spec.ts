@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, createWorkspace, expect, sessionRow, test } from "./fixtures.js"
+import { openSessionPr } from "./pull-request.js"
 
 const git = (cwd: string, args: ReadonlyArray<string>): string =>
   execFileSync("git", [...args], { cwd, encoding: "utf8" }).trim()
@@ -95,7 +96,7 @@ test("PR stack rail orders layers base-up and ⌥] moves to the next PR with Che
     }
   })
   await window.getByTestId("session-row-s_stack").click()
-  await window.getByTestId("header-link-pr").click()
+  await openSessionPr(window, 482)
   await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
 
   // Rail lists the layers bottom (base) first. Scoped to layer rows, not the
@@ -151,7 +152,7 @@ test("Merge stack CTA merges layers base-up and shows progress", async ({ launch
     }
   })
   await window.getByTestId("session-row-s_merge_stack").click()
-  await window.getByTestId("header-link-pr").click()
+  await openSessionPr(window, 482)
   await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
 
   await window.getByTestId("merge-stack-cta").click()
@@ -186,7 +187,7 @@ test("Restack retargets and rebases every upper layer after the base merges", as
     }
   })
   await window.getByTestId("session-row-s_restack").click()
-  await window.getByTestId("header-link-pr").click()
+  await openSessionPr(window, 482)
   await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
 
   await expect(window.getByTestId("pr-stack-layer-481")).toContainText("Base merged")
@@ -223,7 +224,7 @@ test("Merge stack merges in order; a failure stops the run and Resume continues 
     }
   })
   await window.getByTestId("session-row-s_resume").click()
-  await window.getByTestId("header-link-pr").click()
+  await openSessionPr(window, 482)
   await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
 
   await expect(window.getByTestId("pr-stack-merge-first-482")).toContainText("Merge #481 first")
