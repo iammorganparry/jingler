@@ -52,6 +52,8 @@ import {
   type NewWorkspaceDeps,
   type NewWorkspaceEvent,
 } from "./new-workspace-machine.js";
+import { ChipMenu } from "../components/chip-menu.js";
+import { ChipRow, FromChip } from "./new-workspace-chips.js";
 import { StartFromList } from "./start-from-list.js";
 import { EnvironmentWakeChip, WorkspaceProvisioning, showsWakeChip } from "./workspace-provisioning.js";
 
@@ -199,114 +201,6 @@ function EnvironmentStartupProgress({
   );
 }
 
-function SearchPicker<T extends string>({
-  value,
-  options,
-  onValueChange,
-  ariaLabel,
-  placeholder,
-  searchPlaceholder,
-  emptyLabel,
-  disabled,
-  triggerClassName,
-  contentClassName = "w-[380px]",
-}: {
-  value: T | "";
-  options: ReadonlyArray<PickerOption<T>>;
-  onValueChange: (value: T) => void;
-  ariaLabel: string;
-  placeholder: string;
-  searchPlaceholder: string;
-  emptyLabel: string;
-  disabled?: boolean;
-  triggerClassName?: string;
-  contentClassName?: string;
-}) {
-  const [open, setOpen] = React.useState(false);
-  const [query, setQuery] = React.useState("");
-  const selected = options.find((option) => option.value === value);
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const filtered = normalizedQuery
-    ? options.filter((option) =>
-        `${option.label} ${option.keywords ?? ""}`
-          .toLocaleLowerCase()
-          .includes(normalizedQuery),
-      )
-    : options;
-
-  return (
-    <Select
-      value={value}
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setQuery("");
-      }}
-      onValueChange={(next) => onValueChange(next as T)}
-      disabled={disabled}
-      placement="top"
-      className="min-w-0"
-    >
-      <SelectTrigger
-        ariaLabel={ariaLabel}
-        className={cn(
-          "h-10 min-w-0 rounded-lg border-0 bg-transparent px-2 py-0 text-[13px] shadow-none hover:bg-surface",
-          triggerClassName,
-        )}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          {selected?.icon}
-          <span className={cn("truncate", selected ? "text-muted-foreground" : "text-dim")}>
-            {selected?.label ?? placeholder}
-          </span>
-        </span>
-      </SelectTrigger>
-      <SelectContent
-        className={cn(
-          "right-auto [&_ul]:max-h-[360px] [&_ul]:overflow-y-auto [&_ul]:pt-2",
-          contentClassName,
-        )}
-        search={
-          <SelectSearch
-            autoFocus
-            wrapperClassName="mb-2"
-            placeholder={searchPlaceholder}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        }
-      >
-        {filtered.length === 0 ? (
-          <li className="py-8 text-center text-[12px] text-muted-foreground">
-            {emptyLabel}
-          </li>
-        ) : filtered.map((option) => (
-          <SelectItem
-            key={option.value}
-            value={option.value}
-            textValue={option.label}
-            disabled={option.disabled}
-            className="min-h-11 gap-2.5 py-2"
-          >
-            <span className="flex min-w-0 flex-1 items-center gap-2.5">
-              {option.icon}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium">
-                  {option.label}
-                </span>
-                {option.description && (
-                  <span className="block truncate text-[11px] text-muted-foreground">
-                    {option.description}
-                  </span>
-                )}
-              </span>
-            </span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 export interface NewWorkspaceViewProps {
   open: boolean;
   projects: ReadonlyArray<Project>;
@@ -372,18 +266,31 @@ const workspaceUnavailableReason = (loading: boolean, localOrManaged: boolean, h
 }
 
 type WorkspaceSend = (event: NewWorkspaceEvent) => void
-function ProjectControls({ context, projectOptions, sourceOptions, checkoutOptions, branchOptions, loading, send }: {
-  context: NewWorkspaceContext; projectOptions: ReadonlyArray<PickerOption<string>>; sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>
-  checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">>; branchOptions: ReadonlyArray<PickerOption<string>>; loading: boolean; send: WorkspaceSend
+const ADD_PROJECT = "__add-project__"
+const CHECKOUT_OPTIONS = [
+  { value: "worktree", label: "Worktree", description: "Isolated Git worktree for this session" },
+  { value: "direct", label: "This checkout", description: "Work directly in the project checkout" },
+] as const
+function ProjectControls({ context, props, sourceOptions, loading, send }: {
+  context: NewWorkspaceContext; props: NewWorkspaceViewProps; sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>; loading: boolean; send: WorkspaceSend
 }) {
-  const { projectId, source, isolation, selectedPr, baseBranch, environmentId } = context
+  const { projectId, source, isolation, selectedPr, baseBranch, branches } = context
   const auto = projectId === AUTO_PROJECT_ID
-  return <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-    <div className="min-w-[130px] flex-1"><SearchPicker value={projectId} options={projectOptions} onValueChange={(value) => send({ type: "SET_PROJECT", projectId: value })} ariaLabel="Project" placeholder="Choose project" searchPlaceholder="Search projects…" emptyLabel="No projects match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[340px]" /></div>
-    <div className="min-w-[130px] flex-1"><SearchPicker value={source} options={sourceOptions} onValueChange={(value) => send({ type: "SET_SOURCE", source: value })} ariaLabel="Session source" placeholder="Start from" searchPlaceholder="Search session sources…" emptyLabel="No session sources match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[300px]" /></div>
-    {!auto && <div className="min-w-[130px] flex-1"><SearchPicker value={isolation} options={checkoutOptions} onValueChange={(value) => send({ type: "SET_ISOLATION", isolation: value })} ariaLabel="Checkout" placeholder="Choose checkout" searchPlaceholder="Search checkout modes…" emptyLabel="No checkout modes match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[300px]" /></div>}
-    {!auto && <div className="min-w-[130px] flex-1"><SearchPicker value={selectedBranchOption(source, selectedPr?.headRefName, baseBranch)} options={branchOptions} onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })} ariaLabel="Base branch" placeholder={branchPlaceholder(loading, environmentId === "local")} searchPlaceholder="Search branches…" emptyLabel="No branches match." disabled={loading || source === "pr"} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[320px]" /></div>}
-  </div>
+  const projectOptions = [
+    { value: AUTO_PROJECT_ID, label: "Auto", description: "No repo; the agent attaches one as it works", searchText: "auto" },
+    ...props.projects.map((project) => ({ value: project.id, label: project.name, description: project.availability === "available" ? project.path : "Unavailable on this host", searchText: `${project.name} ${project.path}` })),
+    ...(props.onAddProject ? [{ value: ADD_PROJECT, label: "Add project…", searchText: "add project" }] : []),
+  ]
+  const pickProject = (value: string) => {
+    if (value === ADD_PROJECT) props.onAddProject?.()
+    else if (value === AUTO_PROJECT_ID || props.projects.find((project) => project.id === value)?.availability === "available") send({ type: "SET_PROJECT", projectId: value })
+  }
+  const branch = selectedBranch(source, selectedPr?.headRefName, baseBranch)
+  return <ChipRow>
+    <ChipMenu value={projectId} options={projectOptions} onSelect={pickProject} searchable searchPlaceholder="Search projects…" emptyLabel="No projects match." disabled={loading} ariaLabel="Project" icon={<FolderGit2 size={12} aria-hidden />} />
+    {!auto && <FromChip label={`from ${branch || branchPlaceholder(loading, context.environmentId === "local")}`} source={source} branches={branches} baseBranch={baseBranch} sourceOptions={sourceOptions} disabled={loading} onSource={(value) => send({ type: "SET_SOURCE", source: value })} onBranch={(value) => send({ type: "SET_BASE", baseBranch: value })} />}
+    {!auto && <ChipMenu value={isolation} options={CHECKOUT_OPTIONS} onSelect={(value) => send({ type: "SET_ISOLATION", isolation: value })} disabled={loading} ariaLabel="Checkout" icon={<GitFork size={12} aria-hidden />} />}
+  </ChipRow>
 }
 function WorkspaceComposer({ submitting, context, props, catalog, unavailableReason, controls, selectedProject, send }: {
   submitting: boolean; context: NewWorkspaceContext; props: NewWorkspaceViewProps; catalog: AgentEndpointCatalog | null | undefined
@@ -416,12 +323,11 @@ function WakeChip({ environment, onWake }: { environment: Environment | undefine
   return <EnvironmentWakeChip state={environment.state} onWake={onWake && (() => onWake(environment.id))} />
 }
 
-function NewWorkspaceContent({ props, context, send, submitting, failed, loading, sourceLoading, selectedEnvironment, selectedSource, sourceLabel, catalog, unavailableReason, selectedProject, projectOptions, sourceOptions, checkoutOptions, branchOptions }: {
+function NewWorkspaceContent({ props, context, send, submitting, failed, loading, sourceLoading, selectedEnvironment, selectedSource, sourceLabel, catalog, unavailableReason, selectedProject, sourceOptions }: {
   props: NewWorkspaceViewProps; context: NewWorkspaceContext; send: WorkspaceSend; submitting: boolean; failed: boolean; loading: boolean; sourceLoading: boolean
   selectedEnvironment: Environment | undefined; selectedSource: PickerOption<NewSessionSource> | undefined; sourceLabel: string
   catalog: AgentEndpointCatalog | null | undefined; unavailableReason: string | undefined; selectedProject: Project | undefined
-  projectOptions: ReadonlyArray<PickerOption<string>>; sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>
-  checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">>; branchOptions: ReadonlyArray<PickerOption<string>>
+  sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>
 }) {
   const { source, search, mine, pullRequests, issues, selectedPr, selectedIssue, draft, provisioningPhase, error } = context
   const startup = props.environmentStartup || (submitting && selectedEnvironment !== undefined)
@@ -430,7 +336,7 @@ function NewWorkspaceContent({ props, context, send, submitting, failed, loading
     <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">{startup || submitting || failed
       ? <ProgressPane props={props} context={context} send={send} startup={Boolean(startup)} failed={failed} environment={selectedEnvironment} />
       : <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
-          <div className="flex items-center gap-3"><div><h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">What are we working on?</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Choose where the work starts, configure its checkout, then send the first message.</p></div><span className="flex-1" />{props.onAddProject && <Button variant="secondary" onClick={props.onAddProject}><FolderGit2 size={14} /> Add project</Button>}</div>
+          <div className="flex items-center gap-3"><div><h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">New workspace</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Describe the task. Jingler creates the branch and starts the agent.</p></div></div>
           <WorkspaceStartFrom props={props} context={context} send={send} icon={selectedSource?.icon} label={sourceLabel} loading={sourceLoading} />
           {source === "branch" && <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.</p>}
           <label className="text-xs text-text-bright">
@@ -442,7 +348,7 @@ function NewWorkspaceContent({ props, context, send, submitting, failed, loading
             </Tooltip>{" "}
             Checkpoint-safe mode
           </label>
-          <WorkspaceComposer submitting={submitting} context={context} props={props} catalog={catalog} unavailableReason={unavailableReason} selectedProject={selectedProject} send={send} controls={<ProjectControls context={context} projectOptions={projectOptions} sourceOptions={sourceOptions} checkoutOptions={checkoutOptions} branchOptions={branchOptions} loading={loading} send={send} />} />
+          <WorkspaceComposer submitting={submitting} context={context} props={props} catalog={catalog} unavailableReason={unavailableReason} selectedProject={selectedProject} send={send} controls={<ProjectControls context={context} props={props} sourceOptions={sourceOptions} loading={loading} send={send} />} />
           {draft.trim().length === 0 && unavailableReason === undefined && <div className="flex justify-end"><Button variant="secondary" aria-label="Create workspace" onClick={() => send({ type: "SUBMIT" })}><MessageCircle size={14} /> Create without a first message</Button></div>}
           {error && <p role="alert" className="text-[11px] text-red">{error}</p>}
         </div>}
@@ -600,59 +506,6 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       : contentUnavailableReason(source, selectedPr !== null, selectedIssue !== null, projectId, baseBranch),
   );
 
-  const projectOptions: ReadonlyArray<PickerOption<string>> = [
-    {
-      value: AUTO_PROJECT_ID,
-      label: "Auto",
-      description: "Start with no repo; the agent attaches one as it works",
-      icon: (
-        <SquarePen size={16} className="flex-none text-muted-foreground" aria-hidden />
-      ),
-    },
-    ...props.projects.map((project) => ({
-      value: project.id,
-      label: project.name,
-      description:
-        project.availability === "available"
-          ? project.path
-          : "Unavailable on this host",
-      keywords: project.path,
-      disabled: project.availability !== "available",
-      icon: (
-        <FolderGit2 size={16} className="flex-none text-muted-foreground" aria-hidden />
-      ),
-    })),
-  ];
-  const checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">> = [
-    {
-      value: "worktree",
-      label: "Worktree",
-      description: "Create an isolated Git worktree",
-      keywords: "new isolated branch",
-      icon: <GitFork size={16} className="flex-none text-muted-foreground" aria-hidden />,
-    },
-    {
-      value: "direct",
-      label: "Local",
-      description: "Use the existing project checkout",
-      keywords: "host direct checkout",
-      icon: (
-        <Monitor
-          size={16}
-          className="flex-none text-muted-foreground"
-          aria-hidden
-        />
-      ),
-    },
-  ];
-  const branchOptions: ReadonlyArray<PickerOption<string>> = branches.map(
-    (branch) => ({
-      value: branch,
-      label: branch,
-      keywords: branch.replaceAll("/", " "),
-      icon: <GitBranch size={16} className="flex-none text-muted-foreground" aria-hidden />,
-    }),
-  );
   const sourceOptions = sourceOptionsFor(props);
   const selectedSource = sourceOptions.find(
     (option) => option.value === source,
@@ -673,9 +526,6 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     catalog={agentEndpointCatalog}
     unavailableReason={unavailableReason}
     selectedProject={selectedProject}
-    projectOptions={projectOptions}
     sourceOptions={sourceOptions}
-    checkoutOptions={checkoutOptions}
-    branchOptions={branchOptions}
   />;
 }
