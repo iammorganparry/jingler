@@ -25,3 +25,14 @@
 | obsidian-plugin.spec.ts:7 | stale | At 900px (<1100px) the chat lane is an overlay drawer behind the "Ask" pill (responsive.spec.ts:126), so only `region "Editor group: Obsidian"` exists and no `Resize editor group 1` separator (page snapshot; editor-groups.tsx:320) | Viewport 1200px so the chat/Obsidian split exists; divider dragged to x=880 so the Obsidian pane still narrows below 400px; all stacked-layout asserts kept. Passes solo. |
 | sidebar-attention-layout.spec.ts:50 | stale | Files is no longer a view (900d20d9 removed the files tab contribution; open-files absent from the More views menu in page snapshot); files open from the sidebar Explorer as file tabs. Below 1100px chat folds into the Ask-pill drawer (single group) | Open README.md via explorerTree, assert editor-tab-file-README.md + 2 groups at 1500px; at 900px assert 1 group and chat returns via Show chat lane. Passes solo. |
 | project-config.spec.ts:6, :78 | stale (not a regression) | a94f9c64 (#478) replaced the composer with `WorkspaceProvisioning` (data-testid workspace-provisioning, Cancel button) while `submitting`; new-workspace-view.tsx:430. Progress is user-visible and already unit-tested (new-workspace-view.test.tsx:100-121: composer gone, Cancel shown, view closes on resolve). Send button never shows "Creating session" in this flow | Specs assert the provisioning pane, no Send button/textbox during creation, and pane gone + 1 session saved after. Both pass solo. |
+
+## lane e2e-last
+
+| Test | Verdict | Evidence | Fix |
+|---|---|---|---|
+| asset-browser.spec.ts:41 | flaky (already fixed upstream) | fb74e412 "asset-browser asserts selected file tab" already retargeted the spec; on current epic/redesign (2e6701bb) the full file passes (2 passed) including the generated/file-1199.ts textbox assert; tree click after scroll opens the file | none needed |
+| multi-chat-perf.spec.ts:116, :161 | stale | Page snapshot: sidebar chat rows are `button "Idle Stress 1"` containing title span + owner avatar "j", so `button.textContent === chat.title` never matches (not a removed control; same 24/36 operations still run) | Locate the title span and take its closest button; all benchmark/assert logic unchanged. Both pass solo. |
+| pr-review-session-switch.spec.ts:6 | stale | f872b3c8 (#462) subagent read-only bar replaces the composer, so the `textarea[disabled]` ready selector in measureSessionSwitch never exists (snapshot: "Subagent of review session · read-only") | Ready selector -> `[data-testid="subagent-readonly-bar"]`; same latency assert. Passes solo. |
+| plan-mode.spec.ts:228, toasts.spec.ts:24 | flaky | passed solo | none |
+
+| pr-review-session-switch.spec.ts:6 (after fix) | open: perf budget | Ready selector fixed; median switch latency now measured at 107ms and 110ms against the 100ms budget (spec:68), reproducible solo. Budget left unchanged. | Needs perf investigation (pnpm perf renders) |
