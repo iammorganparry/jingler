@@ -360,18 +360,11 @@ function DockResizeEdge({
 }
 
 // ── TerminalPanel ─────────────────────────────────────────────────────────────
-// The Terminal view's content: a tab strip, the live shells, and a footer, in a
-// panel anchored to the bottom of the view. Its height is drag-resizable and
-// remembered per workspace (session id).
-
-const PANEL_HEIGHT = { initial: 240, min: 120, max: 720 }
-
-/** localStorage key holding one workspace's terminal panel height. */
-export const terminalPanelHeightKey = (sessionId: string): string =>
-  `jingler.terminal.panel-height.${sessionId}`
+// The Terminal view's content: a tab strip, the live shells, and a footer. It
+// fills the whole view; the editor tab already sizes it.
 
 export interface TerminalPanelProps {
-  /** Scopes the persisted height. Remount (`key`) when it changes. */
+  /** The workspace the shells belong to. Remount (`key`) when it changes. */
   sessionId: string
   /** When false the panel is CSS-hidden (its shells stay mounted — no respawn). */
   visible?: boolean
@@ -390,36 +383,18 @@ export interface TerminalPanelProps {
   renderTerminal: (id: string) => ReactNode
 }
 
-/** Bottom terminal panel: resizable, tabbed, with empty and exited states. */
+/** Terminal view: tabbed shells filling the view, with empty and exited states. */
 export function TerminalPanel(props: TerminalPanelProps) {
-  const { sessionId, visible = true } = props
-  const panelEl = useRef<HTMLElement | null>(null)
-  // Drags paint straight onto the element; state + storage commit on release.
-  const { width: height, adjust, commit } = useResizableWidth({
-    storageKey: terminalPanelHeightKey(sessionId),
-    ...PANEL_HEIGHT,
-    applyLive: (value) => {
-      if (panelEl.current) panelEl.current.style.height = `${value}px`
-    }
-  })
-  // Dragging the edge up grows the panel → invert.
-  const onResize = useCallback((delta: number) => adjust(-delta), [adjust])
-
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col justify-end bg-sunken", !visible && "hidden")}>
-      <section
-        ref={panelEl}
-        data-testid="terminal-panel"
-        aria-label="Terminal"
-        className="relative flex max-h-full flex-none flex-col border-t border-hairline bg-sunken"
-        style={{ height }}
-      >
-        <DockResizeEdge orientation="horizontal" onResize={onResize} onResizeEnd={commit} />
-        <TerminalTabStrip {...props} />
-        <TerminalBody {...props} />
-        <TerminalFooter cwdLabel={props.cwdLabel} lastExit={props.lastExit} />
-      </section>
-    </div>
+    <section
+      data-testid="terminal-panel"
+      aria-label="Terminal"
+      className={cn("flex min-h-0 min-w-0 flex-1 flex-col bg-sunken", props.visible === false && "hidden")}
+    >
+      <TerminalTabStrip {...props} />
+      <TerminalBody {...props} />
+      <TerminalFooter cwdLabel={props.cwdLabel} lastExit={props.lastExit} />
+    </section>
   )
 }
 
