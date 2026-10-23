@@ -193,8 +193,8 @@ test("configures canonical model, mode, and reasoning before creating a session"
   expect(project?.width).toBeGreaterThan(0)
   for (const box of others) {
     expect(box?.width).toBeGreaterThan(0)
-    expect(box?.height).toBe(project?.height)
-    expect(box?.y).toBe(project?.y)
+    expect(box?.height).toBeCloseTo(project?.height ?? 0, 0) // sub-pixel: chips are content-sized
+    expect(box?.y).toBeCloseTo(project?.y ?? 0, 0)
   }
 
   await openModelSettings(launched.window)

@@ -56,7 +56,7 @@ export function FromChip({ label, source, branches, baseBranch, sourceOptions, d
   return (
     <MorphPopover open={open} onOpenChange={setOpen}>
       <MorphPopoverTrigger>
-        <Button variant="outline" size="sm" aria-label="Start from" disabled={disabled} className="min-w-0 gap-1.5 px-2 font-mono text-[11px] font-normal">
+        <Button variant="outline" size="sm" aria-label="Start from" disabled={disabled} className="h-auto min-w-0 gap-1.5 px-2 py-[3px] font-mono text-[11px] font-normal">
           <GitBranch size={12} aria-hidden />
           <span className="min-w-0 truncate">{label}</span>
           <ChevronDown size={11} className="text-dim" aria-hidden />
