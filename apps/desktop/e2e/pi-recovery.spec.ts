@@ -77,7 +77,7 @@ test("opens provider recovery for a migrated session", async ({ launchApp }) => 
   })
   await expect(recovery).toBeVisible()
   await recovery.getByRole("button", { name: /Open providers/ }).click()
-  await expect(window.getByText("Provider connections", { exact: true })).toBeVisible()
+  await expect(window.getByRole("heading", { name: "Providers", exact: true })).toBeVisible()
 })
 
 test("inspects and acknowledges an uncertain mutation without replay", async ({ launchApp }) => {
