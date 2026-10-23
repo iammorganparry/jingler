@@ -239,13 +239,13 @@ export function ToolCall({
     </>
   )
   const headerClass = cn(
-    "flex w-full flex-col gap-0.5 px-2.5 py-1.5 text-left text-[11.5px]",
+    "flex w-full flex-col gap-0.5 px-2.5 py-1 text-left text-[12px]",
     onToggle && "cursor-pointer transition-colors hover:bg-hover"
   )
   return (
     <ToolResultSurface
       className={cn(
-        "rounded-md border-line bg-transparent",
+        "rounded-[6px] border-hairline bg-transparent",
         className
       )}
       data-tool-status={status}
