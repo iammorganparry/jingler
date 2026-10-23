@@ -15,7 +15,6 @@ import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js
 import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
-import { IssueLabelChip } from "./issue-picker-list.js"
 import { PullRequestView } from "./pull-request-view.js"
 import type { ReviewRun } from "./review-drawer.js"
 import type { ReviewFindingDraft } from "./review-drawer-machine.js"

@@ -17,7 +17,16 @@ No Superdesign command failed.
 
 ## Screenshots
 Before: /tmp/qa-shots/deep-pr-view/before-*.png
-After: /tmp/qa-shots/deep-pr-view/after-*.png (pending)
+After: /tmp/qa-shots/deep-pr-view/after-*.png (12 stories: PR view checks/files/conversation/rail x2, inbox desktop/loading/small/empty/load-error, GitHub open/merge-blocked)
 
 ## Cult UI decision
-Pending.
+No Cult UI component adopted. Rejected: halo-card, organic-card (marketing chrome, animated gradient rims violate colour-only-for-state), halo-toggle-group/animated-segmented (we already have MotionTabs), halo-search (animated gradient border; SearchField exists), border-beam-button (animated glow). Queries timeline/status returned only marketing/shader components; nothing fits PR timeline/check rows.
+
+## Changes
+- Checks rows: 36px, state dot + name + duration + Details link (replaces icons).
+- Description: no card chrome, 720px reading column. Timeline verbs grey 12px.
+- Rail sections tighter (px16 py12). Inbox rows: single 52px row, avatar, title 13/500, mono 11 meta, age right. Added Empty/LoadError inbox stories.
+- Test updated: pull-request-view.test.tsx 'failing check' asserted svg.text-red; now asserts span.bg-red (icon replaced by state dot). Same intent, no expect removed.
+
+## Gaps
+- Not done: sticky composer restyle, merge box readiness line rework, check-state dot in inbox rows (PullRequestListItem has no checks field), Cult UI.
