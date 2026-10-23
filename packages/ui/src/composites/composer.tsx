@@ -395,6 +395,8 @@ type ComposerProps =  {
   busy?: boolean;
   /** Overrides the default "Message <harness>…" prompt. */
   placeholder?: string;
+  /** Accessible name for the draft textarea, when the placeholder is not enough. */
+  inputLabel?: string;
   /**
    * Take the caret when this composer becomes the one on screen. The host passes
    * the focused pane's flag, so a split never has two composers fighting for it.
@@ -801,7 +803,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
+  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, inputLabel, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -825,6 +827,7 @@ export function Composer(props: ComposerProps) {
           ref={ref}
           {...actionSearchProps(actionsOpen, actionsListId, actionResults[actionsIndex])}
           value={value}
+          aria-label={inputLabel}
           disabled={paused || disabledReason !== undefined}
           placeholder={composerPlaceholder(actionsOpen, disabledReason, paused, busy, placeholder, prompt)}
           onChange={(e) =>

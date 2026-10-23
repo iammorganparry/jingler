@@ -51,3 +51,12 @@ it("preselects the source for the PR and issue starters", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Start from a GitHub issue" }))
   expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ source: "github", projectId: "p1" }))
 })
+
+it("sends from the shared Composer's send button with the draft and chip choices", async () => {
+  const start = vi.fn()
+  render(withProject(start))
+  await screen.findByText("from main")
+  fireEvent.change(screen.getByRole("textbox", { name: "What should we build?" }), { target: { value: "ship it" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send ↵" }))
+  expect(start).toHaveBeenCalledWith({ draft: "ship it", projectId: "p1", baseBranch: "main", isolation: "worktree" })
+})
