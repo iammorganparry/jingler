@@ -59,6 +59,9 @@ import { ChatLaneHeader, SubagentLaneViewContext, type ChatLaneHeaderChat } from
 /** Host-provided marker (`● N agent edits`) shown at the right of a file tab's breadcrumb. */
 export const AgentEditsMarkerContext = createContext<(sessionId: string, path: string) => ReactNode>(() => null)
 
+/** The visible file tab's slot in the breadcrumb row; its body portals Diff/Edit, Follow, Focus controls there. */
+export const FileHeaderSlotContext = createContext<HTMLElement | null>(null)
+
 export interface EditorTabMeta {
   readonly label: string
   /** Lucide glyph for chats and views. Files always use the material file icon. */
@@ -414,6 +417,7 @@ const EditorGroup = memo(function EditorGroup({
   const sectionRef = useRef<HTMLElement>(null)
   const resolveSubagentView = useContext(SubagentLaneViewContext)
   const renderAgentEdits = useContext(AgentEditsMarkerContext)
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null)
   
   useEffect(() => {
     const section = sectionRef.current
@@ -534,15 +538,20 @@ const EditorGroup = memo(function EditorGroup({
       </div>
       )}
       {!collapsed && crumbs.length > 0 && (
-        <Breadcrumb crumbs={crumbs}>
-          {active.kind === "file" ? renderAgentEdits(api.sessionId, active.id) : null}
+        <Breadcrumb crumbs={crumbs} className={active.kind === "file" ? "@container h-8" : undefined}>
+          {active.kind === "file" ? (
+            <>
+              {renderAgentEdits(api.sessionId, active.id)}
+              <span ref={setHeaderSlot} className="flex items-center gap-2" />
+            </>
+          ) : null}
         </Breadcrumb>
       )}
       {!collapsed && (
         <div className="relative flex min-h-0 min-w-0 flex-1">
           {group.tabs.map((surface) => {
             const key = sessionSurfaceKey(surface)
-            return <TabBody key={key} surface={surface} visible={key === group.active} focused={focused} api={api} revision={revision} />
+            return <TabBody key={key} surface={surface} visible={key === group.active} headerSlot={key === group.active ? headerSlot : null} focused={focused} api={api} revision={revision} />
           })}
         </div>
       )}
@@ -629,12 +638,14 @@ const EditorTab = memo(function EditorTab({
 const TabBody = memo(function TabBody({
   surface,
   visible,
+  headerSlot,
   focused,
   api,
   revision
 }: {
   surface: SessionSurface
   visible: boolean
+  headerSlot: HTMLElement | null
   focused: boolean
   api: Api
   revision: unknown
@@ -646,13 +657,15 @@ const TabBody = memo(function TabBody({
       hidden={!visible}
       className="absolute inset-0 flex min-h-0 min-w-0 flex-col"
     >
-      <TabContent
-        surface={surface}
-        focused={surface.kind === "file" ? false : focused && visible}
-        visible={visible}
-        api={api}
-        revision={revision}
-      />
+      <FileHeaderSlotContext.Provider value={headerSlot}>
+        <TabContent
+          surface={surface}
+          focused={surface.kind === "file" ? false : focused && visible}
+          visible={visible}
+          api={api}
+          revision={revision}
+        />
+      </FileHeaderSlotContext.Provider>
     </div>
   )
 })

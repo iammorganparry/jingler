@@ -23,7 +23,6 @@ import { Callout } from "../components/callout.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { FilterChips } from "../components/filter-chips.js"
-import { SegmentedControl } from "../components/segmented-control.js"
 import { PierreProvider, type PierreCodeViewProps } from "../diff/pierre-provider.js"
 import type { JinglerLineSelection } from "../diff/pierre-selection.js"
 import { cn } from "../lib/cn.js"
@@ -522,6 +521,8 @@ export interface ReviewFileDiffProps {
   readonly onTokenLeave?: PierreCodeViewProps["onTokenLeave"]
   /** Rendered at the start of the header, e.g. the Files view's mode toggle. */
   readonly toolbar?: ReactNode
+  /** Omit the header row; the host (a file tab) renders the badge and focus control in its own header. */
+  readonly headerless?: boolean
 }
 
 /**
@@ -551,7 +552,8 @@ export function ReviewFileDiff({
   onSendFindingToAgent,
   onTokenEnter,
   onTokenLeave,
-  toolbar
+  toolbar,
+  headerless = false
 }: ReviewFileDiffProps) {
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
   const local = source === "local"
@@ -578,7 +580,7 @@ export function ReviewFileDiff({
 
   return (
     <div data-testid="review-file-diff" className="flex h-full min-h-0 flex-col bg-editor">
-      <div className="flex h-8 flex-none items-center gap-2 border-b border-hairline bg-panel px-2">
+      {headerless ? null : <div className="flex h-8 flex-none items-center gap-2 border-b border-hairline bg-panel px-2">
         {toolbar}
         <Badge size="xs">{local ? "Uncommitted" : "Pull request"}</Badge>
         <div className="flex-1" />
@@ -595,7 +597,7 @@ export function ReviewFileDiff({
           {focused ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           {focused ? "Exit focus" : "Focus"}
         </Button>
-      </div>
+      </div>}
       <ReviewPierre>
         <ReviewCodeView
           entries={entries}

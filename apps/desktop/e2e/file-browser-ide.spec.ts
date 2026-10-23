@@ -199,7 +199,7 @@ test("splits the session repository beside chat and edits a file through Pierre"
   await window.getByTestId("editor-tab-file-src/config.ts").getByRole("tab").click()
   // Modified files reopen diff-first; switching back to Edit must hydrate the
   // saved draft rather than the pre-save disk payload.
-  const edit = window.getByRole("button", { name: "Edit src/config.ts" })
+  const edit = window.getByRole("tab", { name: "Edit src/config.ts" })
   if ((await edit.count()) > 0) await edit.click()
   await expect(
     window.locator('[data-surface*="src/config.ts"]').getByRole("textbox", { name: "src/config.ts" })
@@ -420,7 +420,7 @@ test("follows the selected chat agent through edited and newly created files", a
   await window.getByRole("tab", { name: "Sessions", exact: true }).click()
   await expect(window.getByTestId("session-tree-file-src/created.ts")).toContainText("+1")
 
-  await window.getByRole("button", { name: "Edit src/created.ts" }).filter({ visible: true }).click()
+  await window.getByRole("tab", { name: "Edit src/created.ts" }).filter({ visible: true }).click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "false")
   await composerFollow.click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
@@ -497,10 +497,10 @@ test("refreshes the repository tree and follows a moved file to its destination"
     })
   ).toContainText("export const mode = 'modern'")
   await expect(
-    fileBody(window, "src/settings/config.ts").getByRole("button", {
+    fileBody(window, "src/settings/config.ts").getByRole("tab", {
       name: "Show diff for src/settings/config.ts"
     })
-  ).toHaveAttribute("aria-pressed", "true")
+  ).toHaveAttribute("aria-selected", "true")
 
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   const tree = await explorerTree(window)
@@ -623,6 +623,22 @@ test("decorates agent edits with a turn label and counts them in the file breadc
   await expect(
     window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "src/config.ts" }).getByText(/\b1 agent edit$/)
   ).toBeVisible()
+
+  // One header row: breadcrumb, Diff/Edit and Follow agent share a y, with no second toolbar bar.
+  const body = window.locator('[data-surface*="src/config.ts"]').filter({ visible: true })
+  const crumb = window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "src/config.ts" })
+  const [crumbBox, modeBox, followBox] = await Promise.all([
+    crumb.boundingBox(),
+    crumb.getByRole("tab", { name: "Edit src/config.ts" }).boundingBox(),
+    crumb.getByRole("button", { name: "Follow agent", exact: true }).boundingBox()
+  ])
+  expect(crumbBox).not.toBeNull()
+  for (const box of [modeBox, followBox]) {
+    expect(box).not.toBeNull()
+    expect(box!.y).toBeGreaterThanOrEqual(crumbBox!.y - 1)
+    expect(box!.y + box!.height).toBeLessThanOrEqual(crumbBox!.y + crumbBox!.height + 1)
+  }
+  await expect(body.getByRole("button", { name: "Follow agent", exact: true })).toHaveCount(0)
 
   await label.click()
   await expect(window.getByText("Updated the configuration mode.", { exact: true }).first()).toBeInViewport()
