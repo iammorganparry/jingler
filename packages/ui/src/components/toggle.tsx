@@ -1,8 +1,5 @@
-import { animate, m, MotionConfig, useReducedMotion } from "motion/react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useId, useState } from "react"
 import { cn } from "../lib/cn.js"
-
-const THUMB_SPRING = { type: "spring", stiffness: 800, damping: 80, mass: 4 } as const
 
 export interface ToggleProps {
   checked?: boolean
@@ -12,58 +9,56 @@ export interface ToggleProps {
   label?: string
   ariaLabel?: string
   "aria-label"?: string
+  /** `default` is 28x16 with a 12px thumb; `sm` is 24x14 with a 10px thumb. */
+  size?: "sm" | "default"
   className?: string
   id?: string
 }
 
-export function Toggle({ checked, defaultChecked = false, onCheckedChange, disabled, label, ariaLabel, "aria-label": ariaLabelAttribute, className, id: idProp }: ToggleProps) {
+const SIZES = {
+  default: { track: "h-4 w-7", thumb: "size-3", on: "translate-x-3" },
+  sm: { track: "h-3.5 w-6", thumb: "size-2.5", on: "translate-x-2.5" }
+} as const
+
+/** Compact switch. Public name stays `Toggle` so call sites compile; the track is calm (no squish/spring). */
+export function Toggle({ checked, defaultChecked = false, onCheckedChange, disabled, label, ariaLabel, "aria-label": ariaLabelAttribute, size = "default", className, id: idProp }: ToggleProps) {
   const generatedId = useId()
   const id = idProp ?? generatedId
-  const thumbRef = useRef<HTMLDivElement>(null)
-  const reduce = useReducedMotion()
   const [internalChecked, setInternalChecked] = useState(defaultChecked)
   const currentChecked = checked ?? internalChecked
-  const [isPressed, setIsPressed] = useState(false)
-  const [isPointer, setIsPointer] = useState(false)
-
-  useEffect(() => {
-    if (!thumbRef.current || reduce) return
-    if (disabled && isPressed) animate(thumbRef.current, { x: [0, -2, 2, -1, 0] }, { delay: 0.2, duration: 0.6 })
-  }, [disabled, isPressed, reduce])
-
-  const squish = !disabled && isPointer && isPressed && !reduce
+  const s = SIZES[size]
   const setChecked = (next: boolean) => {
     if (checked === undefined) setInternalChecked(next)
     onCheckedChange?.(next)
   }
 
   return (
-    <MotionConfig transition={reduce ? { duration: 0 } : THUMB_SPRING}>
-      <span className={cn("inline-flex items-center gap-3", className)}>
-        <m.button
-          id={id}
-          type="button"
-          role="switch"
-          aria-checked={currentChecked}
-          aria-label={ariaLabel ?? ariaLabelAttribute}
-          disabled={disabled}
-          onClick={() => !disabled && setChecked(!currentChecked)}
-          onPointerDown={(event) => { setIsPressed(true); setIsPointer(event.type.startsWith("pointer")) }}
-          onPointerUp={() => setIsPressed(false)}
-          onPointerLeave={() => setIsPressed(false)}
-          initial={false}
-          data-state={currentChecked ? "checked" : "unchecked"}
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <button
+        id={id}
+        type="button"
+        role="switch"
+        aria-checked={currentChecked}
+        aria-label={ariaLabel ?? ariaLabelAttribute}
+        disabled={disabled}
+        onClick={() => !disabled && setChecked(!currentChecked)}
+        data-state={currentChecked ? "checked" : "unchecked"}
+        className={cn(
+          "peer relative inline-flex shrink-0 cursor-pointer items-center rounded-full p-0.5 outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none",
+          s.track,
+          currentChecked ? "bg-primary-fill" : "bg-line-strong"
+        )}
+      >
+        <span
+          aria-hidden
           className={cn(
-            "group peer inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full px-1 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:cursor-not-allowed disabled:opacity-60",
-            currentChecked ? "justify-end bg-primary-fill" : "justify-start bg-line-strong"
+            "pointer-events-none block rounded-full shadow-sm transition-transform duration-150 motion-reduce:transition-none",
+            s.thumb,
+            currentChecked ? cn("bg-primary-fg", s.on) : "bg-panel translate-x-0"
           )}
-        >
-          <m.div ref={thumbRef} layout animate={{ scale: squish ? 0.9 : 1 }} className="pointer-events-none block size-5 rounded-full bg-panel shadow-md">
-            <div className={cn("size-5", squish && (currentChecked ? "ml-1" : "mr-1"))} />
-          </m.div>
-        </m.button>
-        {label && <label htmlFor={id} className="cursor-pointer text-sm text-text-bright">{label}</label>}
-      </span>
-    </MotionConfig>
+        />
+      </button>
+      {label && <label htmlFor={id} className="cursor-pointer text-[13px] text-text-bright">{label}</label>}
+    </span>
   )
 }

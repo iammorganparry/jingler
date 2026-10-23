@@ -72,7 +72,7 @@ describe("BeUI motion catalog", () => {
     expect(onCheckedChange).toHaveBeenCalledWith(true)
 
     const input = screen.getByRole("textbox", { name: "Name" })
-    expect(input.className).toContain("h-11")
-    expect(input.className).toContain("rounded-xl")
+    expect(input.className).toContain("h-8")
+    expect(input.className).toContain("rounded-lg")
   })
 })

@@ -50,7 +50,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | HoverCard | `components/hover-card.tsx` | Detail popover on hover intent and focus; elevated surface, r8, 150ms delay, Esc closes. | — | no | #374 (2.9) |
 | HtmlPreview | `components/html-preview.tsx` | Opt-in preview for an html fenced block in agent output. | — | yes | — |
 | IconButtonGroup | `components/icon-button-group.tsx` | One bordered unit of icon buttons with tooltips, pressed state and arrow-key focus (browser toolbar). | items, label, className | yes | #366 (2.1) |
-| Input | `components/input.tsx` | Plain text field (BeUI Input geometry). | — | no | — |
+| Input | `components/input.tsx` | Plain text field: h32, r8, hairline border, brand focus ring, aria-invalid styling. | — | no | — |
+| Field | `components/field.tsx` | Label (13/500) + control + help (12) / error (role=alert) + required marker; passes id and aria wiring to the control via render prop. | label, help, error, required, children | yes | PR #884 |
 | IssueRail, IssueStateView, ClosedIssueBanner | `composites/issue-rail.tsx` | Issue rail (assignees, one-line labels, linked workspace / PR, provider + repository; empty sections hidden), whole-tab states (loading skeleton, not linked + Link issue, load error + mono reason + Retry) and a neutral closed banner with Reopen. | assignees, labels, workspace, state, onReopen | yes | #447 (6.25) |
 | CommentComposer | `components/comment-composer.tsx` (+ `comment-composer-machine.ts`) | Issue comment box under a thread: Textarea, `Comment` primary, `Close with comment` secondary; failed post keeps the draft and shows an inline error. | post, canClose | yes | #446 (6.24) |
 | Textarea | `components/textarea.tsx` | Multi-line field sharing Input's border, focus ring and disabled states. | — | yes | #446 (6.24) |
@@ -85,9 +86,9 @@ Primitives in `components/`. Prefer these over raw elements.
 | SettingsCard, SettingsRow | `components/settings-row.tsx` | Bordered card of rows; row = label + wrapping help left, fixed control right. | title, label, help, control | yes | #372 (2.7) |
 | Toast, ToastRegion | `components/toast.tsx` | Bottom-right notification stack (success, error + Retry, Needs you + Jump, info); queue, 6 s timeout and hover-pause live in `components/toast-machine.ts`. | variant, title, description, action, onDismiss | yes | #369 (2.4) |
 | VirtualList | `components/virtual-list.tsx` | Windowed, searchable list with fixed row height: only visible rows mount, ↑/↓/Home/End move the active row and scroll it into view, Enter selects, sticky group headers, selection kept while the `query` filters. | items, getKey, getText, getGroup, renderRow, onSelect, query, activeKey, onActiveKeyChange | yes | #377 (2.12) |
-| Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
+| Toggle | `components/toggle.tsx` | Compact switch (28×16, 12px thumb; `sm` 24×14). | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel, size | yes | #372 (2.7) |
 | Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip). | — | no | #374 (2.9) |
-| Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
+| Toggle | `components/toggle.tsx` | Compact switch (28×16, 12px thumb; `sm` 24×14). | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel, size | yes | #372 (2.7) |
 | Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip); optional `shortcut` renders a KbdChip. | — | no | #374 (2.9) |
 
 ## Atoms — BeUI base
