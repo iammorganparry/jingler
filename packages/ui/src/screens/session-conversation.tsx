@@ -20,7 +20,7 @@ import { MissingFolderBanner, ProjectSidebar } from "../app/project-sidebar.js"
 import { projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
-import { EmptyConversation } from "./empty-conversation.js"
+import { EmptyConversation, type HomeStart } from "./empty-conversation.js"
 import type { ConversationPaneCtx } from "./session-pane.js"
 import { BUILTIN_TAB, type TabContribution, type TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
@@ -171,6 +171,10 @@ export interface SessionConversationProps {
   debugStopSequences?: Readonly<Record<string, number>>
   /** Open the New Session view. */
   onNewSession?: () => void
+  /** Home composer submit: open New workspace with this prompt and project. */
+  onStartWithPrompt?: (start: HomeStart) => void
+  /** Branch list for the Home from-chip. */
+  loadBranches?: (repoPath: string) => Promise<ReadonlyArray<string>>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
   /** Open the Usage & limits modal (from the sidebar account menu). */
@@ -348,6 +352,11 @@ export function SessionConversation(props: SessionConversationProps) {
            if (props.showEmpty || activeSessionProjectId !== selectedProjectId) return (<EmptyConversation
             version={props.version}
             onNewSession={openNewSession}
+            onStartWithPrompt={props.onStartWithPrompt}
+            loadBranches={props.loadBranches}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+            userName={props.user?.name}
             sessions={props.sessions}
             liveActivity={props.liveActivity}
             allowFor={props.allowFor}
