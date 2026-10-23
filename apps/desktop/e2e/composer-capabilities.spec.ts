@@ -185,7 +185,7 @@ test("configures canonical model, mode, and reasoning before creating a session"
     [
       launched.window.getByRole("button", { name: "Project", exact: true }),
       launched.window.getByRole("button", { name: "Checkout", exact: true }),
-      launched.window.getByRole("button", { name: "Base branch", exact: true })
+      launched.window.getByRole("button", { name: "Start from", exact: true })
     ].map(async (selector) => (await selector.boundingBox())?.width)
   )
   const [projectWidth, ...otherWidths] = selectorWidths
@@ -202,7 +202,7 @@ test("configures canonical model, mode, and reasoning before creating a session"
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   await launched.window.getByRole("option", { name: "High", exact: true }).click()
   await launched.window.getByRole("button", { name: "Checkout" }).click()
-  await launched.window.getByRole("option", { name: "Local" }).click()
+  await launched.window.getByRole("option", { name: "This checkout" }).click()
   const composer = launched.window.getByTestId("new-session-view").getByRole("textbox")
   await expect(composer).toBeEnabled()
   await composer.fill("Check the configured runtime capabilities.")

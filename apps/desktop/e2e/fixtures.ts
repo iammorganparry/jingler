@@ -134,7 +134,7 @@ export const createWorkspace = async (
   }
   if (checkout === "direct") {
     await window.getByRole("button", { name: "Checkout" }).click();
-    await window.getByRole("option", { name: "Local" }).click();
+    await window.getByRole("option", { name: "This checkout" }).click();
   }
   const create = window.getByRole("button", { name: "Create workspace" });
   await expect(create).toBeEnabled();
@@ -145,7 +145,8 @@ const LOCAL_REPOSITORY_OPTION = /^Local repository/;
 
 /** Register a local repository as a project from the New session view. */
 export const addProject = async (window: Page, projectPath: string): Promise<void> => {
-  await window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click();
+  await window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click();
+  await window.getByRole("option", { name: "Add project…" }).click();
   await expect(window.getByRole("heading", { name: "Add project" })).toBeVisible();
   await window.getByRole("option", { name: LOCAL_REPOSITORY_OPTION }).click();
   const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…");

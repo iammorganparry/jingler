@@ -25,7 +25,8 @@ const makeProject = (home: string, name: string): string => {
 const addProject = async (window: Page, projectPath: string) => {
   await window.getByTestId("new-session").click()
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
-  await window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+  await window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
+  await window.getByRole("option", { name: "Add project…" }).click()
   await expect(window.getByRole("heading", { name: "Add project" })).toBeVisible()
   await window.getByRole("option", { name: LOCAL_REPOSITORY }).click()
   const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…")
@@ -38,14 +39,14 @@ const addProject = async (window: Page, projectPath: string) => {
 
 const createWorkspace = async (
   window: Page,
-  input: { checkout: "Local" | "Worktree"; task?: string; baseBranch?: string }
+  input: { checkout: "This checkout" | "Worktree"; task?: string; baseBranch?: string }
 ) => {
   if (!(await window.getByTestId("new-session-view").isVisible())) {
     await window.getByTestId("new-session").click()
   }
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
   if (input.baseBranch) {
-    await window.getByRole("button", { name: "Base branch" }).click()
+    await window.getByRole("button", { name: "Start from" }).click()
     await window.getByPlaceholder("Search branches…").fill(input.baseBranch)
     await window.getByRole("option", { name: new RegExp(input.baseBranch) }).click()
   }
@@ -122,7 +123,8 @@ test("Browse opens the native file browser and registers its selected repository
   }, projectPath)
 
   await launched.window.getByTestId("new-session").click()
-  await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+  await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
+  await launched.window.getByRole("option", { name: "Add project…" }).click()
   await launched.window.getByRole("option", { name: LOCAL_REPOSITORY }).click()
   await launched.window.getByRole("button", { name: "Browse in Finder" }).click()
   await expect(launched.window.getByRole("textbox", { name: "Project directory" })).toHaveValue(projectPath)
@@ -156,7 +158,8 @@ test("Clone from GitHub loads installation repositories and clones with GitHub c
     }, cloneParent)
 
     await launched.window.getByTestId("new-session").click()
-    await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+    await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
+    await launched.window.getByRole("option", { name: "Add project…" }).click()
     await launched.window.getByRole("option", { name: /^Remote repository/ }).click()
     await launched.window.getByRole("option", { name: /widget.*acme on GitHub/i }).click()
     await expect(launched.window.getByText(join(cloneParent, "widget"))).toBeVisible()
@@ -179,7 +182,7 @@ test("creates a direct workspace from a registered project", async ({ launchApp 
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
   await createWorkspace(launched.window, {
-    checkout: "Local"
+    checkout: "This checkout"
   })
 
   const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
@@ -333,7 +336,7 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
       await expect(dialog).toHaveCount(0)
     }
     await rail.getByRole("button", { name: "Athena", exact: true }).click()
-    await createWorkspace(window, { checkout: "Local" })
+    await createWorkspace(window, { checkout: "This checkout" })
     await expect.poll(() => realpathSync(JSON.parse(readFileSync(join(launched.home, "jingler", "config.json"), "utf8")).lastRepoPath)).toBe(realpathSync(athena))
 
     if (entry === "sidebar") {
@@ -350,7 +353,7 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
       }
     }
     await expect(window.getByRole("button", { name: "Project", exact: true })).toContainText("Jingler")
-    await createWorkspace(window, { checkout: "Local" })
+    await createWorkspace(window, { checkout: "This checkout" })
     const persisted: ReadonlyArray<{ repoPath: string; worktreePath: string }> = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     )
@@ -408,7 +411,8 @@ test("new session hides the environment chip without remote environments and sho
   const view = launched.window.getByTestId("new-session-view")
   await expect(view.getByRole("heading", { name: "New session" })).toBeVisible()
   await expect(view.getByRole("button", { name: "Execution environment", exact: true })).toHaveCount(0)
-  await view.getByRole("button", { name: "Session source", exact: true }).click()
+  await view.getByRole("button", { name: "Start from", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "Issue" }).click()
   await launched.window.getByRole("option", { name: /^Linear issue/ }).click()
   await expect(view.getByText("Couldn't load issues")).toBeVisible({ timeout: 20_000 })
   await expect(view.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
