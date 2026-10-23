@@ -2340,6 +2340,7 @@ function renderIssueInbox(
     onOpenOnGithub={(url) => void window.jingler.openExternal(url)}
     onComment={issueInbox.comment}
     onCloseIssue={issueInbox.close}
+    onReopenIssue={issueInbox.reopen}
     closeError={issueInbox.closeError}
     sessionAction={sessionAction}
     loading={issueInbox.loading}

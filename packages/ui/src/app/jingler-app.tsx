@@ -71,7 +71,7 @@ import {
 } from "../screens/session-conversation.js"
 import type { SessionChatActions } from "./session-tree.js"
 import { openTab } from "./editor-layout.js"
-import { updateEditorLayout } from "./editor-layout-machine.js"
+import { forgetEditorLayout, updateEditorLayout, useEditorLayout } from "./editor-layout-machine.js"
 import { useSplitLayout } from "./use-split-layout.js"
 import { matchSplitShortcut } from "./split-shortcuts.js"
 import {
@@ -1016,6 +1016,15 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     [setSelected]
   )
   const group = split.group
+  // Closing the last tab (⌃⇧W) leaves the session pane with nothing to draw. Drop
+  // the pane and its empty layout so the workspace returns to Home and the next
+  // sidebar click re-seeds the session's chat.
+  const activeLayout = useEditorLayout(selected ?? "")
+  useEffect(() => {
+    if (!selected || !group || activeLayout?.root !== null) return
+    forgetEditorLayout(selected)
+    split.close(group.id, group.focused)
+  }, [activeLayout, group, selected, split])
   const [addProjectOpen, setAddProjectOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   const [usageLoading, setUsageLoading] = useState(false)
