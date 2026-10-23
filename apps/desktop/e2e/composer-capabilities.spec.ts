@@ -181,16 +181,21 @@ test("configures canonical model, mode, and reasoning before creating a session"
   await expect(appShell(launched.window)).toBeVisible()
   await launched.window.getByTestId("new-session").click()
 
-  const selectorWidths = await Promise.all(
+  const chipRow = launched.window.getByTestId("new-workspace-chip-row")
+  const boxes = await Promise.all(
     [
-      launched.window.getByRole("button", { name: "Project", exact: true }),
-      launched.window.getByRole("button", { name: "Checkout", exact: true }),
-      launched.window.getByRole("button", { name: "Start from", exact: true })
-    ].map(async (selector) => (await selector.boundingBox())?.width)
+      chipRow.getByRole("button", { name: "Project", exact: true }),
+      chipRow.getByRole("button", { name: "Checkout", exact: true }),
+      chipRow.getByRole("button", { name: "Start from", exact: true })
+    ].map(async (chip) => chip.boundingBox())
   )
-  const [projectWidth, ...otherWidths] = selectorWidths
-  expect(projectWidth).toBeGreaterThanOrEqual(210)
-  expect(otherWidths).toEqual([projectWidth, projectWidth])
+  const [project, ...others] = boxes
+  expect(project?.width).toBeGreaterThan(0)
+  for (const box of others) {
+    expect(box?.width).toBeGreaterThan(0)
+    expect(box?.height).toBeCloseTo(project?.height ?? 0, 0) // sub-pixel: chips are content-sized
+    expect(box?.y).toBeCloseTo(project?.y ?? 0, 0)
+  }
 
   await openModelSettings(launched.window)
   await expect(

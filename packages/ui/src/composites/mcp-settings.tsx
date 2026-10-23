@@ -20,9 +20,11 @@ import {
   DialogHeader,
   DialogTitle
 } from "../components/dialog.js"
+import { Checkbox } from "../components/checkbox.js"
 import { Field } from "../components/field.js"
 import { Input } from "../components/input.js"
 import { Textarea } from "../components/textarea.js"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select.js"
 import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { StatusRow } from "../components/status-row.js"
 import { Toggle } from "../components/toggle.js"
@@ -181,16 +183,14 @@ export function McpServerForm({
           {(c) => <Input {...c} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. context7" />}
         </Field>
         <Field label="Server type">
-          {(c) => (
-            <select
-              {...c}
-              value={kind}
-              onChange={(e) => setKind(e.target.value === "local" ? "local" : "remote")}
-              className="h-8 rounded-lg border border-line bg-panel px-2.5 text-[13px] text-text"
-            >
-              <option value="remote">Remote (URL)</option>
-              <option value="local">Local (command)</option>
-            </select>
+          {() => (
+            <Select value={kind} onValueChange={(v) => setKind(v === "local" ? "local" : "remote")}>
+              <SelectTrigger aria-label="Server type"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="remote">Remote (URL)</SelectItem>
+                <SelectItem value="local">Local (command)</SelectItem>
+              </SelectContent>
+            </Select>
           )}
         </Field>
       </div>
@@ -206,17 +206,15 @@ export function McpServerForm({
       </Field>
       {kind === "remote" && (
         <Field label="Authentication">
-          {(c) => (
-            <select
-              {...c}
-              value={authKind}
-              onChange={(event) => setAuthKind(event.target.value as typeof authKind)}
-              className="h-8 rounded-lg border border-line bg-panel px-2.5 text-[13px] text-text"
-            >
-              <option value="none">No authentication</option>
-              <option value="api-key">API key</option>
-              <option value="oauth">OAuth</option>
-            </select>
+          {() => (
+            <Select value={authKind} onValueChange={(v) => setAuthKind(v as typeof authKind)}>
+              <SelectTrigger aria-label="Authentication"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No authentication</SelectItem>
+                <SelectItem value="api-key">API key</SelectItem>
+                <SelectItem value="oauth">OAuth</SelectItem>
+              </SelectContent>
+            </Select>
           )}
         </Field>
       )}
@@ -372,13 +370,12 @@ function ImportFlow({
           <div className="flex max-w-xl flex-col gap-1 rounded-md border border-line bg-panel p-3">
             {candidates.map((candidate) => (
               <label key={candidate.name} className="flex items-center gap-2 text-[12px]">
-                <input
-                  type="checkbox"
+                <Checkbox
                   disabled={candidate.problem !== null}
                   checked={selected.has(candidate.name)}
-                  onChange={(e) => {
+                  onCheckedChange={(checked) => {
                     const next = new Set(selected)
-                    if (e.target.checked) next.add(candidate.name)
+                    if (checked) next.add(candidate.name)
                     else next.delete(candidate.name)
                     setSelected(next)
                   }}
@@ -464,11 +461,14 @@ function McpAuthSetupDialogContent({
         <DialogBody>
           <div className="flex flex-col gap-4">
             <Field label="Authentication method">
-              {(c) => (
-                <select {...c} value={kind} onChange={(event) => setKind(event.target.value as typeof kind)} className="h-8 rounded-lg border border-line bg-panel px-2.5 text-[13px] text-text">
-                  <option value="oauth">OAuth</option>
-                  <option value="api-key">API key</option>
-                </select>
+              {() => (
+                <Select value={kind} onValueChange={(v) => setKind(v as typeof kind)}>
+              <SelectTrigger aria-label="Authentication method"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="oauth">OAuth</SelectItem>
+                <SelectItem value="api-key">API key</SelectItem>
+              </SelectContent>
+            </Select>
               )}
             </Field>
             {kind === "api-key" && (
