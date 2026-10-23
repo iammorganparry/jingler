@@ -407,6 +407,17 @@ const sourceOptionsFor = (props: NewWorkspaceViewProps): ReadonlyArray<{
       : []),
   ];
 
+const openEvent = (props: NewWorkspaceViewProps): NewWorkspaceEvent => ({
+  type: "OPEN",
+  ...(props.requestedProjectId ? { projectId: props.requestedProjectId } : {}),
+  ...(props.requestedPr ? { pr: props.requestedPr } : {}),
+  ...(props.requestedIssue ? { issue: props.requestedIssue } : {}),
+  ...(props.requestedDraft ? { draft: props.requestedDraft } : {}),
+  ...(props.requestedSource ? { source: props.requestedSource } : {}),
+  ...(props.requestedBaseBranch ? { baseBranch: props.requestedBaseBranch } : {}),
+  ...(props.requestedIsolation ? { isolation: props.requestedIsolation } : {}),
+});
+
 export function NewWorkspaceView(props: NewWorkspaceViewProps) {
   const depsRef = React.useRef<NewWorkspaceDeps>(props);
   depsRef.current = props;
@@ -414,19 +425,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
   const [state, send] = useMachine(newWorkspaceMachine, { input: { getDeps } });
 
   React.useEffect(() => {
-    if (props.open)
-      send({
-        type: "OPEN",
-        ...(props.requestedProjectId
-          ? { projectId: props.requestedProjectId }
-          : {}),
-        ...(props.requestedPr ? { pr: props.requestedPr } : {}),
-        ...(props.requestedIssue ? { issue: props.requestedIssue } : {}),
-        ...(props.requestedDraft ? { draft: props.requestedDraft } : {}),
-        ...(props.requestedSource ? { source: props.requestedSource } : {}),
-        ...(props.requestedBaseBranch ? { baseBranch: props.requestedBaseBranch } : {}),
-        ...(props.requestedIsolation ? { isolation: props.requestedIsolation } : {}),
-      });
+    if (props.open) send(openEvent(props));
     else send({ type: "CLOSE" });
   }, [props.open, props.requestedPr, props.requestedIssue, props.requestedProjectId, props.requestedDraft, props.requestedSource, props.requestedBaseBranch, props.requestedIsolation, send]);
 
