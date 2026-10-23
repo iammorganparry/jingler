@@ -171,6 +171,8 @@ export interface SessionConversationProps {
   debugStopSequences?: Readonly<Record<string, number>>
   /** Open the New Session view. */
   onNewSession?: () => void
+  /** Home composer submit: open New workspace with this prompt and project. */
+  onStartWithPrompt?: (draft: string, projectId: string | undefined) => void
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
   /** Open the Usage & limits modal (from the sidebar account menu). */
@@ -348,6 +350,10 @@ export function SessionConversation(props: SessionConversationProps) {
            if (props.showEmpty || activeSessionProjectId !== selectedProjectId) return (<EmptyConversation
             version={props.version}
             onNewSession={openNewSession}
+            onStartWithPrompt={props.onStartWithPrompt}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+            userName={props.user?.name}
             sessions={props.sessions}
             liveActivity={props.liveActivity}
             allowFor={props.allowFor}

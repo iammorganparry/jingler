@@ -535,6 +535,7 @@ export function JinglerApp(props:  JinglerAppProps) {
   function workspaceNavigationProps() {
     return {
 onNewSession: onCreateSession ? openNewSession : undefined,
+onStartWithPrompt: onCreateSession ? startWithPrompt : undefined,
 onOpenUsage: onLoadUsage ? openUsage : undefined,
 usage,
 onLoadUsage,
@@ -1045,6 +1046,13 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
+    setNewOpen(true)
+  }, [])
+  const startWithPrompt = useCallback((draft: string, projectId: string | undefined) => {
+    setPullRequestsOpen(false)
+    setSettingsOpen(false)
+    if (projectId) setSelectedProjectId(projectId)
+    setRequestedNewSession(projectId ? { projectId, draft, nonce: Date.now() } : null)
     setNewOpen(true)
   }, [])
   const openNewSessionForProject = useCallback((projectId: string) => {
