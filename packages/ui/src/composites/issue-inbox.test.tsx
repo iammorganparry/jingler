@@ -96,4 +96,18 @@ describe("IssueInbox load states", () => {
     </WidthTierValue>)
     expect(screen.queryByText("Linked pull requests")).toBeNull()
   })
+
+  it("shows the closed banner for a closed issue and Reopen calls the handler; open issues keep Close", () => {
+    const onReopenIssue = vi.fn().mockResolvedValue(undefined)
+    const detail = { ...item({ state: "closed" }), createdAt: "2026-08-01T10:00:00.000Z", comments: [], linkedPrs: [] }
+    const selected = { repository: "acme/widget", number: 1 }
+    const { rerender } = mount(<IssueInbox {...props} issues={[item()]} selected={selected} detail={detail} onReopenIssue={onReopenIssue} onCloseIssue={() => {}} />)
+    expect(screen.getByText("This issue is closed.")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Close issue" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Reopen" }))
+    expect(onReopenIssue).toHaveBeenCalledTimes(1)
+    rerender(<WidthTierValue width={1200}><IssueInbox {...props} issues={[item()]} selected={selected} detail={{ ...detail, state: "open" }} onReopenIssue={onReopenIssue} onCloseIssue={() => {}} /></WidthTierValue>)
+    expect(screen.queryByText("This issue is closed.")).toBeNull()
+    expect(screen.getByRole("button", { name: "Close issue" })).toBeTruthy()
+  })
 })

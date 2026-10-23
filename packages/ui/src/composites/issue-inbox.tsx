@@ -18,6 +18,7 @@ import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { IssueLabelChip } from "./issue-picker-list.js"
+import { ClosedIssueBanner } from "./issue-rail.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { InboxFilterSelect, InboxMessage, filterOptions } from "./pull-request-inbox.js"
@@ -79,6 +80,7 @@ export interface IssueInboxProps {
   onOpenOnGithub?: (url: string) => void
   onComment?: (body: string) => Promise<void> | void
   onCloseIssue?: () => Promise<void> | void
+  onReopenIssue?: () => Promise<void> | void
   closeError?: string | null
   sessionAction?: {
     readonly label: string
@@ -96,7 +98,7 @@ const hasActiveIssueFilters = (f: typeof initialIssueInboxFilters) =>
 
 /** Global GitHub issue list with a responsive detail pane, modelled on PullRequestInbox. */
 export function IssueInbox({
-  issues, viewerLogin, warnings = [], onActivate, onRefresh, onRetry, refreshing = false, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, closeError,
+  issues, viewerLogin, warnings = [], onActivate, onRefresh, onRetry, refreshing = false, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, onReopenIssue, closeError,
   sessionAction, loading = false, detailLoading = false, detailError = null, error = null
 }: IssueInboxProps) {
   const [filterState, sendFilters] = useMachine(issueInboxFilterMachine)
@@ -178,6 +180,7 @@ export function IssueInbox({
         onOpenOnGithub={onOpenOnGithub}
         onComment={onComment}
         onCloseIssue={onCloseIssue}
+        onReopenIssue={onReopenIssue}
       />
     )
   }
@@ -234,7 +237,21 @@ export function IssueInbox({
   )
 }
 
-function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAction, onOpenOnGithub, onComment, onCloseIssue }: {
+function ReopenBanner({ onReopen, closed }: { onReopen?: () => Promise<void> | void; closed: boolean }) {
+  const [reopening, setReopening] = useState(false)
+  if (!(closed && onReopen)) return null
+  return (
+    <ClosedIssueBanner
+      reopening={reopening}
+      onReopen={() => {
+        setReopening(true)
+        Promise.resolve(onReopen()).catch(() => {}).finally(() => setReopening(false))
+      }}
+    />
+  )
+}
+
+function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAction, onOpenOnGithub, onComment, onCloseIssue, onReopenIssue }: {
   issue: IssueDetail
   repository: string
   busy: boolean
@@ -244,6 +261,7 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
   onOpenOnGithub?: (url: string) => void
   onComment?: (body: string) => Promise<void> | void
   onCloseIssue?: () => Promise<void> | void
+  onReopenIssue?: () => Promise<void> | void
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5" aria-busy={busy}>
@@ -275,6 +293,7 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
           )}
         </div>
         {sessionAction?.disabledReason && <p className="self-end text-xs text-muted-foreground">{sessionAction.disabledReason}</p>}
+        <ReopenBanner onReopen={onReopenIssue} closed={issue.state !== "open"} />
         {closeError && <Callout tone="red">{closeError}</Callout>}
         {error && <p role="alert" className="text-xs text-red">{error}</p>}
       </div>

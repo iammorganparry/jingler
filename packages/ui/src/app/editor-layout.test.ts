@@ -209,6 +209,11 @@ describe("editor layout persistence", () => {
     expect(shape(loadEditorLayout("s", file("a.ts"), "main"))).toEqual([["file:a.ts"]])
   })
 
+  it("reseeds the chat when the persisted layout has every tab closed (Q16)", () => {
+    saveEditorLayout("s", closeSurfaceEverywhere(createEditorLayout([chat("main")], "main"), chat("main")))
+    expect(shape(loadEditorLayout("s", chat("main"), "main"))).toEqual([["chat:main"]])
+  })
+
   it("falls back safely for invalid storage", () => {
     localStorage.setItem(`${EDITOR_LAYOUT_STORAGE_PREFIX}bad`, "{not json")
     expect(shape(loadEditorLayout("bad", chat("main"), "main"))).toEqual([["chat:main"]])

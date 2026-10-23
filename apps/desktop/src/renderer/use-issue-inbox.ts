@@ -88,6 +88,12 @@ export function useIssueInbox() {
       : Promise.reject(new Error("Select an issue first.")),
     onSuccess: () => refresh(),
   })
+  const reopenMutation = useMutation({
+    mutationFn: () => selected
+      ? rpc.githubReopenIssue(selected.repository, selected.number)
+      : Promise.reject(new Error("Select an issue first.")),
+    onSuccess: () => refresh(),
+  })
   const { reset: resetComment } = commentMutation
   const { reset: resetClose } = closeMutation
   // A different account must not inherit the previous one's private detail or errors.
@@ -108,13 +114,14 @@ export function useIssueInbox() {
     selected,
     select: (issue: IssueListItem) => {
       if (viewerLogin === null) return
-      commentMutation.reset(); closeMutation.reset(); setSelection({ issue, viewerLogin })
+      commentMutation.reset(); closeMutation.reset(); reopenMutation.reset(); setSelection({ issue, viewerLogin })
     },
     detail: detail.data ?? null,
     detailLoading: detail.isPending && selected !== null,
     detailError: message(detail.error),
     comment: (body: string) => commentMutation.mutateAsync(body),
     close: () => closeMutation.mutateAsync(),
-    closeError: message(closeMutation.error),
+    reopen: () => reopenMutation.mutateAsync(),
+    closeError: message(closeMutation.error ?? reopenMutation.error),
   }
 }

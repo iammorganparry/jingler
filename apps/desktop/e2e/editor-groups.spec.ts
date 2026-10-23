@@ -239,7 +239,11 @@ test("closing an untouched chat tab removes it from the sidebar", async ({ launc
   // Closing a chat with history only closes its tab; its sidebar entry remains.
   await window.getByTestId("thread-switcher").click()
   await window.getByRole("menuitem", { name: "Close Chat 1" }).click()
+  // Chat 1 was the last tab, so the pane closes and Home returns; reopening the
+  // session shows the chat is still there.
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Beta session" }).first().click()
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 1")).toBeVisible()
+  await expect(window.getByText("Keep this chat.")).toBeVisible()
 })
 
 test("dragging file and view tabs creates horizontal and vertical splits", async ({ launchApp }) => {

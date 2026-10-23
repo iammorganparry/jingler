@@ -652,7 +652,9 @@ export const loadEditorLayout = (sessionId: string, fallback: SessionSurface, ma
       stored !== undefined
         ? parseLayout(stored)
         : migrateSurfaceLayout(readJson(`${SESSION_SURFACE_STORAGE_PREFIX}${sessionId}`))
-    if (!layout) return initial
+    // A persisted layout with every tab closed would mount as an empty editor no
+    // sidebar click can fill, so it reseeds the chat instead.
+    if (!layout || layout.root === null) return initial
     layout = migratePrTab(migrateFilesTab(layout))
     if (layout.mainChatId === null || !main) return layout
     const withMain = { ...layout, mainChatId }
