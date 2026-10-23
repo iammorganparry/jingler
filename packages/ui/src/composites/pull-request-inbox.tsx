@@ -282,7 +282,7 @@ export function PullRequestInbox({
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>{visible.length} of {prs.length} loaded PRs</span>
               {hasActiveInboxFilters(facets) &&
-                <button type="button" className="shrink-0 text-brand hover:underline" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</button>}
+                <Button variant="ghost" size="sm" className="h-6 shrink-0 px-2" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</Button>}
             </div>
             {warnings.length > 0 && <div role="status" className="text-xs text-muted-foreground">
               <strong>Partial results</strong>
@@ -300,9 +300,9 @@ export function PullRequestInbox({
       {(!compact || mobileDetail) && (
         <WidthTierProvider className="relative bg-editor">
           {compact && (
-            <button type="button" onClick={() => setMobileDetail(false)} className="absolute left-3 top-3 z-20 flex h-8 items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 text-[11px] text-muted-foreground shadow-sm hover:text-text">
+            <Button variant="outline" size="sm" onClick={() => setMobileDetail(false)} className="absolute left-3 top-3 z-20 bg-panel">
               <ArrowLeft className="size-3.5" /> Back
-            </button>
+            </Button>
           )}
           {renderDetailPane()}
         </WidthTierProvider>
@@ -334,9 +334,9 @@ function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter
                         <option key={team.id} value={team.id} disabled={teamControls.error !== null}>{team.name}</option>)}
                     </optgroup>)}
                 </select>
-                <button type="button" onClick={teamControls.onRefresh} disabled={teamControls.discovering} className="rounded border border-line px-2 py-1.5 text-xs text-text hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring">
+                <Button variant="outline" size="sm" onClick={teamControls.onRefresh} disabled={teamControls.discovering}>
                   {teamControls.discovering ? "Refreshing…" : "Refresh"}
-                </button>
+                </Button>
               </div>
               {teamControls.error && <p role="alert" className="text-xs text-red">{teamControls.error}</p>}
               {!teamControls.discovering && !teamControls.error && teamControls.teams.length === 0 && <p className="text-xs text-muted-foreground">No organization teams are visible to your GitHub CLI account.</p>}
