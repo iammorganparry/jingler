@@ -446,10 +446,10 @@ test("the Changes action filters the Explorer to uncommitted files and reviews o
   await diff.getByRole("button", { name: "Mark viewed: README.md" }).click()
 
   // Focus gives the diff the width: the Explorer steps aside until it ends.
-  await diff.getByRole("button", { name: "Focus diff" }).click()
+  await window.getByRole("button", { name: "Focus diff" }).filter({ visible: true }).first().click()
   await expect(explorer).toHaveCount(0)
   await expect(diff).toBeVisible()
-  await diff.getByRole("button", { name: "Exit review focus" }).click()
+  await window.getByRole("button", { name: "Exit review focus" }).filter({ visible: true }).first().click()
   await expect(window.getByTestId("changed-files-explorer")).toBeVisible()
 
   // "All files" restores the full repository tree.

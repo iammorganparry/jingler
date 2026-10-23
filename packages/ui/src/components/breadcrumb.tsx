@@ -23,7 +23,7 @@ export function Breadcrumb({
           <span className={cn("truncate", index === crumbs.length - 1 && "text-muted-foreground")}>{crumb}</span>
         </span>
       ))}
-      {children === undefined || children === null ? null : <span className="ml-auto flex-none">{children}</span>}
+      {children === undefined || children === null ? null : <span className="ml-auto flex flex-none items-center gap-2">{children}</span>}
     </nav>
   )
 }

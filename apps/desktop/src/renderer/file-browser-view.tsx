@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
+import { useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
 import { workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
 import { isLanguageHoverPath } from "@jingler/contracts"
@@ -11,6 +12,7 @@ import {
   AssetError,
   AssetTooLarge,
   AssetUnsupported,
+  Badge,
   Button,
   Callout,
   ContextMenu,
@@ -18,15 +20,17 @@ import {
   createPierreFileContents,
   DiffView,
   ExplorerPanel,
+  FileHeaderSlotContext,
   FileQuickOpen,
   parsePierreFileDiffs,
   PierreEditor,
   narrowToTurn,
-  ReviewFileDiff
+  ReviewFileDiff,
+  SegmentedControl
 } from "@jingler/ui"
 import type { AgentEdit, PierreAnnotationMetadata, ReviewTurn } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
-import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
+import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, Maximize2, MessageSquarePlus, Minimize2, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { openSessionFileDiff, useFileBrowser } from "./use-file-browser.js"
 import { setReviewFilter, useSessionReviewState } from "./review-store.js"
@@ -287,39 +291,35 @@ export function FileBrowserQuickOpen({
   )
 }
 
-function FileBrowserToolbar({ browser, session }: { browser: FileBrowserController; session: Session }) {
-  const path = browser.selectedPath
+/** Renders into the file tab's single header row (the breadcrumb's right slot); `order-*` fixes the controls' sequence across independent portals. */
+function FileHeaderPortal({ order, children }: { readonly order: string; readonly children: ReactNode }) {
+  const slot = useContext(FileHeaderSlotContext)
+  return slot === null ? null : createPortal(<div className={`flex items-center gap-2 ${order}`}>{children}</div>, slot)
+}
+
+// Labels collapse to icon-only below the breadcrumb row's container width (`@container` on the Breadcrumb).
+const COLLAPSING_LABEL = "hidden @[560px]:inline"
+
+function FollowAgentToggle({ session }: { session: Session }) {
   // Follow is session state: file tabs own per-file actors, but the toggle mirrors the composer's.
   const sessionBrowser = useFileBrowser(session.id, session.worktreePath)
   const followEnabled = sessionBrowser.followEnabled
   return (
-    <>
-      {path === null ? (
-        <span className="flex-1" />
-      ) : (
-        <span className="flex min-w-0 flex-1 items-baseline font-mono text-[10.5px]" title={path}>
-          {path.includes("/") ? (
-            <span className="truncate text-dim">{path.slice(0, path.lastIndexOf("/") + 1)}</span>
-          ) : null}
-          <span className="flex-none text-text">{path.slice(path.lastIndexOf("/") + 1)}</span>
-        </span>
-      )}
-      <div className="ml-auto flex min-w-0 flex-none items-center gap-2">
-        <button
-          type="button"
-          className={[
-            "jingler-mode-toggle inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none transition-colors active:scale-[0.96]",
-            followEnabled ? "is-active" : "text-muted-foreground hover:text-text"
-          ].join(" ")}
-          aria-pressed={followEnabled}
-          onClick={followEnabled ? sessionBrowser.disableFollow : sessionBrowser.enableFollow}
-          title="Follow files edited by the active chat's agent"
-        >
-          <MousePointer2 className="jingler-mode-toggle__mark size-3" aria-hidden />
-          <span className="jingler-mode-toggle__label">Follow agent</span>
-        </button>
-      </div>
-    </>
+    <FileHeaderPortal order="order-3">
+      <Button
+        type="button"
+        variant={followEnabled ? "secondary" : "ghost"}
+        size="sm"
+        aria-pressed={followEnabled}
+        aria-label="Follow agent"
+        onClick={followEnabled ? sessionBrowser.disableFollow : sessionBrowser.enableFollow}
+        title="Follow files edited by the active chat's agent"
+        className="h-6 gap-1 px-1.5 text-[11px]"
+      >
+        <MousePointer2 size={12} aria-hidden />
+        <span className={COLLAPSING_LABEL}>Follow agent</span>
+      </Button>
+    </FileHeaderPortal>
   )
 }
 
@@ -470,11 +470,11 @@ export function FileBrowserView({
         treeLoading={browser.treeLoading}
         treeError={browser.treeError}
         hideTree
-        toolbar={<FileBrowserToolbar browser={browser} session={session} />}
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}
         renderCanvas={(nativeAvailable) => (
           <div className="flex h-full min-h-0 min-w-0">
+            <FollowAgentToggle session={session} />
             <div className="min-w-0 flex-1">
               <FileCanvas
                 sessionId={session.id}
@@ -746,7 +746,7 @@ function FileCanvas({
       editor
     ) : (
       <div className="flex h-full min-h-0 flex-col bg-canvas">
-        <FileModeBar path={browser.selectedPath} mode="edit" browser={browser} />
+        <FileModeControl path={browser.selectedPath} mode="edit" browser={browser} />
         <div className="min-h-0 flex-1">{editor}</div>
       </div>
     )
@@ -896,9 +896,29 @@ function ReviewDiffCanvas({
   const { enter, leave } = tokenHover
   const onTokenEnter = useCallback((token: BrowserToken) => enter(token), [enter])
   const onTokenLeave = useCallback(() => leave(), [leave])
+  const focused = changes.focused
   return (
     <div className="relative h-full min-h-0">
+      <FileHeaderPortal order="order-2">
+        <Badge size="xs">{review.source === "local" ? "Uncommitted" : "Pull request"}</Badge>
+      </FileHeaderPortal>
+      <FileHeaderPortal order="order-4">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-pressed={focused}
+          aria-label={focused ? "Exit review focus" : "Focus diff"}
+          title={focused ? "Restore the review panels" : "Show only the diff"}
+          onClick={changes.toggleFocus}
+          className="h-6 gap-1 px-1.5 text-[11px]"
+        >
+          {focused ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          <span className={COLLAPSING_LABEL}>{focused ? "Exit focus" : "Focus"}</span>
+        </Button>
+      </FileHeaderPortal>
       <ReviewFileDiff
+        headerless
         file={file}
         diff={diff}
         source={review.source}
@@ -952,7 +972,7 @@ function SelectionContextMenu({
   )
 }
 
-function FileModeBar({
+function FileModeControl({
   path,
   mode,
   browser
@@ -962,28 +982,18 @@ function FileModeBar({
   readonly browser: FileBrowserController
 }) {
   return (
-    <div className="flex h-8 flex-none items-center justify-end gap-1 border-b border-hairline bg-panel px-2">
-      <Button
-        type="button"
-        variant={mode === "diff" ? "secondary" : "ghost"}
+    <FileHeaderPortal order="order-1">
+      <SegmentedControl
         size="sm"
-        aria-pressed={mode === "diff"}
-        aria-label={`Show diff for ${path}`}
-        onClick={browser.showDiff}
-      >
-        Diff
-      </Button>
-      <Button
-        type="button"
-        variant={mode === "edit" ? "secondary" : "ghost"}
-        size="sm"
-        aria-pressed={mode === "edit"}
-        aria-label={`Edit ${path}`}
-        onClick={browser.startEdit}
-      >
-        Edit
-      </Button>
-    </div>
+        aria-label="File view"
+        value={mode}
+        onChange={(next) => (next === "diff" ? browser.showDiff() : browser.startEdit())}
+        items={[
+          { value: "diff", label: <span aria-label={`Show diff for ${path}`}>Diff</span> },
+          { value: "edit", label: <span aria-label={`Edit ${path}`}>Edit</span> }
+        ]}
+      />
+    </FileHeaderPortal>
   )
 }
 
@@ -1271,7 +1281,7 @@ function renderDiffContainer(browser: FileBrowserController, followedSelection: 
         followedSelection === null ? undefined : (browser.agentTargetEventId ?? undefined)
       }
     >
-      <FileModeBar path={browser.selectedPath!} mode="diff" browser={browser} />
+      <FileModeControl path={browser.selectedPath!} mode="diff" browser={browser} />
       <div className="min-h-0 flex-1">
         {children}
       </div>

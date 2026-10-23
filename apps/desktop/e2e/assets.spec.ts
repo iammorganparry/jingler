@@ -374,9 +374,10 @@ test("switches a changed file between diff and edit and saves the edited revisio
   await selectTreePath(window, "src/main.ts")
 
   const mainBody = fileBody(window, "src/main.ts")
-  const edit = mainBody.getByRole("button", { name: "Edit src/main.ts", exact: true })
-  const diff = mainBody.getByRole("button", { name: "Show diff for src/main.ts", exact: true })
-  await expect(diff).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+  // Diff/Edit live in the group header row (portalled), not inside the file body.
+  const edit = window.getByRole("tab", { name: "Edit src/main.ts", exact: true }).filter({ visible: true })
+  const diff = window.getByRole("tab", { name: "Show diff for src/main.ts", exact: true }).filter({ visible: true })
+  await expect(diff).toHaveAttribute("aria-selected", "true", { timeout: 15_000 })
   await expect(mainBody.getByTestId("asset-content-canvas")).toContainText(
     "export const answer = 43"
   )
@@ -395,7 +396,7 @@ test("switches a changed file between diff and edit and saves the edited revisio
   // Back on the diff, the SAVED revision is what differs from HEAD — not the
   // pre-save buffer the diff first opened on.
   await diff.click()
-  await expect(diff).toHaveAttribute("aria-pressed", "true")
+  await expect(diff).toHaveAttribute("aria-selected", "true")
   const canvas = mainBody.getByTestId("asset-content-canvas")
   await expect(canvas).toContainText("export const answer = 44")
   await expect(canvas).not.toContainText("export const answer = 43")
