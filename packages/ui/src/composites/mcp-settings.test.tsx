@@ -157,7 +157,7 @@ describe("McpSettings", () => {
     fireEvent.click(screen.getByRole("option", { name: "API key" }))
     fireEvent.change(screen.getByLabelText("API key header"), { target: { value: "X-API-Key" } })
     fireEvent.change(screen.getByLabelText("API key prefix"), { target: { value: "" } })
-    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "secret" } })
+    fireEvent.change(screen.getByLabelText("API key", { selector: "input" }), { target: { value: "secret" } })
     fireEvent.click(screen.getByText("Save server"))
 
     await waitFor(() => expect(add).toHaveBeenCalledWith("context7", {
