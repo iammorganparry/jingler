@@ -29,7 +29,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | ReadingShell, ReadingActionsMenu | `components/reading-shell.tsx` | Shared PR/issue reading surface: header (title + grey identifier, meta line, actions), 720px column, 280px rail (stacks below the wide tier); `⋯` menu with destructive items. | title, identifier, meta, actions, rail, items | yes | #445 (6.23) |
 | Callout | `components/callout.tsx` | Inline notice with a leading glyph; tones share BannerShell neutral styling, only red colours the glyph. | children, glyph, className | no | #376 (2.11) |
 | Card, CardHeader | `components/card.tsx` | Bordered panel surface (Card, CardHeader). | — | no | — |
-| Checkbox | `components/checkbox.tsx` | Checkbox. | checked, onCheckedChange, indeterminate, label, tone | yes | — |
+| Checkbox | `components/checkbox.tsx` | 14px r4 checkbox, token border, brand ring; checked/indeterminate/disabled. | checked, onCheckedChange, indeterminate, label, tone | yes | — |
 | ChipMenu | `components/chip-menu.tsx` | Compact Command picker anchored to a composer control. | — | no | — |
 | CodeChip | `components/code-chip.tsx` | Rendered code reference chip (file, range). One line; label truncates. | — | no | — |
 | Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator, CommandShortcut | `components/command.tsx` | cmdk primitives: Command, CommandDialog, Input, List, Item… | — | yes | — |
@@ -71,10 +71,10 @@ Primitives in `components/`. Prefer these over raw elements.
 | HarnessCard | `composites/harness-card.tsx` | Agent harness row: real provider logo, name, detail and a one-line status pill (Ready / Signing in… / Needs attention / Signed out). | providerId, name, detail, status | yes | #475 (9.5) |
 | ProviderSignedOutCard, ProviderResumeCard, ProviderLimitBanner, ProviderAccountChoice | `composites/provider-recovery-cards.tsx` | Chat recovery states: signed-out Reconnect, Resume run, "Limited until HH:MM" banner, signed-in account radio choice. | title, message, limit, accounts, onUse | yes | #419 (5.13) |
 | ResizeHandle | `components/resizable.tsx` | ResizeHandle for persisted drag-resizable widths. | — | no | — |
-| SearchField (alias SearchInput) | `components/search-input.tsx` | 32px search field: leading magnifier, clear button, Esc clears, optional count and kbd hint. | value, onChange, placeholder, kbd, count | yes | #367 (2.2) |
+| SearchField (alias SearchInput) | `components/search-input.tsx` | h32 r8 search field matching Input (14px icon): leading magnifier, clear button, Esc clears, optional count and kbd hint. | value, onChange, placeholder, kbd, count | yes | #367 (2.2) |
 | FilterChips | `components/filter-chips.tsx` | Single-select row of one-line chips with counts; radiogroup, ←/→/Enter. | options, value, onChange, ariaLabel | yes | #367 (2.2) |
-| SegmentedControl | `components/segmented-control.tsx` | 28px segmented control (24px at size sm); active segment on the surface token; arrow keys move selection. | items, value, onChange, size, fullWidth, aria-label | yes | #368 (2.3) |
-| SelectGroup, SelectLabel | `components/select.tsx` | SelectGroup / SelectLabel re-exports over the BeUI Select. | — | no | — |
+| SegmentedControl | `components/segmented-control.tsx` | 28px segmented control (24px at size sm); active on surface token, inactive --dim; arrow keys move selection. | items, value, onChange, size, fullWidth, aria-label | yes | #368 (2.3) |
+| SelectGroup, SelectLabel | `components/select.tsx` | SelectGroup / SelectLabel over the BeUI Select (h32 r8 trigger, 12px chevron, r8 menu, h32 items). | — | no | — |
 | SignalBars | `components/signal-bars.tsx` | Ascending signal-strength bars. | — | no | — |
 | Spin | `components/spin.tsx` | Box carrying a looping keyframe spin for icons. | active, animation, className, children | no | — |
 | StatusDot | `components/status-dot.tsx` | Status dot, optionally glowing / pulsing. | status, tone, size, glow, pulse, className | yes | #362 (1.4) |

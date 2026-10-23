@@ -28,6 +28,13 @@ describe("SegmentedControl (spec §3e)", () => {
     expect(onChange).toHaveBeenLastCalledWith("sessions")
   })
 
+  it("marks inactive segments dim and unselected", () => {
+    render(<SegmentedControl items={items} value="sessions" />)
+    const inactive = screen.getByRole("tab", { name: "Explorer" })
+    expect(inactive.getAttribute("aria-selected")).toBe("false")
+    expect(inactive.className).toContain("text-dim")
+  })
+
   it("uses 24px segments at size sm", () => {
     render(<SegmentedControl size="sm" items={items} value="sessions" />)
     expect(screen.getByRole("tab", { name: "Explorer" }).className).toContain("h-6")

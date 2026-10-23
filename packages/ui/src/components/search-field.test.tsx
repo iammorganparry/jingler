@@ -30,6 +30,14 @@ describe("SearchField", () => {
     expect((screen.getByLabelText("Search skills") as HTMLInputElement).value).toBe("")
   })
 
+  it("matches the Input look: h-8, rounded-lg, 14px icon", () => {
+    const { container } = render(<Field />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.className).toContain("h-8")
+    expect(root.className).toContain("rounded-lg")
+    expect(container.querySelector("svg")?.getAttribute("width")).toBe("14")
+  })
+
   it("shows the count only while there is a query", () => {
     render(<Field initial="lint" count="12 results" />)
     expect(screen.getByText("12 results")).toBeDefined()
