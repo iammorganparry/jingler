@@ -19,6 +19,10 @@ test("Home composer hands prompt + project to New workspace; starters preselect 
   }
   await expect(window.getByRole("button", { name: "Project", exact: true })).toContainText("widget")
 
+  // Home uses the shared Composer (QA Q19).
+  await expect(window.getByTestId("composer")).toBeVisible()
+  await expect(window.getByRole("button", { name: "Send ↵" })).toBeVisible()
+
   await composer.fill("fix the flaky login test")
   await composer.press("Meta+Enter")
   const view = window.getByTestId("new-session-view")

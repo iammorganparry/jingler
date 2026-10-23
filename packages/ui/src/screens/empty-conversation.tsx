@@ -7,13 +7,16 @@ import { CHECKOUT_OPTIONS, ChipRow, FromChip } from "../composites/new-workspace
 import { Button } from "../components/button.js"
 import { Kbd } from "../components/kbd.js"
 import { ChipMenu } from "../components/chip-menu.js"
-import { Textarea } from "../components/textarea.js"
+import { Composer } from "../composites/composer.js"
 
 export const greetingFor = (now: Date, firstName?: string) => {
   const hour = now.getHours()
   const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"
   return firstName ? `Good ${part}, ${firstName}` : `Good ${part}`
 }
+
+const initialProjectId = (projects: ReadonlyArray<Project>, selectedProjectId?: string | null) =>
+  projects.find((project) => project.id === selectedProjectId)?.id ?? projects[0]?.id ?? ""
 
 const STARTERS = [
   { label: "Start from a GitHub issue", source: "github" },
@@ -77,14 +80,13 @@ export function EmptyConversation({
   now?: Date
 }) {
   const [draft, setDraft] = useState("")
-  const [projectId, setProjectId] = useState(
-    projects.find((project) => project.id === selectedProjectId)?.id ?? projects[0]?.id ?? ""
-  )
+  const [projectId, setProjectId] = useState(initialProjectId(projects, selectedProjectId))
   const [source, setSource] = useState<HomeSource>("blank")
   const [branches, setBranches] = useState<ReadonlyArray<string>>([])
   const [baseBranch, setBaseBranch] = useState("")
   const [isolation, setIsolation] = useState<"worktree" | "direct">("worktree")
-  const projectPath = projects.find((project) => project.id === projectId)?.path
+  const selectedProject = projects.find((project) => project.id === projectId)
+  const projectPath = selectedProject?.path
   useEffect(() => {
     if (!projectPath || !loadBranches) return
     let live = true
@@ -99,7 +101,7 @@ export function EmptyConversation({
     )
     return () => { live = false }
   }, [projectPath, loadBranches])
-  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   const firstRun = !sessions?.some((session) => !session.archived)
   const start = (text: string, from: HomeSource) =>
     onStartWithPrompt?.({
@@ -109,9 +111,6 @@ export function EmptyConversation({
       ...(baseBranch ? { baseBranch } : {}),
       isolation
     })
-  const submit = () => {
-    if (draft.trim()) start(draft.trim(), source)
-  }
   return (
     <div className="flex flex-1 flex-col bg-editor">
       <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-10">
@@ -120,16 +119,18 @@ export function EmptyConversation({
             {greetingFor(now, userName?.trim().split(/\s+/)[0])}
           </h1>
 
-          <div className="flex flex-col gap-2">
-            <Textarea
-              ref={composerRef}
-              aria-label="What should we build?"
-              placeholder="What should we build?"
+          <div ref={composerRef} className="flex flex-col gap-2">
+            <Composer
+              preserveDraftOnSend
+              autoFocus
+              focusKey="home"
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) submit()
-              }}
+              onValueChange={setDraft}
+              onSend={(text) => text.trim() && start(text.trim(), source)}
+              placeholder="What should we build?"
+              inputLabel="What should we build?"
+              repo={selectedProject?.name}
+              branch={baseBranch || undefined}
             />
             <div className="flex items-center gap-2">
               <ChipRow>
@@ -163,9 +164,6 @@ export function EmptyConversation({
                   />
                 )}
               </ChipRow>
-              <Button size="sm" disabled={!draft.trim() || !onStartWithPrompt} onClick={submit}>
-                Start
-              </Button>
             </div>
           </div>
 
@@ -181,7 +179,7 @@ export function EmptyConversation({
                   {label}
                 </Button>
               ))}
-              <Button variant="ghost" onClick={() => composerRef.current?.focus()} className="w-full justify-start">
+              <Button variant="ghost" onClick={() => composerRef.current?.querySelector("textarea")?.focus()} className="w-full justify-start">
                 Describe a task
               </Button>
             </div>
