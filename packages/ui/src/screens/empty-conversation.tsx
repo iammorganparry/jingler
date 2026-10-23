@@ -5,6 +5,7 @@ import { CircleDot, FolderGit2, GitFork, GitPullRequest } from "lucide-react"
 import { HomeCards } from "../composites/home-cards.js"
 import { CHECKOUT_OPTIONS, ChipRow, FromChip } from "../composites/new-workspace-chips.js"
 import { Button } from "../components/button.js"
+import { Kbd } from "../components/kbd.js"
 import { ChipMenu } from "../components/chip-menu.js"
 import { Textarea } from "../components/textarea.js"
 
@@ -208,9 +209,7 @@ export function EmptyConversation({
 function Shortcut({ keys, label }: { keys: string; label: string }) {
   return (
     <span className="flex items-center gap-[7px]">
-      <span className="rounded-[3px] border border-line px-1.5 py-px font-mono text-muted-foreground">
-        {keys}
-      </span>
+      <Kbd>{keys}</Kbd>
       {label}
     </span>
   )
