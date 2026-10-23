@@ -7,7 +7,7 @@ import type {
 } from "@jingler/core"
 import type { PromptToolCapability } from "../prompt/prompt-compiler.js"
 import type { WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
-import { Effect, Either, JSONSchema, Schema } from "effect"
+import { Effect, Either, JSONSchema, ParseResult, Schema } from "effect"
 
 export const INTERACTIVE_TOOL_TIMEOUT_MS = 24 * 60 * 60_000
 
@@ -268,7 +268,7 @@ const validateExecution = (
   const normalized = normalizeStringifiedArguments(schema, stripped.value)
   const decoded = Schema.decodeUnknownEither(tool.input)(normalized)
   return Either.isLeft(decoded)
-    ? { ok: false, result: errorEnvelope(new ToolError("invalid-input", "Tool input failed validation")) }
+    ? { ok: false, result: errorEnvelope(new ToolError("invalid-input", `Tool input failed validation: ${ParseResult.TreeFormatter.formatErrorSync(decoded.left).slice(0, 600)}`)) }
     : { ok: true, value: decoded.right }
 }
 

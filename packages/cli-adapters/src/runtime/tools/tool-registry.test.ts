@@ -33,6 +33,7 @@ describe("ToolRegistry", () => {
     registry.register(definition({ execute }))
     const result = await Effect.runPromise(registry.execute({ id: "workspace_read", arguments: {}, role: "conversation", mode: "ask" }))
     expect(result.error?.code).toBe("invalid-input")
+    expect(result.error?.message).toContain("path")
     expect(execute).not.toHaveBeenCalled()
   })
 
