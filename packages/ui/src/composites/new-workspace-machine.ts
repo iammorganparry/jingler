@@ -212,6 +212,16 @@ const submitWorkspace = (
 const projectFor = (context: NewWorkspaceContext): Project | undefined =>
   context.getDeps().projects.find((project) => project.id === context.projectId)
 
+/** Home's from/checkout chip values; a requested PR or issue wins over a bare source. */
+const homePrefill = (event: NewWorkspaceEvent, hasTarget: unknown) => {
+  const open = event.type === "OPEN" ? event : undefined
+  return {
+    isolation: open?.isolation ?? ("worktree" as const),
+    baseBranch: open?.baseBranch ?? "",
+    source: open?.source && !hasTarget ? { source: open.source } : {}
+  }
+}
+
 const preferredBranch = (branches: ReadonlyArray<string>): string =>
   branches.find((branch) => branch === "main") ??
   branches.find((branch) => branch === "master") ??
@@ -394,7 +404,7 @@ export const newWorkspaceMachine = setup({
       const requested = event.type === "OPEN" ? event.projectId : undefined
       const requestedPr = event.type === "OPEN" ? event.pr : undefined
       const requestedIssue = event.type === "OPEN" ? event.issue : undefined
-      const open = event.type === "OPEN" ? event : undefined
+      const open = homePrefill(event, requestedPr ?? requestedIssue)
       const selected = deps.projects.find((project) => project.id === requested) ??
         deps.projects.find((project) => project.id === deps.defaultProjectId) ??
         deps.projects.find((project) => project.availability === "available")
@@ -406,12 +416,12 @@ export const newWorkspaceMachine = setup({
         projectId: requested === AUTO_PROJECT_ID ? AUTO_PROJECT_ID : (selected?.id ?? ""),
         environmentId: "local",
         resolvedProject: null,
-        isolation: open?.isolation ?? "worktree",
+        isolation: open.isolation,
         checkpointSafeMode: false,
-        baseBranch: open?.baseBranch ?? "",
+        baseBranch: open.baseBranch,
         branches: [] as ReadonlyArray<string>,
         ...resetSource,
-        ...(open?.source && !requestedPr && !requestedIssue ? { source: open.source } : {}),
+        ...open.source,
         ...(requestedPr
           ? {
               source: "pr" as const,
