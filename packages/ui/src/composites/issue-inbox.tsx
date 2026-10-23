@@ -237,6 +237,20 @@ export function IssueInbox({
   )
 }
 
+function ReopenBanner({ onReopen, closed }: { onReopen?: () => Promise<void> | void; closed: boolean }) {
+  const [reopening, setReopening] = useState(false)
+  if (!(closed && onReopen)) return null
+  return (
+    <ClosedIssueBanner
+      reopening={reopening}
+      onReopen={() => {
+        setReopening(true)
+        Promise.resolve(onReopen()).catch(() => {}).finally(() => setReopening(false))
+      }}
+    />
+  )
+}
+
 function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAction, onOpenOnGithub, onComment, onCloseIssue, onReopenIssue }: {
   issue: IssueDetail
   repository: string
@@ -249,7 +263,6 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
   onCloseIssue?: () => Promise<void> | void
   onReopenIssue?: () => Promise<void> | void
 }) {
-  const [reopening, setReopening] = useState(false)
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5" aria-busy={busy}>
       <div className="flex flex-col gap-2">
@@ -280,15 +293,7 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
           )}
         </div>
         {sessionAction?.disabledReason && <p className="self-end text-xs text-muted-foreground">{sessionAction.disabledReason}</p>}
-        {onReopenIssue && issue.state !== "open" && (
-          <ClosedIssueBanner
-            reopening={reopening}
-            onReopen={() => {
-              setReopening(true)
-              Promise.resolve(onReopenIssue()).catch(() => {}).finally(() => setReopening(false))
-            }}
-          />
-        )}
+        <ReopenBanner onReopen={onReopenIssue} closed={issue.state !== "open"} />
         {closeError && <Callout tone="red">{closeError}</Callout>}
         {error && <p role="alert" className="text-xs text-red">{error}</p>}
       </div>

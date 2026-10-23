@@ -31,7 +31,7 @@ test("closing the last pane returns to Home and the session row reopens it", asy
   await expect(window.getByTestId("editor-groups")).toBeVisible()
 
   await window.keyboard.press("Control+Shift+W")
-  await expect(window.getByTestId("home-starters")).toBeVisible()
+  await expect(window.getByRole("textbox", { name: "What should we build?" })).toBeVisible()
   await expect(window.getByTestId("editor-groups-empty")).toHaveCount(0)
 
   await row.click()
