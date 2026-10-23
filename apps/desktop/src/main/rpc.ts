@@ -146,6 +146,8 @@ import {
   SessionNotFoundError,
   workspaceModeOf,
   reduceCheckouts,
+  activeCheckoutOf,
+  checkoutsOf,
   sessionForCheckout,
   createWorkspaceProvisioningPlan,
   defaultModeFor,
@@ -2443,6 +2445,24 @@ const postReviewToPr = (
     );
   });
 
+/** Detect a PR in every non-active checkout's own worktree and store it on that checkout. */
+const detectOtherCheckoutPrs = (session: Session) =>
+  Effect.forEach(
+    checkoutsOf(session).filter(
+      (c) => c.id !== activeCheckoutOf(session).id && c.worktreePath !== undefined,
+    ),
+    (checkout) =>
+      GitHubApi.prForWorktree(checkout.worktreePath!).pipe(
+        Effect.orElseSucceed(() => null),
+        Effect.flatMap((found) =>
+          found === null || found === checkout.prNumber
+            ? Effect.void
+            : SessionStore.setCheckoutPr(session.id, checkout.id, found).pipe(Effect.ignore),
+        ),
+      ),
+    { discard: true },
+  );
+
 /**
  * `Github.detectPr` handler. Looks up a PR open on the session's branch and, when
  * found, links it (persists `prNumber`). Returns the number, or null. Exported for tests.
@@ -2451,6 +2471,8 @@ export const githubDetectPr = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
     if (!session?.worktreePath) return null;
+    // Every other checkout has its own branch/PR: detect each in its own worktree.
+    yield* detectOtherCheckoutPrs(session);
     // Resolve against the worktree's live branch — the stored `session.branch`
     // drifts once the agent checks out / creates a different branch there.
     const [n, liveBranch] = yield* Effect.all([

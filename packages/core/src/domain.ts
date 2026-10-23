@@ -565,6 +565,8 @@ export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>;
  */
 export const SessionPr = Schema.Struct({
   number: Schema.Number,
+  /** Display repo of the checkout this PR lives in; set for multi-checkout sessions so same-numbered PRs stay distinct. */
+  repo: Schema.optional(Schema.String),
   /** Head branch of this layer. */
   branch: Schema.optional(Schema.String),
   /** Base this layer targets: the trunk, or the branch of the layer below. */

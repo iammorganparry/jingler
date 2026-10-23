@@ -1429,6 +1429,42 @@ describe("RPC handlers", () => {
       expect(upsertSessionRoute).not.toHaveBeenCalled();
     });
 
+    it("detects a PR per checkout and stores each on its own checkout", async () => {
+      const now = "2026-08-11T06:00:00.000Z";
+      const webPath = join(dir, "qa-web-worktree");
+      const apiPath = join(dir, "qa-api-worktree");
+      mkdirSync(root, { recursive: true });
+      mkdirSync(webPath, { recursive: true });
+      mkdirSync(apiPath, { recursive: true });
+      const co = (id: string, repo: string, worktreePath: string) => ({
+        id, repo, repoPath: worktreePath, worktreePath, branch: "fix/x", prNumber: null,
+      });
+      writeFileSync(join(root, "sessions.json"), JSON.stringify([{
+        id: "two-repos", repo: "qa-web", branch: "fix/x", baseBranch: "main",
+        title: "Two repos", status: "idle", cli: "claude", diff: { added: 0, removed: 0 },
+        prNumber: null, costUsd: 0, tokens: 0, updatedAt: now, worktreePath: webPath,
+        repoPath: webPath, workspaceMode: "worktree", semanticBranchPending: false,
+        checkouts: [co("web", "qa-web", webPath), co("api", "qa-api", apiPath)],
+        activeCheckoutId: "web",
+        chats: [{ id: "c", title: null, createdAt: now, updatedAt: now }], activeChatId: "c",
+      }]));
+      const github = Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        fakeGithubApi({
+          prForWorktree: (cwd: string) => Effect.succeed(cwd === webPath ? 1 : 2),
+          repository: () => Effect.fail(new GitHubApiError({ reason: "repository-access", message: "no app" })),
+        }),
+        Layer.succeed(GitService, { branchAt: () => Effect.succeed("fix/x") } as never),
+        Layer.succeed(GitHubAuth, { upsertSessionRoute: vi.fn() } as never),
+      );
+      await Effect.runPromise(githubDetectPr("two-repos").pipe(Effect.provide(github)));
+      const linked = await Effect.runPromise(SessionStore.get("two-repos").pipe(Effect.provide(github)));
+      expect(linked.checkouts?.map((c) => [c.id, c.prNumber])).toEqual([["web", 1], ["api", 2]]);
+      expect(linked.prNumber).toBe(1);
+      expect(linked.prs).toEqual([{ number: 2, repo: "qa-api" }, { number: 1, repo: "qa-web" }]);
+    });
+
     it("synchronizes the live branch and replacement PR route before returning", async () => {
       const now = "2026-08-11T06:00:00.000Z";
       const worktreePath = join(dir, "replacement-pr-worktree");
