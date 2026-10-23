@@ -39,6 +39,16 @@ describe("UsageModal execution report", () => {
     expect(screen.getByTestId("usage-kpis").textContent).toContain("1")
   })
 
+  it("keeps the filters on their own row, apart from the title and Export JSON", () => {
+    render(<UsageModal open usage={null} report={report} onExport={() => {}} />)
+    const header = screen.getByTestId("usage-report-header")
+    const filters = screen.getByTestId("usage-report-filters")
+    expect(within(header).getByRole("button", { name: /Export JSON/ })).toBeTruthy()
+    expect(within(header).queryByRole("radiogroup")).toBeNull()
+    expect(header.contains(filters)).toBe(false)
+    expect(within(filters).getAllByRole("radiogroup")).toHaveLength(2)
+  })
+
   it("drops facts older than the selected date range from the KPIs and table", () => {
     const old = makeUsageFact({
       id: "o", runId: "o", sessionId: "s", chatId: "c", parentRunId: null,

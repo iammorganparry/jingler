@@ -12,7 +12,7 @@ import type {
   UsageWindow
 } from "@jingler/core"
 import { filterUsageFacts, modelDetailFromFacts, sortModelPerformance, usageReportFromFacts } from "@jingler/core"
-import { RefreshCw } from "lucide-react"
+import { Download, RefreshCw } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
@@ -162,7 +162,8 @@ function KpiStrip({ groups }: { groups: Groups }) {
     sumBy(groups, (group) => group.reasoningTokens)
   ]
   return (
-    <div className="mb-3 grid grid-cols-4 gap-2" data-testid="usage-kpis">
+    <div className="@container mb-3">
+    <div className="grid grid-cols-2 gap-2 @[560px]:grid-cols-4" data-testid="usage-kpis">
       <KpiTile label="Runs" value={runs} />
       <KpiTile label="Success rate" value={success === null ? null : percent(success)} />
       <KpiTile
@@ -176,6 +177,7 @@ function KpiStrip({ groups }: { groups: Groups }) {
         partial={coverage < 1}
         delta={coverage < 1 ? `cost known for ${percent(coverage)} of runs` : undefined}
       />
+    </div>
     </div>
   )
 }
@@ -237,13 +239,18 @@ export function ReportSection({ report, onExport }: { report: UsageReport; onExp
 
   return (
     <div className="border-t border-hairline py-[14px]">
-      <div className="mb-2 flex items-center justify-between gap-3">
+      <div data-testid="usage-report-header" className="mb-2 flex items-center justify-between gap-3">
         <div className="text-[12px] font-semibold text-text-bright">Execution report</div>
-        <div className="flex items-center gap-2">
-          <FilterChips options={rangeOptions} value={range} onChange={setRange} ariaLabel="Filter by date range" />
-          <FilterChips options={runtimeFilterOptions} value={runtimeFilter} onChange={setRuntimeFilter} ariaLabel="Filter by runtime" />
-          {onExport && <Button size="sm" variant="ghost" onClick={() => void onExport()}>Export JSON</Button>}
-        </div>
+        {onExport && (
+          <Button size="sm" variant="ghost" onClick={() => void onExport()}>
+            <Download size={12} />
+            Export JSON
+          </Button>
+        )}
+      </div>
+      <div data-testid="usage-report-filters" className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <FilterChips options={rangeOptions} value={range} onChange={setRange} ariaLabel="Filter by date range" />
+        <FilterChips options={runtimeFilterOptions} value={runtimeFilter} onChange={setRuntimeFilter} ariaLabel="Filter by runtime" />
       </div>
       {filteredGroups.length === 0 ? (
         <div className="text-[11px] text-muted-foreground">No completed parent or child runs recorded.</div>
@@ -291,7 +298,7 @@ export function UsageBody({
           Reading plan usage…
         </div>
       ) : (
-        <div className="py-8 text-center text-[13px] text-muted-foreground">
+        <div className="py-3 text-[12px] text-muted-foreground">
           No provider connections are configured on this machine.
         </div>
       )}

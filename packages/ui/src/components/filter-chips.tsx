@@ -54,7 +54,7 @@ export function FilterChips<T extends string>({
               else if (e.key === "Enter") (e.preventDefault(), onChange(option.value))
             }}
             className={cn(
-              "inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] border border-transparent px-2 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              "inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] border border-transparent px-2 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue",
               checked
                 ? "bg-surface text-text-bright"
                 : "text-muted-foreground hover:bg-surface hover:text-text"
