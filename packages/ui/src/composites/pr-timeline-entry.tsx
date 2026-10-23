@@ -51,8 +51,8 @@ export function PrTimelineEntry({
             tone="orange"
             size={22}
           />
-          <span className="text-[13px] font-semibold text-text-bright">{item.author}</span>
-          <span className="text-[11.5px] font-semibold text-muted-foreground">{meta.label}</span>
+          <span className="text-[13px] font-medium text-text-bright">{item.author}</span>
+          <span className="text-[12px] text-muted-foreground">{meta.label}</span>
           <div className="flex-1" />
           <span className="font-mono text-[11px] text-dim">{relativeTime(item.createdAt)}</span>
         </div>

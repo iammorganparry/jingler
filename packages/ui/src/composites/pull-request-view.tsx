@@ -13,14 +13,12 @@ import type {
 } from "@jingler/core"
 import { GitCommit, GitPullRequest, PanelRight } from "lucide-react"
 import { Stepper } from "../components/status-row.js"
-import { cn } from "../lib/cn.js"
 import { useContainerWidth } from "../hooks/use-container-width.js"
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from "../components/drawer.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
-import { Card } from "../components/card.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { Markdown } from "../components/markdown.js"
@@ -234,31 +232,19 @@ export interface PullRequestViewProps {
 /** The PR description rendered as the opening comment; placeholder when empty. */
 function PrDescriptionCard({ pr, repository }: { pr: PullRequest; repository?: string }) {
   return (
-          <Card>
-              <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-[11px]">
-                <Avatar
-                  initial={pr.author.login.charAt(0).toUpperCase()}
-                  src={githubAvatarUrl(pr.author.login)}
-                  tone="orange"
-                  size={22}
-                />
-                <span className="text-[13px] font-semibold text-text-bright">
-                  {pr.author.login}
-                </span>
-                <span className="text-[11.5px] text-muted-foreground">opened this</span>
-                <div className="flex-1" />
-                <span className="font-mono text-[11px] text-dim">
-                  {relativeTime(pr.createdAt)}
-                </span>
-              </div>
-              <div className="px-[14px] py-[11px]">
-                {pr.body?.trim() ? (
-                  <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
-                ) : (
-                  <p className="text-[13.5px] text-muted-foreground">No description provided.</p>
-                )}
-              </div>
-          </Card>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <Avatar initial={pr.author.login.charAt(0).toUpperCase()} src={githubAvatarUrl(pr.author.login)} tone="orange" size={20} />
+        <span className="text-[13px] font-medium text-text-bright">{pr.author.login}</span>
+        <span className="text-[12px] text-muted-foreground">opened this</span>
+        <span className="font-mono text-[11px] text-dim">{relativeTime(pr.createdAt)}</span>
+      </div>
+      {pr.body?.trim() ? (
+        <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
+      ) : (
+        <p className="text-[13px] text-muted-foreground">No description provided.</p>
+      )}
+    </section>
   )
 }
 
@@ -742,7 +728,7 @@ function CheckEvidence({ pr, stack }: { pr: PullRequest; stack?: PrStackNav }) {
     pr.checks.length === 0 ? (
       <EmptyState title="No checks reported" description="CI results will appear here once a run starts." />
     ) : (
-      <div className="flex flex-col gap-3 rounded-lg border border-line bg-panel p-4">
+      <div className="flex flex-col overflow-hidden rounded-lg border border-line bg-panel">
         {pr.checks.map((check) => <PrCheckRow key={check.name.toLowerCase()} check={check} />)}
       </div>
     )
