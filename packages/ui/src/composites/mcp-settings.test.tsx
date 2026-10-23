@@ -153,7 +153,8 @@ describe("McpSettings", () => {
     fireEvent.click(screen.getByText("Add server"))
     fireEvent.change(screen.getByLabelText("Server name"), { target: { value: "context7" } })
     fireEvent.change(screen.getByLabelText("Server URL"), { target: { value: "https://mcp.context7.com/mcp" } })
-    fireEvent.change(screen.getByLabelText("Authentication"), { target: { value: "api-key" } })
+    fireEvent.click(screen.getByRole("button", { name: "Authentication" }))
+    fireEvent.click(screen.getByRole("option", { name: "API key" }))
     fireEvent.change(screen.getByLabelText("API key header"), { target: { value: "X-API-Key" } })
     fireEvent.change(screen.getByLabelText("API key prefix"), { target: { value: "" } })
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "secret" } })
@@ -184,7 +185,8 @@ describe("McpSettings", () => {
     render(<McpSettings {...props({ add })} />)
     fireEvent.click(screen.getByText("Add server"))
     fireEvent.change(screen.getByLabelText("Server name"), { target: { value: "local" } })
-    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "local" } })
+    fireEvent.click(screen.getByRole("button", { name: "Server type" }))
+    fireEvent.click(screen.getByRole("option", { name: "Local (command)" }))
     fireEvent.change(screen.getByLabelText("Server command"), {
       target: { value: '["/Applications/My Server/bin/mcp", "--label", "two words"]' }
     })
