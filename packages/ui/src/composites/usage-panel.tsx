@@ -12,11 +12,10 @@ import type {
   UsageWindow
 } from "@jingler/core"
 import { filterUsageFacts, modelDetailFromFacts, sortModelPerformance, usageReportFromFacts } from "@jingler/core"
-import { Gauge, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/dialog.js"
 import { FilterChips } from "../components/filter-chips.js"
 import { KpiTile, StackedMiniBar } from "../components/kpi-tile.js"
 import { ModelPerformanceTable } from "../components/model-performance-table.js"
