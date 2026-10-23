@@ -32,7 +32,7 @@ export function ModelPerformanceTable({
   className?: string
 }) {
   return (
-    <table data-testid="model-performance-table" className={cn("w-full text-[11px]", className)}>
+    <table data-testid="model-performance-table" className={cn("w-full table-fixed text-[11px]", className)}>
       <thead>
         <tr className="text-left text-muted-foreground">
           {columns.map((col) => (
@@ -40,12 +40,12 @@ export function ModelPerformanceTable({
               key={col.key}
               scope="col"
               aria-sort={sortBy === col.key ? (direction === "asc" ? "ascending" : "descending") : "none"}
-              className="py-1 font-medium"
+              className={cn("py-1 font-medium", col.key !== "modelId" && "text-right")}
             >
               <button
                 type="button"
                 onClick={() => onSort(col.key)}
-                className="flex items-center gap-1 whitespace-nowrap hover:text-text-bright"
+                className={cn("flex items-center gap-1 whitespace-nowrap hover:text-text-bright", col.key !== "modelId" && "ml-auto")}
               >
                 {col.label}
                 {sortBy === col.key && <span aria-hidden="true">{direction === "asc" ? "↑" : "↓"}</span>}
@@ -78,7 +78,7 @@ export function ModelPerformanceTable({
             )}
           >
             {columns.map((col) => (
-              <td key={col.key} className="py-1.5 tabular-nums">
+              <td key={col.key} className={cn("py-1.5 tabular-nums", col.key === "modelId" ? "truncate pr-2" : "pl-2 text-right")}>
                 {col.format(group)}
               </td>
             ))}
