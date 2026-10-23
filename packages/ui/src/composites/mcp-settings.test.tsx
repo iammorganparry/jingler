@@ -46,8 +46,8 @@ describe("McpSettings", () => {
     const remove = vi.fn(async () => {})
     render(<McpSettings {...props({ remove })} />)
     expect(screen.getByText("Context7")).toBeTruthy()
-    expect(screen.getByText("https://mcp.context7.com/mcp")).toBeTruthy()
-    fireEvent.click(screen.getByText("Remove"))
+    expect(screen.getByText(/mcp\.context7\.com\/mcp/)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Remove context7" }))
     expect(remove).toHaveBeenCalledWith("context7")
   })
 
@@ -106,7 +106,7 @@ describe("McpSettings", () => {
 
   it("surfaces failed actions", async () => {
     render(<McpSettings {...props({ remove: async () => { throw new Error("disk is read-only") } })} />)
-    fireEvent.click(screen.getByText("Remove"))
+    fireEvent.click(screen.getByRole("button", { name: "Remove context7" }))
     expect(await screen.findByText("disk is read-only")).toBeTruthy()
   })
 

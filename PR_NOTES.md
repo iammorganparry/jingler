@@ -9,10 +9,13 @@ Project: https://superdesign.dev/teams/39a42d14-af52-4eef-afb5-c20531c92e4f/proj
 No Superdesign command failed. Replica HTML: `.superdesign/replica_html_template/`.
 
 ## Screenshots
-Before: /tmp/qa-shots/deep-settings-mcp/before-*.png (after-*.png added later).
+Before: /tmp/qa-shots/deep-settings-mcp/before-*.png 
+After: /tmp/qa-shots/deep-settings-mcp/after-*.png (stories: molecules-overview--settings, settings-mcpsettings--empty/list/add-form/add-form-error/parse-error).
 
 ## Cult UI decision
-(pending)
+Searched `@cult-ui` (queries: empty, menu). Rejected: organic-card / minimal-card (marketing cards; SettingsCard already covers it), halo-badge (gradient rim + glow break "colour only for state"), gradient-button-group (decorative gradients), poll-widget / feature-poll (not a settings pattern), halo-toast (toast lane, not this surface). No genuine fit, so none adopted; no COMPONENTS.md row added.
 
 ## Gaps
-(pending)
+- Settings shell already matched §5e (220px, 4 groups, 11px uppercase labels); left unchanged. Notifications split, Context+Plan merge not done.
+- MCP: "Add server" now opens the existing McpServerDialog (was inline). Remove is an icon button (`aria-label="Remove <name>"`), Details/Enable toggle kept. No overflow menu.
+- Removed expects: none removed; two assertions updated in mcp-settings.test.tsx (Remove now an icon button queried by role/name; target text matched by regex because it is prefixed with transport).

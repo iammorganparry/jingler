@@ -27,7 +27,9 @@ import { Textarea } from "../components/textarea.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select.js"
 import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { StatusRow } from "../components/status-row.js"
+import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
+import { Trash2 } from "lucide-react"
 import { McpServerDetailDialog } from "./mcp-server-detail-dialog.js"
 
 /**
@@ -85,6 +87,14 @@ const IMPORT_SOURCES: ReadonlyArray<{ id: McpImportSourceId; label: string }> = 
   { id: "codex", label: "Codex" },
   { id: "opencode", label: "opencode" }
 ]
+
+/** Dot colour is state only; everything else stays neutral. */
+const MCP_STATE_TONE: Partial<Record<string, string>> = {
+  connected: "bg-green",
+  "needs-auth": "bg-yellow",
+  authorizing: "bg-blue",
+  failed: "bg-red"
+}
 
 const statusFor = (
   statuses: ReadonlyArray<McpServerStatus> | null,
@@ -247,20 +257,6 @@ export function McpServerForm({
         </AsyncButton>
       </div>
     </div>
-  )
-}
-
-function AddServerForm({
-  add,
-  setApiKey
-}: Pick<McpSettingsProps, "add" | "setApiKey">) {
-  const [open, setOpen] = React.useState(false)
-  return open ? (
-    <McpServerForm add={add} setApiKey={setApiKey} onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
-  ) : (
-    <Button variant="secondary" size="sm" className="self-start" onClick={() => setOpen(true)}>
-      Add server
-    </Button>
   )
 }
 
@@ -539,6 +535,129 @@ export function McpBrand({ server, compact = false }: { readonly server: McpServ
   )
 }
 
+function McpServerHelp({ server, status, onConnect }: { readonly server: McpServer; readonly status: McpServerStatus | null; readonly onConnect: () => void }) {
+  const needsAuth = server.authState === "needs-auth"
+  if (!status && !needsAuth) return null
+  const failed = status?.state === "failed"
+  const toolCount = status?.toolCount ?? 0
+  return (
+    <div className="flex flex-col gap-1">
+      {status ? (
+        <StatusRow failed={failed}>
+          {failed ? (status.error ?? "Connection failed") : `${toolCount} tool${toolCount === 1 ? "" : "s"}`}
+        </StatusRow>
+      ) : null}
+      {needsAuth && (
+        <StatusRow>
+          Needs sign-in · <Button variant="ghost" size="sm" onClick={onConnect} className="inline h-auto px-0 py-0 hover:bg-transparent hover:underline">Connect</Button>
+        </StatusRow>
+      )}
+    </div>
+  )
+}
+
+function McpServerRow({
+  server,
+  status,
+  run,
+  openDetail,
+  startAuthorization,
+  setEnabled,
+  remove
+}: {
+  readonly server: McpServer
+  readonly status: McpServerStatus | null
+  readonly run: (action: () => Promise<void>) => void
+  readonly openDetail: (server: McpServer) => void
+  readonly startAuthorization: McpSettingsProps["startAuthorization"]
+  readonly setEnabled: McpSettingsProps["setEnabled"]
+  readonly remove: McpSettingsProps["remove"]
+}) {
+  const state = server.authState === "needs-auth" ? "needs-auth" : (status?.state ?? "unknown")
+  return (
+    <SettingsRow
+      label={
+        <div className="flex min-w-0 items-center gap-2.5">
+          <McpBrand server={server} compact />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-[13px] font-medium text-text-bright">
+              {server.displayName}
+              <StatusDot tone={MCP_STATE_TONE[state] ?? "bg-line-strong"} size={6} />
+              <span className="sr-only">{state}</span>
+            </div>
+            <div className="truncate font-mono text-[11px] text-dim">
+              {server.transport} · {server.target}
+            </div>
+          </div>
+        </div>
+      }
+      help={<McpServerHelp server={server} status={status} onConnect={() => run(() => startAuthorization(server.name))} />}
+      control={
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => openDetail(server)}>
+            Details
+          </Button>
+          <Toggle
+            checked={server.enabled}
+            onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
+            aria-label={`Enable ${server.name}`}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Remove ${server.name}`}
+            onClick={() => run(() => remove(server.name))}
+          >
+            <Trash2 size={14} />
+          </Button>
+        </div>
+      }
+    />
+  )
+}
+
+function McpServerList({
+  servers,
+  statuses,
+  ...rest
+}: {
+  readonly servers: ReadonlyArray<McpServer>
+  readonly statuses: ReadonlyArray<McpServerStatus> | null
+  readonly run: (action: () => Promise<void>) => void
+  readonly openDetail: (server: McpServer) => void
+  readonly startAuthorization: McpSettingsProps["startAuthorization"]
+  readonly setEnabled: McpSettingsProps["setEnabled"]
+  readonly remove: McpSettingsProps["remove"]
+}) {
+  return (
+    <SettingsCard>
+      {servers.map((server) => (
+        <McpServerRow key={server.name} server={server} status={statusFor(statuses, server.name)} {...rest} />
+      ))}
+    </SettingsCard>
+  )
+}
+
+function McpHeader({ probing, probe, canProbe, reveal, addButton }: { readonly probing: boolean; readonly probe: () => void; readonly canProbe: boolean; readonly reveal: () => void; readonly addButton: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <h2 className="text-[20px] font-semibold text-text-bright">MCP servers</h2>
+        <p className="mt-1 text-[12px] text-muted-foreground">
+          Servers from <code className="font-mono">~/jingler/mcp.json</code> are available to local sessions.
+        </p>
+      </div>
+      <div className="flex flex-none items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={probe} disabled={probing || !canProbe}>
+          {probing ? "Testing…" : "Test connections"}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={reveal}>Reveal mcp.json</Button>
+        {addButton}
+      </div>
+    </div>
+  )
+}
+
 export function McpSettings({
   servers,
   parseError,
@@ -582,15 +701,16 @@ export function McpSettings({
     )
   }
 
+  const [addOpen, setAddOpen] = React.useState(false)
+  const addButton = (
+    <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
+      Add server
+    </Button>
+  )
+
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h3 className="text-[13px] font-semibold text-text-bright">MCP servers</h3>
-        <p className="mt-0.5 text-[11px] text-dim">
-          Servers from <code className="font-mono">~/jingler/mcp.json</code> are available to
-          local sessions. Edit the file directly or manage entries here — same file either way.
-        </p>
-      </div>
+    <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5">
+      <McpHeader probing={probing} probe={probe} canProbe={servers.length > 0} reveal={() => run(reveal)} addButton={servers.length > 0 ? addButton : null} />
 
       {parseError ? (
         <Callout tone="red">
@@ -601,78 +721,23 @@ export function McpSettings({
       {actionError ? <div role="alert"><Callout tone="red">{actionError}</Callout></div> : null}
 
       {servers.length === 0 && !loading && parseError === null ? (
-        <p className="text-[12px] text-dim">No servers configured yet.</p>
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-line px-4 py-10">
+          <p className="text-[13px] text-muted-foreground">No servers configured yet.</p>
+          {addButton}
+        </div>
       ) : (
-        <SettingsCard>
-          {servers.map((server) => {
-            const status = statusFor(statuses, server.name)
-            const failed = status?.state === "failed"
-            const toolCount = status?.toolCount ?? 0
-            
-            return (
-              <SettingsRow
-                key={server.name}
-                label={
-                  <div className="flex min-w-0 items-center gap-2">
-                    <McpBrand server={server} compact />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium text-text-bright">{server.displayName}</div>
-                      <div className="truncate font-mono text-[11px] text-dim">{server.target}</div>
-                    </div>
-                  </div>
-                }
-                help={
-                  <div className="mt-1 flex flex-col gap-1">
-                    {status ? (
-                      <StatusRow failed={failed}>
-                        {failed ? (status.error ?? "Connection failed") : `${toolCount} tool${toolCount === 1 ? "" : "s"}`}
-                      </StatusRow>
-                    ) : null}
-                    {server.authState === "needs-auth" && (
-                      <StatusRow>
-                        Needs sign-in · <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => run(() => startAuthorization(server.name))}
-                          className="inline h-auto px-0 py-0 hover:bg-transparent hover:underline"
-                        >
-                          Connect
-                        </Button>
-                      </StatusRow>
-                    )}
-                  </div>
-                }
-                control={
-                  <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => openDetail(server)}>
-                      Details
-                    </Button>
-                    <Toggle
-                      checked={server.enabled}
-                      onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
-                      aria-label={`Enable ${server.name}`}
-                    />
-                    <Button variant="ghost" size="sm" onClick={() => run(() => remove(server.name))}>
-                      Remove
-                    </Button>
-                  </div>
-                }
-              />
-            )
-          })}
-        </SettingsCard>
+        <McpServerList
+          servers={servers}
+          statuses={statuses}
+          run={run}
+          openDetail={openDetail}
+          startAuthorization={startAuthorization}
+          setEnabled={setEnabled}
+          remove={remove}
+        />
       )}
 
-      <div className="flex items-center gap-2">
-        <AddServerForm add={add} setApiKey={setApiKey} />
-        <Button variant="secondary" size="sm" onClick={probe} disabled={probing || servers.length === 0}>
-          {probing ? "Testing…" : "Test connections"}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => run(reveal)}>
-          Reveal mcp.json
-        </Button>
-      </div>
-
+      <McpServerDialog open={addOpen} onOpenChange={setAddOpen} add={add} setApiKey={setApiKey} />
       <ImportFlow importCandidates={importCandidates} applyImport={applyImport} />
       <McpAuthSetupDialog
         server={authSetupServer}
