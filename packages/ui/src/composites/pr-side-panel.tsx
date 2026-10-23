@@ -36,14 +36,11 @@ export function LabelChip({ label }: { label: PrLabel }) {
       </Badge>
     )
   }
-  const hex = `#${label.color.replace(/^#/, "")}`
   return (
-    <span
-      className="rounded-md px-[9px] py-0.5 text-[10.5px]"
-      style={{ color: hex, backgroundColor: `${hex}22` }}
-    >
+    <Badge tone="neutral" size="sm">
+      <span aria-hidden className="size-1.5 flex-none rounded-full" style={{ backgroundColor: `#${label.color.replace(/^#/, "")}` }} />
       {label.name}
-    </span>
+    </Badge>
   )
 }
 
