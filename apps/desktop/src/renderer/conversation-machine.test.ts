@@ -8,6 +8,7 @@ import type {
 } from "@jingler/core"
 import {
   assistantMessage,
+  pendingQuestion,
   piEndpointId,
   ProviderConnectionId,
   ProviderId,
@@ -2457,6 +2458,26 @@ describe("conversationMachine — stop", () => {
     const last = actor.getSnapshot().context.messages.at(-1)!
     expect(last.streaming).toBe(false)
     expect(last.parts.some((p) => p._tag === "Text" && p.text === STOPPED_NOTE)).toBe(true)
+    actor.stop()
+  })
+
+  it("dismisses a pending question on stop and lets the user send again", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({
+      _tag: "QuestionRequested",
+      request: { id: "q1", questions: [{ question: "Which?", header: "Pick", multiSelect: false, options: [] }] }
+    })
+    expect(pendingQuestion(actor.getSnapshot().context.messages)).not.toBeNull()
+
+    actor.send({ type: "STOP" })
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(pendingQuestion(actor.getSnapshot().context.messages)).toBeNull()
+
+    actor.send({ type: "SEND", text: "again" })
+    await waitFor(actor, (s) => s.matches("running"))
     actor.stop()
   })
 
