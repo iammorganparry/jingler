@@ -66,8 +66,8 @@ describe("BeUI motion catalog", () => {
     expect(onClick).toHaveBeenCalledOnce()
 
     const checkbox = screen.getByRole("checkbox", { name: "Choice" })
-    expect(checkbox.className).toContain("size-5")
-    expect(checkbox.className).toContain("border-2")
+    expect(checkbox.className).toContain("size-[14px]")
+    expect(checkbox.className).toContain("rounded-[4px]")
     fireEvent.click(checkbox)
     expect(onCheckedChange).toHaveBeenCalledWith(true)
 
