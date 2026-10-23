@@ -442,7 +442,7 @@ return (<PlanSection
         />)
 }
 case "connectors": {
-return (<div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-6">
+return (<div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-8">
           {renderOptionalSection(mcp, (props) => <McpSettings {...props} />, "MCP servers")}
         </div>)
 }

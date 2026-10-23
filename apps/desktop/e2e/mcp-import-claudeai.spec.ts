@@ -81,7 +81,7 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
         ;(globalThis as unknown as { __opened: string[] }).__opened.push(url)
       }
     })
-    await window.getByRole("button", { name: "Connect" }).first().click()
+    await window.getByRole("button", { name: "Connect", exact: true }).first().click()
     await expect.poll(() => app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened.length)).toBe(1)
     const [authorizationUrl] = await app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)
     const callback = await fetch(authorizationUrl!)
