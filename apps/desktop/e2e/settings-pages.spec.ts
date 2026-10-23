@@ -18,26 +18,24 @@ test("Header views: pin from Settings shows in the header, unpin returns it to M
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: [session] })
   await expect(appShell(window)).toBeVisible()
   await sessionRow(window, "Settings pages demo").click()
-  // Plan only exists for sessions with a plan; Files is a stable built-in view.
-  await expect(window.getByTestId("header-view-files")).toHaveCount(0)
+  // Terminal is pinned by default; unpin it, see it under More views, then pin it back.
+  await expect(window.getByTestId("header-view-terminal")).toBeVisible()
+  const toggleTerminal = async () => {
+    await window.getByRole("button", { name: "Account menu" }).click()
+    await window.getByRole("menuitem", { name: "Settings" }).click()
+    await window.getByRole("button", { name: "Header views" }).click()
+    await window.getByRole("switch", { name: "Pin Terminal to header" }).click()
+    await window.getByRole("button", { name: "Close settings" }).click()
+  }
 
-  await window.getByRole("button", { name: "Account menu" }).click()
-  await window.getByRole("menuitem", { name: "Settings" }).click()
-  await window.getByRole("button", { name: "Header views" }).click()
-  await window.getByRole("switch", { name: "Pin Files to header" }).click()
-  await window.getByRole("button", { name: "Close settings" }).click()
-
-  await expect(window.getByTestId("header-view-files")).toBeVisible()
-
-  await window.getByRole("button", { name: "Account menu" }).click()
-  await window.getByRole("menuitem", { name: "Settings" }).click()
-  await window.getByRole("button", { name: "Header views" }).click()
-  await window.getByRole("switch", { name: "Pin Files to header" }).click()
-  await window.getByRole("button", { name: "Close settings" }).click()
-
-  await expect(window.getByTestId("header-view-files")).toHaveCount(0)
+  await toggleTerminal()
+  await expect(window.getByTestId("header-view-terminal")).toHaveCount(0)
   await window.getByTestId("view-overflow-trigger").click()
-  await expect(window.getByTestId("open-files")).toBeVisible()
+  await expect(window.getByTestId("open-terminal")).toBeVisible()
+  await window.keyboard.press("Escape")
+
+  await toggleTerminal()
+  await expect(window.getByTestId("header-view-terminal")).toBeVisible()
 })
 
 test("Settings → Usage renders the page", async ({ launchApp }) => {
