@@ -1023,7 +1023,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
   useEffect(() => {
     if (!selected || !group || activeLayout?.root !== null) return
     forgetEditorLayout(selected)
-    split.close(group.id, group.focused)
+    split.closePane(group.id, group.focused)
   }, [activeLayout, group, selected, split])
   const [addProjectOpen, setAddProjectOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
