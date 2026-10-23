@@ -20,7 +20,9 @@ import {
   DialogHeader,
   DialogTitle
 } from "../components/dialog.js"
+import { Field } from "../components/field.js"
 import { Input } from "../components/input.js"
+import { Textarea } from "../components/textarea.js"
 import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { StatusRow } from "../components/status-row.js"
 import { Toggle } from "../components/toggle.js"
@@ -173,93 +175,78 @@ export function McpServerForm({
   }
 
   return (
-    <div className="flex max-w-xl flex-col gap-3 rounded-md border border-line bg-panel p-3">
-      <div className="flex items-center gap-2">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Name, e.g. context7"
-          aria-label="Server name"
-        />
-        <select
-          value={kind}
-          onChange={(e) => setKind(e.target.value === "local" ? "local" : "remote")}
-          aria-label="Server type"
-          className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text"
-        >
-          <option value="remote">Remote (URL)</option>
-          <option value="local">Local (command)</option>
-        </select>
-      </div>
-      <Input
-        value={target}
-        onChange={(e) => setTarget(e.target.value)}
-        placeholder={kind === "remote" ? "https://mcp.example.com/mcp" : '["npx", "-y", "some-mcp"]'}
-        aria-label={kind === "remote" ? "Server URL" : "Server command"}
-      />
-      {kind === "remote" && (
-        <div className="flex items-center gap-2">
-          <select
-            value={authKind}
-            onChange={(event) => setAuthKind(event.target.value as typeof authKind)}
-            aria-label="Authentication"
-            className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text"
-          >
-            <option value="none">No authentication</option>
-            <option value="api-key">API key</option>
-            <option value="oauth">OAuth</option>
-          </select>
-          {authKind === "api-key" && (
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
-              <Input
-                value={apiKeyHeader}
-                onChange={(event) => setApiKeyHeader(event.target.value)}
-                placeholder="Header"
-                aria-label="API key header"
-              />
-              <Input
-                value={apiKeyPrefix}
-                onChange={(event) => setApiKeyPrefix(event.target.value)}
-                placeholder="Prefix (optional)"
-                aria-label="API key prefix"
-              />
-              <Input
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKeyValue(event.target.value)}
-                placeholder="API key"
-                aria-label="API key"
-                className="col-span-2"
-              />
-            </div>
+    <div className="flex max-w-xl flex-col gap-4">
+      <div className="grid grid-cols-[1fr_auto] items-start gap-3">
+        <Field label="Server name">
+          {(c) => <Input {...c} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. context7" />}
+        </Field>
+        <Field label="Server type">
+          {(c) => (
+            <select
+              {...c}
+              value={kind}
+              onChange={(e) => setKind(e.target.value === "local" ? "local" : "remote")}
+              className="h-8 rounded-lg border border-line bg-panel px-2.5 text-[13px] text-text"
+            >
+              <option value="remote">Remote (URL)</option>
+              <option value="local">Local (command)</option>
+            </select>
           )}
+        </Field>
+      </div>
+      <Field label={kind === "remote" ? "Server URL" : "Server command"}>
+        {(c) => (
+          <Input
+            {...c}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder={kind === "remote" ? "https://mcp.example.com/mcp" : '["npx", "-y", "some-mcp"]'}
+          />
+        )}
+      </Field>
+      {kind === "remote" && (
+        <Field label="Authentication">
+          {(c) => (
+            <select
+              {...c}
+              value={authKind}
+              onChange={(event) => setAuthKind(event.target.value as typeof authKind)}
+              className="h-8 rounded-lg border border-line bg-panel px-2.5 text-[13px] text-text"
+            >
+              <option value="none">No authentication</option>
+              <option value="api-key">API key</option>
+              <option value="oauth">OAuth</option>
+            </select>
+          )}
+        </Field>
+      )}
+      {kind === "remote" && authKind === "api-key" && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="API key header">
+            {(c) => <Input {...c} value={apiKeyHeader} onChange={(event) => setApiKeyHeader(event.target.value)} placeholder="Header" />}
+          </Field>
+          <Field label="API key prefix" help="Optional">
+            {(c) => <Input {...c} value={apiKeyPrefix} onChange={(event) => setApiKeyPrefix(event.target.value)} placeholder="Prefix" />}
+          </Field>
+          <Field label="API key" className="col-span-2">
+            {(c) => <Input {...c} type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} placeholder="API key" />}
+          </Field>
         </div>
       )}
-      <label className="flex flex-col gap-1">
-        <span className="text-[11px] text-muted-foreground">
-          {kind === "remote" ? "Headers" : "Environment"} — one KEY=value per line.
-          Use {"{env:VAR}"} to read a value from the environment.
-        </span>
-        <textarea
-          value={pairs}
-          onChange={(e) => setPairs(e.target.value)}
-          rows={2}
-          className="rounded-xl border border-line bg-panel px-3.5 py-2.5 font-mono text-[11px] text-text outline-none focus:border-text-bright/40 focus:ring-2 focus:ring-ring/40"
-          aria-label={kind === "remote" ? "Headers" : "Environment variables"}
-        />
-      </label>
+      <Field
+        label={kind === "remote" ? "Headers" : "Environment variables"}
+        help={`One KEY=value per line. Use {env:VAR} to read a value from the environment.`}
+      >
+        {(c) => <Textarea {...c} value={pairs} onChange={(e) => setPairs(e.target.value)} rows={2} className="min-h-16 font-mono text-[12px]" />}
+      </Field>
       {error ? <div role="alert"><Callout tone="red">{error}</Callout></div> : null}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
         <AsyncButton pendingLabel="Saving…" onClick={submit}>
           Save server
         </AsyncButton>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="text-[11px] text-dim hover:underline"
-        >
-          Cancel
-        </button>
       </div>
     </div>
   )
@@ -273,13 +260,9 @@ function AddServerForm({
   return open ? (
     <McpServerForm add={add} setApiKey={setApiKey} onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
   ) : (
-    <button
-      type="button"
-      onClick={() => setOpen(true)}
-      className="self-start rounded-md border border-line bg-panel px-3 py-1.5 text-[12px] text-text hover:bg-surface"
-    >
+    <Button variant="secondary" size="sm" className="self-start" onClick={() => setOpen(true)}>
       Add server
-    </button>
+    </Button>
   )
 }
 
@@ -375,14 +358,9 @@ function ImportFlow({
       <div className="flex items-center gap-2">
         <span className="text-[11px] text-muted-foreground">Import from</span>
         {IMPORT_SOURCES.map(({ id, label }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => void load(id)}
-            className="rounded-md border border-line bg-panel px-2 py-1 text-[11px] text-text hover:bg-surface"
-          >
+          <Button key={id} variant="secondary" size="sm" onClick={() => void load(id)}>
             {label}
-          </button>
+          </Button>
         ))}
       </div>
       {error ? <div role="alert"><Callout tone="red">{error}</Callout></div> : null}
@@ -421,16 +399,16 @@ function ImportFlow({
               <AsyncButton pendingLabel="Importing…" onClick={apply} disabled={selected.size === 0}>
                 Import {selected.size} server{selected.size === 1 ? "" : "s"}
               </AsyncButton>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setCandidates(null)
                   setSource(null)
                 }}
-                className="text-[11px] text-dim hover:underline"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         )
@@ -484,18 +462,22 @@ function McpAuthSetupDialogContent({
           <DialogDescription>Choose the authentication method required by this MCP server.</DialogDescription>
         </DialogHeader>
         <DialogBody>
-          <div className="flex flex-col gap-3">
-            <select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)} aria-label="Authentication method" className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text">
-              <option value="oauth">OAuth</option>
-              <option value="api-key">API key</option>
-            </select>
+          <div className="flex flex-col gap-4">
+            <Field label="Authentication method">
+              {(c) => (
+                <select {...c} value={kind} onChange={(event) => setKind(event.target.value as typeof kind)} className="h-8 rounded-lg border border-line bg-panel px-2.5 text-[13px] text-text">
+                  <option value="oauth">OAuth</option>
+                  <option value="api-key">API key</option>
+                </select>
+              )}
+            </Field>
             {kind === "api-key" && (
               <>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input value={header} onChange={(event) => setHeader(event.target.value)} aria-label="API key header" />
-                  <Input value={prefix} onChange={(event) => setPrefix(event.target.value)} aria-label="API key prefix" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="API key header">{(c) => <Input {...c} value={header} onChange={(event) => setHeader(event.target.value)} />}</Field>
+                  <Field label="API key prefix">{(c) => <Input {...c} value={prefix} onChange={(event) => setPrefix(event.target.value)} />}</Field>
                 </div>
-                <Input type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} aria-label={`API key for ${server.displayName}`} />
+                <Field label={`API key for ${server.displayName}`}>{(c) => <Input {...c} type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} />}</Field>
               </>
             )}
             <AsyncButton disabled={kind === "api-key" && (apiKey.length === 0 || header.trim().length === 0)} pendingLabel={kind === "oauth" ? "Opening…" : "Saving…"} onClick={submit}>
@@ -530,7 +512,7 @@ export function McpApiKeyDialog({
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-3">
-            <Input type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} aria-label={`API key for ${server.displayName}`} autoFocus />
+            <Field label={`API key for ${server.displayName}`}>{(c) => <Input {...c} type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} autoFocus />}</Field>
             <AsyncButton
               disabled={apiKey.length === 0}
               pendingLabel="Saving…"
@@ -662,25 +644,17 @@ export function McpSettings({
                 }
                 control={
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openDetail(server)}
-                      className="text-[11px] text-blue hover:underline"
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => openDetail(server)}>
                       Details
-                    </button>
+                    </Button>
                     <Toggle
                       checked={server.enabled}
                       onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
                       aria-label={`Enable ${server.name}`}
                     />
-                    <button
-                      type="button"
-                      onClick={() => run(() => remove(server.name))}
-                      className="text-[11px] text-state-failed hover:underline"
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => run(() => remove(server.name))}>
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 }
               />
@@ -691,21 +665,12 @@ export function McpSettings({
 
       <div className="flex items-center gap-2">
         <AddServerForm add={add} setApiKey={setApiKey} />
-        <button
-          type="button"
-          onClick={probe}
-          disabled={probing || servers.length === 0}
-          className="rounded-md border border-line bg-panel px-3 py-1.5 text-[12px] text-text hover:bg-surface disabled:opacity-50"
-        >
+        <Button variant="secondary" size="sm" onClick={probe} disabled={probing || servers.length === 0}>
           {probing ? "Testing…" : "Test connections"}
-        </button>
-        <button
-          type="button"
-          onClick={() => run(reveal)}
-          className="text-[11px] text-blue hover:underline"
-        >
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => run(reveal)}>
           Reveal mcp.json
-        </button>
+        </Button>
       </div>
 
       <ImportFlow importCandidates={importCandidates} applyImport={applyImport} />
