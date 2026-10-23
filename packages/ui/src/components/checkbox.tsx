@@ -33,8 +33,8 @@ function renderMarkPath() {
           {showMark && (
             <m.svg
               key={indeterminate ? "indeterminate" : "checked"}
-              width="12"
-              height="12"
+              width="10"
+              height="10"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -72,12 +72,12 @@ function renderMarkPath() {
         transition={SPRING_PRESS}
         data-state={checked ? "checked" : indeterminate ? "indeterminate" : "unchecked"}
         className={cn(
-          "inline-flex size-5 shrink-0 items-center justify-center rounded-md border-2 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:cursor-not-allowed disabled:opacity-60",
+          "inline-flex size-[14px] shrink-0 items-center justify-center rounded-[4px] border outline-none transition-colors duration-150 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50",
           showMark
             ? tone === "success"
               ? "border-green bg-green text-white"
               : "border-brand bg-brand text-white"
-            : "border-muted-foreground/50 bg-panel hover:border-muted-foreground",
+            : "border-line-strong bg-transparent hover:border-dim",
           className
         )}
         {...props}

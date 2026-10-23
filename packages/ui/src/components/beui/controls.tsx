@@ -113,7 +113,7 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
                   "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                   sizeClass,
                   stretch && "w-full",
-                  active ? activeText : "text-muted-foreground hover:text-text-bright",
+                  active ? activeText : "text-dim hover:text-text-bright",
                   item.disabled && "cursor-not-allowed opacity-50", radius
                 )}
               >{item.label}</button>

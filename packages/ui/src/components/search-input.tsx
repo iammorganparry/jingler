@@ -26,11 +26,11 @@ export const SearchField = React.forwardRef<
 >(({ value, onChange, placeholder = "Search…", kbd, count, autoFocus, className, "aria-label": ariaLabel }, ref) => (
   <div
     className={cn(
-      "flex h-8 items-center gap-2 rounded-md border border-line bg-sunken px-2.5 text-[12.5px] text-dim focus-within:border-line-strong",
+      "flex h-8 items-center gap-2 rounded-lg border border-line bg-transparent px-3 text-[13px] text-dim transition-colors duration-150 hover:border-line-strong focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30",
       className
     )}
   >
-    <Search size={13} className="flex-none" />
+    <Search size={14} className="flex-none" />
     <input
       ref={ref}
       value={value}
