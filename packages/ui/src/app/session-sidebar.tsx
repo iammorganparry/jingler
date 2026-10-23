@@ -26,7 +26,7 @@ import {
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
-import { sidebarIsRail, sidebarShowsExpanded, usePaneWidth } from "../hooks/width-tier.js"
+import { sidebarIsRail, usePaneWidth } from "../hooks/width-tier.js"
 import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
@@ -1257,23 +1257,16 @@ export function SessionSidebar(props: SessionSidebarProps) {
   // `shellWidth === 0` is the pre-measurement frame; treat it as roomy so the
   // sidebar doesn't flash a rail on every launch before the observer reports.
   const cramped = sidebarIsRail(shellWidth)
-  // Below the rail breakpoint the persisted pin is ignored (not overwritten);
-  // expanding there is a session-local peek that resets on widening.
-  const [peek, setPeek] = React.useState(false)
-  const expanded = !props.forceCollapsed && sidebarShowsExpanded({ cramped, pinned, peek })
+  const expanded = !props.forceCollapsed && (pinned ?? !cramped)
 
   const setPin = React.useCallback((next: boolean) => {
-    if (cramped) {
-      setPeek(next)
-      return
-    }
     setPinned(next)
     try {
       localStorage.setItem(PIN_STORAGE_KEY, next ? "1" : "0")
     } catch {
       /* private mode / quota — the pin is still live for this session */
     }
-  }, [cramped])
+  }, [])
 
   const expandRequest = props.expandRequest ?? 0
   const lastExpandRequest = React.useRef(expandRequest)
@@ -1289,12 +1282,12 @@ export function SessionSidebar(props: SessionSidebarProps) {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault()
-        setPin(!expanded)
+        setPin(!(pinned ?? !cramped))
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [expanded, setPin])
+  }, [pinned, cramped, setPin])
 
   if (expanded) {
     return (

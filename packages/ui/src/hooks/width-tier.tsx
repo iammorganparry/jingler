@@ -42,10 +42,6 @@ export const chatLaneIsDrawer = (windowWidth: number): boolean =>
 export const sidebarIsRail = (shellWidth: number): boolean =>
   shellWidth !== 0 && shellWidth < SHELL_BREAKPOINTS.sidebarRailBelow
 
-/** Cramped windows ignore the saved pin (rail unless peeking); roomy ones honour it. */
-export const sidebarShowsExpanded = ({ cramped, pinned, peek }: { cramped: boolean; pinned: boolean | null; peek: boolean }): boolean =>
-  cramped ? peek : (pinned ?? true)
-
 const ORDER: Record<WidthTier, number> = { tiny: 0, narrow: 1, mid: 2, wide: 3 }
 
 /** `atLeast(tier, "mid")` — true when there's at least `min` worth of room. */

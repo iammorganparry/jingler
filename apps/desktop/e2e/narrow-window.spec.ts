@@ -7,7 +7,7 @@ test("at 760px the sidebar is a rail, New session fits the viewport, and the sid
 
   await expect(window.getByTestId("session-rail")).toBeVisible()
 
-  await window.getByTestId("new-session").click()
+  await window.getByRole("button", { name: "New session", exact: true }).first().click()
   const view = window.getByTestId("new-session-view")
   await expect(view).toBeVisible()
   const inside = async (testId: string) => {
