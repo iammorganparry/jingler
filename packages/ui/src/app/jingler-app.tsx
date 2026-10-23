@@ -55,6 +55,7 @@ import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
 import { AddProjectDialog } from "../composites/add-project-dialog.js"
 import { NewWorkspaceView } from "../composites/new-workspace-view.js"
 import { UsageModal } from "../composites/usage-modal.js"
+import type { HeaderViewItem } from "./header-view-buttons.js"
 import {
   SettingsView,
   type SettingsViewProps
@@ -735,6 +736,13 @@ function getActiveTabContext(active: Session) {
       ))
          }
 
+  /** Every view the header can pin, regardless of the active session (conversation is never a header view). */
+  function settingsHeaderViews(): ReadonlyArray<HeaderViewItem> {
+    return [...TAB_SHAPES, ...(tabContributions ?? [])]
+      .filter((tab) => tab.id !== BUILTIN_TAB.conversation)
+      .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, ...(tabContributions?.some((c) => c.id === tab.id) ? { plugin: true } : {}) }))
+  }
+
   function renderSettings() {
     const menu = getProjectMenuProps()
     return (settingsOpen && providerConnections ? (
@@ -785,6 +793,8 @@ function getActiveTabContext(active: Session) {
               fontScale={fontScale}
               onSaveFontScale={onSaveFontScale}
               themes={themes}
+              headerViews={headerViews && onHeaderViewsChange ? { views: settingsHeaderViews(), pinned: headerViews, onChange: onHeaderViewsChange } : undefined}
+              usage={onLoadUsage ? { usage, report: usageReport, loading: usageLoading, onExport: onExportUsage, onOpen: refreshUsage } : undefined}
               plugins={plugins}
               devices={devices}
               onClose={() => setSettingsOpen(false)}
@@ -1127,14 +1137,17 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     onVisibleSessionsChange?.(split.visibleSessionIds)
   }, [split.visibleSessionIds, onVisibleSessionsChange])
 
-  const openUsage = useCallback(() => {
-    setUsageOpen(true)
+  const refreshUsage = useCallback(() => {
     const result = onLoadUsage?.()
     if (result && typeof (result as Promise<void>).then === "function") {
       setUsageLoading(true)
       void (result as Promise<void>).finally(() => setUsageLoading(false))
     }
   }, [onLoadUsage])
+  const openUsage = useCallback(() => {
+    setUsageOpen(true)
+    refreshUsage()
+  }, [refreshUsage])
 
   const ghConnected =
     githubConnection.connected &&
