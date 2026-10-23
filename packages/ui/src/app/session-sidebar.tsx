@@ -613,7 +613,7 @@ return (renderExpandedGroupHeading())
             aria-current={issuesActive ? "page" : undefined}
             onClick={onOpenIssues}
             className={cn(
-              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              "flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
               issuesActive
                 ? "bg-surface text-text-bright"
                 : "text-muted-foreground hover:bg-surface/60 hover:text-text"
@@ -621,7 +621,7 @@ return (renderExpandedGroupHeading())
           >
             <CircleDot size={15} className={issuesActive ? "text-text-bright" : undefined} />
             <span className="flex-1">Issues</span>
-            {issuesActive && <span className="text-[10px] text-blue">Open</span>}
+            
           </button>
         </div>
       ))
@@ -636,7 +636,7 @@ return (renderExpandedGroupHeading())
             aria-current={pullRequestsActive ? "page" : undefined}
             onClick={onOpenPullRequests}
             className={cn(
-              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              "flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
               pullRequestsActive
                 ? "bg-surface text-text-bright"
                 : "text-muted-foreground hover:bg-surface/60 hover:text-text"
@@ -644,7 +644,7 @@ return (renderExpandedGroupHeading())
           >
             <GitPullRequest size={15} className={pullRequestsActive ? "text-text-bright" : undefined} />
             <span className="flex-1">Pull requests</span>
-            {pullRequestsActive && <span className="text-[10px] text-blue">Open</span>}
+            
           </button>
         </div>
       ))
