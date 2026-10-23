@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { type ReactNode, useId } from "react"
 import { cn } from "../lib/cn.js"
 
 /** Label + help on the left, control on the right. Long help wraps; the control never does. */
@@ -24,11 +24,12 @@ export function SettingsRow({
   )
 }
 
-/** A bordered group of SettingsRows (r12, hairline between rows) with an optional header. */
+/** A bordered group of SettingsRows (r12, hairline between rows). A titled card is a labelled region. */
 export function SettingsCard({ title, children, className }: { title?: ReactNode; children: ReactNode; className?: string }) {
+  const headingId = useId()
   return (
-    <section className={cn("flex flex-col gap-2", className)}>
-      {title && <h3 className="px-1 text-[12px] font-medium text-muted-foreground">{title}</h3>}
+    <section aria-labelledby={title ? headingId : undefined} className={cn("flex flex-col gap-2", className)}>
+      {title && <h3 id={headingId} className="px-1 text-[13px] font-semibold text-text-bright">{title}</h3>}
       <div className="divide-y divide-line overflow-hidden rounded-xl border border-line">{children}</div>
     </section>
   )

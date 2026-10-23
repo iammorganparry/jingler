@@ -78,6 +78,8 @@ import { SegmentedControl } from "../components/segmented-control.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
 import { Spinner } from "../components/loading.js"
+import { Field } from "../components/field.js"
+import { Textarea } from "../components/textarea.js"
 import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { VoiceSettings, type VoiceSettingsProps } from "./voice-settings.js"
@@ -693,7 +695,7 @@ export function DevicesSection({
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-[16px] font-semibold text-text-bright">
+            <h2 className="text-[20px] font-semibold text-text-bright">
               Devices
             </h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
@@ -846,22 +848,20 @@ export function DevicesSection({
             <DialogTitle>Rename environment</DialogTitle>
           </DialogHeader>
           <DialogBody>
-            <label
-              htmlFor="environment-rename-name"
-              className="flex flex-col gap-2 text-[11px] font-medium text-muted-foreground"
-            >
-              Name
-              <Input
-                id="environment-rename-name"
-                aria-label="Environment name"
-                value={renameValue}
-                onChange={(event) => setRenameValue(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void submitRename()
-                }}
-                disabled={renamePending}
-              />
-            </label>
+            <Field label="Name">
+              {(c) => (
+                <Input
+                  {...c}
+                  aria-label="Environment name"
+                  value={renameValue}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void submitRename()
+                  }}
+                  disabled={renamePending}
+                />
+              )}
+            </Field>
           </DialogBody>
           <DialogFooter>
             <Button
@@ -1082,13 +1082,13 @@ function PlanSection({
             }
           />
           <div className="px-4 py-3">
-            <textarea
+            <Textarea
               value={source}
               onChange={(e) => setSource(e.target.value)}
               rows={8}
               spellCheck={false}
               aria-label="Plan template"
-              className="w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 font-mono text-[11px] text-text outline-none focus:border-text-bright/40 focus:ring-2 focus:ring-ring/40"
+              className="font-mono text-[12px]"
             />
           </div>
         </SettingsCard>
@@ -1439,19 +1439,19 @@ function GeneralSection({
               checked={obsidianDraft.enabled}
               onChange={(enabled) => saveObsidian({ ...obsidianDraft, enabled })}
             />
-            <label
-              htmlFor="obsidian-explanations-folder"
-              className="flex flex-col gap-2 py-2.5 text-[11px] font-medium text-muted-foreground"
-            >
-              Vault folder
-              <Input
-                id="obsidian-explanations-folder"
-                value={obsidianDraft.folder}
-                disabled={!obsidianDraft.enabled}
-                onChange={(event) => setObsidianDraft({ ...obsidianDraft, folder: event.target.value })}
-                onBlur={() => saveObsidian(obsidianDraft)}
-              />
-            </label>
+            <div className="px-4 py-3">
+              <Field label="Vault folder">
+                {(c) => (
+                  <Input
+                    {...c}
+                    value={obsidianDraft.folder}
+                    disabled={!obsidianDraft.enabled}
+                    onChange={(event) => setObsidianDraft({ ...obsidianDraft, folder: event.target.value })}
+                    onBlur={() => saveObsidian(obsidianDraft)}
+                  />
+                )}
+              </Field>
+            </div>
           </SettingsCard>
         ) : null}
       </div>
