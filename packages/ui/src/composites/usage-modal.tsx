@@ -28,7 +28,7 @@ export function UsageModal({
   const hasProviders = (usage?.providers.length ?? 0) > 0
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose?.()}>
-      <DialogContent className="w-[600px]">
+      <DialogContent className="w-[720px] max-w-[calc(100vw-48px)]">
         <DialogHeader>
           <Gauge size={16} className="text-blue" />
           <DialogTitle>Usage &amp; limits</DialogTitle>
