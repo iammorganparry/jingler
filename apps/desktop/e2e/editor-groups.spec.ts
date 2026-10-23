@@ -224,6 +224,7 @@ test("closing an untouched chat tab removes it from the sidebar", async ({ launc
   await expect(window.getByText("Keep this chat.")).toBeVisible()
 
   // Chat-only groups use ChatLaneHeader with a dedicated "New chat" button
+  await window.getByRole("button", { name: "New tab" }).first().click()
   await window.getByTestId("new-chat-button").click()
   await expect(window.getByTestId("thread-switcher")).toContainText("Chat 2")
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toBeVisible()

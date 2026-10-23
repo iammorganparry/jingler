@@ -52,6 +52,7 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
 
   await sessionRow(first.window, "Multi-chat lifecycle").click()
   await expect(activeChat(first.window)).toContainText("Chat 1")
+  await first.window.getByRole("button", { name: "New tab" }).first().click()
   await first.window.getByTestId("new-chat-button").click()
   await expect(activeChat(first.window)).toContainText("Chat 2")
   await renameInTree(first.window, "Chat 2", "Review migrations")
@@ -80,6 +81,7 @@ test("a new chat stays empty while its own transcript loads", async ({ launchApp
 
   await sessionRow(launched.window, "Multi-chat lifecycle").click()
   await expect(launched.window.getByText("The release checklist is ready.")).toBeVisible()
+  await launched.window.getByRole("button", { name: "New tab" }).first().click()
   await launched.window.getByTestId("new-chat-button").click()
   await expect(activeChat(launched.window)).toContainText("Chat 2")
 
@@ -104,6 +106,7 @@ test("a closed chat can be reopened with its transcript after a real app restart
   await sessionRow(first.window, "Multi-chat lifecycle").click()
   await expect(first.window.getByText("The release checklist is ready.")).toBeVisible()
   await renameInTree(first.window, "Chat 1", "Main workspace")
+  await first.window.getByRole("button", { name: "New tab" }).first().click()
   await first.window.getByTestId("new-chat-button").click()
   await treeChat(first.window, "Main workspace").click({ button: "right" })
   await first.window.getByRole("menuitem", { name: "Close chat" }).click()
@@ -136,6 +139,7 @@ test("switch chat thread via the lane header dropdown", async ({ launchApp }) =>
   await sessionRow(launched.window, "Multi-chat lifecycle").click()
   
   // Create a second chat
+  await launched.window.getByRole("button", { name: "New tab" }).first().click()
   await launched.window.getByTestId("new-chat-button").click()
   await renameInTree(launched.window, "Chat 2", "Review migrations")
   

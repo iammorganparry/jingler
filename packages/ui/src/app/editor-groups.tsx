@@ -29,7 +29,8 @@ import {
   type ReactNode
 } from "react"
 import { createPortal } from "react-dom"
-import { Ellipsis, Plus, X, type LucideIcon } from "lucide-react"
+import { Ellipsis, MessageSquarePlus, Plus, X, type LucideIcon } from "lucide-react"
+import { Button } from "../components/button.js"
 import { Breadcrumb } from "../components/breadcrumb.js"
 import { cn } from "../lib/cn.js"
 import { FileIcon } from "../components/file-icon.js"
@@ -479,7 +480,6 @@ const EditorGroup = memo(function EditorGroup({
               const chat = chatTabs.find(c => c.id === id)
               if (chat) api.onActivate(group.id, chat)
             }}
-            onCreateChat={() => api.onCreateChat?.(api.sessionId)}
             onCloseChat={(id) => {
               const chat = chatTabs.find((c) => c.id === id)
               if (chat) api.onClose(group.id, chat)
@@ -489,7 +489,7 @@ const EditorGroup = memo(function EditorGroup({
             subagentSlot={api.renderSubagentChip?.((active as Extract<SessionSurface, { kind: "chat" }>).id)}
             subagentView={resolveSubagentView((active as Extract<SessionSurface, { kind: "chat" }>).id)}
           />
-          <Launcher api={api} />
+          <Launcher api={api} onCreateChat={api.onCreateChat ? () => api.onCreateChat?.(api.sessionId) : undefined} />
           {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
           {/* Hidden draggable elements for all chats to enable drag-to-split and programmatic close */}
           {chatTabs.map((chat) => (
@@ -673,20 +673,16 @@ const TabContent = memo(function TabContent({
   return <WidthTierProvider className="flex-col">{api.renderBody(surface, { focused, visible })}</WidthTierProvider>
 })
 
-function Launcher({ api }: { api: Api }) {
+/** The group's single + menu: New chat (chat lanes only), then the view launcher items. */
+function Launcher({ api, onCreateChat }: { api: Api; onCreateChat?: () => void }) {
   const items = api.launcherItems ?? []
-  if (items.length === 0) return null
+  if (items.length === 0 && !onCreateChat) return null
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label="New tab"
-          title="New tab"
-          className="flex flex-none items-center px-2 text-dim outline-none hover:text-text"
-        >
+        <Button variant="ghost" size="sm" aria-label="New tab" title="New chat or tab" className="h-auto flex-none rounded-none px-2">
           <Plus className="size-3.5" />
-        </button>
+        </Button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
@@ -695,6 +691,13 @@ function Launcher({ api }: { api: Api }) {
           collisionPadding={8}
           className="z-50 flex min-w-[220px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
         >
+          {onCreateChat && (
+            <DropdownMenu.Item onSelect={onCreateChat} data-testid="new-chat-button" className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright">
+              <MessageSquarePlus className="size-3.5 flex-none text-dim" />
+              <span className="min-w-0 flex-1 truncate">New chat</span>
+            </DropdownMenu.Item>
+          )}
+          {onCreateChat && items.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-hairline" />}
           {items.map((item) => (
             <DropdownMenu.Item
               key={item.id}
