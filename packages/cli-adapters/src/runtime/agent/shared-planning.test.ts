@@ -384,4 +384,17 @@ describe("shared harness planning", () => {
     expect(f.projections().at(-1)).toMatchObject({ planFilePath: null, checklist: [] })
   })
 
+  it("accepts a follow-up turn in another checkout attached to the same session, but not an unrelated workspace", async () => {
+    const f = await setup()
+    const other = await mkdtemp(join(tmpdir(), "jingler-shared-planning-b-")); roots.push(other)
+    const stranger = await mkdtemp(join(tmpdir(), "jingler-shared-planning-c-")); roots.push(stranger)
+    const checkout = (id: string, worktreePath: string) => ({ id, repo: id, branch: "main", worktreePath })
+    const checkouts = { session: () => ({ id: "s", checkouts: [checkout("a", f.root), checkout("b", other)], activeCheckoutId: "b" }) } as never
+    const runtime = f.wrap(async function* () { yield done })
+    const turn = (cwd: string) => Effect.runPromise(Stream.runCollect(runtime.run(specFor(cwd), { ...f.context, checkouts })))
+    await turn(f.root)
+    await turn(other)
+    await expect(turn(stranger)).rejects.toThrow("Plan belongs to a different workspace")
+  })
+
 })

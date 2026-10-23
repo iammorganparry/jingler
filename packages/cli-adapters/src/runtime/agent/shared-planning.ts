@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { readFile, realpath, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import { SessionManager } from "@earendil-works/pi-coding-agent"
-import type { AgentRunSpec, PlannotatorProjection, PlannotatorReviewDecision, StreamEvent } from "@jingler/core"
+import { checkoutsOf, type AgentRunSpec, type PlannotatorProjection, type PlannotatorReviewDecision, type StreamEvent } from "@jingler/core"
 import { extractProgressMarkers, parseChecklist, updateChecklistStatuses, type ChecklistStatus } from "@jingler/plannotator-ext/generated/checklist.ts"
 import { parsePlanMarkdown } from "@jingler/plannotator-ext/plan-parse.ts"
 import { validatePlanMarkdown } from "@jingler/plannotator-ext/plan-validation.ts"
@@ -200,7 +200,14 @@ class PlanningSession {
       this.state = await this.storage.read() ?? await migratePi(original, piSessionsDir) ?? {
         cwd: await realpath(spec.cwd), phase: original.mode === "plan" ? "planning" : "idle", path: null, content: "", reviewPending: false
       }
-      if (this.state.cwd !== await realpath(spec.cwd)) throw new Error("Plan belongs to a different workspace")
+      const cwd = await realpath(spec.cwd)
+      if (this.state.cwd !== cwd) {
+        // switch_checkout moves spec.cwd between checkouts of one session; both must be attached to it.
+        const attached = await Promise.all((context.checkouts ? checkoutsOf(context.checkouts.session()) : [])
+          .flatMap((c) => [c.worktreePath, c.repoPath]).filter((p): p is string => p !== undefined)
+          .map((p) => realpath(p).catch(() => p)))
+        if (!(attached.includes(cwd) && attached.includes(this.state.cwd))) throw new Error("Plan belongs to a different workspace")
+      }
       if (original.mode === "plan" && this.state.selectedMode !== undefined && this.state.selectedMode !== "plan" && !this.state.reviewPending) {
         this.state = { ...this.state, phase: "planning" }
       }
