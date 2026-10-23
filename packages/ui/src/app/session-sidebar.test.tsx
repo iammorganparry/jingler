@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
+import { WidthTierValue } from "../hooks/width-tier.js"
 import { testSession as session } from "../test-support.js"
 import { activeSurface, allTabs, createEditorLayout, dropTab, focusedGroup, openTab, saveEditorLayout } from "./editor-layout.js"
 import { editorLayoutOf, resetEditorLayouts, updateEditorLayout } from "./editor-layout-machine.js"
@@ -619,5 +620,27 @@ describe("SessionSidebar session tree", () => {
   it("shows no tree in the collapsed rail", () => {
     renderTree({ forceCollapsed: true })
     expect(screen.queryByTestId("session-tree-s1")).toBeNull()
+  })
+})
+
+describe("SessionSidebar narrow-window collapse", () => {
+  const at = (width: number) => (
+    <WidthTierValue width={width}>
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[session({ id: "n" })]} defaultFilters={DEFAULT_FILTERS} />
+    </WidthTierValue>
+  )
+
+  it("auto-collapses below 1000px despite a saved pin, peeks open, and restores the pin when widened", () => {
+    localStorage.setItem("sb.sidebar.pinned", "1")
+    const { rerender } = render(at(1200))
+    expect(screen.getByTestId("session-sidebar")).toBeTruthy()
+    rerender(at(760))
+    expect(screen.getByTestId("session-rail")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /expand sidebar/i }))
+    expect(screen.getByTestId("session-sidebar")).toBeTruthy()
+    expect(localStorage.getItem("sb.sidebar.pinned")).toBe("1")
+    rerender(at(1200))
+    expect(screen.getByTestId("session-sidebar")).toBeTruthy()
+    localStorage.clear()
   })
 })

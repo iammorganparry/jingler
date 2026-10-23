@@ -113,7 +113,7 @@ export function EmptyConversation({
     })
   return (
     <div className="flex flex-1 flex-col bg-editor">
-      <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-10">
+      <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 sm:px-10">
         <div className="flex w-full max-w-[760px] flex-col gap-5">
           <h1 className="m-0 text-[20px] font-semibold tracking-[-0.2px] text-text-bright">
             {greetingFor(now, userName?.trim().split(/\s+/)[0])}

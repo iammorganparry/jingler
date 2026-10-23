@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
-import { atLeast, chatLaneIsDrawer, sidebarIsRail, tierFor, useWidthTier, WIDTH_TIER_BREAKPOINTS, WidthTierValue } from "./width-tier.js"
+import { atLeast, chatLaneIsDrawer, sidebarIsRail, sidebarShowsExpanded, tierFor, useWidthTier, WIDTH_TIER_BREAKPOINTS, WidthTierValue } from "./width-tier.js"
 
 afterEach(cleanup)
 
@@ -76,6 +76,14 @@ describe("shell breakpoints (chat drawer first at 1100, sidebar rail second at 1
     expect(sidebarIsRail(1000)).toBe(false)
     expect(sidebarIsRail(999)).toBe(true)
     expect(sidebarIsRail(0)).toBe(false)
+  })
+
+  it("ignores the saved pin when cramped and honours it again when roomy", () => {
+    expect(sidebarShowsExpanded({ cramped: true, pinned: true, peek: false })).toBe(false)
+    expect(sidebarShowsExpanded({ cramped: true, pinned: true, peek: true })).toBe(true)
+    expect(sidebarShowsExpanded({ cramped: false, pinned: true, peek: false })).toBe(true)
+    expect(sidebarShowsExpanded({ cramped: false, pinned: false, peek: true })).toBe(false)
+    expect(sidebarShowsExpanded({ cramped: false, pinned: null, peek: false })).toBe(true)
   })
 
   it("drawer always comes first as the window narrows", () => {
