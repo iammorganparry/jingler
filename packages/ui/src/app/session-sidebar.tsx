@@ -353,14 +353,13 @@ function ReleaseNotesCard({ releaseNotes }: { releaseNotes: SidebarReleaseNotes 
           ) : null}
         </ul>
       ) : null}
-      <button
-        type="button"
+      <Button variant="ghost" size="icon"
         aria-label={`Dismiss Jingler ${version} release notes`}
         onClick={onDismiss}
-        className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-dim outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+        className="absolute right-2 top-2 size-7 text-dim"
       >
         <X size={14} />
-      </button>
+      </Button>
     </section>
   )
 }
@@ -845,15 +844,14 @@ return (renderExpandedGroupHeading())
         {/* The rail's expand button lives in the same corner, so the control
             that changes this state is in one place rather than two. */}
         {onCollapse && (
-          <button
-            type="button"
+          <Button variant="ghost" size="icon"
             onClick={onCollapse}
             aria-label="Collapse sidebar"
             title="Collapse sidebar (⌘B)"
-            className="flex size-7 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+            className="size-7 flex-none text-dim"
           >
             <PanelLeft size={14} />
-          </button>
+          </Button>
         )}
         {/*
           Where the "Filter sessions…" field used to be.
@@ -897,18 +895,17 @@ return (renderExpandedGroupHeading())
           a shortcut to someone already reaching for the button — the tooltip
           says it instead, which is where a shortcut is normally learnt.
         */}
-        <button
-          type="button"
+        <Button variant="ghost" size="icon"
           onClick={onNewSession}
           aria-label="New session"
           title="New session (⌘N)"
           // The expanded and collapsed sidebar both expose this action, so a
           // testid is the stable handle regardless of the responsive layout.
           data-testid="new-session"
-          className="flex size-7 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+          className="size-7 flex-none text-dim"
         >
           <Plus size={15} />
-        </button>
+        </Button>
       </div>
 
       {search ? <div className="px-3 pb-2">{search}</div> : null}
@@ -1143,24 +1140,22 @@ function SessionRail({
       data-testid="session-rail"
       className="flex flex-none flex-col items-center gap-1 overflow-hidden py-2"
     >
-      <button
-        type="button"
+      <Button variant="ghost" size="icon"
         onClick={onExpand}
         aria-label="Expand sidebar"
         title="Expand sidebar (⌘B)"
-        className="flex size-8 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex-none text-dim"
       >
         <PanelLeft size={15} />
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button variant="ghost" size="icon"
         onClick={onNewSession}
         aria-label="New session"
         title="New session (⌘N)"
-        className="flex size-8 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex-none text-dim"
       >
         <Plus size={15} />
-      </button>
+      </Button>
       <span className="my-1 h-px w-6 flex-none bg-hairline" />
       {onOpenPullRequests && (
         <button
