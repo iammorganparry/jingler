@@ -35,6 +35,7 @@ import {
   Keyboard,
   FolderCog,
   Palette,
+  PanelTop,
   Plug,
   RefreshCw,
   Server,
@@ -66,6 +67,8 @@ import { EmptyState } from "../components/feedback.js"
 import { JinglerWordmark } from "../brand/jingler-mark.js"
 import { AsyncButton } from "../components/async-button.js"
 import { GithubMark } from "../components/github-mark.js"
+import { HeaderViewsSettings, type HeaderViewsSettingsProps } from "./header-views-settings.js"
+import { UsageSettings, type UsageSettingsProps } from "./usage-settings.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
 import {
   PluginsSettings,
@@ -107,6 +110,8 @@ type SectionKey =
   | "connectors"
   | "github"
   | "themes"
+  | "headerViews"
+  | "usage"
   | "plugins"
   | "keybindings"
   | "devices"
@@ -134,6 +139,7 @@ const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       { key: "notifications", label: "Notifications", icon: <Bell size={14} />, ready: true },
       { key: "voice", label: "Voice", icon: <Mic size={14} />, ready: true },
       { key: "projects", label: "Projects", icon: <FolderCog size={14} />, ready: true },
+      { key: "usage", label: "Usage", icon: <Gauge size={14} />, ready: true },
       { key: "permissions", label: "Permissions", icon: <ShieldCheck size={14} />, ready: false }
     ]
   },
@@ -160,6 +166,7 @@ const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     label: "Appearance",
     items: [
       { key: "themes", label: "Themes", icon: <Palette size={14} />, ready: true },
+      { key: "headerViews", label: "Header views", icon: <PanelTop size={14} />, ready: true },
       { key: "keybindings", label: "Keybindings", icon: <Keyboard size={14} />, ready: false }
     ]
   }
@@ -184,6 +191,10 @@ export interface SettingsViewProps {
    * renders the stub, exactly as an unbuilt section does.
    */
   themes?: ThemesSettingsProps
+  /** Pin toggles for the session header views; absent renders the stub. */
+  headerViews?: HeaderViewsSettingsProps
+  /** Full Usage page; absent renders the stub. */
+  usage?: UsageSettingsProps
   /**
    * Everything the Plugins pane needs. Optional for the same reason `themes`
    * is — Storybook mounts Settings without a plugin catalog, and absent renders
@@ -297,6 +308,8 @@ export function SettingsView({
   webSearch,
   runtimeInspector,
   themes,
+  headerViews,
+  usage,
   plugins,
   devices,
   mcp,
@@ -359,6 +372,12 @@ return (renderOptionalSection(runtimeInspector, (props) => <RuntimeInspector {..
 }
 case "plugins": {
 return (renderOptionalSection(plugins, (props) => <PluginsSettings {...props} />, "Plugins"))
+}
+case "headerViews": {
+return renderOptionalSection(headerViews, (props) => <HeaderViewsSettings {...props} />, "Header views")
+}
+case "usage": {
+return renderOptionalSection(usage, (props) => <UsageSettings {...props} />, "Usage")
 }
 case "themes": {
 return (renderOptionalSection(themes, (props) => <ThemesSettings {...props} />, "Themes"))
@@ -452,6 +471,7 @@ return (<GithubSection
     setSection(next)
     if (next === "providers") providerConnections?.onReload?.()
     if (next === "runtime") runtimeInspector?.onRefresh()
+    if (next === "usage") usage?.onOpen?.()
   }
 
   // Three `flex-none` columns (216 + 328 + detail) is ~544px of chrome before
