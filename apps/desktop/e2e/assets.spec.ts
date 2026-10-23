@@ -374,8 +374,9 @@ test("switches a changed file between diff and edit and saves the edited revisio
   await selectTreePath(window, "src/main.ts")
 
   const mainBody = fileBody(window, "src/main.ts")
-  const edit = mainBody.getByRole("tab", { name: "Edit src/main.ts", exact: true })
-  const diff = mainBody.getByRole("tab", { name: "Show diff for src/main.ts", exact: true })
+  // Diff/Edit live in the group header row (portalled), not inside the file body.
+  const edit = window.getByRole("tab", { name: "Edit src/main.ts", exact: true }).filter({ visible: true })
+  const diff = window.getByRole("tab", { name: "Show diff for src/main.ts", exact: true }).filter({ visible: true })
   await expect(diff).toHaveAttribute("aria-selected", "true", { timeout: 15_000 })
   await expect(mainBody.getByTestId("asset-content-canvas")).toContainText(
     "export const answer = 43"
