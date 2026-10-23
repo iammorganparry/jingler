@@ -38,7 +38,8 @@ export interface ChatLaneHeaderProps {
   /** Switch to a different chat thread. */
   readonly onSelectChat: (id: string) => void
   /** Create a new chat thread. */
-  readonly onCreateChat: () => void
+  /** Omit when the host offers New chat elsewhere (the editor group's + menu). */
+  readonly onCreateChat?: () => void
   /** Close a chat tab. Omit to hide the per-chat close items. */
   readonly onCloseChat?: (id: string) => void
   /** Whether the file browser follows this chat's agent edits. */
@@ -247,17 +248,19 @@ export function ChatLaneHeader({
       </DropdownMenu.Root>
       )}
 
-      <Button
-        variant="ghost"
-        size="sm"
-        data-testid="new-chat-button"
-        aria-label="New chat"
-        title="New chat"
-        onClick={onCreateChat}
-        className="flex-none px-1.5"
-      >
-        <Plus className="size-3.5" />
-      </Button>
+      {onCreateChat && (
+        <Button
+          variant="ghost"
+          size="sm"
+          data-testid="new-chat-button"
+          aria-label="New chat"
+          title="New chat"
+          onClick={onCreateChat}
+          className="flex-none px-1.5"
+        >
+          <Plus className="size-3.5" />
+        </Button>
+      )}
 
       <div data-testid="subagent-slot" className="flex-none">{subagentSlot}</div>
 
