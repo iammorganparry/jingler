@@ -63,12 +63,12 @@ describe("PullRequestView evidence navigation", () => {
     expect(onOpenFiles).not.toHaveBeenCalled()
   })
 
-  it("marks only a failing check's icon red, never its row or link", () => {
+  it("marks only a failing check's state dot red, never its row or link", () => {
     const failing = { ...pr, checks: [{ name: "Lint", status: "fail" as const, detailsUrl: "https://ci.example/1", durationMs: 48000 }] }
     render(<WidthTierValue width={1200}><PullRequestView pr={failing} connected /></WidthTierValue>)
     fireEvent.click(screen.getByRole("tab", { name: "Checks 0/1" }))
     const row = screen.getAllByText("Lint")[0]!.parentElement as HTMLElement
-    expect(row.querySelector("svg.text-red")).toBeTruthy()
+    expect(row.querySelector("span.bg-red")).toBeTruthy()
     expect(row.className).not.toMatch(/red/)
     expect(screen.getAllByText("48s").length).toBeGreaterThan(0)
     expect(screen.getAllByRole("link", { name: "Details for Lint" })[0]!.className).not.toMatch(/red/)
