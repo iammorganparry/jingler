@@ -642,7 +642,7 @@ export const sessionDiff = (id: string, checkoutId?: string, workspacePath?: str
       return yield* WorkspaceService.diff(target);
     }
     if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
-    return yield* WorkspaceService.diff(session.worktreePath);
+    return yield* WorkspaceService.diff(session.worktreePath, session.baseBranch);
   });
 
 export const sessionDiffStat = (id: string) =>
@@ -651,7 +651,7 @@ export const sessionDiffStat = (id: string) =>
       Effect.orElseSucceed(() => null),
     );
     if (!session?.worktreePath) return { added: 0, removed: 0, files: 0 };
-    return yield* WorkspaceService.diffStat(session.worktreePath);
+    return yield* WorkspaceService.diffStat(session.worktreePath, session.baseBranch);
   });
 
 export const sessionFileDiff = (id: string, path: string) =>
@@ -660,7 +660,7 @@ export const sessionFileDiff = (id: string, path: string) =>
       Effect.orElseSucceed(() => null),
     );
     if (!session?.worktreePath) return { kind: "patch" as const, patch: "" };
-    return yield* WorkspaceService.boundedFileDiff(session.worktreePath, path);
+    return yield* WorkspaceService.boundedFileDiff(session.worktreePath, path, session.baseBranch);
   });
 
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
