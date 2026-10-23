@@ -46,7 +46,7 @@ export function LabelChip({ label }: { label: PrLabel }) {
 
 function RailSection({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex flex-none flex-col gap-[11px] border-b border-hairline p-4">
+    <div className="flex flex-none flex-col gap-2 border-b border-hairline px-4 py-3">
       <div className="flex items-center gap-2">
         <Eyebrow className="flex-1">{title}</Eyebrow>
         {aside}

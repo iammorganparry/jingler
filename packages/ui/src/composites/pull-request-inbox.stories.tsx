@@ -145,3 +145,19 @@ export const Loading: Story = {
     </WidthTierValue>
   )
 }
+
+export const Empty: Story = {
+  render: () => (
+    <WidthTierValue width={1440}>
+      <div className="flex h-screen"><PullRequestInbox prs={[]} viewerLogin="morgan" selected={null} detail={null} onSelect={() => {}} /></div>
+    </WidthTierValue>
+  )
+}
+
+export const LoadError: Story = {
+  render: () => (
+    <WidthTierValue width={1440}>
+      <div className="flex h-screen"><PullRequestInbox prs={[]} viewerLogin="morgan" selected={null} detail={null} onSelect={() => {}} error="Couldn't load pull requests" onRetry={() => {}} /></div>
+    </WidthTierValue>
+  )
+}

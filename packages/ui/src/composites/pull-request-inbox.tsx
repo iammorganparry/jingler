@@ -15,7 +15,6 @@ import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js
 import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
-import { IssueLabelChip } from "./issue-picker-list.js"
 import { PullRequestView } from "./pull-request-view.js"
 import type { ReviewRun } from "./review-drawer.js"
 import type { ReviewFindingDraft } from "./review-drawer-machine.js"
@@ -185,7 +184,7 @@ export function PullRequestInbox({
   }
 
          function getLoading() {
-           if (loading) return <ListSkeleton rows={6} rowHeight={64} gap={8} className="p-4" />
+           if (loading) return <ListSkeleton rows={8} rowHeight={52} gap={6} className="p-4" />
            if (error) return <div className="p-4"><InlineError message={error} onRetry={onRetry} /></div>
            if (visible.length === 0) return (<EmptyState
               className="min-h-48 justify-center"
@@ -206,29 +205,24 @@ export function PullRequestInbox({
                     if (compact) setMobileDetail(true)
                   }}
                   className={cn(
-                    "flex w-full flex-col gap-2 border-b border-hairline px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                    "flex w-full items-center gap-3 border-b border-hairline px-4 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                     active ? "bg-selection" : "hover:bg-surface"
                   )}
                 >
-                  <div className="flex min-w-0 items-start gap-2">
-                    <GitPullRequest className={cn("mt-0.5 size-4 flex-none", pr.isDraft ? "text-dim" : "text-muted-foreground")} />
-                    <span className="min-w-0 flex-1 text-[13px] font-semibold leading-[1.35] text-text-bright">{pr.title}</span>
-                    {pr.isDraft && <Badge tone="neutral" size="xs">Draft</Badge>}
-                  </div>
-                  <div className="flex min-w-0 items-center gap-2 pl-6 font-mono text-[10.5px] text-muted-foreground">
-                    <span className="truncate">{pr.repository}</span>
-                    <span className="text-line">#{pr.number}</span>
-                    <span className="flex-1" />
-                    <span>{relativeTime(pr.updatedAt)}</span>
-                  </div>
-                  <div className="flex min-w-0 flex-wrap items-center gap-2 pl-6">
-                    <Avatar initial={(pr.author.login[0] ?? "?").toUpperCase()} src={pr.author.avatarUrl ?? githubAvatarUrl(pr.author.login, 32)} size={17} />
-                    <span className="text-[10.5px] text-muted-foreground">{pr.author.login}</span>
-                    {pr.labels.slice(0, 2).map((label) => <IssueLabelChip key={label.name} {...label} />)}
-                    <span className="flex-1" />
-                    <DiffStat added={pr.additions} removed={pr.deletions} />
-                    {pr.comments > 0 && <span className="flex items-center gap-1 font-mono text-[10px] text-dim"><MessageSquare className="size-3" />{pr.comments}</span>}
-                  </div>
+                  <Avatar initial={(pr.author.login[0] ?? "?").toUpperCase()} src={pr.author.avatarUrl ?? githubAvatarUrl(pr.author.login, 32)} size={20} />
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-[13px] font-medium text-text-bright">{pr.title}</span>
+                      {pr.isDraft && <Badge tone="neutral" size="xs">Draft</Badge>}
+                    </span>
+                    <span className="flex min-w-0 items-center gap-2 font-mono text-[11px] text-dim">
+                      <span className="truncate">{pr.repository}</span>
+                      <span>#{pr.number}</span>
+                      {pr.comments > 0 && <span className="flex items-center gap-1"><MessageSquare className="size-3" />{pr.comments}</span>}
+                    </span>
+                  </span>
+                  <DiffStat added={pr.additions} removed={pr.deletions} />
+                  <span className="w-8 flex-none text-right font-mono text-[11px] text-dim">{relativeTime(pr.updatedAt)}</span>
                 </button>
               )
             }))
