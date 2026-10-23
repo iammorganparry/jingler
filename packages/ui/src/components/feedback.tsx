@@ -121,8 +121,8 @@ export function EmptyState({
   return (
     <div className={cn("flex flex-col items-center gap-2 px-6 py-8 text-center", className)}>
       {icon && <span className="text-dim">{icon}</span>}
-      <span className="text-[13px] font-medium text-text-bright">{title}</span>
-      {description && <span className="max-w-xs text-[12px] text-muted-foreground">{description}</span>}
+      <span className="text-[13px] text-muted-foreground">{title}</span>
+      {description && <span className="max-w-xs text-[12px] text-dim">{description}</span>}
       {action && <div className="mt-1">{action}</div>}
     </div>
   )
@@ -143,7 +143,7 @@ export function InlineError({
   return (
     <div
       role="alert"
-      className={cn("flex h-9 items-center gap-2 rounded-md bg-state-failed/10 px-2.5 text-[12px]", className)}
+      className={cn("flex h-9 items-center gap-2 rounded-[6px] bg-state-failed/10 px-2.5 text-[12px]", className)}
     >
       <CircleAlert size={14} className="flex-none text-state-failed" />
       <span className="min-w-0 flex-1 truncate text-state-failed">{message}</span>

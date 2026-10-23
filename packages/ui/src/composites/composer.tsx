@@ -874,25 +874,25 @@ export function Composer(props: ComposerProps) {
               />
               <span className="flex-1" />
               {drawerOpen && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  className="my-auto size-6 rounded-[6px] p-0 text-dim"
                   aria-label={planExtended ? "Collapse plan overview" : "Extend to plan overview"}
                   aria-pressed={planExtended}
                   onClick={() => setPlanExtended((value) => !value)}
-                  className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {planExtended ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                className="my-auto size-6 rounded-[6px] p-0 text-dim"
                 aria-label={drawerOpen ? "Collapse drawer" : "Expand drawer"}
                 aria-expanded={drawerOpen}
                 onClick={() => setDrawerOpen((open) => !open)}
-                className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <ChevronDown className={cn("size-3.5 transition-transform", !drawerOpen && "-rotate-90")} />
-              </button>
+              </Button>
             </div>
             {drawerOpen && (
               <div className="max-h-[280px] overflow-y-auto">
@@ -1380,15 +1380,15 @@ export function Composer(props: ComposerProps) {
               />
             ))}
             {attachments.length < MAX_ATTACHMENTS && (
-              <button
-                type="button"
+              <Button
+                variant="outline"
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach image"
-                className="flex size-[58px] flex-none flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-line text-dim outline-none transition-colors hover:border-line-strong hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="size-[58px] flex-none flex-col gap-0.5 border-dashed p-0 text-dim"
               >
                 <Plus size={15} />
-                <span className="text-[8.5px]">Add</span>
-              </button>
+                <span className="text-[11px]">Add</span>
+              </Button>
             )}
           </div>
         )}

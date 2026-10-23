@@ -382,14 +382,14 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
         <div>
           <DiffPeek preview={shown} />
           {lines.length > HUNK_PREVIEW_LINES && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={() => setExpanded((v) => !v)}
-              className="flex w-full items-center gap-1 bg-editor px-3 py-1 text-[11px] text-line-strong transition-colors hover:text-muted-foreground active:scale-[0.99]"
+              className="h-6 w-full justify-start gap-1 rounded-none bg-editor px-3 text-[11px] text-dim"
             >
               {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
               {expanded ? "Hide" : `Show all ${lines.length} lines`}
-            </button>
+          </Button>
           )}
         </div>
       ))
@@ -458,16 +458,17 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ReadonlyArray<Tool
   const hidden = tools.length - 1
   return (
     <div className={cn("flex flex-col gap-3", WIDTH)}>
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        size="sm"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 self-start rounded-md border border-line px-2.5 py-1 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-surface hover:text-text active:scale-[0.98]"
+        className="gap-1.5 self-start font-mono text-[11px] text-muted-foreground"
       >
         {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         {expanded
           ? `Hide ${hidden} earlier ${hidden === 1 ? "call" : "calls"}`
           : `+ ${hidden} more tool ${hidden === 1 ? "call" : "calls"}`}
-      </button>
+      </Button>
       {expanded ? (
         tools.map((tool, i) => <ToolCardView key={i} tool={tool} />)
       ) : (
@@ -774,14 +775,15 @@ function MessageTurnImpl({
         <Eyebrow>You</Eyebrow>
       )}
       {hiddenParts > 0 && (
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          size="sm"
           data-testid="show-earlier-steps"
           onClick={() => setShowAllParts(true)}
-          className="flex w-fit items-center gap-1.5 rounded-full border border-line bg-sunken px-3 py-1 text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground"
+          className="w-fit text-muted-foreground"
         >
           Show {hiddenParts} earlier steps
-        </button>
+        </Button>
       )}
       {renderParts(visibleParts, {
         onDecideGate,
