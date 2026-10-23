@@ -2434,6 +2434,30 @@ describe("migrateSessionPrs", () => {
   })
 })
 
+describe("migrateSessionPrs per checkout", () => {
+  const co = (id: string, repo: string, prNumber: number | null) => ({ id, repo, branch: "b", prNumber })
+  const twoRepos = (activeCheckoutId: string) =>
+    ({
+      prNumber: null,
+      activeCheckoutId,
+      checkouts: [co("web", "qa-web", 1), co("api", "qa-api", 2)]
+    }) as unknown as Session
+
+  it("lists every checkout's PR with its repo and mirrors the active one", () => {
+    const migrated = migrateSessionPrs(twoRepos("web"))
+    expect(migrated.prs).toEqual([
+      { number: 2, repo: "qa-api" },
+      { number: 1, repo: "qa-web" }
+    ])
+    expect(migrated.prNumber).toBe(1)
+  })
+
+  it("leaves single-checkout sessions without repo labels", () => {
+    const single = { prNumber: 3, activeCheckoutId: "web", checkouts: [co("web", "qa-web", 3)] } as unknown as Session
+    expect(migrateSessionPrs(single).prs).toEqual([{ number: 3 }])
+  })
+})
+
 describe("migrateRepoName", () => {
   const at = (repoPath: string | undefined, repo: string) => {
     const input = repoPath === undefined ? { id: "s1", repo } : { id: "s1", repo, repoPath }

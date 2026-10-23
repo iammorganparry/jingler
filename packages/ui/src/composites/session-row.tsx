@@ -56,6 +56,13 @@ function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: str
   )
 }
 
+/** One "repo #N" per checkout PR for multi-repo sessions; plain "#N" otherwise; null with no PR. */
+const prLabelOf = (session: Session): string | null => {
+  const repoPrs = (session.prs ?? []).filter((pr) => pr.repo !== undefined)
+  if (repoPrs.length > 0) return repoPrs.map((pr) => `${pr.repo} #${pr.number}`).join(" · ")
+  return session.prNumber === null ? null : `#${session.prNumber}`
+}
+
 /** A session row for the sidebar list. Active state gets the blue ring. */
 const repoLabelOf = (session: Session): string => (hasNoRepo(activeCheckoutOf(session)) ? "No repo" : session.repo)
 
@@ -119,6 +126,7 @@ export function SessionRow({
   onToggleExpanded?: (id: string) => void
   className?: string
 }) {
+  const prLabel = prLabelOf(session)
          function renderActiveRow() {
            return (<motion.div
       layoutId={session.archived ? undefined : `session-${session.id}`}
@@ -242,16 +250,16 @@ export function SessionRow({
               {linkedIssue.identifier}
             </span>
           )}
-          {session.prNumber !== null && (
+          {prLabel !== null && (
             <span
               className="flex shrink-0 items-center gap-1 whitespace-nowrap"
-              title={`Pull request #${session.prNumber}`}
+              title={`Pull request ${prLabel}`}
             >
               <PrStatusGlyph
                 pr={prState}
                 stack={session.prs?.map((layer) => ({ state: layer.state ?? "open", checks: layer.checks ?? null }))}
               />
-              <span>#{session.prNumber}</span>
+              <span>{prLabel}</span>
             </span>
           )}
           <div className="flex-1" />

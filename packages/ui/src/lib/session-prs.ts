@@ -4,6 +4,8 @@ import type { SubagentFleetNode } from "@jingler/core"
 export interface SessionPrRow {
   readonly number: number
   readonly agent: string
+  /** Repo of the checkout this PR lives in; set only for multi-checkout sessions. */
+  readonly repo?: string
   readonly branch: string | null
   readonly state?: string
   /** The fleet node this row came from — absent for the main row, which has no node. */
@@ -18,14 +20,16 @@ export interface SessionPrRow {
  */
 export const sessionPrRows = (
   mainPrNumbers: readonly number[],
-  fleet: readonly SubagentFleetNode[]
+  fleet: readonly SubagentFleetNode[],
+  repoByNumber: ReadonlyMap<number, string> = new Map()
 ): SessionPrRow[] => {
   const seen = new Set<number>()
   const rows: SessionPrRow[] = []
   for (const number of mainPrNumbers) {
     if (seen.has(number)) continue
     seen.add(number)
-    rows.push({ number, agent: "main", branch: null })
+    const repo = repoByNumber.get(number)
+    rows.push({ number, agent: "main", branch: null, ...(repo === undefined ? {} : { repo }) })
   }
   for (const node of fleet) {
     if (node.prNumber == null || seen.has(node.prNumber)) continue

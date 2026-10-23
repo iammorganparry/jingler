@@ -46,7 +46,9 @@ export function SessionPrsChip({ rows, onSelect }: SessionPrsChipProps) {
               onSelect={() => onSelect(row)}
               className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
             >
-              <span className="flex-none font-mono text-dim">#{row.number}</span>
+              <span className="flex-none font-mono text-dim">
+                {row.repo !== undefined && `${row.repo} `}#{row.number}
+              </span>
               <span className="flex-none font-medium text-text-bright">{row.agent}</span>
               {row.branch !== null && (
                 <span className="min-w-0 flex-1 truncate font-mono text-dim">{row.branch}</span>

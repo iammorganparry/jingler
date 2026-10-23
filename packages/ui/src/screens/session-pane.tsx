@@ -971,7 +971,8 @@ function SessionPaneBody(props: SessionPaneProps) {
   }
   const prRows = sessionPrRows(
     active.prs?.length ? active.prs.map((pr) => pr.number) : active.prNumber == null ? [] : [active.prNumber],
-    props.subagentPrNodes?.[active.id] ?? []
+    props.subagentPrNodes?.[active.id] ?? [],
+    new Map((active.prs ?? []).flatMap((pr) => (pr.repo === undefined ? [] : [[pr.number, pr.repo] as const])))
   )
   const linkedIssue = issueReferenceOf(active)
   const issueTab = tabs.find((tab) => linkedIssue !== undefined && tab.issueProviderId === linkedIssue.providerId)

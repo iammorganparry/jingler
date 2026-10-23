@@ -143,3 +143,22 @@ describe("SessionRow multi-repo count", () => {
     expect(screen.queryByTestId("session-repos-legacy")).toBeNull()
   })
 })
+
+describe("SessionRow per-checkout PRs", () => {
+  const co = (id: string, repo: string, prNumber: number) => ({ id, repo, branch: "b", prNumber })
+
+  it("labels every checkout's PR with its repo", () => {
+    const session = testSession({
+      id: "two-prs",
+      prNumber: 1,
+      checkouts: [co("web", "qa-web", 1), co("api", "qa-api", 2)],
+      activeCheckoutId: "web",
+      prs: [
+        { number: 2, repo: "qa-api" },
+        { number: 1, repo: "qa-web" }
+      ]
+    })
+    render(<SessionRow session={session} />)
+    expect(screen.getByText("qa-api #2 · qa-web #1")).toBeDefined()
+  })
+})

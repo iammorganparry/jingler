@@ -39,7 +39,7 @@ import {
   UNTITLED_SESSION,
   workspaceModeOf
 } from "@jingler/core"
-import { Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths } from "@jingler/core"
+import { Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths, reduceCheckouts } from "@jingler/core"
 import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, type Path } from "@effect/platform"
@@ -391,11 +391,34 @@ export const migrateSessionIssue = (session: Session): Session => {
 }
 
 /**
+ * A multi-checkout session tracks one PR per checkout: `prs` lists them (active
+ * checkout last, repo-labelled) after any stack layers that belong to none, and
+ * `prNumber` keeps mirroring the ACTIVE checkout. Returns the session itself when no checkout has a PR.
+ */
+const prsFromCheckouts = (session: Session): Session => {
+  const checkouts = session.checkouts ?? []
+  const withPr = checkouts.filter((c) => c.prNumber !== null)
+  if (withPr.length === 0) return session
+  const owned = new Set(withPr.map((c) => c.prNumber))
+  const entry = (c: (typeof checkouts)[number]): SessionPr => ({
+    ...(session.prs?.find((pr) => pr.number === c.prNumber) ?? {}),
+    number: c.prNumber as number,
+    repo: c.repo
+  })
+  const ordered = [...withPr.filter((c) => c.id !== session.activeCheckoutId), ...withPr.filter((c) => c.id === session.activeCheckoutId)]
+  const prs = [...(session.prs ?? []).filter((pr) => !owned.has(pr.number)), ...ordered.map(entry)]
+  const active = checkouts.find((c) => c.id === session.activeCheckoutId)
+  return { ...session, prs, prNumber: active ? active.prNumber : session.prNumber }
+}
+
+/**
  * Keep `prs` (the stack, bottom first) and `prNumber` (its top) consistent.
  * Sessions persisted before stacks existed have only `prNumber`; they read as a
  * one-element stack. Deterministic, so it is safe on every read and write.
  */
 export const migrateSessionPrs = (session: Session): Session => {
+  const withPrs = session.checkouts && session.checkouts.length > 1 ? prsFromCheckouts(session) : session
+  if (withPrs !== session) return withPrs
   const prs = session.prs ?? []
   if (prs.length > 0) {
     const top = prs[prs.length - 1]!.number
@@ -1764,8 +1787,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...unlinked
           } = session
           const { prs: _prs, ...single } = unlinked
-          return migrateSessionPrs({ ...single, prNumber })
+          // Keep the active checkout's own record in step with the scalar mirror.
+          const checkouts = single.checkouts?.map((c) => (c.id === single.activeCheckoutId ? { ...c, prNumber } : c))
+          return migrateSessionPrs({ ...single, prNumber, ...(checkouts ? { checkouts } : {}) })
         })
+
+      /** Link a PR to one specific checkout (not necessarily the active one). */
+      const setCheckoutPr = (id: string, checkoutId: string, prNumber: number | null) =>
+        update(id, (session) =>
+          migrateSessionPrs(reduceCheckouts(session, { type: "update", checkoutId, patch: { prNumber } }))
+        )
 
       /** Add a PR on top of the stack (or update it in place when `number` is already in it). */
       const appendPr = (id: string, pr: SessionPr) =>
@@ -2196,6 +2227,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setStatus,
         addAllowlist,
         setPrNumber,
+        setCheckoutPr,
         appendPr,
         setGitHubLink,
         claimGitHubFeedback,

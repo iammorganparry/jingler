@@ -29,4 +29,15 @@ describe("SessionPrsChip", () => {
     fireEvent.click(childRow)
     expect(onSelect).toHaveBeenCalledWith(rows[1])
   })
+
+  it("labels each row with its repo for multi-checkout sessions", () => {
+    const repoRows: ReadonlyArray<SessionPrRow> = [
+      { number: 2, agent: "main", branch: null, repo: "qa-api" },
+      { number: 1, agent: "main", branch: null, repo: "qa-web" }
+    ]
+    render(<SessionPrsChip rows={repoRows} onSelect={vi.fn()} />)
+    openChip()
+    expect(screen.getByTestId("session-prs-chip-row-2").textContent).toContain("qa-api #2")
+    expect(screen.getByTestId("session-prs-chip-row-1").textContent).toContain("qa-web #1")
+  })
 })
