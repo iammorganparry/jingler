@@ -80,7 +80,7 @@ export interface NewWorkspaceContext {
 
 export type NewWorkspaceEvent =
   | { type: "SET_CHECKPOINT_SAFE_MODE"; enabled: boolean }
-  | { type: "OPEN"; projectId?: string; pr?: PrSummary; issue?: IssueSummary; draft?: string }
+  | { type: "OPEN"; projectId?: string; pr?: PrSummary; issue?: IssueSummary; draft?: string; source?: "pr" | "github"; baseBranch?: string; isolation?: "worktree" | "direct" }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
   | { type: "SET_ENVIRONMENT"; environmentId: string }
@@ -370,6 +370,9 @@ export const newWorkspaceMachine = setup({
     })
   },
   guards: {
+    // Home's "Start from a PR / issue" opens with a bare remote source: load its list once the project resolves.
+    preselectedSourceNeedsLoading: ({ context, event }) => isRemoteSource(context.source) && context.selectedPr === null &&
+      context.selectedIssue === null && (event as unknown as { output: { project: Project | null } }).output.project !== null,
     sourceNeedsLoading: ({ context, event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source) &&
       (!event.source.startsWith("provider:") || (context.getDeps().issueProviders ?? []).some((provider) => `provider:${provider.id}` === event.source)),
     canSubmit: ({ context }) => {
@@ -391,6 +394,7 @@ export const newWorkspaceMachine = setup({
       const requested = event.type === "OPEN" ? event.projectId : undefined
       const requestedPr = event.type === "OPEN" ? event.pr : undefined
       const requestedIssue = event.type === "OPEN" ? event.issue : undefined
+      const open = event.type === "OPEN" ? event : undefined
       const selected = deps.projects.find((project) => project.id === requested) ??
         deps.projects.find((project) => project.id === deps.defaultProjectId) ??
         deps.projects.find((project) => project.availability === "available")
@@ -402,11 +406,12 @@ export const newWorkspaceMachine = setup({
         projectId: requested === AUTO_PROJECT_ID ? AUTO_PROJECT_ID : (selected?.id ?? ""),
         environmentId: "local",
         resolvedProject: null,
-        isolation: "worktree" as const,
+        isolation: open?.isolation ?? "worktree",
         checkpointSafeMode: false,
-        baseBranch: "",
+        baseBranch: open?.baseBranch ?? "",
         branches: [] as ReadonlyArray<string>,
         ...resetSource,
+        ...(open?.source && !requestedPr && !requestedIssue ? { source: open.source } : {}),
         ...(requestedPr
           ? {
               source: "pr" as const,
@@ -461,7 +466,7 @@ export const newWorkspaceMachine = setup({
       return {
         resolvedProject: output.project,
         branches: output.branches,
-        baseBranch: context.selectedPr?.baseRefName ?? preferredBranch(output.branches),
+        baseBranch: context.selectedPr?.baseRefName ?? (output.branches.includes(context.baseBranch) ? context.baseBranch : preferredBranch(output.branches)),
         error: null
       }
     }),
@@ -535,7 +540,10 @@ export const newWorkspaceMachine = setup({
                 )?.kind
               })
         }),
-        onDone: { target: "editing", actions: "applyBranches" },
+        onDone: [
+          { guard: "preselectedSourceNeedsLoading", target: "sourceLoading", actions: "applyBranches" },
+          { target: "editing", actions: "applyBranches" }
+        ],
         onError: { target: "editing", actions: "setLoadError" }
       },
       on: {

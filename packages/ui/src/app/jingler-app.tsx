@@ -1,3 +1,4 @@
+import type { HomeStart } from "../screens/empty-conversation.js"
 import type { SubagentFleetNode } from "@jingler/core"
 import { defaultProps } from "../lib/default-props.js"
 import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, matchSplitEditorChord, surfaceCommandForShortcut, tabShortcutHint } from "./app-shortcuts.js"
@@ -405,6 +406,9 @@ export interface JinglerAppProps {
     readonly pr?: PrSummary
     readonly issue?: IssueSummary
     readonly draft?: string
+    readonly source?: "pr" | "github"
+    readonly baseBranch?: string
+    readonly isolation?: "worktree" | "direct"
     readonly githubCliAccountId?: string
     readonly githubSlug?: string
     readonly tabId?: TabKey
@@ -536,6 +540,7 @@ export function JinglerApp(props:  JinglerAppProps) {
     return {
 onNewSession: onCreateSession ? openNewSession : undefined,
 onStartWithPrompt: onCreateSession ? startWithPrompt : undefined,
+loadBranches,
 onOpenUsage: onLoadUsage ? openUsage : undefined,
 usage,
 onLoadUsage,
@@ -827,6 +832,9 @@ function getActiveTabContext(active: Session) {
               requestedPr={requestedNewSession?.pr}
               requestedIssue={requestedNewSession?.issue}
               requestedDraft={requestedNewSession?.draft}
+              requestedSource={requestedNewSession?.source}
+              requestedBaseBranch={requestedNewSession?.baseBranch}
+              requestedIsolation={requestedNewSession?.isolation}
               providerCatalog={providerConnections?.catalog}
               agentEndpointCatalog={agentEndpointCatalog}
               defaultConnectionId={providerConnections?.defaultConnectionId}
@@ -1048,11 +1056,11 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     setRequestedNewSession(null)
     setNewOpen(true)
   }, [])
-  const startWithPrompt = useCallback((draft: string, projectId: string | undefined) => {
+  const startWithPrompt = useCallback(({ projectId, ...prefill }: HomeStart) => {
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     if (projectId) setSelectedProjectId(projectId)
-    setRequestedNewSession(projectId ? { projectId, draft, nonce: Date.now() } : null)
+    setRequestedNewSession(projectId ? { projectId, ...prefill, nonce: Date.now() } : null)
     setNewOpen(true)
   }, [])
   const openNewSessionForProject = useCallback((projectId: string) => {

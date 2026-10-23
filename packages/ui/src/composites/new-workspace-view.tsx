@@ -45,7 +45,7 @@ import {
   type NewWorkspaceEvent,
 } from "./new-workspace-machine.js";
 import { ChipMenu } from "../components/chip-menu.js";
-import { ChipRow, FromChip } from "./new-workspace-chips.js";
+import { CHECKOUT_OPTIONS, ChipRow, FromChip } from "./new-workspace-chips.js";
 import { StartFromList } from "./start-from-list.js";
 import { EnvironmentWakeChip, WorkspaceProvisioning, showsWakeChip } from "./workspace-provisioning.js";
 
@@ -213,6 +213,9 @@ export interface NewWorkspaceViewProps {
   requestedIssue?: IssueSummary | null;
   /** First message to seed the New Session composer with. */
   requestedDraft?: string | null;
+  requestedSource?: "pr" | "github" | null;
+  requestedBaseBranch?: string | null;
+  requestedIsolation?: "worktree" | "direct" | null;
   prepareProject: NewWorkspaceDeps["prepareProject"];
   loadBranches: NewWorkspaceDeps["loadBranches"];
   issueProviders?: NewWorkspaceDeps["issueProviders"];
@@ -258,10 +261,6 @@ const workspaceUnavailableReason = (loading: boolean, localOrManaged: boolean, h
 
 type WorkspaceSend = (event: NewWorkspaceEvent) => void
 const ADD_PROJECT = "__add-project__"
-const CHECKOUT_OPTIONS = [
-  { value: "worktree", label: "Worktree", description: "Isolated Git worktree for this session" },
-  { value: "direct", label: "This checkout", description: "Work directly in the project checkout" },
-] as const
 function ProjectControls({ context, props, sourceOptions, loading, send }: {
   context: NewWorkspaceContext; props: NewWorkspaceViewProps; sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>; loading: boolean; send: WorkspaceSend
 }) {
@@ -424,9 +423,12 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
         ...(props.requestedPr ? { pr: props.requestedPr } : {}),
         ...(props.requestedIssue ? { issue: props.requestedIssue } : {}),
         ...(props.requestedDraft ? { draft: props.requestedDraft } : {}),
+        ...(props.requestedSource ? { source: props.requestedSource } : {}),
+        ...(props.requestedBaseBranch ? { baseBranch: props.requestedBaseBranch } : {}),
+        ...(props.requestedIsolation ? { isolation: props.requestedIsolation } : {}),
       });
     else send({ type: "CLOSE" });
-  }, [props.open, props.requestedPr, props.requestedIssue, props.requestedProjectId, props.requestedDraft, send]);
+  }, [props.open, props.requestedPr, props.requestedIssue, props.requestedProjectId, props.requestedDraft, props.requestedSource, props.requestedBaseBranch, props.requestedIsolation, send]);
 
   const projectRequest = props.requestedProjectId ?? props.defaultProjectId;
   const previousProjectRequest = React.useRef(projectRequest);

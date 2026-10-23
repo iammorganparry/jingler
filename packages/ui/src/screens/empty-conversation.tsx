@@ -1,9 +1,9 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import type { Project, Session, SessionActivity } from "@jingler/core"
-import { FolderGit2 } from "lucide-react"
+import { CircleDot, FolderGit2, GitFork, GitPullRequest } from "lucide-react"
 import { HomeCards } from "../composites/home-cards.js"
-import { ChipRow } from "../composites/new-workspace-chips.js"
+import { CHECKOUT_OPTIONS, ChipRow, FromChip } from "../composites/new-workspace-chips.js"
 import { Button } from "../components/button.js"
 import { ChipMenu } from "../components/chip-menu.js"
 import { Textarea } from "../components/textarea.js"
@@ -14,7 +14,28 @@ export const greetingFor = (now: Date, firstName?: string) => {
   return firstName ? `Good ${part}, ${firstName}` : `Good ${part}`
 }
 
-const STARTERS = ["Start from a GitHub issue", "Start from a PR"] as const
+const STARTERS = [
+  { label: "Start from a GitHub issue", source: "github" },
+  { label: "Start from a PR", source: "pr" }
+] as const
+
+const FROM_SOURCES = [
+  { value: "pr" as const, label: "Pull request", icon: <GitPullRequest size={15} aria-hidden /> },
+  { value: "github" as const, label: "GitHub issue", icon: <CircleDot size={15} aria-hidden /> }
+]
+
+/** What Home hands to New workspace as its prefill. */
+export interface HomeStart {
+  draft: string
+  projectId: string | undefined
+  source?: "pr" | "github"
+  baseBranch?: string
+  isolation?: "worktree" | "direct"
+}
+
+type HomeSource = "blank" | "branch" | "pr" | "github"
+const fromLabel = (source: HomeSource, branch: string) =>
+  source === "pr" ? "from Pull request" : source === "github" ? "from GitHub issue" : `from ${branch || "main"}`
 
 /**
  * Home (spec §5c): greeting, the "What should we build?" composer with a project chip,
@@ -25,6 +46,7 @@ export function EmptyConversation({
   version,
   onNewSession,
   onStartWithPrompt,
+  loadBranches,
   projects = [],
   selectedProjectId,
   userName,
@@ -44,7 +66,9 @@ export function EmptyConversation({
   version?: string
   onNewSession?: () => void
   /** Opens New workspace prefilled with the prompt and chosen project. */
-  onStartWithPrompt?: (draft: string, projectId: string | undefined) => void
+  onStartWithPrompt?: (start: HomeStart) => void
+  /** Branch list for the from-chip. */
+  loadBranches?: (repoPath: string) => Promise<ReadonlyArray<string>>
   projects?: ReadonlyArray<Project>
   selectedProjectId?: string | null
   /** Signed-in user's display name; only the first word is shown. */
@@ -55,10 +79,37 @@ export function EmptyConversation({
   const [projectId, setProjectId] = useState(
     projects.find((project) => project.id === selectedProjectId)?.id ?? projects[0]?.id ?? ""
   )
+  const [source, setSource] = useState<HomeSource>("blank")
+  const [branches, setBranches] = useState<ReadonlyArray<string>>([])
+  const [baseBranch, setBaseBranch] = useState("")
+  const [isolation, setIsolation] = useState<"worktree" | "direct">("worktree")
+  const projectPath = projects.find((project) => project.id === projectId)?.path
+  useEffect(() => {
+    if (!projectPath || !loadBranches) return
+    let live = true
+    setBaseBranch("")
+    loadBranches(projectPath).then(
+      (list) => {
+        if (!live) return
+        setBranches(list)
+        setBaseBranch(list.find((b) => b === "main") ?? list.find((b) => b === "master") ?? list[0] ?? "")
+      },
+      () => live && setBranches([])
+    )
+    return () => { live = false }
+  }, [projectPath, loadBranches])
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const firstRun = !sessions?.some((session) => !session.archived)
+  const start = (text: string, from: HomeSource) =>
+    onStartWithPrompt?.({
+      draft: text,
+      projectId: projectId || undefined,
+      ...(from === "pr" || from === "github" ? { source: from } : {}),
+      ...(baseBranch ? { baseBranch } : {}),
+      isolation
+    })
   const submit = () => {
-    if (draft.trim()) onStartWithPrompt?.(draft.trim(), projectId || undefined)
+    if (draft.trim()) start(draft.trim(), source)
   }
   return (
     <div className="flex flex-1 flex-col bg-editor">
@@ -90,6 +141,26 @@ export function EmptyConversation({
                     icon={<FolderGit2 size={12} aria-hidden />}
                   />
                 )}
+                {projects.length > 0 && (
+                  <FromChip
+                    label={fromLabel(source, baseBranch)}
+                    source={source}
+                    branches={branches}
+                    baseBranch={baseBranch}
+                    sourceOptions={FROM_SOURCES}
+                    onSource={(next) => setSource(next === "pr" || next === "github" ? next : "blank")}
+                    onBranch={setBaseBranch}
+                  />
+                )}
+                {projects.length > 0 && (
+                  <ChipMenu
+                    value={isolation}
+                    options={CHECKOUT_OPTIONS}
+                    onSelect={setIsolation}
+                    ariaLabel="Checkout"
+                    icon={<GitFork size={12} aria-hidden />}
+                  />
+                )}
               </ChipRow>
               <Button size="sm" disabled={!draft.trim() || !onStartWithPrompt} onClick={submit}>
                 Start
@@ -99,8 +170,13 @@ export function EmptyConversation({
 
           {firstRun && (
             <div className="flex flex-col" data-testid="home-starters">
-              {STARTERS.map((label) => (
-                <Button key={label} variant="ghost" onClick={onNewSession} className="w-full justify-start">
+              {STARTERS.map(({ label, source: from }) => (
+                <Button
+                  key={label}
+                  variant="ghost"
+                  onClick={() => (projectId && onStartWithPrompt ? start(draft.trim(), from) : onNewSession?.())}
+                  className="w-full justify-start"
+                >
                   {label}
                 </Button>
               ))}

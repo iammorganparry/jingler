@@ -7,6 +7,11 @@ import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from "../compo
 import { SegmentedControl } from "../components/segmented-control.js"
 import type { NewSessionSource } from "./new-workspace-machine.js"
 
+export const CHECKOUT_OPTIONS = [
+  { value: "worktree", label: "Worktree", description: "Isolated Git worktree for this session" },
+  { value: "direct", label: "This checkout", description: "Work directly in the project checkout" },
+] as const
+
 /** The single chip row under the New workspace prompt: `project ▾ · from main ▾ · worktree ▾`. */
 export function ChipRow({ children }: { children: React.ReactNode }) {
   return <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" data-testid="new-workspace-chip-row">{children}</div>
