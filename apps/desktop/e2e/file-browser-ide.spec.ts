@@ -385,11 +385,14 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   await expect(composerFollow).toHaveClass(/is-active/)
   await expect(composerFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
+  // Since #901 the file tab's Follow agent sits in the breadcrumb header row.
   const workspaceFollow = window
-    .getByTestId("asset-browser")
+    .getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("button", { name: "Follow agent", exact: true })
+    .filter({ visible: true })
+    .first()
   await expect(workspaceFollow).toHaveAttribute("aria-pressed", "true")
-  await expect(workspaceFollow).toHaveClass(/is-active/)
+  await expect(workspaceFollow).toBeVisible()
   await expect(workspaceFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
 
   await window.getByRole("tab", { name: "Sessions", exact: true }).click()
@@ -497,9 +500,9 @@ test("refreshes the repository tree and follows a moved file to its destination"
     })
   ).toContainText("export const mode = 'modern'")
   await expect(
-    fileBody(window, "src/settings/config.ts").getByRole("tab", {
+    window.getByRole("tab", {
       name: "Show diff for src/settings/config.ts"
-    })
+    }).filter({ visible: true })
   ).toHaveAttribute("aria-selected", "true")
 
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")

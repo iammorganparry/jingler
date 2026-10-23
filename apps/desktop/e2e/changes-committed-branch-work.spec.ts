@@ -32,6 +32,8 @@ test("QA Q1: Changes still lists work the agent already committed on the session
   })
   await expect(appShell(window)).toBeVisible()
   await window.getByRole("button", { name: "Changes" }).first().click()
-  const list = window.getByRole("listbox", { name: "Changed files by agent" })
-  await expect(list.getByRole("option", { name: /committed\.txt/ })).toBeVisible({ timeout: 30_000 })
+  // The agent list only holds files the agent edited this run; the Explorer's Changed filter is the branch diff.
+  const explorer = window.getByTestId("changed-files-explorer")
+  await expect(explorer).toBeVisible({ timeout: 20_000 })
+  await expect(explorer.locator('[data-item-path="committed.txt"]')).toBeVisible({ timeout: 30_000 })
 })
