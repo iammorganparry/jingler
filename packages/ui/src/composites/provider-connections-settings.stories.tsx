@@ -97,3 +97,23 @@ export const MultipleAccounts: Story = {
     </div>
   )
 }
+
+/** Nothing connected: one-line empty state, then the runtime picker with PI account rows. */
+export const Empty: Story = {
+  render: () => (
+    <div className="flex h-[640px] w-[900px] bg-editor">
+      <ProviderConnectionsSettings
+        catalog={Schema.decodeSync(ProviderCatalog)({ connections: [], refreshedAt: "2026-08-10T08:00:00.000Z", stale: false })}
+        onRefresh={() => {}}
+        onVerify={() => {}}
+        onMakeDefault={() => {}}
+        onLogout={() => {}}
+        onConnectClaude={() => {}}
+        onStartCodex={() => {}}
+        onSetApiKey={() => {}}
+        onCancelLogin={async () => {}}
+        onSaveApiKey={async () => ({ ok: true })}
+      />
+    </div>
+  )
+}
