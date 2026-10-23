@@ -327,6 +327,52 @@ describe("WorkspaceService", () => {
     expect(countObjects()).toBe(before)
   })
 
+  it("diffStat()/diff()/boundedFileDiff() with a base include committed branch work; without it only uncommitted", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "branch-work"))
+    execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoPath })
+    writeFileSync(join(repoPath, "committed.txt"), "committed\n")
+    execFileSync("git", ["add", "-A"], { cwd: repoPath })
+    execFileSync("git", ["commit", "-m", "work", "--no-gpg-sign"], { cwd: repoPath })
+    writeFileSync(join(repoPath, "uncommitted.txt"), "uncommitted\n")
+    const run = <A, E>(effect: Effect.Effect<A, E, WorkspaceService | ConfigService | AppPaths | NodeContext.NodeContext>) =>
+      runExit(effect.pipe(Effect.provide(services)), temp.layer)
+
+    const withBase = await run(
+      WorkspaceService.diffStat(repoPath, "main")
+    )
+    const withoutBase = await run(
+      WorkspaceService.diffStat(repoPath).pipe(Effect.provide(services))
+    )
+    const unresolvable = await run(
+      WorkspaceService.diffStat(repoPath, "no-such-branch").pipe(Effect.provide(services))
+    )
+    const review = await run(
+      WorkspaceService.diff(repoPath, "main").pipe(Effect.provide(services))
+    )
+    const file = await run(
+      WorkspaceService.boundedFileDiff(repoPath, "committed.txt", "main").pipe(
+        Effect.provide(services)
+      )
+    )
+    const fileNoBase = await run(
+      WorkspaceService.boundedFileDiff(repoPath, "committed.txt").pipe(
+        Effect.provide(services)
+      )
+    )
+
+    expect(withBase._tag === "Success" && withBase.value.files).toBe(2)
+    expect(withoutBase._tag === "Success" && withoutBase.value.files).toBe(1)
+    expect(unresolvable._tag === "Success" && unresolvable.value.files).toBe(1)
+    expect(review._tag === "Success" && review.value.files.map((f) => f.path).sort()).toStrictEqual([
+      "committed.txt",
+      "uncommitted.txt"
+    ])
+    expect(file._tag === "Success" && file.value.kind === "patch" && file.value.patch).toContain(
+      "+committed"
+    )
+    expect(fileNoBase._tag === "Success" && fileNoBase.value.kind === "patch" && fileNoBase.value.patch).toBe("")
+  })
+
   it("diff() is empty for a clean worktree", async () => {
     const repoPath = initGitRepo(join(repos.dir, "clean"))
     const exit = await runExit(
