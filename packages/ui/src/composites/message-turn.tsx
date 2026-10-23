@@ -552,8 +552,13 @@ const PartView = memo(function PartView({
     case "Question":
       // Pending questions dock in the composer (as the QuestionCard); once
       // answered, show a compact record of the picks here so the choice persists.
-      return part.answers === null ? null : (
-        <QuestionSummary request={part.request} answers={part.answers} className={WIDTH} />
+      return part.answers === null && !part.cancelled ? null : (
+        <QuestionSummary
+          request={part.request}
+          answers={part.answers ?? []}
+          cancelled={part.cancelled}
+          className={WIDTH}
+        />
       )
     case "Plan":
       return null

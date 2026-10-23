@@ -372,7 +372,9 @@ export type GatePart = Schema.Schema.Type<typeof GatePart>
  */
 export const QuestionPart = Schema.TaggedStruct("Question", {
   request: QuestionRequest,
-  answers: Schema.NullOr(Schema.Array(QuestionAnswer))
+  answers: Schema.NullOr(Schema.Array(QuestionAnswer)),
+  /** True when the operator stopped the run before answering; optional so old transcripts decode. */
+  cancelled: Schema.optional(Schema.Boolean)
 })
 export type QuestionPart = Schema.Schema.Type<typeof QuestionPart>
 
@@ -981,7 +983,7 @@ export const settleLoaded = (msg: Message): Message => {
   const orphaned = base.parts.some(
     (p) =>
       (p._tag === "Gate" && p.gate.status === "pending") ||
-      (p._tag === "Question" && p.answers === null) ||
+      (p._tag === "Question" && p.answers === null && !p.cancelled) ||
       (p._tag === "Plan" && (p.plan.status === "proposed" || p.plan.status === "revising"))
   )
   if (!orphaned) return base
@@ -991,8 +993,8 @@ export const settleLoaded = (msg: Message): Message => {
       if (p._tag === "Gate" && p.gate.status === "pending") {
         return { ...p, gate: { ...p.gate, status: "rejected" as const } }
       }
-      if (p._tag === "Question" && p.answers === null) {
-        return { ...p, answers: [] }
+      if (p._tag === "Question" && p.answers === null && !p.cancelled) {
+        return { ...p, answers: [], cancelled: true }
       }
       if (p._tag === "Plan" && (p.plan.status === "proposed" || p.plan.status === "revising")) {
         return { ...p, plan: { ...p.plan, status: "stale" as const } }
@@ -1188,7 +1190,8 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
               liveBranch: e.liveBranch
             }
           : { _tag: "Text", text: e.message }
-      return { ...msg, streaming: false, parts: [...parts, part] }
+      const base = e._tag === "Failed" && e.message === STOPPED_NOTE ? cancelPendingQuestions(msg) : msg
+      return { ...base, streaming: false, parts: [...base.parts, part] }
     }),
 
     // Sub-agent lifecycle events are conversation-level, not part of any single
@@ -1536,11 +1539,19 @@ export const setQuestionAnswers = (
   )
 })
 
+/** Mark every unanswered question in a message cancelled (the operator stopped the run). */
+export const cancelPendingQuestions = (msg: Message): Message => ({
+  ...msg,
+  parts: msg.parts.map((p) =>
+    p._tag === "Question" && p.answers === null && !p.cancelled ? { ...p, cancelled: true } : p
+  )
+})
+
 /** The first unanswered question group across a transcript, or null. */
 export const pendingQuestion = (messages: ReadonlyArray<Message>): QuestionRequest | null => {
   for (let i = messages.length - 1; i >= 0; i--) {
     for (const part of messages[i]!.parts) {
-      if (part._tag === "Question" && part.answers === null) return part.request
+      if (part._tag === "Question" && part.answers === null && !part.cancelled) return part.request
     }
   }
   return null
