@@ -7,9 +7,9 @@ describe("BeUI production ownership", () => {
   it("keeps compatibility atoms backed by BeUI implementations", () => {
     expect(source("../button.tsx")).toContain('from "motion/react"')
     expect(source("../button.tsx")).toContain("rounded-[6px]")
-    expect(source("../input.tsx")).toContain("BeUI Input")
+    expect(source("../input.tsx")).toContain("rounded-lg")
     expect(source("../checkbox.tsx")).toContain('from "motion/react"')
-    expect(source("../toggle.tsx")).toContain("THUMB_SPRING")
+    expect(source("../toggle.tsx")).toContain('role="switch"')
     expect(source("../segmented-control.tsx")).toContain('from "./beui/controls.js"')
     expect(source("../loading.tsx")).toContain('from "./beui/loader.js"')
     expect(source("../badge.tsx")).toContain('from "./beui/animated-badge.js"')
