@@ -479,7 +479,7 @@ return (<GithubSection
   // Three `flex-none` columns (216 + 328 + detail) is ~544px of chrome before
   // the settings themselves get a pixel. Below `mid` the nav narrows to an icon
   // rail so the section you're editing keeps the room.
-  const compact = !atLeast(useWidthTier(), "mid")
+  const compact = !atLeast(useWidthTier(), "wide")
 
   return (
     <div className="flex min-h-0 flex-1 bg-editor">

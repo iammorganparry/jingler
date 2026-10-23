@@ -323,10 +323,10 @@ function NewWorkspaceContent({ props, context, send, submitting, failed, loading
   const startup = props.environmentStartup || (submitting && selectedEnvironment !== undefined)
   return <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="new-session-view">
     <div className="flex h-12 flex-none items-center border-b border-hairline px-5"><h1 className="text-[13px] font-semibold text-text-bright">New session</h1><span className="flex-1" /><WakeChip environment={selectedEnvironment} onWake={props.onWakeEnvironment} /><Button variant="ghost" size="icon" aria-label="Close new session" disabled={submitting && !props.environmentStartup?.error} onClick={() => send({ type: "CLOSE" })}><X size={15} /></Button></div>
-    <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">{startup || submitting || failed
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-auto px-4 py-10 sm:px-6">{startup || submitting || failed
       ? <ProgressPane props={props} context={context} send={send} startup={Boolean(startup)} failed={failed} environment={selectedEnvironment} />
       : <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
-          <div className="flex items-center gap-3"><div><h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">New workspace</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Describe the task. Jingler creates the branch and starts the agent.</p></div></div>
+          <div className="flex min-w-0 items-center gap-3"><div className="min-w-0"><h2 className="truncate text-[20px] font-semibold tracking-[-0.2px] text-text-bright">New workspace</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Describe the task. Jingler creates the branch and starts the agent.</p></div></div>
           <WorkspaceStartFrom props={props} context={context} send={send} icon={selectedSource?.icon} label={sourceLabel} loading={sourceLoading} />
           {source === "branch" && <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.</p>}
           <label className="text-xs text-text-bright">
