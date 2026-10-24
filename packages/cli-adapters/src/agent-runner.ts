@@ -422,6 +422,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         return (yield* Ref.get(modes)).get(chatId) ?? (mode === "plan" ? defaultModeFor() : mode)
       })
 
+    // Present only with Auto switching on; allows MAX_WORK_MODE_SWITCHES agent-initiated switches per turn.
+    const workModeHostFor = (chatId: string, chat: { readonly autoSwitch?: boolean; readonly mode?: PermissionMode }) => {
+      if (chat.autoSwitch !== true) return {}
+      let switches = 0
+      const approval = () => Effect.runSync(Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor()
+      return { workModeHost: { approvalIsAuto: () => approval() === "auto", reserveSwitch: () => switches < MAX_WORK_MODE_SWITCHES && ++switches > 0 } }
+    }
+
     const followWorkMode = (sessionId: string, chatId: string, event: StreamEvent) =>
       event._tag === "WorkModeChanged" ? setWorkMode(sessionId, chatId, event.workMode) : Effect.void
 
@@ -1092,14 +1100,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 console.error("Failed to persist execution usage", cause)
               }))
             )
-          // At most MAX_WORK_MODE_SWITCHES agent-initiated switches per turn.
-          let switches = 0
-          const workModeHost = chat.autoSwitch !== true ? {} : {
-            workModeHost: {
-              approvalIsAuto: () => Effect.runSync(Ref.get(modes)).get(chatId) === "auto" || (Effect.runSync(Ref.get(modes)).get(chatId) === undefined && (chat.mode ?? defaultModeFor()) === "auto"),
-              reserveSwitch: () => switches < MAX_WORK_MODE_SWITCHES && ++switches > 0
-            }
-          }
+          const workModeHost = workModeHostFor(chatId, chat)
           const checkoutOption = yield* turnCheckoutHost(sessionId, chatId, { ...session, worktreePath }, emit)
           const adapterRun = adapter.run(chatId, spec, {
             ...checkoutOption,
