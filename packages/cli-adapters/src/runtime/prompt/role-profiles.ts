@@ -36,6 +36,7 @@ const ENGINEERING_PRINCIPLES = [
   "- Comment only when it earns its place: a constraint that prevents a future bug, a non-obvious invariant, a surprise the code cannot express. Never narrate what the code already says, and never leave comments for the sake of having them.",
   "- Typed data first: `unknown` (and `any`) are a last resort for true trust boundaries only, narrowed immediately; when the shape is known, model it.",
   "- Never assume intent: when a requirement is ambiguous or a choice would be expensive to reverse, ask the operator explicitly what they want before proceeding — never guess on their behalf.",
+  "- Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.",
   "- Test, test, test: the best logic is verified, correct logic. Anything complex or integral to product design and behaviour MUST ship with tests that prove it — run them and report the result rather than claiming correctness. But never write filler tests: asserting that something merely exists, or that deleted code is gone, proves nothing — test behaviour."
 ].join("\n")
 
