@@ -24,9 +24,11 @@ import type {
   SessionPr,
   SettledSessionStatus,
   WorkspaceLifecycle,
-  WorkspaceMode
+  WorkspaceMode,
+  WorkMode
 } from "@jingler/core"
 import {
+  defaultModeFor,
   type GitHubApiError,
   GitError,
   issueReferenceOf,
@@ -73,6 +75,7 @@ const LegacyChatObject = Schema.Struct({
   id: Schema.optional(Schema.Unknown),
   providerId: Schema.optional(Schema.Unknown),
   mode: Schema.optional(Schema.Unknown),
+  workMode: Schema.optional(Schema.Unknown),
   reasoning: Schema.optional(Schema.Unknown)
 })
 const LegacyChatWithId = Schema.Struct({ id: Schema.String })
@@ -116,15 +119,26 @@ const runtimeMode = (value: unknown): PermissionMode | undefined => {
     case "ask":
     case "accept-edits":
     case "auto":
-    case "plan":
       return value
     default:
       return undefined
   }
 }
 
-const persistedMode = (value: unknown): PermissionMode | undefined =>
-  runtimeMode(value) ?? (typeof value === "string" ? "ask" : undefined)
+/**
+ * Stored approval level. Legacy `plan` becomes the default level (the plan half
+ * moves to `persistedWorkMode`); an unknown string falls back to the default
+ * instead of silently coercing to `ask`.
+ */
+const persistedMode = (value: unknown): PermissionMode | undefined => {
+  const known = runtimeMode(value)
+  if (known !== undefined || value === undefined || value === null) return known
+  if (value !== "plan") console.warn(`Unknown stored chat mode ${JSON.stringify(value)}; using the default approval level`)
+  return defaultModeFor()
+}
+
+const persistedWorkMode = (workMode: unknown, legacyMode: unknown): WorkMode | undefined =>
+  workMode === "plan" || workMode === "build" ? workMode : legacyMode === "plan" ? "plan" : undefined
 
 const initialChat = (
   sessionId: string,
@@ -140,6 +154,7 @@ const initialChat = (
   } = {}
 ): Chat => {
   const mode = persistedMode(legacy.mode)
+  const workMode = persistedWorkMode(legacy.workMode, legacy.mode)
   const allowlist =
     Array.isArray(legacy.allowlist) &&
     legacy.allowlist.every((entry) => typeof entry === "string")
@@ -157,6 +172,7 @@ const initialChat = (
     createdAt: now,
     updatedAt: now,
     ...propertiesWhen(mode !== undefined, { mode }),
+    ...propertiesWhen(workMode !== undefined, { workMode }),
     ...propertiesWhen(allowlist !== undefined, { allowlist }),
     ...propertiesWhen(contextTokens !== undefined, { contextTokens }),
     ...runtime
@@ -256,6 +272,7 @@ export const migrateSessionChats = (value: unknown): unknown => {
     return {
       ...chat,
       ...propertiesWhen(persistedMode(chat.mode) !== undefined, { mode: persistedMode(chat.mode) }),
+      ...propertiesWhen(persistedWorkMode(chat.workMode, chat.mode) !== undefined, { workMode: persistedWorkMode(chat.workMode, chat.mode) }),
       ...propertiesWhen(chat.reasoning === undefined && reasoning !== undefined, { reasoning })
     }
   }
@@ -1248,6 +1265,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               createdAt: now,
               updatedAt: now,
               ...propertiesWhen(source?.mode !== undefined, { mode: source?.mode }),
+              ...propertiesWhen(source?.workMode !== undefined, { workMode: source?.workMode }),
               ...propertiesWhen(source?.reasoning !== undefined, { reasoning: source?.reasoning }),
               ...propertiesWhen(source?.connectionId !== undefined, { connectionId: source?.connectionId }),
               ...propertiesWhen(source?.providerId !== undefined, { providerId: source?.providerId }),
@@ -1302,6 +1320,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               createdAt: now,
               updatedAt: now,
               ...propertiesWhen(closed?.mode !== undefined, { mode: closed?.mode }),
+              ...propertiesWhen(closed?.workMode !== undefined, { workMode: closed?.workMode }),
               ...propertiesWhen(closed?.reasoning !== undefined, { reasoning: closed?.reasoning }),
               ...propertiesWhen(closed?.connectionId !== undefined, { connectionId: closed?.connectionId }),
               ...propertiesWhen(closed?.providerId !== undefined, { providerId: closed?.providerId }),
@@ -1368,6 +1387,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             )
           }
         })
+
+      /** Persist one chat's Plan/Build work mode. */
+      const setWorkMode = (id: string, chatId: string, workMode: WorkMode) =>
+        update(id, (session) => ({
+          ...session,
+          chats: session.chats.map((chat) => (chat.id === chatId ? { ...chat, workMode } : chat))
+        }))
 
       const setAgentModel = (
         id: string,
@@ -2203,6 +2229,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         discardClosedChat,
         reopenChat,
         setMode,
+        setWorkMode,
         setAgentModel,
         confirmAgentStart,
         confirmAgentModel,
