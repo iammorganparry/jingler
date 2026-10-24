@@ -7,7 +7,7 @@ import { extractProgressMarkers, parseChecklist, updateChecklistStatuses, type C
 import { parsePlanMarkdown } from "@jingler/plannotator-ext/plan-parse.ts"
 import { validatePlanMarkdown } from "@jingler/plannotator-ext/plan-validation.ts"
 import { createReviewedContent } from "@jingler/plannotator-ext/plan-status.ts"
-import { isPlanWritePathAllowed } from "@jingler/plannotator-ext/tool-scope.ts"
+import { isWorkspaceMarkdownPath } from "@jingler/plannotator-ext/tool-scope.ts"
 import phaseConfig from "@jingler/plannotator-ext/plannotator.json" with { type: "json" }
 import { Effect, Schema, Stream } from "effect"
 import { AtomicJsonFile } from "../persistence/atomic-json-file.js"
@@ -37,7 +37,7 @@ const sameOwner = (a: AgentRuntimeOwner, b: AgentRuntimeOwner) => a.runtimeId ==
 const ownerFor = (spec: AgentRunSpec): AgentRuntimeOwner => ({ runtimeId: spec.runtimeId, endpointId: spec.endpointId, targetId: spec.targetCapabilities.targetId })
 
 async function readPlan(cwd: string, path: string): Promise<string> {
-  if (!isPlanWritePathAllowed(path, cwd)) throw new ToolError("forbidden", "Plan must be a Markdown file inside the workspace")
+  if (!isWorkspaceMarkdownPath(path, cwd)) throw new ToolError("forbidden", "Plan must be a Markdown file inside the workspace")
   const file = resolve(cwd, path)
   const metadata = await stat(file)
   if (!metadata.isFile() || metadata.size > 512 * 1024) throw new ToolError("invalid-input", "Plan must be a regular file no larger than 512 KiB")
@@ -307,7 +307,7 @@ export const makeSharedPlanningRuntime = (directory: string, piSessionsDir: stri
     }),
     run: (original, context) => Stream.unwrapScoped(Effect.gen(function* () {
       if (original.role === "title" || original.role === "context-digest" || original.role === "review") return runtime.run(original, context)
-      const spec = original.mode === "plan" ? { ...original, mode: "auto" as const, role: "conversation" as const } : original
+      const spec = original
       const key = JSON.stringify([spec.sessionId, spec.chatId])
       const session = sessions.get(key) ?? new PlanningSession(storedState(directory, spec.sessionId, spec.chatId))
       sessions.set(key, session)
@@ -322,8 +322,7 @@ export const makeSharedPlanningRuntime = (directory: string, piSessionsDir: stri
       )
       const prompt = yield* attempt(() => session.prompt(spec, controller.signal))
       const planningContext: AgentRuntimeContext = { ...context, isPlanReviewPending: () => session.pending !== null, planning: session }
-      // Pi normalizes parent execution itself; preserve its original child capability ceiling.
-      return runtime.run({ ...(original.runtimeId === "pi" ? original : spec), prompt }, planningContext).pipe(Stream.tap((event) =>
+      return runtime.run({ ...spec, prompt }, planningContext).pipe(Stream.tap((event) =>
         attempt(() => session.observe(event)).pipe(Effect.catchAll((error) => attempt(() => session.progressFailed(error))))
       ))
     }))

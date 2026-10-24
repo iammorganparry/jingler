@@ -670,3 +670,14 @@ test("plan settings persist auto-run and the plan template", async ({ launchApp 
   await openPlanSettings()
   await expect(window.getByRole("switch", { name: "Plan auto-run" })).not.toBeChecked()
 })
+
+test("plan mode blocks a write outside the plan file but lets the plan file through", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  const agentsPath = join(launched.repoPath, "AGENTS.md")
+  const before = existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null
+  await startPlanReview(launched, "[[plan]] [[escape]] replace auth")
+
+  // The scripted agent retries after the blocked write and the plan file lands.
+  await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
+  expect(existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null).toBe(before)
+})

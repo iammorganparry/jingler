@@ -305,18 +305,13 @@ const validateConnection = (
  */
 const DEFAULT_PROMPT_TOKEN_BUDGET = 8_000
 
-const effectiveRuntimeSpec = (spec: AgentRunSpec): AgentRunSpec =>
-  spec.mode === "plan"
-    ? { ...spec, role: "conversation", mode: "auto" }
-    : spec
-
 const createResources = (
   options: PiSessionFactoryOptions,
   spec: AgentRunSpec,
   registry: ToolRegistry | undefined,
   nativeSubagentsEnabled: boolean
 ) => {
-  const runtimeSpec = effectiveRuntimeSpec(spec)
+  const runtimeSpec = spec
   const registryTools = [
     ...(registry?.capabilitiesFor(runtimeSpec.role, runtimeSpec.mode) ?? []),
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
@@ -330,7 +325,7 @@ const createResources = (
       const workspaceInstructions = await instructionLayers(spec.cwd)
       return (options.promptCompiler ?? new PromptCompiler()).compile({
         layers: [
-          ...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
+          ...runtimeInvariantLayers(spec.role, spec.mode),
           ...ponytailPromptLayers(spec.ponytailMode),
           ...(nativeSubagentsEnabled ? [DELEGATION_DEFAULT_PROMPT_LAYER] : []),
           ...workspaceInstructions
@@ -417,7 +412,7 @@ const createEmbeddedSession = (
           message: `Certified model is unavailable: ${spec.modelId}`
         })
       }
-      const toolSpec = effectiveRuntimeSpec(spec)
+      const toolSpec = spec
       const customTools = registry ? [...createPiTools(registry, toolSpec, context)] : []
       const thinkingLevel = thinkingLevelFor(spec.reasoning)
       const sessionManager = sessionManagerFor(spec, options.sessionsDir)
@@ -641,7 +636,7 @@ const createSessionHandle = (
     const connection = yield* options.resolveConnection(spec)
     yield* validateConnection(spec, connection)
     const registry = yield* resolveSessionToolRegistry(options, spec, context, tracker)
-    const toolSpec = effectiveRuntimeSpec(spec)
+    const toolSpec = spec
     if (registry.hasMutatingTools(toolSpec.role, toolSpec.mode) && !tracker && !options.delegationOnly) {
       return yield* Effect.fail(
         new AgentRuntimeError({

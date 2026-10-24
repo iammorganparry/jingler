@@ -391,8 +391,8 @@ describe("AgentRunner HITL gating", () => {
     ).then(() => out)
   }
 
-  it("plan: commands and edits run unattended like auto", async () => {
-    expect(await probe("plan")).toStrictEqual({ command: "allow", edit: "allow" })
+  it("plan: commands and edits are denied without gating", async () => {
+    expect(await probe("plan")).toStrictEqual({ command: "deny", edit: "deny" })
   })
 
   it("ask: the same command still gates", async () => {

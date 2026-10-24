@@ -84,6 +84,8 @@ export interface ToolExecutionContext {
   /** Per-call cwd override (e.g. a validated subagent child cwd); absent means the tool's registered default. */
   readonly cwd?: string
   readonly signal: AbortSignal
+  /** True for plan-mode calls; scoped tools (plan-file writes, read-only shell) must self-check via plan-policy. */
+  readonly plan?: boolean
   readonly idempotencyKey: string | null
   readonly progress: (progress: ToolProgress) => void
 }
@@ -165,14 +167,26 @@ export interface ToolExecutionObserver {
   ) => Effect.Effect<void, ToolError>
 }
 
-const readOnlyRole = (role: AgentRole): boolean => role === "plan" || role === "review"
 const mutatingRisk = (risk: ToolRisk): boolean => risk === "mutate" || risk === "execute"
+
+/** Plan mode: the one capability filter every harness's tool calls route through (deny by default). */
+const PLAN_NETWORK_TOOLS = new Set(["web_search", "mcp_search"])
+/** Allowed in plan only after a per-call check in plan-policy.ts. */
+const PLAN_SCOPED_TOOLS = new Set(["workspace_write", "workspace_edit", "command_execute"])
+const isPlan = (role: AgentRole, mode: RuntimeMode): boolean => role === "plan" || mode === "plan"
+const planFlag = (input: ToolExecutionRequest): { readonly plan?: true } =>
+  isPlan(input.role, input.mode) ? { plan: true } : {}
+const planAllows = (tool: AnyToolDefinition): boolean =>
+  tool.origin?.kind === "plugin"
+    ? tool.risk === "read"
+    : tool.risk === "read" || PLAN_NETWORK_TOOLS.has(tool.id) || PLAN_SCOPED_TOOLS.has(tool.id)
 
 const allowed = (tool: AnyToolDefinition, role: AgentRole, mode: RuntimeMode): boolean =>
   tool.roles.includes(role) &&
   tool.modes.includes(mode) &&
-  !(readOnlyRole(role) && mutatingRisk(tool.risk)) &&
-  !(mode === "read-only" && mutatingRisk(tool.risk))
+  !(role === "review" && mutatingRisk(tool.risk)) &&
+  !(mode === "read-only" && mutatingRisk(tool.risk)) &&
+  (!isPlan(role, mode) || planAllows(tool))
 
 const errorEnvelope = (error: ToolError): ToolResultEnvelope => ({
   status: error.code === "cancelled" ? "cancelled" : "error",
@@ -351,6 +365,7 @@ const executeDefinition = async (
     input.signal?.addEventListener("abort", onAbort, { once: true })
   const execution = tool.execute(value, {
     signal: controller.signal,
+    ...planFlag(input),
     idempotencyKey: input.idempotencyKey ?? null,
     progress: input.progress ?? (() => undefined),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd })

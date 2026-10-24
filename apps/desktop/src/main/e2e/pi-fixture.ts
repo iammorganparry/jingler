@@ -646,8 +646,13 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === SUBMIT_PLAN_TOOL) {
     return submitResultResponse(context, toolResultText(lastMessage), submitCount)
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL && lastMessage.toolCallId !== "plannotator-escape") {
     return callTool(SUBMIT_PLAN_TOOL, { filePath: "PLAN.md" }, `plannotator-submit-${submitCount + 1}`)
+  }
+  // [[escape]]: first attempt a write outside the plan file; plan mode must block it.
+  const escaped = context.messages.some((message) => message.role === "toolResult" && message.toolCallId === "plannotator-escape")
+  if (!escaped && currentPlanMessages.some((text) => text.includes("[[escape]]"))) {
+    return callTool(WRITE_TOOL, { path: "AGENTS.md", content: "pwned\n" }, "plannotator-escape")
   }
   const invalid = currentPlanMessages.some((text) => text.includes("[[invalid-plan]]"))
   const flat = currentPlanMessages.some((text) => text.includes("[[flat-plan]]"))
@@ -666,7 +671,7 @@ const planScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssis
       "Adopted the plan scratchpad and finished the first step. [DONE:1]"
     )
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL && lastMessage.toolCallId !== "plannotator-escape") {
     return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-update")
   }
   // Normal sessions carry Jingler's workspace tools, not pi's plan-mode
@@ -718,7 +723,7 @@ const richScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssis
       "Adopted the structured plan. TokenStore implemented. [DONE:1]"
     )
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL && lastMessage.toolCallId !== "plannotator-escape") {
     return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-rich-update")
   }
   return callTool(
@@ -756,7 +761,7 @@ const architectureFigureResponse = (context: PiContext): ReturnType<typeof fauxA
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === UPDATE_PLAN_TOOL) {
     return fauxAssistantMessage("Architecture figure published.")
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL && lastMessage.toolCallId !== "plannotator-escape") {
     return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "architecture-plan-update")
   }
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === "jingler_publish_explanation") {

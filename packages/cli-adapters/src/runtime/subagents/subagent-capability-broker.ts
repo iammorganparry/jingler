@@ -124,7 +124,7 @@ export const childExecutionProfile = (
   spec: SubagentParentSpec,
   agent: string
 ): { readonly role: AgentRole; readonly mode: RuntimeMode } =>
-  READ_ONLY_AGENTS.has(agent)
+  READ_ONLY_AGENTS.has(agent) || spec.mode === "plan" || spec.mode === "read-only"
     ? { role: "review", mode: "read-only" }
     : { role: spec.role, mode: spec.mode }
 

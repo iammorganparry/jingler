@@ -905,9 +905,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // Re-read the live mode each call so an in-run change (e.g. a plan
               // approval restoring the exec mode) takes effect on this same turn.
               const liveMode = (yield* Ref.get(modes)).get(chatId) ?? mode
-              if (verdict(liveMode, allow, req) === "allow") {
-                return "allow" as const
-              }
+              const decision = verdict(liveMode, allow, req)
+              if (decision === "allow") return "allow" as const
+              if (decision === "deny") return "deny" as const
               const gn = yield* nextId
               const gateId = `g_${sessionId}_${gn}`
               const gate = buildGate(gateId, req)

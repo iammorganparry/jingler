@@ -345,10 +345,10 @@ describe("shared harness planning", () => {
     expect(f.projections().at(-1)?.phase).toBe("executing")
   })
 
-  it("preserves Pi child plan permissions while the parent retains planning tools", async () => {
+  it("forces read-only child permissions from a plan parent while the parent retains planning tools", async () => {
     const f = await setup()
     const runtime = f.wrap(async function* (registry, spec, context) {
-      expect(childExecutionProfile(spec, "worker")).toEqual({ role: "plan", mode: "plan" })
+      expect(childExecutionProfile(spec, "worker")).toEqual({ role: "review", mode: "read-only" })
       const result = await call(registry, spec, context, "plannotator_update_plan", { filePath: "plan.md" })
       expect(result.details.status).toBe("success")
       yield done

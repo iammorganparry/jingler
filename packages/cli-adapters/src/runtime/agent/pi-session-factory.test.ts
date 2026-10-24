@@ -120,14 +120,14 @@ const fakeSession = (): AgentSession =>
   }) as unknown as AgentSession
 
 describe("pi session creation", () => {
-  it("uses only registry-owned planning tools with tracked Auto tools in plan mode", async () => {
+  it("exposes registry-owned planning tools in plan mode without rewriting it to Auto", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-planning-session-")); roots.push(root)
     await writeFile(join(root, "AGENTS.md"), "Run the project checks before completion.")
     await writeFile(join(root, "CLAUDE.md"), "Preserve the repository conventions.")
     const captured: CreateAgentSessionOptions[] = []
     const registry = new ToolRegistry()
     for (const id of ["auto_only", "plannotator_submit_plan", "plannotator_update_plan"]) registry.register({
-      id, version: "1", description: "Shared registry tool", input: Schema.Struct({}), risk: "read", roles: ["conversation"], modes: ["auto"],
+      id, version: "1", description: "Shared registry tool", input: Schema.Struct({}), risk: "read", roles: ["conversation", "plan"], modes: ["auto", "plan"],
       timeoutMs: 1000, outputBudget: 1000, cancellable: true, idempotency: "safe", execute: async () => null
     })
     const factory = makePiSessionFactory({ agentDir: join(root, "agent"), sessionsDir: join(root, "sessions"),

@@ -104,6 +104,9 @@ export const codexMcpConfig = (context: AgentRuntimeContext, environment: NodeJS
   return { env, config: { mcp_servers: servers } }
 }
 
+/** Plan and read-only runs get Codex's read-only sandbox with approvals disabled; plan writes go through the path-checked Jingler relay tools. */
+const readOnlyMode = (spec: AgentRunSpec): boolean => spec.mode === "read-only" || spec.mode === "plan"
+
 const seedPrompt = (spec: AgentRunSpec) => {
   const history = spec.seed?.messages ?? spec.priorMessages
   return history.length === 0
@@ -127,7 +130,7 @@ const permissionResponse = async (
   signal: AbortSignal
 ): Promise<PermissionsRequestApprovalResponse> => {
   const decision =
-    spec.mode === "read-only"
+    readOnlyMode(spec)
       ? "deny"
       : await Effect.runPromise(
           context.canUseTool({
@@ -202,7 +205,7 @@ const answerRequest = async (
   switch (message.method) {
     case "item/commandExecution/requestApproval":
     case "item/fileChange/requestApproval": {
-      const allowed = spec.mode === "read-only" ? "deny" : await Effect.runPromise(
+      const allowed = readOnlyMode(spec) ? "deny" : await Effect.runPromise(
         context.canUseTool({
           toolId: String(p.itemId),
           risk: message.method === "item/fileChange/requestApproval" ? "mutate" : "execute"
@@ -254,9 +257,9 @@ const openThread = async (
     model: spec.modelId,
     config: codexWorkspaceConfig(config, spec.workspaceEnvironment),
     developerInstructions: systemPrompt,
-    approvalPolicy: spec.mode === "read-only" ? "never" : "on-request",
+    approvalPolicy: readOnlyMode(spec) ? "never" : "on-request",
     approvalsReviewer: "user",
-    sandbox: spec.mode === "read-only" ? "read-only" : "workspace-write"
+    sandbox: readOnlyMode(spec) ? "read-only" : "workspace-write"
   }
   let fresh = spec.continuation === null
   let response: { thread: { id: string } }

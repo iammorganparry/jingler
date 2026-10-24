@@ -66,6 +66,8 @@ describe("planning writes", () => {
 			expect(isPlanWritePathAllowed("PLAN.md", root)).toBe(true);
 			expect(isPlanWritePathAllowed("plans/auth.mdx", root)).toBe(true);
 			expect(isPlanWritePathAllowed("src/auth.ts", root)).toBe(false);
+			for (const name of ["AGENTS.md", "CLAUDE.md", "README.md", "docs/README.md"])
+				expect(isPlanWritePathAllowed(name, root)).toBe(false);
 			expect(isPlanWritePathAllowed("../PLAN.md", root)).toBe(false);
 			expect(isPlanWritePathAllowed("escape/PLAN.md", root)).toBe(false);
 			expect(isPlanWritePathAllowed("DANGLING.md", root)).toBe(false);
