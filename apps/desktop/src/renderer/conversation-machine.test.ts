@@ -1091,7 +1091,7 @@ describe("conversationMachine — queue while busy", () => {
     await waitFor(actor, (s) => s.matches(idle))
     actor.send({ type: "SEND", text: "go" })
     await waitFor(actor, (s) => s.matches("running"))
-    emit({ _tag: "ToolEnd", id: "sub-t1", agentId: "sub-1", status: "success", meta: null, diff: "diff --git a/x b/x", preview: null })
+    emit({ _tag: "ToolEnd", id: "sub-t1", agentId: "sub-1", status: "success", meta: null, diff: { added: 1, removed: 0 }, preview: null })
     await waitFor(actor, () => invalidate.mock.calls.length > 0)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["local", "diff", session.id] })
     invalidate.mockRestore()
