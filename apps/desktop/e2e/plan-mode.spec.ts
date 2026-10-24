@@ -681,6 +681,21 @@ test("plan mode blocks a write outside the plan file but lets the plan file thro
   expect(existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null).toBe(before)
 })
 
+test("toggle switches plan and build", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  const agentsPath = join(launched.repoPath, "AGENTS.md")
+  const before = existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null
+  await startPlanReview(launched, "[[plan]] [[escape]] replace auth")
+  await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
+  expect(existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null).toBe(before)
+
+  await launched.window.getByRole("tab", { name: "Build" }).click()
+  const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.fill("[[escape]] write again")
+  await composer.press("Enter")
+  await expect.poll(() => (existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null), { timeout: 30_000 }).toBe("pwned\n")
+})
+
 const savedChat = (launched: LaunchedApp) => {
   const all = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")) as ReadonlyArray<{
     readonly id: string
