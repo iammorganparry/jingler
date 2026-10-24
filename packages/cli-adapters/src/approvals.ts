@@ -64,7 +64,8 @@ const basename = (target: string | null): string => target?.split("/").pop() ?? 
 /**
  * Decide whether a requested action runs (`"allow"`) or must pause for the
  * operator (`"gate"`), from the chat's HITL mode + allowlist:
- * - `auto` and `plan` — everything runs,
+ * - `auto` — everything runs,
+ * - `plan` — nothing mutating runs (the plan file is written through the tool registry, never a gate),
  * - `accept-edits` — edits run, commands gate (unless allowlisted),
  * - `ask` — edits and commands both gate (unless a command is allowlisted).
  */
@@ -72,8 +73,9 @@ export const verdict = (
   mode: PermissionMode,
   allow: ReadonlySet<string>,
   req: PermissionRequest
-): "allow" | "gate" => {
-  if (mode === "auto" || mode === "plan") return "allow"
+): "allow" | "gate" | "deny" => {
+  if (mode === "plan") return "deny"
+  if (mode === "auto") return "allow"
   if (isAllowlisted(allow, req.command)) return "allow"
   if (req.kind === "edit") return mode === "accept-edits" ? "allow" : "gate"
   return "gate"

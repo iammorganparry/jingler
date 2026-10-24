@@ -257,8 +257,8 @@ describe("native Codex protocol", () => {
     for (const id of [null, "persisted", "missing"]) {
       const events = await collect(spec({ mode, prompt: "policy", continuation: id ? { runtimeId: "codex", endpointId, id } : null }))
       expect(events).toContainEqual({ _tag: "Assistant", text: JSON.stringify({
-        approvalPolicy: mode === "read-only" ? "never" : "on-request",
-        sandbox: mode === "read-only" ? "read-only" : "workspace-write",
+        approvalPolicy: mode !== "auto" ? "never" : "on-request",
+        sandbox: mode !== "auto" ? "read-only" : "workspace-write",
         approvalsReviewer: "user"
       }) })
     }
@@ -269,7 +269,7 @@ describe("native Codex protocol", () => {
       const result = await Effect.runPromise(makeCodexAgentRuntime({ binary }).run(spec({ mode, prompt }), {
         ...context, canUseTool
       }).pipe(Stream.runCollect))
-      const allowed = mode !== "read-only"
+      const allowed = mode === "auto"
       const response = approvalResponse(allowed, prompt)
       expect(Array.from(result)).toContainEqual({ _tag: "Assistant", text: JSON.stringify(response) })
       expect(canUseTool).toHaveBeenCalledTimes(allowed ? 1 : 0)

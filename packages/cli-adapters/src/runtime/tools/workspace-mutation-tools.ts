@@ -6,6 +6,7 @@ import { checkpointFiles } from "../../checkpoint-file-tools.js"
 import { workspaceCheckpointMode } from "../../workspace-admission.js"
 import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { worktreeEnv } from "../../worktree-env.js"
+import { assertPlanCall } from "./plan-policy.js"
 import {
   Command,
   CommandExecutor,
@@ -26,6 +27,9 @@ import {
 
 const roles = ["conversation", "plan-execution", "background"] as const
 const modes = ["ask", "accept-edits", "auto"] as const
+// Plan mode reaches only write/edit/command_execute, each self-checked via assertPlanCall.
+const planRoles = [...roles, "plan"] as const
+const planModes = [...modes, "plan"] as const
 const PathInput = Schema.String.pipe(Schema.minLength(1))
 
 interface ResolvedWorkspacePath {
@@ -233,8 +237,8 @@ const fileTool = <Input, Encoded>(
   ...definition,
   version: "1",
   risk: "mutate",
-  roles,
-  modes,
+  roles: definition.id === "workspace_write" || definition.id === "workspace_edit" ? planRoles : roles,
+  modes: definition.id === "workspace_write" || definition.id === "workspace_edit" ? planModes : modes,
   timeoutMs: 30_000,
   outputBudget: 8_000,
   cancellable: false,
@@ -260,6 +264,7 @@ export const registerWorkspaceMutationTools = (
       input: Schema.Struct({ path: PathInput, content: Schema.String }),
       execute: ({ path, content }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
+        if (context.plan) assertPlanCall("workspace_write", { path }, resolved)
         return routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.write(resolved, path, content) : Effect.runPromise(workspace.write(resolved, path, content))
       }
     })
@@ -276,6 +281,7 @@ export const registerWorkspaceMutationTools = (
       }),
       execute: ({ path, oldText, newText, replaceAll }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
+        if (context.plan) assertPlanCall("workspace_edit", { path }, resolved)
         return routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.edit(resolved, path, oldText, newText, replaceAll) : Effect.runPromise(workspace.edit(resolved, path, oldText, newText, replaceAll))
       }
     })
@@ -310,8 +316,8 @@ export const registerWorkspaceMutationTools = (
       command: Schema.String.pipe(Schema.minLength(1))
     }),
     risk: "execute",
-    roles,
-    modes,
+    roles: planRoles,
+    modes: planModes,
     // 24h before: a command blocked on stdin or a foreground dev server hung
     // the whole turn for the rest of the day.
     timeoutMs: 10 * 60 * 1_000,
@@ -320,6 +326,7 @@ export const registerWorkspaceMutationTools = (
     idempotency: "unsafe",
     execute: ({ command }, context) => {
       const resolved = context.cwd ?? cwdOf(cwd)
+      if (context.plan) assertPlanCall("command_execute", { command }, resolved)
       return Effect.runPromise(
         (routing && !workspaceCheckpointMode(routing.sessionId)
           ? routing.offload.executeIfEligible(

@@ -646,6 +646,11 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
     return callTool(SUBMIT_PLAN_TOOL, { filePath: "PLAN.md" }, `plannotator-submit-${submitCount + 1}`)
   }
+  // [[escape]]: first attempt a write outside the plan file; plan mode must block it.
+  const escaped = context.messages.some((message) => message.role === "toolResult" && message.toolCallId === "plannotator-escape")
+  if (!escaped && currentPlanMessages.some((text) => text.includes("[[escape]]"))) {
+    return callTool(WRITE_TOOL, { path: "AGENTS.md", content: "pwned\n" }, "plannotator-escape")
+  }
   const invalid = currentPlanMessages.some((text) => text.includes("[[invalid-plan]]"))
   return callTool(WRITE_TOOL, { path: "PLAN.md", content: invalid ? INVALID_REVIEW_PLAN : STRUCTURED_REVIEW_PLAN }, "plannotator-write")
 }
