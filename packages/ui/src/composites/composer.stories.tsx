@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useEffect, useRef, useState } from "react"
-import type { PermissionMode, ReasoningSetting } from "@jingler/core"
+import type { PermissionMode, ReasoningSetting, WorkMode } from "@jingler/core"
 import { Check, ImagePlus, Search, Sparkles } from "lucide-react"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { testProviderCatalog } from "../test-support.js"
@@ -27,6 +27,13 @@ const meta: Meta = {
 }
 export default meta
 type Story = StoryObj
+
+function WorkModeFixture({ initialWorkMode }: { initialWorkMode: WorkMode }) {
+  const [workMode, setWorkMode] = useState<WorkMode>(initialWorkMode)
+  return <Composer mode="auto" onSetMode={() => {}} workMode={workMode} onSetWorkMode={setWorkMode} onSend={() => {}} />
+}
+export const WorkModePlan: Story = { render: () => <WorkModeFixture initialWorkMode="plan" /> }
+export const WorkModeBuild: Story = { render: () => <WorkModeFixture initialWorkMode="build" /> }
 
 function ComposerFixture() {
   const [mode, setMode] = useState<PermissionMode>("accept-edits")

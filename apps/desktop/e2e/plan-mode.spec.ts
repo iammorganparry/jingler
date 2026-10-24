@@ -71,7 +71,6 @@ const startPlanReview = async (launched: LaunchedApp, prompt = "[[plan]] replace
   const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
   await composer.click()
   await launched.window.keyboard.press("Shift+Tab")
-  await launched.window.keyboard.press("Shift+Tab")
   await expect(launched.window.locator("[data-mode='plan']")).toContainText("Plan")
   await composer.fill(prompt)
   await composer.press("Enter")
@@ -136,7 +135,7 @@ test("projects explicit deliverable stages without treating overview headings as
   await expect(completion).toBeVisible({ timeout: 30_000 })
   // The composer is back in Auto. Asserted on its mode attribute: split beside
   // the plan, the chat pane is narrow and the mode chip drops its word label.
-  await expect(launched.window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "auto")
+  await expect(launched.window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "accept-edits")
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
 
   const planRow = transcriptCard.locator("xpath=ancestor::*[@data-index][1]")
@@ -698,7 +697,7 @@ test("approving a plan switches the chat to build and keeps its approval level",
   await expect.poll(() => savedChat(launched)?.workMode).toBe("plan")
   await approveReview(launched)
   await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("build")
-  expect(savedChat(launched)?.mode).toBe("auto") // Shift+Tab passes through auto on the way to plan
+  expect(savedChat(launched)?.mode).toBe("accept-edits") // the Plan/Build toggle leaves the approval level alone
 })
 
 test("a plan chat comes back in plan after an app restart", async ({ launchApp }) => {
@@ -720,5 +719,5 @@ test("a plan chat comes back in plan after an app restart", async ({ launchApp }
   })
   await expect(appShell(reopened.window)).toBeVisible()
   await expect(reopened.window.locator("[data-mode='plan']")).toBeVisible({ timeout: 20_000 })
-  expect(savedChat(reopened)?.mode).toBe("auto") // Shift+Tab passes through auto on the way to plan
+  expect(savedChat(reopened)?.mode).toBe("accept-edits") // the Plan/Build toggle leaves the approval level alone
 })

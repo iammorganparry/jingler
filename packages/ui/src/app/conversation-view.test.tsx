@@ -202,3 +202,24 @@ describe("ConversationView timeline rail ticks", () => {
     }
   })
 })
+
+const pressShiftTab = () => {
+  const box = screen.getByPlaceholderText(/Message/)
+  box.focus()
+  fireEvent.keyDown(box, { key: "Shift", code: "ShiftLeft", shiftKey: true })
+  fireEvent.keyDown(box, { key: "Tab", code: "Tab", shiftKey: true })
+}
+
+describe("ConversationView work mode hotkey", () => {
+  it("shift+tab cycles work mode", async () => {
+    const onSetWorkMode = vi.fn()
+    const onSetMode = vi.fn()
+    const view = render(<ConversationView mode="auto" workMode="build" messages={[]} onSetWorkMode={onSetWorkMode} onSetMode={onSetMode} />)
+    pressShiftTab()
+    await waitFor(() => expect(onSetWorkMode).toHaveBeenLastCalledWith("plan"))
+    view.rerender(<ConversationView mode="auto" workMode="plan" messages={[]} onSetWorkMode={onSetWorkMode} onSetMode={onSetMode} />)
+    pressShiftTab()
+    await waitFor(() => expect(onSetWorkMode).toHaveBeenLastCalledWith("build"))
+    expect(onSetMode).not.toHaveBeenCalled()
+  })
+})
