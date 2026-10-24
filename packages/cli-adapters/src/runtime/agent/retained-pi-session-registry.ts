@@ -121,6 +121,7 @@ export const rebindablePiSessionContext = (
 ): AgentRuntimeContext => ({
   get planning() { return holder.current.planning },
   get mcp() { return holder.current.mcp },
+  get workModeHost() { return holder.current.workModeHost },
   // A retained session registers its tools once; a stable facade keeps them on the CURRENT turn's host.
   get checkouts() {
     return holder.current.checkouts === undefined ? undefined : liveCheckoutHost(() => holder.current.checkouts!)

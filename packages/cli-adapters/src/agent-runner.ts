@@ -1,4 +1,5 @@
 import { workspaceEnvironment } from "./workspace-environment.js"
+import { MAX_WORK_MODE_SWITCHES } from "./runtime/agent/work-mode-tool.js"
 import { join } from "node:path"
 import { sharedPlanReviewPending } from "./runtime/agent/shared-planning.js"
 
@@ -400,10 +401,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     const getSessionOrNull = (sessionId: string) =>
       SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
 
-    const setWorkMode = (sessionId: string, chatId: string, workMode: WorkMode) =>
+    const setWorkMode = (sessionId: string, chatId: string, workMode: WorkMode, autoSwitch?: boolean) =>
       Effect.gen(function* () {
         yield* Ref.update(workModes, (m) => new Map(m).set(chatId, workMode))
-        yield* SessionStore.setWorkMode(sessionId, chatId, workMode).pipe(Effect.ignore)
+        yield* SessionStore.setWorkMode(sessionId, chatId, workMode, autoSwitch).pipe(Effect.ignore)
       })
 
     // Plan overrides the approval level for enforcement; the stored level stays untouched.
@@ -1091,9 +1092,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 console.error("Failed to persist execution usage", cause)
               }))
             )
+          // At most MAX_WORK_MODE_SWITCHES agent-initiated switches per turn.
+          let switches = 0
+          const workModeHost = chat.autoSwitch !== true ? {} : {
+            workModeHost: {
+              approvalIsAuto: () => Effect.runSync(Ref.get(modes)).get(chatId) === "auto" || (Effect.runSync(Ref.get(modes)).get(chatId) === undefined && (chat.mode ?? defaultModeFor()) === "auto"),
+              reserveSwitch: () => switches < MAX_WORK_MODE_SWITCHES && ++switches > 0
+            }
+          }
           const checkoutOption = yield* turnCheckoutHost(sessionId, chatId, { ...session, worktreePath }, emit)
           const adapterRun = adapter.run(chatId, spec, {
             ...checkoutOption,
+            ...workModeHost,
             emit,
             recordUsage,
             canUseTool,

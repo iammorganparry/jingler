@@ -174,13 +174,15 @@ const mutatingRisk = (risk: ToolRisk): boolean => risk === "mutate" || risk === 
 const PLAN_NETWORK_TOOLS = new Set(["web_search", "mcp_search"])
 /** Allowed in plan only after a per-call check in plan-policy.ts. */
 const PLAN_SCOPED_TOOLS = new Set(["workspace_write", "workspace_edit", "command_execute"])
+/** Jingler control tools that stay callable in plan: the agent must be able to switch modes. */
+const PLAN_CONTROL_TOOLS = new Set(["jingler_set_work_mode"])
 const isPlan = (role: AgentRole, mode: RuntimeMode): boolean => role === "plan" || mode === "plan"
 const planFlag = (input: ToolExecutionRequest): { readonly plan?: true } =>
   isPlan(input.role, input.mode) ? { plan: true } : {}
 const planAllows = (tool: AnyToolDefinition): boolean =>
   tool.origin?.kind === "plugin"
     ? tool.risk === "read"
-    : tool.risk === "read" || PLAN_NETWORK_TOOLS.has(tool.id) || PLAN_SCOPED_TOOLS.has(tool.id)
+    : tool.risk === "read" || PLAN_CONTROL_TOOLS.has(tool.id) || PLAN_NETWORK_TOOLS.has(tool.id) || PLAN_SCOPED_TOOLS.has(tool.id)
 
 const allowed = (tool: AnyToolDefinition, role: AgentRole, mode: RuntimeMode): boolean =>
   tool.roles.includes(role) &&

@@ -1097,7 +1097,9 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
-      workMode: WorkMode
+      workMode: WorkMode,
+      /** Omitted leaves the chat's Auto setting unchanged. */
+      autoSwitch: Schema.optional(Schema.Boolean)
     }
   }),
 

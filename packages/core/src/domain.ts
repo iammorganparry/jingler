@@ -403,6 +403,8 @@ export const Chat = Schema.Struct({
   mode: Schema.optional(PermissionMode),
   /** Plan/Build, persisted per chat; absent means build. */
   workMode: Schema.optional(WorkMode),
+  /** The agent may switch Plan/Build itself via `jingler_set_work_mode`; absent means off. */
+  autoSwitch: Schema.optional(Schema.Boolean),
   reasoning: Schema.optional(ReasoningSetting),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   contextTokens: Schema.optional(Schema.Number),

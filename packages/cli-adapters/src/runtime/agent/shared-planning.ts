@@ -111,6 +111,8 @@ class PlanningSession {
       .replaceAll(`\${todoList}`, () => parseChecklist(this.state.content).map((item) => `${item.step}. [${item.completed ? "x" : " "}] ${item.text}`).join("\n"))
   }
 
+  planApproved() { return this.state.phase === "executing" }
+
   attachRegistry(registry: ToolRegistry) { this.registry = registry }
 
   register(registry: ToolRegistry, context: AgentRuntimeContext) {

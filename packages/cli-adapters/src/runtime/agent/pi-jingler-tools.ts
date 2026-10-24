@@ -31,6 +31,7 @@ import { registerCodeIntelligenceTools } from "../tools/code-intelligence-tools.
 import { registerStructuralCodeTools } from "../tools/structural-code-tools.js"
 import { registerCheckoutTool, toolCwd } from "../tools/checkout-tools.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
+import { registerWorkModeTool } from "./work-mode-tool.js"
 
 const roles = ["conversation", "plan", "plan-execution", "background"] as const
 const modes = codeReadModes
@@ -98,6 +99,7 @@ export const createJinglerControlTools = (
   if (context.checkouts !== undefined) {
     registerCheckoutTool(registry, context.checkouts, context.publishEvent)
   }
+  if (context.workModeHost !== undefined) registerWorkModeTool(registry, context)
   registry.register(
     controlTool({
       id: "jingler_publish_explanation",

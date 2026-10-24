@@ -1266,6 +1266,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               updatedAt: now,
               ...propertiesWhen(source?.mode !== undefined, { mode: source?.mode }),
               ...propertiesWhen(source?.workMode !== undefined, { workMode: source?.workMode }),
+              ...propertiesWhen(source?.autoSwitch !== undefined, { autoSwitch: source?.autoSwitch }),
               ...propertiesWhen(source?.reasoning !== undefined, { reasoning: source?.reasoning }),
               ...propertiesWhen(source?.connectionId !== undefined, { connectionId: source?.connectionId }),
               ...propertiesWhen(source?.providerId !== undefined, { providerId: source?.providerId }),
@@ -1321,6 +1322,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               updatedAt: now,
               ...propertiesWhen(closed?.mode !== undefined, { mode: closed?.mode }),
               ...propertiesWhen(closed?.workMode !== undefined, { workMode: closed?.workMode }),
+              ...propertiesWhen(closed?.autoSwitch !== undefined, { autoSwitch: closed?.autoSwitch }),
               ...propertiesWhen(closed?.reasoning !== undefined, { reasoning: closed?.reasoning }),
               ...propertiesWhen(closed?.connectionId !== undefined, { connectionId: closed?.connectionId }),
               ...propertiesWhen(closed?.providerId !== undefined, { providerId: closed?.providerId }),
@@ -1389,10 +1391,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         })
 
       /** Persist one chat's Plan/Build work mode. */
-      const setWorkMode = (id: string, chatId: string, workMode: WorkMode) =>
+      const setWorkMode = (id: string, chatId: string, workMode: WorkMode, autoSwitch?: boolean) =>
         update(id, (session) => ({
           ...session,
-          chats: session.chats.map((chat) => (chat.id === chatId ? { ...chat, workMode } : chat))
+          chats: session.chats.map((chat) => (chat.id === chatId ? { ...chat, workMode, ...propertiesWhen(autoSwitch !== undefined, { autoSwitch }) } : chat))
         }))
 
       const setAgentModel = (
