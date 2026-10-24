@@ -745,3 +745,19 @@ test("a plan chat comes back in plan after an app restart", async ({ launchApp }
   await expect(reopened.window.locator("[data-mode='plan']")).toBeVisible({ timeout: 20_000 })
   expect(savedChat(reopened)?.mode).toBe("accept-edits") // the Plan/Build toggle leaves the approval level alone
 })
+
+test("agent enters plan via tool", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  const { window } = launched
+  const skipImport = window.getByRole("button", { name: "Skip import" })
+  if (await skipImport.isVisible()) await skipImport.click()
+  await window.getByRole("tab", { name: "Auto" }).click()
+  const composer = window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.click()
+  await composer.fill("[[switch-plan]] refactor auth")
+  await composer.press("Enter")
+  await expect(window.getByText("Switched to Plan — large refactor")).toBeVisible({ timeout: 30_000 })
+  await expect(window.locator("[data-mode='plan']")).toBeVisible()
+  await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("plan")
+  expect(existsSync(join(launched.repoPath, "AGENTS.md"))).toBe(false)
+})

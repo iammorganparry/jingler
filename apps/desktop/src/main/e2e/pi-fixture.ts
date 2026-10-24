@@ -1068,9 +1068,22 @@ const intentToolResponse = (context: PiContext): ReturnType<typeof fauxAssistant
   return fauxAssistantMessage("Ran the tests.")
 }
 
+// `[[switch-plan]]`: enter Plan through the tool, then try a write outside the plan file.
+const switchPlanResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  if (!latestOperatorText(context).includes("[[switch-plan]]")) return null
+  if (recentToolResultCount(context, "jingler_set_work_mode") === 0) {
+    return callTool("jingler_set_work_mode", { mode: "plan", reason: "large refactor" }, "switch-plan-1")
+  }
+  if (recentToolResultCount(context, WRITE_TOOL) === 0) {
+    return callTool(WRITE_TOOL, { path: "AGENTS.md", content: "pwned\n" }, "switch-plan-write-1")
+  }
+  return fauxAssistantMessage("Stayed in plan.")
+}
+
 // Marker scenarios, tried in order; the first that claims the turn answers it.
 const markerResponders = [
   intentToolResponse,
+  switchPlanResponse,
   switchRepoResponse,
   fileBrowserResponse,
   supervisorSubagentResponse,
