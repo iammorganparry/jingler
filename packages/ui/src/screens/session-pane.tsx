@@ -38,7 +38,8 @@ import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
 import { SessionPrsChip } from "../app/session-prs-chip.js"
 import { sessionPrRows } from "../lib/session-prs.js"
-import { HeaderLinkChips, HeaderViewButtons, type HeaderLinkChip, type HeaderViewItem } from "../app/header-view-buttons.js"
+import { SessionHeaderIdentity } from "../app/session-header-identity.js"
+import { HeaderViewButtons, type HeaderLinkChip, type HeaderViewItem } from "../app/header-view-buttons.js"
 import { ViewOverflowMenu } from "../app/view-overflow-menu.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
@@ -79,7 +80,7 @@ import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchCh
 import { AskPill } from "../components/ask-pill.js"
 import { ChatDrawer } from "../app/chat-drawer.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
-import { File, MessageSquarePlus, MessagesSquare, SquareTerminal } from "lucide-react"
+import { CircleDot, File, GitPullRequest, MessageSquarePlus, MessagesSquare, SquareTerminal } from "lucide-react"
 import { TerminalPanel, terminalTabLabel, type SessionTerminals, type TerminalTab, type UseSessionTerminals } from "../app/terminal-panel.js"
 import { DiscardCommentsDialog } from "../composites/discard-comments-dialog.js"
 import { planDraftCount, planDraftKey } from "../composites/plan-comment-drafts.js"
@@ -604,9 +605,11 @@ function SessionPaneBody(props: SessionPaneProps) {
   const mainChatId = active.chats[0]?.id
   const fallbackChatSurface: SessionSurface = { kind: "chat", id: active.activeChatId }
   const [headerViewsTarget, setHeaderViewsTarget] = useState<HTMLElement | null>(null)
+  const [headerIdentityTarget, setHeaderIdentityTarget] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
     if (typeof document === "undefined") return
     setHeaderViewsTarget(document.getElementById("session-header-views-portal"))
+    setHeaderIdentityTarget(document.getElementById("session-header-identity-portal"))
   }, [])
 
   // The layout lives in the app-wide store so the sidebar tree reads the same
@@ -1048,6 +1051,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       id: "pr",
       label: `PR #${active.prNumber}`,
       title: "Open pull request",
+      icon: GitPullRequest,
       onOpen: () => selectTab(BUILTIN_TAB.checks)
     })
   }
@@ -1063,6 +1067,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       id: "issue",
       label: linkedIssue.identifier,
       title: `Open ${linkedIssue.identifier}`,
+      icon: CircleDot,
       onOpen: () => selectTab(issueTab.id)
     })
   }
@@ -1090,22 +1095,29 @@ function SessionPaneBody(props: SessionPaneProps) {
       </>
     ) : null
   const headerViewControls =
-    issuePicker || viewButtons || linkChips.length > 0 || prRows.length > 1 ? (
+    issuePicker || viewButtons ? (
       <div className="flex items-center gap-0.5">
-        <HeaderLinkChips chips={prRows.length > 1 ? linkChips.filter((chip) => chip.id !== "pr") : linkChips} />
-        {prRows.length > 1 && (
-          <SessionPrsChip
-            rows={prRows}
-            onSelect={(row) => {
-              props.onOpenSessionPr?.(active.id, row.number)
-              selectTab(BUILTIN_TAB.checks)
-            }}
-          />
-        )}
         {issuePicker}
         {viewButtons}
       </div>
     ) : null
+  const headerIdentity = (
+    <SessionHeaderIdentity
+      title={active.title || UNTITLED_SESSION}
+      branch={active.branch}
+      chips={prRows.length > 1 ? linkChips.filter((chip) => chip.id !== "pr") : linkChips}
+    >
+      {prRows.length > 1 && (
+        <SessionPrsChip
+          rows={prRows}
+          onSelect={(row) => {
+            props.onOpenSessionPr?.(active.id, row.number)
+            selectTab(BUILTIN_TAB.checks)
+          }}
+        />
+      )}
+    </SessionHeaderIdentity>
+  )
 
   const renderGroups = (groupLayout: EditorLayout) => (
         <EditorGroups
@@ -1151,6 +1163,7 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   return (
     <>
+      {headerIdentityTarget !== null && paneFocused ? createPortal(headerIdentity, headerIdentityTarget) : null}
       {headerViewsTarget !== null && paneFocused && headerViewControls ? createPortal(headerViewControls, headerViewsTarget) : null}
       <div ref={setLaneHost} className="flex min-h-0 min-w-0 flex-1 flex-row relative">
         {(chatLane.showAskPill || drawerLane) && (
