@@ -213,3 +213,11 @@ describe("McpSettings", () => {
     await waitFor(() => expect(applyImport).toHaveBeenCalledWith("claude", ["linear"], undefined, false))
   })
 })
+
+describe("McpSettings import entry", () => {
+  it("renders the host-provided import entry on the empty state", () => {
+    render(<McpSettings {...props({ servers: [], importEntry: <div>Found 2 servers you can import</div> })} />)
+    expect(screen.getByText("Found 2 servers you can import")).toBeTruthy()
+    expect(screen.getByText("No servers configured yet.")).toBeTruthy()
+  })
+})

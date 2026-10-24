@@ -527,6 +527,20 @@ function AuthedApp({
       persistDismissed={rpc.mcpDismissImport}
     />
   );
+  const settingsImportCard = (
+    <McpImportPrompt
+      ready={!mcp.loading && mcp.parseError === null}
+      servers={mcp.servers}
+      load={mcp.importCandidates}
+      apply={mcp.applyImport}
+      probe={async () => rpc.mcpStatus()}
+      startAuthorization={mcp.startAuthorization}
+      logTail={mcp.logTail}
+      isDismissed={rpc.mcpImportDismissed}
+      persistDismissed={rpc.mcpDismissImport}
+      ignoreDismissal
+    />
+  );
   const environmentController = useEnvironments();
   const providerCatalog = useProviderCatalog(environmentController.environments);
   const agentsSettings = useAgentsSettings();
@@ -1913,7 +1927,7 @@ function AuthedApp({
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
         contextSessions={contextSessions}
-        mcp={mcp}
+        mcp={{ ...mcp, importEntry: settingsImportCard }}
         voice={voice}
         environments={environmentController.environments}
         loadEnvironmentDiscovery={rpc.environmentsDiscovery}
