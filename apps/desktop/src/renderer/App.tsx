@@ -106,7 +106,7 @@ import { issueSessionAction, issueSessionOpener, issueSessionTarget, useIssueInb
 import { ReviewTrayDock, revealSessionChanges } from "./changes-review.js";
 import { setReviewFocused, useReviewFocused } from "./review-store.js";
 import { FileBrowserExplorer, FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
-import { TerminalDockView } from "./terminal-dock-view.js";
+import { useDesktopSessionTerminals } from "./session-terminals.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
@@ -2144,9 +2144,7 @@ function AuthedApp({
             />
           );
         }}
-        renderTerminalDock={(session, visible) => (
-          <TerminalDockView session={session} visible={visible} />
-        )}
+        useSessionTerminals={useDesktopSessionTerminals}
         onFocusChat={(sessionId, chatId) => {
           const session = sessions.find((candidate) => candidate.id === sessionId);
           if (!session || session.activeChatId === chatId) return;

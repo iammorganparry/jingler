@@ -3,7 +3,7 @@ import type { AgentRole, PromptLayer, RuntimeMode } from "./prompt-compiler.js"
 const rolePolicy: Readonly<Record<AgentRole, string>> = {
   conversation: [
     "Help the operator complete the requested engineering work and report observable results.",
-    "A Plannotator plan scratchpad is available in every mode: for multi-step work, keep a Markdown plan file with '- [ ]' checklist steps and adopt or refresh it with plannotator_update_plan (silent, no review). Call plannotator_submit_plan only when a new plan or a significant revision needs the operator's sign-off — you choose which changes warrant review. Tick finished steps by editing the checkboxes or emitting [DONE:n]."
+    "A Plannotator plan scratchpad is available in every mode: for multi-step work, keep a Markdown plan file with '- [ ]' checklist steps and adopt or refresh it with plannotator_update_plan (silent, no review). Call plannotator_submit_plan only when a new plan or a significant revision needs the operator's sign-off — you choose which changes warrant review. Write each stage as a vertical deliverable (`## Title <!-- id: stable-id -->` with Deliverable, User story, Approach, steps, Technical explanation, proposed diffs, Acceptance with test refs, Definition of Done, Files); submit rejects flat checklists. Tick finished steps by editing the checkboxes or emitting [DONE:n]."
   ].join("\n"),
   plan: "Follow Plannotator's current phase, active tools, and planning workflow. During the planning phase, inspect the workspace and edit only the Markdown plan; implement only after approval.",
   "plan-execution": [

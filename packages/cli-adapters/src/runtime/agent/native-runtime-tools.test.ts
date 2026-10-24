@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { stagedPlan } from "./fixtures/staged-plan.js"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -92,7 +93,7 @@ it.runIf(process.env.JINGLER_NATIVE_CAPABILITIES_LIVE === "1").each(["codex", "o
 it.each(["claude", "codex", "opencode"] as const)("%s transports plan tools and waits for the shared UI verdict", async (runtimeId) => {
   const root = await mkdtemp(join(tmpdir(), "jingler-native-plan-"))
   try {
-    await writeFile(join(root, "plan.md"), "# Shared plan\n- [ ] Verify the harness\n")
+    await writeFile(join(root, "plan.md"), stagedPlan("Verify the harness"))
     const options: NativeRuntimeToolsOptions = { createToolRegistry: (_spec, context) => Effect.succeed(createJinglerControlTools(context)) }
     const harness = runtimeId === "claude"
       ? makeClaudeAgentRuntime({ ...options, binary: fileURLToPath(new URL("./fixtures/claude-planning.mjs", import.meta.url)) })

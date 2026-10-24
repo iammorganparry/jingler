@@ -133,7 +133,8 @@ class PlanningSession {
     const combined = AbortSignal.any([signal, this.binding.signal])
     await this.serialize(() => this.adopt(filePath, submit, combined))
     if (submit) return this.review(combined)
-    return { message: "Plan view updated without requesting approval.", checklist: parseChecklist(this.state.content) }
+    const warnings = validatePlanMarkdown(this.state.content)
+    return { message: `Plan view updated without requesting approval.${warnings.length ? ` Before submitting, fix:\n${warnings.map((w) => `- ${w}`).join("\n")}` : ""}`, checklist: parseChecklist(this.state.content) }
   }
 
   private async adopt(filePath: string, submit: boolean, signal: AbortSignal) {

@@ -212,11 +212,40 @@ describe("SessionPane editor-group regressions", () => {
       <SessionPane
         session={session({ id: "terminal-visible" })}
         renderConversation={() => <div>chat</div>}
-        renderTerminal={(_owner, visible) => <span data-testid="terminal-visible">{String(visible)}</span>}
+        useSessionTerminals={() => ({
+          tabs: [{ id: "t1", title: "zsh", status: "running" }],
+          hydrated: true,
+          create: async () => "t1",
+          close: async () => {},
+          restart: async () => "t1",
+          renderTerminal: (_id, visible) => <span data-testid="terminal-visible">{String(visible)}</span>
+        })}
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }))
     expect(screen.getAllByTestId("terminal-visible").map((node) => node.textContent)).toEqual(["true"])
+    expect(screen.getByTestId("editor-tab-terminal-t1")).toBeTruthy()
     expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
+  })
+
+  it("closing a shell tab kills that terminal", () => {
+    const close = vi.fn(async () => {})
+    render(
+      <SessionPane
+        session={session({ id: "terminal-close" })}
+        renderConversation={() => <div>chat</div>}
+        useSessionTerminals={() => ({
+          tabs: [{ id: "t1", title: "zsh", status: "running" }, { id: "t2", title: "zsh", status: "running" }],
+          hydrated: true,
+          create: async () => "t3",
+          close,
+          restart: async () => "t1",
+          renderTerminal: (id) => <span>{id}</span>
+        })}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Terminal" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close zsh 2" }))
+    expect(close).toHaveBeenCalledWith("t2")
   })
 })

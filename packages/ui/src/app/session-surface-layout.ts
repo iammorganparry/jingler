@@ -4,6 +4,7 @@ import { MAX_PANES, MIN_RATIO } from "./split-layout.js"
 export type SessionSurface =
   | { readonly kind: "chat"; readonly id: string }
   | { readonly kind: "file"; readonly id: string }
+  | { readonly kind: "terminal"; readonly id: string }
   | { readonly kind: "view"; readonly id: TabKey; readonly chatId?: string }
 
 export interface SessionSurfacePane {
@@ -47,7 +48,7 @@ export const parseSessionSurfaceKey = (value: string): SessionSurface | null => 
     const parsed = JSON.parse(value) as unknown
     if (!Array.isArray(parsed) || parsed.length !== 3) return null
     const [kind, id, chatId] = parsed
-    if ((kind !== "chat" && kind !== "file" && kind !== "view") || typeof id !== "string") {
+    if ((kind !== "chat" && kind !== "file" && kind !== "terminal" && kind !== "view") || typeof id !== "string") {
       return null
     }
     if (kind === "view") {
@@ -285,7 +286,7 @@ export const isSurface = (value: unknown): value is SessionSurface => {
   if (typeof value !== "object" || value === null) return false
   const candidate = value as { kind?: unknown; id?: unknown; chatId?: unknown }
   return (
-    (candidate.kind === "chat" || candidate.kind === "file" || candidate.kind === "view") &&
+    (candidate.kind === "chat" || candidate.kind === "file" || candidate.kind === "terminal" || candidate.kind === "view") &&
     typeof candidate.id === "string" &&
     candidate.id.length > 0 &&
     (candidate.chatId === undefined || typeof candidate.chatId === "string")

@@ -1,4 +1,5 @@
 import type { SubagentFleetNode } from "@jingler/core"
+import type { UseSessionTerminals } from "../app/terminal-panel.js"
 import type { SessionChatActions } from "../app/session-tree.js"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { matchExplorerToggleChord } from "../app/app-shortcuts.js"
@@ -247,8 +248,8 @@ export interface SessionConversationProps {
   /** The review tray beside a session's panes; null until drafts exist. */
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
-  /** Render the per-session Terminal view. */
-  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
+  /** Hook supplying the session's shells (each is an editor tab). */
+  useSessionTerminals?: UseSessionTerminals
   /** App version, shown in the sidebar footer. */
   version?: string
   /** Available packaged-app update shown in the sidebar. */
@@ -408,7 +409,7 @@ export function SessionConversation(props: SessionConversationProps) {
             headerViews={props.headerViews}
             onHeaderViewsChange={props.onHeaderViewsChange}
             renderReviewTray={props.renderReviewTray}
-            renderTerminalDock={props.renderTerminalDock}
+            useSessionTerminals={props.useSessionTerminals}
             selectTabRequest={props.selectTabRequest}
             onTabRequestHandled={props.onTabRequestHandled}
           />)

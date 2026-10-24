@@ -23,6 +23,7 @@ import {
   resizeChatLane,
   resizedPair,
   resizeSplit,
+  replaceLegacyTerminalView,
   saveEditorLayout
 } from "./editor-layout.js"
 import { SESSION_SURFACE_STORAGE_PREFIX, sessionSurfaceKey, type SessionSurface } from "./session-surface-layout.js"
@@ -340,5 +341,31 @@ describe("max groups cap", () => {
     const target = groupsOf(layout.root)[1]!
     const dropped = dropTab(layout, { surface: file("d.ts") }, target.id, "center")
     expect(shape(dropped)[1]).toContain("file:d.ts")
+  })
+})
+
+describe("terminal surfaces", () => {
+  const chat: SessionSurface = { kind: "chat", id: "c" }
+  const shell = (id: string): SessionSurface => ({ kind: "terminal", id })
+
+  it("opens, focuses and closes a shell tab", () => {
+    let layout = openTab(createEditorLayout([chat]), shell("t1"))
+    layout = openTab(layout, shell("t2"))
+    expect(allTabs(layout).map(sessionSurfaceKey)).toContain(sessionSurfaceKey(shell("t2")))
+    layout = closeSurfaceEverywhere(layout, shell("t1"))
+    expect(allTabs(layout).filter((tab) => tab.kind === "terminal")).toEqual([shell("t2")])
+  })
+
+  it("migrates a persisted Terminal view tab into the live shells", () => {
+    const legacy = openTab(createEditorLayout([chat]), { kind: "view", id: "terminal" })
+    const migrated = replaceLegacyTerminalView(legacy, [shell("t1"), shell("t2")])
+    expect(allTabs(migrated).filter((tab) => tab.kind === "view")).toEqual([])
+    expect(allTabs(migrated).filter((tab) => tab.kind === "terminal")).toEqual([shell("t1"), shell("t2")])
+    expect(replaceLegacyTerminalView(migrated, [shell("t3")])).toBe(migrated)
+  })
+
+  it("round-trips a shell tab through storage", () => {
+    saveEditorLayout("s", openTab(createEditorLayout([chat]), shell("t1")))
+    expect(allTabs(loadEditorLayout("s", chat)).some((tab) => tab.kind === "terminal")).toBe(true)
   })
 })

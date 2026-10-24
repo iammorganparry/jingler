@@ -2,8 +2,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { PanelBottom, PanelRight, Plus, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Button } from "../components/button.js"
-import { EmptyState } from "../components/feedback.js"
-import { StatusDot } from "../components/status-dot.js"
+import type { Session } from "@jingler/core"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { clampDockWidth, effectiveDock } from "./dock-fit.js"
 import { useResizableWidth } from "../components/resizable.js"
@@ -360,164 +359,80 @@ function DockResizeEdge({
 }
 
 // ── TerminalPanel ─────────────────────────────────────────────────────────────
-// The Terminal view's content: a tab strip, the live shells, and a footer. It
-// fills the whole view; the editor tab already sizes it.
+// One shell's editor-tab body: the live cell, an exited/Restart bar and a
+// footer. The editor tab bar owns tab chrome; the panel only fills its tab.
 
 export interface TerminalPanelProps {
-  /** The workspace the shells belong to. Remount (`key`) when it changes. */
-  sessionId: string
-  /** When false the panel is CSS-hidden (its shells stay mounted — no respawn). */
-  visible?: boolean
-  tabs: ReadonlyArray<TerminalTab>
-  activeId: string | null
-  onSelect: (id: string) => void
-  onNew: () => void
-  onClose: (id: string) => void
+  readonly tab: TerminalTab
   /** Replace an exited shell with a fresh one. */
-  onRestart: (id: string) => void
+  readonly onRestart: (id: string) => void
   /** Working directory shown in the footer (the session's worktree). */
-  cwdLabel?: string
-  /** Exit code of the most recently exited shell (null → nothing exited yet). */
-  lastExit?: number | null
+  readonly cwdLabel?: string
   /** Render the live terminal cell for a tab id (the desktop app's XtermView). */
-  renderTerminal: (id: string) => ReactNode
+  readonly renderTerminal: (id: string) => ReactNode
 }
 
-/** Terminal view: tabbed shells filling the view, with empty and exited states. */
-export function TerminalPanel(props: TerminalPanelProps) {
+/** A session's shells, supplied by the host; every shell is an editor tab of kind `terminal`. */
+export interface SessionTerminals {
+  readonly tabs: ReadonlyArray<TerminalTab>
+  /** True once the session's existing shells have been listed. */
+  readonly hydrated: boolean
+  /** Spawns a shell; resolves its id, or null when the spawn failed. */
+  readonly create: () => Promise<string | null>
+  /** Kills a shell. */
+  readonly close: (id: string) => Promise<void>
+  /** Spawns a replacement and kills the old shell; resolves the new id. */
+  readonly restart: (id: string) => Promise<string | null>
+  /** Working directory shown in each shell's footer. */
+  readonly cwdLabel?: string
+  readonly renderTerminal: (id: string, visible: boolean) => ReactNode
+}
+
+/** A React hook, called once per session pane render, returning that session's shells. */
+export type UseSessionTerminals = (session: Session) => SessionTerminals
+
+/** "zsh", then "zsh 2" for a second shell with the same base name. */
+export const terminalTabLabel = (tabs: ReadonlyArray<TerminalTab>, id: string): string => {
+  const tab = tabs.find((candidate) => candidate.id === id)
+  if (!tab) return "Terminal"
+  const nth = tabs.filter((candidate) => candidate.title === tab.title).findIndex((candidate) => candidate.id === id) + 1
+  return nth > 1 ? `${tab.title} ${nth}` : tab.title
+}
+
+export function TerminalPanel({ tab, onRestart, cwdLabel, renderTerminal }: TerminalPanelProps) {
+  const exited = tab.status === "exited"
+  const lastExit = exited ? tab.exitCode : null
   return (
     <section
       data-testid="terminal-panel"
       aria-label="Terminal"
-      className={cn("flex min-h-0 min-w-0 flex-1 flex-col bg-sunken", props.visible === false && "hidden")}
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-sunken"
     >
-      <TerminalTabStrip {...props} />
-      <TerminalBody {...props} />
-      <TerminalFooter cwdLabel={props.cwdLabel} lastExit={props.lastExit} />
-    </section>
-  )
-}
-
-const dotTone = (tab: TerminalTab): string => {
-  if (tab.status === "running") return "bg-text-bright"
-  if (tab.status === "exited") return tab.exitCode ? "bg-state-failed" : "bg-line-strong"
-  return "bg-dim"
-}
-
-function TerminalTabStrip({
-  tabs,
-  activeId,
-  onSelect,
-  onNew,
-  onClose
-}: Pick<TerminalPanelProps, "tabs" | "activeId" | "onSelect" | "onNew" | "onClose">) {
-  return (
-    <div className="flex h-9 flex-none items-stretch border-b border-hairline bg-panel">
-      <div role="tablist" aria-label="Terminals" className="flex min-w-0 items-stretch overflow-x-auto">
-        {tabs.map((tab) => (
+      <div className="relative min-h-0 flex-1 bg-sunken">
+        {exited && (
           <div
-            key={tab.id}
-            className={cn(
-              "group flex flex-none items-center border-r border-hairline",
-              tab.id === activeId
-                ? "border-b-2 border-b-text-bright bg-sunken text-text-bright"
-                : "text-muted-foreground opacity-70 hover:opacity-100"
-            )}
+            data-testid="terminal-exited"
+            className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-hairline bg-panel px-3 py-1.5 text-[12px] text-muted-foreground"
           >
-            <Button
-              role="tab"
-              aria-selected={tab.id === activeId}
-              variant="ghost"
-              size="sm"
-              onClick={() => onSelect(tab.id)}
-              className="h-full gap-2 rounded-none px-3 font-mono text-[11.5px]"
-            >
-              <StatusDot tone={dotTone(tab)} size={6} />
-              <span className="max-w-[140px] truncate">{tab.title}</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Close ${tab.title}`}
-              onClick={() => onClose(tab.id)}
-              className="mr-1 size-5 flex-none opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-            >
-              <X className="size-3" />
+            <span className="min-w-0 flex-1 truncate">
+              Shell exited{tab.exitCode != null ? ` with code ${tab.exitCode}` : ""}
+            </span>
+            <Button variant="secondary" size="sm" onClick={() => onRestart(tab.id)}>
+              Restart
             </Button>
           </div>
-        ))}
+        )}
+        <div className="absolute inset-0">{renderTerminal(tab.id)}</div>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="New terminal"
-        onClick={onNew}
-        className="h-full w-9 flex-none rounded-none"
-      >
-        <Plus className="size-3.5" />
-      </Button>
-    </div>
-  )
-}
-
-function TerminalBody({
-  tabs,
-  activeId,
-  onNew,
-  onRestart,
-  renderTerminal
-}: Pick<TerminalPanelProps, "tabs" | "activeId" | "onNew" | "onRestart" | "renderTerminal">) {
-  if (tabs.length === 0) {
-    return (
-      <div data-testid="terminal-empty" className="flex min-h-0 flex-1 items-center justify-center">
-        <EmptyState
-          title="No terminals"
-          description="Start a shell in this workspace's worktree."
-          action={
-            <Button variant="secondary" size="sm" onClick={onNew}>
-              <Plus className="size-3.5" /> New terminal
-            </Button>
-          }
-        />
-      </div>
-    )
-  }
-  const exited = tabs.find((tab) => tab.id === activeId && tab.status === "exited")
-  // Every shell stays mounted; only the active one is shown.
-  return (
-    <div className="relative min-h-0 flex-1 bg-sunken">
-      {exited && (
-        <div
-          data-testid="terminal-exited"
-          className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-hairline bg-panel px-3 py-1.5 text-[12px] text-muted-foreground"
-        >
-          <span className="min-w-0 flex-1 truncate">
-            Shell exited{exited.exitCode != null ? ` with code ${exited.exitCode}` : ""}
+      <div className="flex h-7 flex-none items-center gap-2.5 border-t border-hairline bg-panel px-3 font-mono text-[10.5px] text-dim">
+        {cwdLabel && <span className="min-w-0 truncate text-muted-foreground">{cwdLabel}</span>}
+        {cwdLabel && lastExit != null && <span className="flex-none text-line">·</span>}
+        {lastExit != null && (
+          <span className="flex-none">
+            last exit <span className={lastExit === 0 ? "text-text-bright" : "text-state-failed"}>{lastExit}</span>
           </span>
-          <Button variant="secondary" size="sm" onClick={() => onRestart(exited.id)}>
-            Restart
-          </Button>
-        </div>
-      )}
-      {tabs.map((tab) => (
-        <div key={tab.id} className={cn("absolute inset-0", tab.id === activeId ? "block" : "hidden")}>
-          {renderTerminal(tab.id)}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function TerminalFooter({ cwdLabel, lastExit }: Pick<TerminalPanelProps, "cwdLabel" | "lastExit">) {
-  return (
-    <div className="flex h-7 flex-none items-center gap-2.5 border-t border-hairline bg-panel px-3 font-mono text-[10.5px] text-dim">
-      {cwdLabel && <span className="min-w-0 truncate text-muted-foreground">{cwdLabel}</span>}
-      {cwdLabel && lastExit != null && <span className="flex-none text-line">·</span>}
-      {lastExit != null && (
-        <span className="flex-none">
-          last exit <span className={lastExit === 0 ? "text-text-bright" : "text-state-failed"}>{lastExit}</span>
-        </span>
-      )}
-    </div>
+        )}
+      </div>
+    </section>
   )
 }

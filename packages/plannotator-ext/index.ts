@@ -1029,6 +1029,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 			persistState();
 
 			const completed = checklistItems.filter((item) => item.completed).length;
+			const warnings = validatePlanMarkdown(planContent);
+			const warningText = warnings.length > 0
+				? ` Before submitting, fix:\n${warnings.map((w) => `- ${w}`).join("\n")}\n`
+				: "";
 			const summary = checklistItems.length > 0
 				? `Plan updated from ${inputPath}: ${completed}/${checklistItems.length} checklist steps complete.`
 				: `Plan updated from ${inputPath} (no checklist steps found — use "- [ ]" checkboxes to track progress).`;
@@ -1036,7 +1040,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				content: [
 					{
 						type: "text",
-						text: `${summary} The operator sees this plan live; call ${PLAN_SUBMIT_TOOL} when a change needs their review.`,
+						text: `${summary}${warningText} The operator sees this plan live; call ${PLAN_SUBMIT_TOOL} when a change needs their review.`,
 					},
 				],
 				details: { updated: true, steps: checklistItems.length, completed },
