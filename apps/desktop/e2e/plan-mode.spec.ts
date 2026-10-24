@@ -761,3 +761,19 @@ test("agent enters plan via tool", async ({ launchApp }) => {
   await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("plan")
   expect(existsSync(join(launched.repoPath, "AGENTS.md"))).toBe(false)
 })
+
+test("agent cannot leave plan without an approved plan", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  const { window } = launched
+  const skipImport = window.getByRole("button", { name: "Skip import" })
+  if (await skipImport.isVisible()) await skipImport.click()
+  await window.getByRole("tab", { name: "Auto" }).click()
+  const composer = window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.click()
+  await composer.fill("[[switch-build]] start coding")
+  await composer.press("Enter")
+  await expect(window.getByRole("button", { name: "Work mode Switched to Build — start coding" })).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByText("Cannot switch to build", { exact: false })).toBeVisible()
+  await expect(window.locator("[data-mode='plan']")).toBeVisible()
+  await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("plan")
+})
