@@ -11,46 +11,9 @@ import { executeRegistryTool } from "./registry-tool-bridge.js"
 import { makeSharedPlanningRuntime, sharedPlanReviewPending } from "./shared-planning.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import { childExecutionProfile } from "../subagents/subagent-capability-broker.js"
+import { stagedPlan } from "./fixtures/staged-plan.js"
 
-const staged = (...tasks: string[]) => `## Proposed flow
-\`\`\`mermaid
-flowchart LR
-  a --> b
-\`\`\`
-
-## Work <!-- id: work -->
-
-### Deliverable
-Work is done.
-
-### User story
-**As a** user
-**I want** the work
-**So that** I benefit
-
-### Approach
-- Do it.
-
-${tasks.map((t) => `- [ ] ${t}`).join("\n")}
-
-### Technical explanation
-Plain.
-
-### Acceptance
-- [ ] second (test: a.test.ts::works)
-
-### Definition of Done
-- Tests pass
-
-### Files
-- \`a.ts\` — M
-
-> complexity: low
-
-## Test strategy
-Unit.
-`
-const PLAN = staged("first $&")
+const PLAN = stagedPlan("first $&")
 const FLAT = "# Work\n- [ ] first\n- [ ] second\n"
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
@@ -180,7 +143,7 @@ describe("shared harness planning", () => {
     const runtime = f.wrap(async function* (registry, spec, context) {
       await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
       await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
-      await writeFile(join(f.root, "plan.md"), staged("first revised"))
+      await writeFile(join(f.root, "plan.md"), stagedPlan("first revised"))
       await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
       yield done
     })
@@ -196,7 +159,7 @@ describe("shared harness planning", () => {
     // Unchanged resubmission: nothing to compare against.
     expect((await decide(false))?.previousPlanContent).toBeUndefined()
     const revised = await decide(true)
-    expect(revised?.planContent).toBe(staged("first revised"))
+    expect(revised?.planContent).toBe(stagedPlan("first revised"))
     expect(revised?.previousPlanContent).toBe(PLAN)
     await running
   })
