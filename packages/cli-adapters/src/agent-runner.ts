@@ -406,6 +406,24 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* SessionStore.setWorkMode(sessionId, chatId, workMode).pipe(Effect.ignore)
       })
 
+    // Plan overrides the approval level for enforcement; the stored level stays untouched.
+    const turnModes = (chatId: string, stored: { readonly workMode?: WorkMode; readonly mode?: PermissionMode }) =>
+      Effect.gen(function* () {
+        const workMode = (yield* Ref.get(workModes)).get(chatId) ?? stored.workMode ?? "build"
+        const approval = (yield* Ref.get(modes)).get(chatId) ?? stored.mode ?? defaultModeFor()
+        return { workMode, sessionMode: (workMode === "plan" ? "plan" : approval) as PermissionMode }
+      })
+
+    // Re-read per tool call so an in-run switch (plan approval) applies this turn.
+    const liveModeFor = (chatId: string, workMode: WorkMode, mode: PermissionMode) =>
+      Effect.gen(function* () {
+        if (((yield* Ref.get(workModes)).get(chatId) ?? workMode) === "plan") return "plan" as const
+        return (yield* Ref.get(modes)).get(chatId) ?? (mode === "plan" ? defaultModeFor() : mode)
+      })
+
+    const followWorkMode = (sessionId: string, chatId: string, event: StreamEvent) =>
+      event._tag === "WorkModeChanged" ? setWorkMode(sessionId, chatId, event.workMode) : Effect.void
+
     // Legacy composer entry point: "plan" maps to the plan work mode; any other
     // value is an approval level and leaves plan, as the old mode switch did.
     const setMode = (
@@ -562,13 +580,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const { session, chat, connectionId, modelId } = yield* resolveTurnChat(sessionId, chatId)
           yield* TranscriptStore.adoptLegacy(sessionId, chatId)
 
-          // Plan/Build is its own persisted setting; plan overrides the approval
-          // level for enforcement while the stored approval level stays untouched.
-          const workMode = (yield* Ref.get(workModes)).get(chatId) ?? chat.workMode ?? "build"
-          const sessionMode: PermissionMode =
-            workMode === "plan"
-              ? "plan"
-              : (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor()
+          const { workMode, sessionMode } = yield* turnModes(chatId, chat)
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
@@ -836,7 +848,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // and `error`. The first terminal owns the turn; folding the
               // second printed the same context-overflow message twice.
               if (!(yield* claimTurnTerminal(event, sawTerminal, turnSettled))) return
-              if (event._tag === "WorkModeChanged") yield* setWorkMode(sessionId, chatId, event.workMode)
+              yield* followWorkMode(sessionId, chatId, event)
                   // Tracked before the early returns below, so background-task and
                   // sub-agent events still count toward "what did this run actually
                   // emit" — a run that produced only sub-agent chatter and then
@@ -897,10 +909,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           const canUseTool = (req: PermissionRequest): Effect.Effect<PermissionDecision> =>
             Effect.gen(function* () {
-              // Re-read the live mode each call so an in-run change (e.g. a plan
-              // approval restoring the exec mode) takes effect on this same turn.
-              const liveWork = (yield* Ref.get(workModes)).get(chatId) ?? workMode
-              const liveMode = liveWork === "plan" ? "plan" : (yield* Ref.get(modes)).get(chatId) ?? (mode === "plan" ? defaultModeFor() : mode)
+              const liveMode = yield* liveModeFor(chatId, workMode, mode)
               const decision = verdict(liveMode, allow, req)
               if (decision === "allow") return "allow" as const
               if (decision === "deny") return "deny" as const

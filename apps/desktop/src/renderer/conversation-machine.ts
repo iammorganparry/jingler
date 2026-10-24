@@ -1037,6 +1037,12 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
   }
 }
 
+// The server switched Plan -> Build (plan approval); land on the approval level the chat kept.
+const followWorkModeChange = (
+  context: { readonly mode: PermissionMode; readonly executionMode: PermissionMode },
+  workMode: "plan" | "build"
+) => (workMode === "build" && context.mode === "plan" ? { mode: context.executionMode } : {})
+
 export const conversationMachine = setup({
   types: {
     context: {} as ConversationContext,
@@ -1639,9 +1645,7 @@ export const conversationMachine = setup({
       }
       // The server switched Plan -> Build (plan approval); follow it locally
       // without echoing an RPC, landing on the approval level the chat kept.
-      if (e._tag === "WorkModeChanged") {
-        return e.workMode === "build" && context.mode === "plan" ? { mode: context.executionMode } : {}
-      }
+      if (e._tag === "WorkModeChanged") return followWorkModeChange(context, e.workMode)
       if (e._tag === "PlanProposed") {
         return {
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),
