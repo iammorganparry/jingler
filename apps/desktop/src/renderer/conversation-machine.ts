@@ -1025,7 +1025,7 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
   const chat = initialConversationChat(input)
   return {
     session: input.session, chatId: chat.id, messages: [], sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] }, remotePublishProgress: null,
-    mode: chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
+    mode: chat.workMode === "plan" ? "plan" : chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
     skills: [], files: [], runtimeId: chat.runtimeId ?? input.session.runtimeId ?? null, endpointId: chat.endpointId ?? input.session.endpointId ?? null,
     connectionId: chat.connectionId ?? input.session.connectionId ?? null, providerId: chat.providerId ?? input.session.providerId ?? null,
     modelId: chat.modelId ?? input.session.modelId ?? null, modelPending: false, diffStat: { added: 0, removed: 0, files: 0 }, patchAt: 0,
