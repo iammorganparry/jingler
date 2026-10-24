@@ -20,10 +20,14 @@
     "**/.turbo/**",
     "**/.next/**",
     "**/coverage/**",
-    "**/storybook-static/**"
+    "**/storybook-static/**",
+    "**/.dagger/**"
   ],
   "jsPlugins": [
-    { "name": "anti-slop", "specifier": "./tools/oxlint/anti-slop/index.ts" }
+    {
+      "name": "anti-slop",
+      "specifier": "./tools/oxlint/anti-slop/index.ts"
+    }
   ],
   "categories": {
     "correctness": "off"
@@ -44,6 +48,9 @@
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
-    "complexity": ["error", 20]
+    "complexity": [
+      "error",
+      20
+    ]
   }
 }

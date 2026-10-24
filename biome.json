@@ -49,6 +49,7 @@
       "!**/out",
       "!**/dist",
       "!**/.turbo",
+      "!**/.dagger",
       "!**/storybook-static",
       "!tools/oxlint/anti-slop",
       "!packages/plannotator-ext"
