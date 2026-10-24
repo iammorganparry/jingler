@@ -836,6 +836,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // and `error`. The first terminal owns the turn; folding the
               // second printed the same context-overflow message twice.
               if (!(yield* claimTurnTerminal(event, sawTerminal, turnSettled))) return
+              if (event._tag === "WorkModeChanged") yield* setWorkMode(sessionId, chatId, event.workMode)
                   // Tracked before the early returns below, so background-task and
                   // sub-agent events still count toward "what did this run actually
                   // emit" — a run that produced only sub-agent chatter and then
@@ -1588,6 +1589,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       decideGate,
       answerQuestion,
       setMode,
+      setWorkMode,
       setModel,
       steer,
       stop,

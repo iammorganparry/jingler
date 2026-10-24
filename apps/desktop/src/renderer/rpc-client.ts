@@ -62,6 +62,7 @@ import type {
   ProjectRunCommand,
   WorkspaceRunState,
   PermissionMode,
+  WorkMode,
   PlanDocument,
   PlanTemplateConfig,
   PrFileChange,
@@ -816,6 +817,11 @@ export const rpc = {
     chatId: string,
     mode: PermissionMode
   ): Promise<void> => run((c) => c.Agent.setMode({ sessionId, chatId, mode })),
+  agentSetWorkMode: (
+    sessionId: string,
+    chatId: string,
+    workMode: WorkMode
+  ): Promise<void> => run((c) => c.Agent.setWorkMode({ sessionId, chatId, workMode })),
   agentSetReasoning: (
     sessionId: string,
     chatId: string,
