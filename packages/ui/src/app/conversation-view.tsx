@@ -15,6 +15,7 @@ import type {
   McpRemoteAuth,
   McpServer,
   PermissionMode,
+  WorkMode,
   PlanDocument,
   ProviderCatalog,
   ProviderConnectionId,
@@ -195,9 +196,6 @@ const useTurnHotkeys = (items: ReadonlyArray<PreviewRailItem>, activeId: string 
     [activeId, items, onSelect]
   )
 
-/** Shift+Tab cycles Jingler's provider-neutral permission modes. */
-const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
-const MODE_CYCLE_WITH_PLAN: ReadonlyArray<PermissionMode> = [...MODE_CYCLE, "plan"]
 const PLANNOTATOR_PLAN_TOOLS = new Set(["plannotator_submit_plan", "plannotator_update_plan"])
 const isPlannotatorPlanTool = (part: Message["parts"][number]): boolean =>
   part._tag === "Tool" &&
@@ -335,6 +333,8 @@ export interface ConversationViewProps {
   onFilterChanges?: () => void
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onSetMode?: (mode: PermissionMode) => void
+  workMode?: WorkMode
+  onSetWorkMode?: (workMode: WorkMode) => void
   onSwitchToAuto?: () => void
   reasoningEffort?: ReasoningEffort
   thinkingEnabled?: boolean
@@ -403,7 +403,7 @@ const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: Con
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, waitingIds, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, waitingIds, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, workMode, onSetWorkMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     checkpointCount: 0,
     loadingHistory: false,
@@ -600,7 +600,8 @@ function renderSessionAnalytics() {
                 reasoningEffort={reasoningEffort}
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}
-                allowPlan
+                workMode={workMode}
+                onSetWorkMode={onSetWorkMode}
                 contextMeter={getContextMeter()}
                 onSend={onSend}
                 onStop={onStop}
@@ -647,23 +648,18 @@ function renderSessionAnalytics() {
     planAnchorIndex >= 0 &&
     planDocument.plan.sections.length + planDocument.plan.stages.length > 0
 
-  // Shift+Tab cycles the HITL mode (works while typing in the composer). Plan
-  // is part of the same Jingler-owned contract for every certified model.
+  // Shift+Tab flips Plan/Build (works while typing in the composer); approval has its own dropdown.
   //
   // Scoped to THIS pane via the ref `useHotkeys` returns (attached to the root
   // below), so it only fires while focus is inside this view. A split view
   // mounts one ConversationView per pane, and an unscoped document-level binding
   // fires in EVERY mounted pane at once — so a single Shift+Tab cycled every
   // composer's mode, not just the focused one's.
-  const cycle = MODE_CYCLE_WITH_PLAN
   const modeHotkeyRef = useHotkeys<HTMLDivElement>(
     "shift+tab",
-    () => {
-      const i = cycle.indexOf(mode)
-      onSetMode?.(cycle[(i + 1) % cycle.length]!)
-    },
+    () => onSetWorkMode?.(workMode === "plan" ? "build" : "plan"),
     { enableOnFormTags: true, preventDefault: true },
-    [mode, onSetMode, cycle]
+    [workMode, onSetWorkMode]
   )
 
   // Escape halts a running agent. Deliberately NOT `enableOnFormTags` (unlike
