@@ -306,3 +306,25 @@ it("offers checkpoints only on conversation surfaces and hands off the surviving
   rendered.rerender(<EditorGroups {...props(() => null)} layout={{ focusedGroupId: "right", root: { type: "group", id: "right", tabs: [source], active: sessionSurfaceKey(source) } }} onOpenCheckpoints={onOpenCheckpoints} />)
   expect(screen.queryByRole("button", { name: "More conversation actions" })).toBeNull()
 })
+
+describe("EditorGroups breadcrumbs", () => {
+  it("shows path crumbs for file tabs and none for chat tabs", () => {
+    const describeWithCrumbs = (surface: SessionSurface) => ({
+      label: surface.id,
+      ...(surface.kind === "file" ? { crumbs: surface.id.split("/") } : {})
+    })
+    const body = () => null
+    const chatOnly: EditorLayout = {
+      focusedGroupId: "g",
+      root: { type: "group", id: "g", tabs: [a], active: sessionSurfaceKey(a) }
+    }
+    const view = render(<EditorGroups {...props(body)} describe={describeWithCrumbs} layout={chatOnly} />)
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull()
+    const fileOnly: EditorLayout = {
+      focusedGroupId: "g",
+      root: { type: "group", id: "g", tabs: [source], active: sessionSurfaceKey(source) }
+    }
+    view.rerender(<EditorGroups {...props(body)} describe={describeWithCrumbs} layout={fileOnly} />)
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" }).textContent).toContain("a.ts")
+  })
+})

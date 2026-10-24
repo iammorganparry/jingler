@@ -310,7 +310,7 @@ describe("plugin tab contributions", () => {
   it("opens the PR view from the header PR chip without duplicating the tab", () => {
     render(
       <>
-        <div id="session-header-views-portal" />
+        <div id="session-header-identity-portal" />
         <SessionPane
           session={session({ id: "chip-pr", prNumber: 482 })}
           renderConversation={() => <div>transcript</div>}
@@ -318,7 +318,7 @@ describe("plugin tab contributions", () => {
         />
       </>
     )
-    const chip = within(document.getElementById("session-header-views-portal")!).getByTestId("header-link-pr")
+    const chip = within(document.getElementById("session-header-identity-portal")!).getByTestId("header-link-pr")
     expect(chip.textContent).toBe("PR #482")
     fireEvent.click(chip)
     fireEvent.click(chip)
@@ -328,7 +328,7 @@ describe("plugin tab contributions", () => {
   it("opens the linked issue view from the header issue chip", () => {
     render(
       <>
-        <div id="session-header-views-portal" />
+        <div id="session-header-identity-portal" />
         <SessionPane
           session={session({
             id: "chip-issue",
@@ -340,7 +340,7 @@ describe("plugin tab contributions", () => {
         />
       </>
     )
-    const chip = within(document.getElementById("session-header-views-portal")!).getByTestId("header-link-issue")
+    const chip = within(document.getElementById("session-header-identity-portal")!).getByTestId("header-link-issue")
     expect(chip.textContent).toBe("LIN-482")
     fireEvent.click(chip)
     expect(screen.getByText("linear.issue body")).toBeTruthy()

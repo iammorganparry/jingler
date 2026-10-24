@@ -488,12 +488,13 @@ const EditorGroup = memo(function EditorGroup({
               const chat = chatTabs.find((c) => c.id === id)
               if (chat) api.onClose(group.id, chat)
             }}
+            onCreateChat={api.onCreateChat ? () => api.onCreateChat?.(api.sessionId) : undefined}
             followAgent={api.followAgent}
             onToggleFollowAgent={api.onToggleFollowAgent}
             subagentSlot={api.renderSubagentChip?.((active as Extract<SessionSurface, { kind: "chat" }>).id)}
             subagentView={resolveSubagentView((active as Extract<SessionSurface, { kind: "chat" }>).id)}
           />
-          <Launcher api={api} onCreateChat={api.onCreateChat ? () => api.onCreateChat?.(api.sessionId) : undefined} />
+          <Launcher api={api} />
           {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
           {/* Hidden draggable elements for all chats to enable drag-to-split and programmatic close */}
           {chatTabs.map((chat) => (
@@ -686,10 +687,10 @@ const TabContent = memo(function TabContent({
   return <WidthTierProvider className="flex-col">{api.renderBody(surface, { focused, visible })}</WidthTierProvider>
 })
 
-/** The group's single + menu: New chat (chat lanes only), then the view launcher items. */
-function Launcher({ api, onCreateChat }: { api: Api; onCreateChat?: () => void }) {
+/** The group's + menu: the view launcher items. */
+function Launcher({ api }: { api: Api }) {
   const items = api.launcherItems ?? []
-  if (items.length === 0 && !onCreateChat) return null
+  if (items.length === 0) return null
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -704,13 +705,6 @@ function Launcher({ api, onCreateChat }: { api: Api; onCreateChat?: () => void }
           collisionPadding={8}
           className="z-50 flex min-w-[220px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
         >
-          {onCreateChat && (
-            <DropdownMenu.Item onSelect={onCreateChat} data-testid="new-chat-button" className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright">
-              <MessageSquarePlus className="size-3.5 flex-none text-dim" />
-              <span className="min-w-0 flex-1 truncate">New chat</span>
-            </DropdownMenu.Item>
-          )}
-          {onCreateChat && items.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-hairline" />}
           {items.map((item) => (
             <DropdownMenu.Item
               key={item.id}

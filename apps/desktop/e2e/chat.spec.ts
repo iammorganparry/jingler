@@ -475,7 +475,7 @@ test("renaming a session keeps the open tab and the breadcrumb follows it", asyn
   const input = row.getByRole("textbox")
   await input.fill("Renamed from sidebar")
   await input.press("Enter")
-  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Renamed from sidebar")
+  await expect(window.getByTestId("session-header-identity")).toContainText("Renamed from sidebar")
   await expect(fileTab.getByRole("tab")).toHaveAttribute("aria-selected", "true")
 
   // Tabs live in the editor group, not the window title bar.

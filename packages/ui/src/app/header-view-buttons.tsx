@@ -58,6 +58,7 @@ export interface HeaderLinkChip {
   readonly id: string
   readonly label: string
   readonly title: string
+  readonly icon?: LucideIcon
   readonly onOpen: () => void
 }
 
@@ -68,12 +69,13 @@ export function HeaderLinkChips({ chips }: { readonly chips: ReadonlyArray<Heade
       {chips.map((chip) => (
         <Tooltip key={chip.id} label={chip.title} side="bottom">
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             data-testid={`header-link-${chip.id}`}
             onClick={chip.onOpen}
-            className="h-7 px-2 font-mono text-[11px]"
+            className="h-6 px-2 font-mono text-[11px] text-muted-foreground"
           >
+            {chip.icon ? <chip.icon size={14} aria-hidden /> : null}
             {chip.label}
           </Button>
         </Tooltip>
