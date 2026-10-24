@@ -59,6 +59,7 @@ import {
   focusedGroup,
   groupsOf,
   loadEditorLayout,
+  replaceLegacyTerminalView,
   openTab,
   pruneEditorLayout,
   resizeSplit,
@@ -78,7 +79,8 @@ import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchCh
 import { AskPill } from "../components/ask-pill.js"
 import { ChatDrawer } from "../app/chat-drawer.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
-import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
+import { File, MessageSquarePlus, MessagesSquare, SquareTerminal } from "lucide-react"
+import { TerminalPanel, terminalTabLabel, type SessionTerminals, type TerminalTab, type UseSessionTerminals } from "../app/terminal-panel.js"
 import { DiscardCommentsDialog } from "../composites/discard-comments-dialog.js"
 import { planDraftCount, planDraftKey } from "../composites/plan-comment-drafts.js"
 import { LinkedIssueSelector, type LinkedIssueSelectorItem } from "../composites/linked-issue-selector.js"
@@ -176,8 +178,8 @@ export interface SessionPaneProps {
   ) => ReactNode
   /** Render this session's embedded browser inside its pane. */
   renderBrowser?: (session: Session, visible: boolean) => ReactNode
-  /** Render the session terminal as a normal closable/splittable view. */
-  renderTerminal?: (session: Session, visible: boolean) => ReactNode
+  /** Hook supplying the session's shells; each one is its own editor tab. */
+  useSessionTerminals?: UseSessionTerminals
   /**
    * List a path among the session's open files WITHOUT selecting it. A file
    * pane owns its own document; selecting its path in the shared actor would
@@ -335,6 +337,7 @@ function resolveVisibleTab(tabs: ReadonlyArray<TabContribution>, tab: TabKey): T
 }
 
 const noop = () => {}
+const NO_SHELLS: ReadonlyArray<TerminalTab> = []
 
 const discardUntouchedChat = (
   surface: SessionSurface,
@@ -343,6 +346,10 @@ const discardUntouchedChat = (
   discard: SessionPaneProps["onCloseUntouchedChat"]
 ): void => {
   if (surface.kind === "chat" && copies <= 1) discard?.(sessionId, surface.id)
+}
+
+const killShell = (surface: SessionSurface, copies: number, terminals: SessionTerminals | undefined): void => {
+  if (surface.kind === "terminal" && copies <= 1) void terminals?.close(surface.id)
 }
 
 const SurfaceContent = memo(function SurfaceContent({
@@ -373,7 +380,9 @@ const surfaceOwner = (surface: SessionSurface): string | undefined =>
 const tabOf = (surface: SessionSurface): TabKey =>
   surface.kind === "view"
     ? surface.id
-    : BUILTIN_TAB.conversation
+    : surface.kind === "terminal"
+      ? BUILTIN_TAB.terminal
+      : BUILTIN_TAB.conversation
 
 /** A linked-issue picker for one issue-provider tab: derived from the session's linked issues, or supplied by a plugin. */
 export interface IssueMenu {
@@ -421,9 +430,14 @@ function describeEditorSurface(
   surface: SessionSurface,
   session: Session,
   contributions: ReadonlyArray<TabContribution>,
-  tabCtx: TabContext
+  tabCtx: TabContext,
+  shells: ReadonlyArray<TerminalTab>
 ): EditorTabMeta {
   const sessionLabel = session.title || UNTITLED_SESSION
+  if (surface.kind === "terminal") {
+    const label = terminalTabLabel(shells, surface.id)
+    return { label, icon: SquareTerminal, crumbs: [sessionLabel, label] }
+  }
   if (surface.kind === "chat") {
     const label = chatTitleOf(session, surface.id)
     return { label, icon: MessagesSquare, crumbs: [sessionLabel, label] }
@@ -441,6 +455,24 @@ function describeEditorSurface(
     crumbs: owner ? [sessionLabel, owner, label] : [sessionLabel, label],
     ...(badge ? { badge } : {})
   }
+}
+
+function renderShell(
+  terminals: SessionTerminals | undefined,
+  id: string,
+  visible: boolean,
+  onRestart: (id: string) => void
+): ReactNode {
+  const tab = terminals?.tabs.find((candidate) => candidate.id === id)
+  if (!(terminals && tab)) return null
+  return (
+    <TerminalPanel
+      tab={tab}
+      cwdLabel={terminals.cwdLabel}
+      onRestart={onRestart}
+      renderTerminal={(shellId) => terminals.renderTerminal(shellId, visible)}
+    />
+  )
 }
 
 function renderEditorBody(
@@ -491,7 +523,8 @@ function allowedViewKeysOf(
   return tabs.flatMap((contribution) => {
     if (
       contribution.id === BUILTIN_TAB.conversation ||
-      contribution.id === BUILTIN_TAB.changes
+      contribution.id === BUILTIN_TAB.changes ||
+      contribution.id === BUILTIN_TAB.terminal
     ) return []
     if (contribution.id === BUILTIN_TAB.browser) {
       return session.chats.map((chat) => sessionSurfaceKey({ kind: "view", id: contribution.id, chatId: chat.id }))
@@ -563,6 +596,11 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const active = props.session
   const sessionId = active.id
+  // The host's hook is a fixed prop for the app's lifetime, so the call order is stable.
+  const terminals = props.useSessionTerminals?.(active)
+  const terminalsRef = useRef(terminals)
+  terminalsRef.current = terminals
+  const shells = terminals?.tabs ?? NO_SHELLS
   const mainChatId = active.chats[0]?.id
   const fallbackChatSurface: SessionSurface = { kind: "chat", id: active.activeChatId }
   const [headerViewsTarget, setHeaderViewsTarget] = useState<HTMLElement | null>(null)
@@ -602,6 +640,28 @@ function SessionPaneBody(props: SessionPaneProps) {
     },
     [mainChatId, syncChat, update]
   )
+  const shellsHydrated = terminals?.hydrated ?? true
+  /** Spawns a shell and opens its tab. */
+  const openNewShell = useCallback(async () => {
+    const id = await terminalsRef.current?.create()
+    if (id) openSurface({ kind: "terminal", id })
+  }, [openSurface])
+  /** ⌃`, the palette and "Open in terminal": the newest shell, or a fresh one if none. */
+  const [shellWanted, setShellWanted] = useState(false)
+  const openLatestShell = useCallback(() => {
+    const latest = terminalsRef.current?.tabs.at(-1)
+    if (latest) openSurface({ kind: "terminal", id: latest.id })
+    else void openNewShell()
+  }, [openNewShell, openSurface])
+  useEffect(() => {
+    if (!shellWanted || !shellsHydrated) return
+    setShellWanted(false)
+    openLatestShell()
+  }, [shellWanted, shellsHydrated, openLatestShell])
+  const restartShell = useCallback(async (id: string) => {
+    const next = await terminalsRef.current?.restart(id)
+    if (next) openSurface({ kind: "terminal", id: next })
+  }, [openSurface])
 
   const filePaths = allTabs(layout)
     .flatMap((surface) => (surface.kind === "file" ? [surface.id] : []))
@@ -691,7 +751,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   // Changes (and the retired Code Review tab) are reviewed in the Explorer, so
   // selecting them is an action on the host rather than a surface to open.
   const onRevealChanges = props.onRevealChanges
-  const selectTab = useCallback(
+  const selectView = useCallback(
     (nextTab: TabKey) => {
       if (nextTab === BUILTIN_TAB.changes || nextTab === BUILTIN_TAB.review) {
         onRevealChanges?.(active.id)
@@ -708,6 +768,13 @@ function SessionPaneBody(props: SessionPaneProps) {
       })
     },
     [active, browserActive, onRevealChanges, openPlanReview, openSurface, props.onToggleBrowser, props.tabContributions]
+  )
+  const selectTab = useCallback(
+    (nextTab: TabKey) =>
+      nextTab === BUILTIN_TAB.terminal
+        ? shellsHydrated ? openLatestShell() : setShellWanted(true)
+        : selectView(nextTab),
+    [openLatestShell, selectView, shellsHydrated]
   )
   // An outside request to switch tabs (the command palette). The nonce is the
   // trigger, and reporting it handled stops a remount replaying it. It goes
@@ -769,7 +836,7 @@ function SessionPaneBody(props: SessionPaneProps) {
           onSelectReview: () => ctx.onSelectTab(BUILTIN_TAB.changes)
         }),
       browser: (session, ctx) => props.renderBrowser?.(session, ctx.paneVisible ?? true),
-      terminal: (session, ctx) => props.renderTerminal?.(session, ctx.paneVisible ?? true),
+      terminal: () => null,
       stub: (id) => <BuiltinStubScreen tab={id} />
     }),
     ...(props.tabContributions ?? [])
@@ -785,9 +852,21 @@ function SessionPaneBody(props: SessionPaneProps) {
   const allowedSurfaceKeys = new Set<string>([
     ...active.chats.map((chat) => sessionSurfaceKey({ kind: "chat", id: chat.id })),
     ...allTabs(layout).filter((surface) => surface.kind === "file").map(sessionSurfaceKey),
-    ...allowedViewKeys
+    ...allowedViewKeys,
+    // Until the shell list loads, keep restored shell tabs and the old Terminal view for migration.
+    ...(shellsHydrated
+      ? shells.map((shell) => sessionSurfaceKey({ kind: "terminal", id: shell.id }))
+      : [
+          sessionSurfaceKey({ kind: "view", id: BUILTIN_TAB.terminal }),
+          ...allTabs(layout).filter((surface) => surface.kind === "terminal").map(sessionSurfaceKey)
+        ])
   ])
   const allowedSurfaceSignature = [...allowedSurfaceKeys].sort().join("\n")
+  // A persisted Terminal view tab becomes the session's shell tabs once they are known.
+  useEffect(() => {
+    if (!shellsHydrated) return
+    update((current) => replaceLegacyTerminalView(current, shells.map((shell) => ({ kind: "terminal", id: shell.id }))))
+  }, [shellsHydrated, shells, update])
   useEffect(() => {
     update((current) => pruneEditorLayout(current, allowedSurfaceKeys))
   }, [allowedSurfaceSignature, update])
@@ -827,6 +906,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         return
       }
       discardUntouchedChat(surface, copies, active.id, props.onCloseUntouchedChat)
+      killShell(surface, copies, terminalsRef.current)
       if (surface.kind === "view" && surface.id === BUILTIN_TAB.browser && copies <= 1) {
         const chatId = surface.chatId ?? active.activeChatId
         if (props.isBrowserActive?.(active.id, chatId)) props.onToggleBrowser?.(active.id, chatId)
@@ -870,7 +950,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       label: descriptor.label,
       icon: descriptor.icon,
       ...(descriptor.id === BUILTIN_TAB.terminal ? { detail: "Open a shell in this worktree" } : {}),
-      onSelect: () => selectTab(descriptor.id)
+      onSelect: () => (descriptor.id === BUILTIN_TAB.terminal ? void openNewShell() : selectTab(descriptor.id))
     }))
   const launcherItems: ReadonlyArray<TabLauncherItem> = [
     ...(props.onCreateChat
@@ -882,10 +962,12 @@ function SessionPaneBody(props: SessionPaneProps) {
     ...viewLauncherItems
   ]
 
-  const describeSurface = (surface: SessionSurface) => describeEditorSurface(surface, active, contributions, tabCtx)
+  const describeSurface = (surface: SessionSurface) => describeEditorSurface(surface, active, contributions, tabCtx, shells)
 
   const renderBody = (surface: SessionSurface, ctx: { readonly focused: boolean; readonly visible: boolean }) =>
-    renderEditorBody(
+    surface.kind === "terminal"
+      ? renderShell(terminals, surface.id, ctx.visible, restartShell)
+      : renderEditorBody(
       props,
       active,
       surface,
@@ -899,7 +981,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       connectGithub
     )
 
-  const renderRevision = useMemo(() => ({}), [active, contributions])
+  const renderRevision = useMemo(() => ({}), [active, contributions, shells])
   const paneFocused = props.pane === undefined || props.pane.focused
   // Keyboard shortcuts for chat lane collapse (⌘L) and Focus mode (⌘⇧L)
   useEffect(() => {

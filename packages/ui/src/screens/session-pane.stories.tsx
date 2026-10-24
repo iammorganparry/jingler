@@ -3,7 +3,6 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 import { createEditorLayout, dropTab, focusedGroup } from "../app/editor-layout.js"
 import { initEditorLayout, resetEditorLayouts } from "../app/editor-layout-machine.js"
-import { BUILTIN_TAB } from "../app/tab-contributions.js"
 import { testSession } from "../test-support.js"
 import { SessionPane } from "./session-pane.js"
 
@@ -39,7 +38,7 @@ function EditorGroupsPreview() {
     )
     layout = dropTab(
       layout,
-      { surface: { kind: "view", id: BUILTIN_TAB.terminal } },
+      { surface: { kind: "terminal", id: "t1" } },
       focusedGroup(layout)?.id ?? null,
       "bottom"
     )
@@ -70,11 +69,18 @@ function EditorGroupsPreview() {
             <pre className="mt-3 text-dim">{"export function EditorGroups() {\n  return <Workbench />\n}"}</pre>
           </div>
         )}
-        renderTerminal={() => (
-          <div className="flex flex-1 bg-canvas p-4 font-mono text-xs text-green">
-            $ pnpm test -- editor-layout
-          </div>
-        )}
+        useSessionTerminals={() => ({
+          tabs: [{ id: "t1", title: "zsh", status: "running" }],
+          hydrated: true,
+          create: async () => "t1",
+          close: async () => {},
+          restart: async () => "t1",
+          renderTerminal: () => (
+            <div className="flex flex-1 bg-canvas p-4 font-mono text-xs text-green">
+              $ pnpm test -- editor-layout
+            </div>
+          )
+        })}
       />
     </div>
   )

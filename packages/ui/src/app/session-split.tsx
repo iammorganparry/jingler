@@ -1,4 +1,5 @@
 import type { SubagentFleetNode } from "@jingler/core"
+import type { UseSessionTerminals } from "./terminal-panel.js"
 import type { ReactNode } from "react"
 import type { DiffStat, IssueIdentity, Session, SessionActivity, SessionPrStatus } from "@jingler/core"
 import type { SplitGroup } from "./split-layout.js"
@@ -90,7 +91,7 @@ export interface SessionSplitProps {
   /** Persist a new pinned header view set. */
   onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
+  useSessionTerminals?: UseSessionTerminals
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
    *
@@ -128,7 +129,7 @@ export function SessionSplit(props: SessionSplitProps) {
       renderExplanation={props.renderExplanation}
       renderFiles={props.renderFiles}
       renderBrowser={props.renderBrowser}
-      renderTerminal={props.renderTerminalDock}
+      useSessionTerminals={props.useSessionTerminals}
       onTrackFile={props.onTrackFile}
       onRequestCloseFile={props.onRequestCloseFile}
       conversationPane={props.conversationPane}

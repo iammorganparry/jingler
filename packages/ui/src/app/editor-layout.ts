@@ -115,7 +115,8 @@ export const resizeChatLane = (
 }
 
 const laneOf = (surface: SessionSurface): "chat" | "content" => surface.kind === "chat" ? "chat" : "content"
-const isBrowser = (surface: SessionSurface) => surface.kind === "view" && surface.id === "browser"
+const isSingleBody = (surface: SessionSurface) =>
+  surface.kind === "terminal" || (surface.kind === "view" && surface.id === "browser")
 const uniqueTabs = (tabs: ReadonlyArray<SessionSurface>): ReadonlyArray<SessionSurface> => {
   const seen = new Set<string>()
   return tabs.filter((tab) => {
@@ -356,9 +357,9 @@ const dropActivationTarget = (
   edge: DropEdge
 ): TabGroup | undefined => {
   const holder = groups.find((group) => group.tabs.some((tab) => keyOf(tab) === keyOf(surface)))
-  // Browser bodies all control one native WebContentsView per session/chat, so
-  // they cannot be copied into competing groups.
-  if (isBrowser(surface) && holder && !move) return holder
+  // Browser bodies control one native WebContentsView per session/chat and a shell
+  // is one PTY stream, so neither can be copied into competing groups.
+  if (isSingleBody(surface) && holder && !move) return holder
   return move && from === target.id && (edge === "center" || target.tabs.length === 1)
     ? target
     : undefined
@@ -415,6 +416,21 @@ export const closeSurfaceEverywhere = (layout: EditorLayout, surface: SessionSur
 /** Closes every tab matching `match` in every group. */
 export const closeTabsWhere = (layout: EditorLayout, match: (surface: SessionSurface) => boolean): EditorLayout =>
   allTabs(layout).filter(match).reduce(closeSurfaceEverywhere, layout)
+
+/**
+ * Shells are their own `terminal` tabs now. A persisted Terminal `view` tab is
+ * swapped for the session's live shells that are not already open.
+ */
+export const replaceLegacyTerminalView = (
+  layout: EditorLayout,
+  terminals: ReadonlyArray<SessionSurface>
+): EditorLayout => {
+  const legacy = keyOf({ kind: "view", id: "terminal" })
+  if (!allTabs(layout).some((tab) => keyOf(tab) === legacy)) return layout
+  const closed = closeTabsWhere(layout, (tab) => keyOf(tab) === legacy)
+  const open = new Set(allTabs(closed).map(keyOf))
+  return terminals.filter((tab) => !open.has(keyOf(tab))).reduce((next, tab) => openTab(next, tab), closed)
+}
 
 /** Every distinct open surface, in reading order. */
 export const allTabs = (layout: EditorLayout): ReadonlyArray<SessionSurface> =>

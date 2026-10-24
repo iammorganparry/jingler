@@ -8,7 +8,7 @@
  * by `close` (which kills the PTY). State is keyed by session id so switching
  * away and back restores the exact tab set.
  */
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryClient } from "@tanstack/react-query"
 import type { TerminalInfo } from "@jingler/core"
@@ -63,17 +63,14 @@ const writeTabs = (
 
 export interface UseTerminals {
   tabs: ReadonlyArray<TerminalInfo>
-  activeId: string | null
   /** True once this session's existing terminals have been loaded. */
   hydrated: boolean
-  /** Spawn a new terminal for the active session and focus it. */
-  create: () => Promise<void>
+  /** Spawn a new terminal for the active session; resolves its id. */
+  create: () => Promise<string | null>
   /** Kill a terminal and drop its tab. */
   close: (id: string) => Promise<void>
   /** Replace a terminal with a fresh shell (spawn the new one first, then drop the old). */
-  restart: (id: string) => Promise<void>
-  /** Focus a tab. */
-  select: (id: string) => void
+  restart: (id: string) => Promise<string | null>
   /** Mark a tab exited (its shell process ended) — keeps it until closed. */
   markExited: (id: string, code: number) => void
 }
@@ -81,26 +78,19 @@ export interface UseTerminals {
 export function useTerminals(sessionId: string | null, cwd?: string): UseTerminals {
   const qc = useQueryClient()
   const query = useSessionTerminals(sessionId)
-  // `activeId` is a pure UI selection (not server state) tracked per session so it
-  // survives switching away and back; the effective value below falls back to the
-  // last tab whenever the stored selection is gone (e.g. its tab was closed).
-  const [selectedBySession, setSelectedBySession] = useState<Record<string, string | null>>({})
   const creating = useRef(false)
 
   const tabs = query.data ?? EMPTY_TABS
-  const stored = sessionId ? selectedBySession[sessionId] : null
-  const activeId =
-    stored && tabs.some((t) => t.id === stored) ? stored : (tabs[tabs.length - 1]?.id ?? null)
 
   const create = useCallback(async () => {
-    if (!sessionId || creating.current) return
+    if (!sessionId || creating.current) return null
     creating.current = true
     try {
       const info = await rpc.terminalCreate(sessionId, cwd, 80, 24)
       writeTabs(qc, sessionId, (prev) => [...prev, info])
-      setSelectedBySession((m) => ({ ...m, [sessionId]: info.id }))
+      return info.id
     } catch {
-      /* spawn failed; nothing added */
+      return null // spawn failed; nothing added
     } finally {
       creating.current = false
     }
@@ -117,18 +107,11 @@ export function useTerminals(sessionId: string | null, cwd?: string): UseTermina
 
   const restart = useCallback(
     async (id: string) => {
-      await create()
+      const next = await create()
       await close(id)
+      return next
     },
     [create, close]
-  )
-
-  const select = useCallback(
-    (id: string) => {
-      if (!sessionId) return
-      setSelectedBySession((m) => ({ ...m, [sessionId]: id }))
-    },
-    [sessionId]
   )
 
   const markExited = useCallback(
@@ -143,14 +126,12 @@ export function useTerminals(sessionId: string | null, cwd?: string): UseTermina
 
   return {
     tabs,
-    activeId,
     // `isFetched` flips true once the list settles (success or error), matching the
     // old behaviour of marking a session hydrated even when the list call failed.
     hydrated: sessionId !== null && query.isFetched,
     create,
     close,
     restart,
-    select,
     markExited
   }
 }
