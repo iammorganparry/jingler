@@ -59,6 +59,7 @@ import {
   SshHost,
   ExternalInstructionIdentity,
   PermissionMode,
+  WorkMode,
   PlanTemplateConfig,
   PrFileChange,
   McpConfigEntry,
@@ -1088,6 +1089,15 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       chatId: Schema.String,
       requestId: Schema.String,
       answers: Schema.Array(QuestionAnswer)
+    }
+  }),
+
+  /** Switch a chat between Plan and Build without touching its approval level. */
+  Rpc.make("Agent.setWorkMode", {
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      workMode: WorkMode
     }
   }),
 

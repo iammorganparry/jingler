@@ -1516,7 +1516,7 @@ function renderMainConversation({
     hasMoreHistory={convo.hasMoreHistory}
     loadingHistory={convo.loadingHistory}
     onLoadEarlier={convo.loadOlder}
-    mode={convo.mode}
+    mode={convo.approvalMode}
     subagentNeedsAttention={subagentNeedsAttention}
     skills={convo.skills}
     files={convo.files}
@@ -1586,6 +1586,8 @@ function renderMainConversation({
     onStop={convo.stop}
     onDecideGate={convo.decideGate}
     onSetMode={convo.setMode}
+    workMode={convo.workMode}
+    onSetWorkMode={convo.setWorkMode}
     onSwitchToAuto={() => convo.setMode("auto")}
     reasoningEffort={convo.reasoning?.effort}
     thinkingEnabled={convo.reasoning?.enabled}

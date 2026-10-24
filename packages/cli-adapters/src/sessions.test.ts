@@ -703,7 +703,7 @@ describe("SessionStore", () => {
     )
     expect(withDefaults._tag).toBe("Success")
     if (withDefaults._tag === "Success") {
-      expect(activeChat(withDefaults.value).mode).toBe("plan")
+      expect(activeChat(withDefaults.value).workMode).toBe("plan")
       expect(activeChat(withDefaults.value).modelId).toBe(modelId)
       expect(activeChat(withDefaults.value).reasoning).toStrictEqual({
         enabled: false,
@@ -1351,6 +1351,49 @@ describe("SessionStore", () => {
     expect(result.chats.find((chat) => chat.id === result.activeChatId)?.mode).toBe("auto")
   })
 
+  it("persists work mode across reload", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Work mode" }))
+        yield* SessionStore.setMode(created.id, "auto")
+        yield* SessionStore.setWorkMode(created.id, created.activeChatId, "plan")
+        return created.id
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    const reread = await runExit(SessionStore.get(exit.value).pipe(Effect.provide(SessionStore.Default)), temp.layer)
+    expect(reread._tag).toBe("Success")
+    if (reread._tag !== "Success") return
+    expect(activeChat(reread.value).workMode).toBe("plan")
+    expect(activeChat(reread.value).mode).toBe("auto")
+  })
+
+  it("migrates legacy plan mode", async () => {
+    const created = await runExit(
+      SessionStore.create(input({ title: "Legacy plan" })).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+    const chat = created.value.chats[0]
+    const other = { ...chat, id: `${chat?.id}_x`, mode: "bogus" }
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      JSON.stringify([{ ...created.value, chats: [{ ...chat, mode: "plan" }, other] }])
+    )
+    const reread = await runExit(SessionStore.get(created.value.id).pipe(Effect.provide(SessionStore.Default)), temp.layer)
+    expect(reread._tag).toBe("Success")
+    if (reread._tag !== "Success") return
+    const [first, second] = reread.value.chats
+    expect(first?.workMode).toBe("plan")
+    expect(first?.mode).toBe("auto")
+    // Unknown strings fall back to the default level, not "ask", and do not enter plan.
+    expect(second?.mode).toBe("auto")
+    expect(second?.workMode).toBeUndefined()
+  })
+
   /**
    * Switching harness is not just a field write. `resumeId` holds the PREVIOUS
    * harness's thread id — handing a Codex thread id to Claude would resume
@@ -1615,7 +1658,7 @@ describe("SessionStore", () => {
     expect(s.baseBranch).toBe("main")
     expect(s.title).toBe("Fix Auth Refresh")
     expect(activeChat(s)).toMatchObject({
-      mode: "plan",
+      workMode: "plan",
       modelId
     })
     // The slug carries the PR number so same-titled PRs never collide.
@@ -2099,7 +2142,7 @@ describe("SessionStore", () => {
     expect(s.initialPrompt).toBe("Refund route 500s on a stale token\n\nFix the refund route.")
     expect(s.prNumber).toBe(null)
     expect(activeChat(s)).toMatchObject({
-      mode: "plan",
+      workMode: "plan",
       modelId
     })
   })

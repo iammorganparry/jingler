@@ -71,7 +71,6 @@ const startPlanReview = async (launched: LaunchedApp, prompt = "[[plan]] replace
   const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
   await composer.click()
   await launched.window.keyboard.press("Shift+Tab")
-  await launched.window.keyboard.press("Shift+Tab")
   await expect(launched.window.locator("[data-mode='plan']")).toContainText("Plan")
   await composer.fill(prompt)
   await composer.press("Enter")
@@ -136,7 +135,7 @@ test("projects explicit deliverable stages without treating overview headings as
   await expect(completion).toBeVisible({ timeout: 30_000 })
   // The composer is back in Auto. Asserted on its mode attribute: split beside
   // the plan, the chat pane is narrow and the mode chip drops its word label.
-  await expect(launched.window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "auto")
+  await expect(launched.window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "accept-edits")
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
 
   const planRow = transcriptCard.locator("xpath=ancestor::*[@data-index][1]")
@@ -680,4 +679,69 @@ test("plan mode blocks a write outside the plan file but lets the plan file thro
   // The scripted agent retries after the blocked write and the plan file lands.
   await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
   expect(existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null).toBe(before)
+})
+
+test("toggle switches plan and build", async ({ launchApp }) => {
+  // Plan (toggled in): the scripted agent's write outside the plan file is blocked.
+  const planned = await launchPlanMode(launchApp)
+  const plannedAgents = join(planned.repoPath, "AGENTS.md")
+  await startPlanReview(planned, "[[plan]] [[escape]] replace auth")
+  await expect.poll(() => planFile(planned), { timeout: 30_000 }).toContain("## Test strategy")
+  expect(existsSync(plannedAgents)).toBe(false)
+  await planned.app.close()
+
+  // Plan then Build (toggled back): the same write goes through.
+  const built = await launchPlanMode(launchApp)
+  const skipImport = built.window.getByRole("button", { name: "Skip import" })
+  if (await skipImport.isVisible()) await skipImport.click()
+  const composer = built.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.click()
+  await built.window.keyboard.press("Shift+Tab")
+  await expect(built.window.locator("[data-mode='plan']")).toBeVisible()
+  await built.window.getByRole("tab", { name: "Build" }).click()
+  await expect(built.window.locator("[data-mode='accept-edits']")).toBeVisible()
+  await composer.fill("[[escape]] write directly")
+  await composer.press("Enter")
+  await expect.poll(() => existsSync(join(built.repoPath, "AGENTS.md")), { timeout: 30_000 }).toBe(true)
+})
+
+const savedChat = (launched: LaunchedApp) => {
+  const all = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")) as ReadonlyArray<{
+    readonly id: string
+    readonly chats: ReadonlyArray<{ readonly workMode?: string; readonly mode?: string }>
+  }>
+  return all.find((session) => session.id === "s_plannotator")?.chats[0]
+}
+
+test("approving a plan switches the chat to build and keeps its approval level", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await (await ensurePlanTab(launched)).click()
+  await expect(review(launched)).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => savedChat(launched)?.workMode).toBe("plan")
+  await approveReview(launched)
+  await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("build")
+  expect(savedChat(launched)?.mode).toBe("accept-edits") // the Plan/Build toggle leaves the approval level alone
+})
+
+test("a plan chat comes back in plan after an app restart", async ({ launchApp }) => {
+  const first = await launchPlanMode(launchApp)
+  await startPlanReview(first)
+  await (await ensurePlanTab(first)).click()
+  await expect(review(first)).toBeVisible({ timeout: 30_000 })
+  await first.app.close()
+
+  const reopened = await launchApp({
+    configured: true,
+    withRepo: true,
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    authServer: first.authServer,
+    githubServer: first.githubServer,
+    githubRelay: first.githubRelay
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  await expect(reopened.window.locator("[data-mode='plan']")).toBeVisible({ timeout: 20_000 })
+  expect(savedChat(reopened)?.mode).toBe("accept-edits") // the Plan/Build toggle leaves the approval level alone
 })

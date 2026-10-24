@@ -10,7 +10,7 @@ import {
   type StreamEvent,
   type Worktree
 } from "@jingler/core"
-import { INTERACTIVE_TOOL_TIMEOUT_MS, ToolError, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
+import { INTERACTIVE_TOOL_TIMEOUT_MS, codeReadModes, ToolError, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
 
 /** The session slice the checkout reducer reads and rewrites. */
 export type CheckoutSessionState = Parameters<typeof activeCheckoutOf>[0]
@@ -133,7 +133,7 @@ export const registerCheckoutTool = (
     }),
     risk: "read",
     roles: ["conversation", "plan-execution"],
-    modes: ["ask", "accept-edits", "auto", "plan", "read-only"],
+    modes: codeReadModes,
     timeoutMs: INTERACTIVE_TOOL_TIMEOUT_MS,
     outputBudget: 16_000,
     cancellable: true,

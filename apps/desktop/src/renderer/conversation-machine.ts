@@ -520,6 +520,7 @@ type ConversationEvent =
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
+  | { type: "SET_WORK_MODE"; workMode: "plan" | "build" }
   | {
       type: "SET_MODEL"
       runtimeId: AgentRuntimeId
@@ -1025,7 +1026,7 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
   const chat = initialConversationChat(input)
   return {
     session: input.session, chatId: chat.id, messages: [], sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] }, remotePublishProgress: null,
-    mode: chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
+    mode: chat.workMode === "plan" ? "plan" : chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
     skills: [], files: [], runtimeId: chat.runtimeId ?? input.session.runtimeId ?? null, endpointId: chat.endpointId ?? input.session.endpointId ?? null,
     connectionId: chat.connectionId ?? input.session.connectionId ?? null, providerId: chat.providerId ?? input.session.providerId ?? null,
     modelId: chat.modelId ?? input.session.modelId ?? null, modelPending: false, diffStat: { added: 0, removed: 0, files: 0 }, patchAt: 0,
@@ -1036,6 +1037,12 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
     loadingHistory: false, reviewer: null, reviewPhase: "starting", reviewStartedAt: null
   }
 }
+
+// The server switched Plan -> Build (plan approval); land on the approval level the chat kept.
+const followWorkModeChange = (
+  context: { readonly mode: PermissionMode; readonly executionMode: PermissionMode },
+  workMode: "plan" | "build"
+) => (workMode === "build" && context.mode === "plan" ? { mode: context.executionMode } : {})
 
 export const conversationMachine = setup({
   types: {
@@ -1635,11 +1642,11 @@ export const conversationMachine = setup({
         }
       }
       if (e._tag === "PlannotatorStateChanged") {
-        if (e.state.phase === "executing" && context.mode === "plan") {
-          self.send({ type: "SET_MODE", mode: "auto" })
-        }
         return { plannotator: e.state }
       }
+      // The server switched Plan -> Build (plan approval); follow it locally
+      // without echoing an RPC, landing on the approval level the chat kept.
+      if (e._tag === "WorkModeChanged") return followWorkModeChange(context, e.workMode)
       if (e._tag === "PlanProposed") {
         return {
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),
@@ -1847,8 +1854,13 @@ export const conversationMachine = setup({
       if (event.type !== "SET_MODE") return {}
       void rpc.agentSetMode(context.session.id, context.chatId, event.mode)
       return isExecutionMode(event.mode)
-        ? { mode: event.mode, executionMode: event.mode }
+        ? { mode: context.mode === "plan" ? "plan" : event.mode, executionMode: event.mode }
         : { mode: event.mode }
+    }),
+    persistWorkMode: assign(({ context, event }) => {
+      if (event.type !== "SET_WORK_MODE") return {}
+      void rpc.agentSetWorkMode(context.session.id, context.chatId, event.workMode)
+      return { mode: event.workMode === "plan" ? "plan" : context.executionMode }
     }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}
@@ -2164,6 +2176,7 @@ export const conversationMachine = setup({
        */
       on: {
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // The composer is enabled from the first paint, so a prompt can be sent
         // before the transcript lands — and a dropped one is invisible: the box
         // clears and the operator believes they sent it. Hold it and run it the
@@ -2290,6 +2303,7 @@ export const conversationMachine = setup({
           { actions: "settleLateSteer" }
         ],
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // Re-read the worktree diff on demand (e.g. after a revert from the rail).
         REFRESH_DIFF: { target: "refreshingDiff" }
       }
@@ -2388,6 +2402,7 @@ export const conversationMachine = setup({
         DECIDE_GATE: { actions: "optimisticGate" },
         ANSWER_QUESTION: { actions: "optimisticAnswer" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // Stopping PARKS the queue rather than clearing it — the operator asked
         // the agent to halt, not to destroy what they typed. The rows stay on
         // screen and inert until acted on (see `queueParked`). Live sub-agent
@@ -2425,6 +2440,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     },
     /**
@@ -2468,6 +2484,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     },
     // After a turn ends, re-read the worktree diff so the Changes rail reflects
@@ -2532,6 +2549,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     }
   }

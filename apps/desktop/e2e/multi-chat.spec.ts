@@ -143,10 +143,10 @@ test("switch chat thread via the lane header dropdown", async ({ launchApp }) =>
   await launched.window.getByTestId("new-chat-button").click()
   await renameInTree(launched.window, "Chat 2", "Review migrations")
   
-  // Chat groups should not have role=tablist
+  // The chat group's tab strip is not a tablist (the composer's Work mode segmented control is)
   const chatGroup = launched.window.locator('[data-testid="editor-group"][data-focused="true"]')
   await expect(chatGroup).toBeVisible()
-  await expect(chatGroup.locator('[role="tablist"]')).toHaveCount(0)
+  await expect(chatGroup.locator('[role="tablist"]:not([aria-label="Work mode"])')).toHaveCount(0)
   
   // Should have the chat lane header
   await expect(launched.window.getByTestId("chat-lane-header")).toBeVisible()

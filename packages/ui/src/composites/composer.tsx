@@ -10,6 +10,7 @@ import type {
   McpRemoteAuth,
   McpServer,
   PermissionMode,
+  WorkMode,
   PlanDocument,
   ProviderCatalog,
   ProviderCatalogModel,
@@ -42,6 +43,7 @@ import {
   Square,
 } from "lucide-react";
 import { Spin } from "../components/spin.js";
+import { SegmentedControl, type SegmentItem } from "../components/segmented-control.js";
 import { cn } from "../lib/cn.js";
 import { downscaleImage } from "../lib/image-downscale.js";
 import { atLeast, useWidthTier } from "../hooks/width-tier.js";
@@ -114,6 +116,14 @@ const MODE_OPTIONS: ReadonlyArray<ComposerOption<PermissionMode>> = [
   { value: "accept-edits", label: "Accept Edits" },
   { value: "auto", label: "Auto" },
 ];
+const WORK_MODE_ITEMS: ReadonlyArray<SegmentItem<WorkMode>> = [
+  { value: "plan", label: "Plan" },
+  { value: "build", label: "Build" },
+];
+const surfaceMode = (workMode: WorkMode | undefined, mode: PermissionMode) => (workMode === "plan" ? "plan" : mode);
+function WorkModeToggle({ workMode = "build", onSetWorkMode }: { workMode?: WorkMode; onSetWorkMode?: (workMode: WorkMode) => void }) {
+  return onSetWorkMode ? <SegmentedControl size="sm" aria-label="Work mode" items={WORK_MODE_ITEMS} value={workMode} onChange={onSetWorkMode} /> : null;
+}
 type ReasoningChoice = "default" | ReasoningEffort;
 /**
  * Filled bars for a reasoning choice — its rung on the PROVIDER'S ladder, not a
@@ -383,8 +393,9 @@ type ComposerProps =  {
   reasoningEffort?: ReasoningEffort;
   thinkingEnabled?: boolean;
   onSetReasoning?: (reasoning?: ReasoningSetting) => void;
-  /** Offer the Jingler-owned read-only planning mode. */
-  allowPlan?: boolean;
+  /** Persisted Plan/Build work mode, separate from the approval `mode`; the toggle shows when `onSetWorkMode` is given. */
+  workMode?: WorkMode;
+  onSetWorkMode?: (workMode: WorkMode) => void;
   paused?: boolean;
   /** Disable composing without disabling the model picker used to recover. */
   disabledReason?: string;
@@ -771,6 +782,7 @@ export function Composer(props: ComposerProps) {
                 </MorphPopoverContent>
               </MorphPopover>}
               {!modelCatalog && onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
+              <WorkModeToggle workMode={workMode} onSetWorkMode={onSetWorkMode} />
               <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
               {!modelCatalog && (!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
             </>)
@@ -796,6 +808,7 @@ export function Composer(props: ComposerProps) {
                 <div className="space-y-1.5">
                   {modelCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
                   {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
+                  {onSetWorkMode && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Work mode</div><WorkModeToggle workMode={workMode} onSetWorkMode={onSetWorkMode} /></div>}
                   <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Permission</div><ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} inlineContent className="w-full max-w-none" /></div>
                   {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} inlineContent className="w-full max-w-none" /></div>}
                 </div>
@@ -803,7 +816,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, inputLabel, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
+  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, workMode, onSetWorkMode, paused, disabledReason, busy, placeholder, inputLabel, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -815,7 +828,6 @@ export function Composer(props: ComposerProps) {
     modelId: null,
     mode: "auto",
     followAgent: false,
-    allowPlan: false,
     paused: false,
     busy: false,
     autoFocus: false,
@@ -948,27 +960,7 @@ export function Composer(props: ComposerProps) {
 
   const modelCatalog = agentEndpointCatalog ?? providerCatalog
   const selectedModel = selectedComposerModel({ agentEndpointCatalog, providerCatalog, endpointId, providerId, modelId })
-  const canonicalModes: ReadonlyArray<{
-    readonly id: PermissionMode;
-    readonly label: string;
-    readonly kind: "execute" | "plan";
-    readonly description?: string;
-  }> = [
-    ...MODE_OPTIONS.map((option) => ({
-      id: option.value,
-      label: String(option.label),
-      kind: "execute" as const,
-    })),
-    { id: "plan" as const, label: "Plan", kind: "plan" as const },
-  ];
-  const modeOptions: ReadonlyArray<ComposerOption<PermissionMode>> = canonicalModes
-    .filter((option) => allowPlan || option.kind !== "plan")
-    .map((option) => ({
-      value: option.id,
-      label:
-        option.label,
-      description: option.description,
-    }));
+  const modeOptions = MODE_OPTIONS;
   const { reasoningEfforts, reasoningOptions } = composerReasoningOptions(selectedModel)
   // The chip's value and its bar count are the same fact; deriving it once keeps
   // the glyph from drifting out of step with the label beside it.
@@ -1320,7 +1312,7 @@ export function Composer(props: ComposerProps) {
       <PromptInputSurface
         // Keep the mode available to tests and integrations without tinting the
         // composer chrome. The selected menu item carries the state.
-        data-mode={mode}
+        data-mode={surfaceMode(workMode, mode)}
         onDragOver={(e) => {
           if (paused || disabledReason !== undefined) return;
           e.preventDefault();
