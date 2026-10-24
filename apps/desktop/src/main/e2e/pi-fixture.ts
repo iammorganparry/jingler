@@ -580,6 +580,9 @@ const INVALID_REVIEW_PLAN = STRUCTURED_REVIEW_PLAN
   .replace("```diff path=src/auth.ts", "```diff path=../outside.ts")
   .replace("## Test strategy\nUnit tests cover the token format; the e2e flow covers sign-in.\n\n", "")
 
+// A flat checklist: submit must reject it as having no staged deliverables.
+const FLAT_REVIEW_PLAN = "# Auth replacement\n\n- [ ] Replace the token format\n- [ ] Verify sign-in\n"
+
 const PLAN_ANCHOR = "Replace the auth flow with a deterministic test implementation."
 /** The review plan with one prefixed note per line appended under its anchor. */
 const planWithNotes = (prefix: string, lines: ReadonlyArray<string>): string =>
@@ -647,7 +650,8 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
     return callTool(SUBMIT_PLAN_TOOL, { filePath: "PLAN.md" }, `plannotator-submit-${submitCount + 1}`)
   }
   const invalid = currentPlanMessages.some((text) => text.includes("[[invalid-plan]]"))
-  return callTool(WRITE_TOOL, { path: "PLAN.md", content: invalid ? INVALID_REVIEW_PLAN : STRUCTURED_REVIEW_PLAN }, "plannotator-write")
+  const flat = currentPlanMessages.some((text) => text.includes("[[flat-plan]]"))
+  return callTool(WRITE_TOOL, { path: "PLAN.md", content: flat ? FLAT_REVIEW_PLAN : invalid ? INVALID_REVIEW_PLAN : STRUCTURED_REVIEW_PLAN }, "plannotator-write")
 }
 
 const UPDATE_PLAN_TOOL = "plannotator_update_plan"

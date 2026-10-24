@@ -42,9 +42,26 @@ Unit tests cover sign-in.
 `
 
 describe("validatePlanMarkdown", () => {
-  it("accepts complete explicit stages and legacy plans", () => {
+  it("accepts complete explicit stages", () => {
     expect(validatePlanMarkdown(validStage)).toEqual([])
-    expect(validatePlanMarkdown("## Legacy stage\n- [ ] Do it\n")).toEqual([])
+  })
+
+  it("rejects flat checklists and stages without ids, telling the agent the stage shape", () => {
+    for (const flat of ["# Work\n- [ ] Do it\n", "## Legacy stage\n- [ ] Do it\n"]) {
+      const errors = validatePlanMarkdown(flat)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toContain("<!-- id: stable-id -->")
+      expect(errors[0]).toContain("Technical explanation")
+    }
+  })
+
+  it("rejects a staged plan missing Technical explanation or Deliverable", () => {
+    expect(validatePlanMarkdown(validStage.replace(/### Technical explanation\n.*\n/, ""))).toContain(
+      'Stage "Ship auth" needs a Technical explanation.'
+    )
+    expect(validatePlanMarkdown(validStage.replace(/### Deliverable\n.*\n/, ""))).toContain(
+      'Stage "Ship auth" needs a Deliverable.'
+    )
   })
 
   it("rejects a pathless diff fence", () => {
@@ -70,7 +87,6 @@ describe("validatePlanMarkdown", () => {
     expect(validatePlanMarkdown(validStage.replace(/## Proposed flow[\s\S]*?## Ship auth/, "## Ship auth"))).toContain(
       "Plan needs a top-level Mermaid flow diagram."
     )
-    expect(validatePlanMarkdown("## Legacy stage\n- [ ] Do it\n")).toEqual([])
   })
 
   it("reports missing stage fields and malformed dependencies", () => {
