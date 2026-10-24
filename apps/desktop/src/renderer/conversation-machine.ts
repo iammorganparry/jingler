@@ -324,6 +324,8 @@ export interface ConversationContext {
   readonly mode: PermissionMode
   /** Last concrete harness permission mode, retained while Plan is selected. */
   readonly executionMode: ExecutionMode
+  /** The agent may switch Plan/Build itself (composer "Auto" segment). */
+  readonly autoSwitch: boolean
   readonly skills: ReadonlyArray<Skill>
   readonly files: ReadonlyArray<string>
   readonly runtimeId: AgentRuntimeId | null
@@ -520,7 +522,7 @@ type ConversationEvent =
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
-  | { type: "SET_WORK_MODE"; workMode: "plan" | "build" }
+  | { type: "SET_WORK_MODE"; workMode: "plan" | "build"; autoSwitch?: boolean }
   | {
       type: "SET_MODEL"
       runtimeId: AgentRuntimeId
@@ -1026,7 +1028,7 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
   const chat = initialConversationChat(input)
   return {
     session: input.session, chatId: chat.id, messages: [], sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] }, remotePublishProgress: null,
-    mode: chat.workMode === "plan" ? "plan" : chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
+    mode: chat.workMode === "plan" ? "plan" : chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits", autoSwitch: chat.autoSwitch === true,
     skills: [], files: [], runtimeId: chat.runtimeId ?? input.session.runtimeId ?? null, endpointId: chat.endpointId ?? input.session.endpointId ?? null,
     connectionId: chat.connectionId ?? input.session.connectionId ?? null, providerId: chat.providerId ?? input.session.providerId ?? null,
     modelId: chat.modelId ?? input.session.modelId ?? null, modelPending: false, diffStat: { added: 0, removed: 0, files: 0 }, patchAt: 0,
@@ -1038,11 +1040,11 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
   }
 }
 
-// The server switched Plan -> Build (plan approval); land on the approval level the chat kept.
+// The server switched Plan/Build (plan approval or the agent's own switch); Build lands on the approval level the chat kept.
 const followWorkModeChange = (
   context: { readonly mode: PermissionMode; readonly executionMode: PermissionMode },
   workMode: "plan" | "build"
-) => (workMode === "build" && context.mode === "plan" ? { mode: context.executionMode } : {})
+) => (workMode === "plan" ? { mode: "plan" as const } : context.mode === "plan" ? { mode: context.executionMode } : {})
 
 export const conversationMachine = setup({
   types: {
@@ -1859,8 +1861,8 @@ export const conversationMachine = setup({
     }),
     persistWorkMode: assign(({ context, event }) => {
       if (event.type !== "SET_WORK_MODE") return {}
-      void rpc.agentSetWorkMode(context.session.id, context.chatId, event.workMode)
-      return { mode: event.workMode === "plan" ? "plan" : context.executionMode }
+      void rpc.agentSetWorkMode(context.session.id, context.chatId, event.workMode, event.autoSwitch)
+      return { mode: event.workMode === "plan" ? "plan" : context.executionMode, ...(event.autoSwitch === undefined ? {} : { autoSwitch: event.autoSwitch }) }
     }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}

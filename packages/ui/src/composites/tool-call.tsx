@@ -48,6 +48,11 @@ const toolCallDetail = (
   return raw === null ? null : stripCwdPrefix(raw, cwd)
 }
 
+const workModeTitle = (args: Record<string, unknown> | null | undefined): string => {
+  const mode = args?.mode === "build" ? "Build" : "Plan"
+  return typeof args?.reason === "string" && args.reason ? `Switched to ${mode} — ${args.reason}` : `Switched to ${mode}`
+}
+
 /**
  * A tool call's title and secondary line. `intent` (agent-written, present
  * tense) always wins the title when present; otherwise derive a label from
@@ -71,6 +76,8 @@ export function toolCallLabel({ toolName, args, intent, cwd }: ToolCallLabelInpu
       const path = typeof args?.path === "string" ? args.path : ""
       return { title: path ? `Edited \`${baseName(path)}\`` : "Edited file", detail }
     }
+    case "jingler_set_work_mode":
+      return { title: workModeTitle(args), detail: null }
     default:
       return { title: toolName, detail }
   }

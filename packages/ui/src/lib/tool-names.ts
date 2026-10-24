@@ -36,6 +36,7 @@ const CANONICAL_TOOL_NAMES: Readonly<Record<string, string>> = {
   jingler_submit_plan: "Submit plan",
   jingler_list_resources: "Resources",
   jingler_load_resource: "Resource",
+  jingler_set_work_mode: "Work mode",
   // The in-app browser (the jingler-browser MCP server)
   "mcp__jingler-browser__navigate": "Navigate",
   "mcp__jingler-browser__screenshot": "Screenshot",

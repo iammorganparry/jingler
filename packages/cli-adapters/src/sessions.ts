@@ -100,6 +100,12 @@ const LegacySessionWithRepo = Schema.Struct({
   repo: Schema.optional(Schema.Unknown)
 })
 
+/** Settings a new chat inherits from the chat it was forked or replaced from. */
+const carriedChatSettings = (from: Chat | undefined) => {
+  const keys = ["mode", "workMode", "autoSwitch", "reasoning", "connectionId", "providerId", "modelId", "allowlist"] as const
+  return Object.fromEntries(keys.flatMap((key) => (from?.[key] === undefined ? [] : [[key, from[key]]])))
+}
+
 const propertiesWhen = <T extends object>(condition: boolean, properties: T) =>
   condition ? properties : {}
 
@@ -1264,13 +1270,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
-              ...propertiesWhen(source?.mode !== undefined, { mode: source?.mode }),
-              ...propertiesWhen(source?.workMode !== undefined, { workMode: source?.workMode }),
-              ...propertiesWhen(source?.reasoning !== undefined, { reasoning: source?.reasoning }),
-              ...propertiesWhen(source?.connectionId !== undefined, { connectionId: source?.connectionId }),
-              ...propertiesWhen(source?.providerId !== undefined, { providerId: source?.providerId }),
-              ...propertiesWhen(source?.modelId !== undefined, { modelId: source?.modelId }),
-              ...propertiesWhen(source?.allowlist !== undefined, { allowlist: source?.allowlist })
+              ...carriedChatSettings(source)
             }
             return {
               ...session,
@@ -1319,13 +1319,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
-              ...propertiesWhen(closed?.mode !== undefined, { mode: closed?.mode }),
-              ...propertiesWhen(closed?.workMode !== undefined, { workMode: closed?.workMode }),
-              ...propertiesWhen(closed?.reasoning !== undefined, { reasoning: closed?.reasoning }),
-              ...propertiesWhen(closed?.connectionId !== undefined, { connectionId: closed?.connectionId }),
-              ...propertiesWhen(closed?.providerId !== undefined, { providerId: closed?.providerId }),
-              ...propertiesWhen(closed?.modelId !== undefined, { modelId: closed?.modelId }),
-              ...propertiesWhen(closed?.allowlist !== undefined, { allowlist: closed?.allowlist })
+              ...carriedChatSettings(closed)
             }
             const chats = remaining.length > 0 ? remaining : [replacement]
             const activeChatId =
@@ -1389,10 +1383,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         })
 
       /** Persist one chat's Plan/Build work mode. */
-      const setWorkMode = (id: string, chatId: string, workMode: WorkMode) =>
+      const setWorkMode = (id: string, chatId: string, workMode: WorkMode, autoSwitch?: boolean) =>
         update(id, (session) => ({
           ...session,
-          chats: session.chats.map((chat) => (chat.id === chatId ? { ...chat, workMode } : chat))
+          chats: session.chats.map((chat) => (chat.id === chatId ? { ...chat, workMode, ...propertiesWhen(autoSwitch !== undefined, { autoSwitch }) } : chat))
         }))
 
       const setAgentModel = (

@@ -14,6 +14,7 @@ import { Context, Effect, Layer } from "effect"
 import type { RuntimeRemoteMcpServer } from "./runtime/mcp/attachment.js"
 import type { JinglerMcpAttachments } from "./runtime/tools/mcp-tools.js"
 import type { CheckoutHost } from "./runtime/tools/checkout-tools.js"
+import type { WorkModeHost } from "./runtime/agent/work-mode-tool.js"
 
 /**
  * A remote MCP attachment ready for an embedded pi run.
@@ -116,6 +117,8 @@ export interface AgentContext {
   readonly registerTurnSteer?: (steer: SteerTurn | null) => Effect.Effect<void>
   /** Multi-repo checkout state for this turn; absent for sessions without a project registry. */
   readonly checkouts?: CheckoutHost
+  /** Present only when the chat has Auto switching on; enables `jingler_set_work_mode`. */
+  readonly workModeHost?: WorkModeHost
 }
 
 /**

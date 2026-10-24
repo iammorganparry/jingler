@@ -116,13 +116,18 @@ const MODE_OPTIONS: ReadonlyArray<ComposerOption<PermissionMode>> = [
   { value: "accept-edits", label: "Accept Edits" },
   { value: "auto", label: "Auto" },
 ];
-const WORK_MODE_ITEMS: ReadonlyArray<SegmentItem<WorkMode>> = [
+type WorkModeSegment = WorkMode | "auto";
+const WORK_MODE_ITEMS: ReadonlyArray<SegmentItem<WorkModeSegment>> = [
   { value: "plan", label: "Plan" },
   { value: "build", label: "Build" },
+  { value: "auto", label: "Auto" },
 ];
 const surfaceMode = (workMode: WorkMode | undefined, mode: PermissionMode) => (workMode === "plan" ? "plan" : mode);
-function WorkModeToggle({ workMode = "build", onSetWorkMode }: { workMode?: WorkMode; onSetWorkMode?: (workMode: WorkMode) => void }) {
-  return onSetWorkMode ? <SegmentedControl size="sm" aria-label="Work mode" items={WORK_MODE_ITEMS} value={workMode} onChange={onSetWorkMode} /> : null;
+function WorkModeToggle({ workMode = "build", autoSwitch = false, onSetWorkMode }: { workMode?: WorkMode; autoSwitch?: boolean; onSetWorkMode?: (workMode: WorkMode, autoSwitch?: boolean) => void }) {
+  if (!onSetWorkMode) return null;
+  // Auto keeps the current Plan/Build and lets the agent flip it; Plan/Build turn Auto off.
+  const choose = (next: WorkModeSegment) => (next === "auto" ? onSetWorkMode(workMode, true) : autoSwitch ? onSetWorkMode(next, false) : onSetWorkMode(next));
+  return <SegmentedControl size="sm" aria-label="Work mode" items={WORK_MODE_ITEMS} value={autoSwitch ? "auto" : workMode} onChange={choose} />;
 }
 type ReasoningChoice = "default" | ReasoningEffort;
 /**
@@ -395,7 +400,9 @@ type ComposerProps =  {
   onSetReasoning?: (reasoning?: ReasoningSetting) => void;
   /** Persisted Plan/Build work mode, separate from the approval `mode`; the toggle shows when `onSetWorkMode` is given. */
   workMode?: WorkMode;
-  onSetWorkMode?: (workMode: WorkMode) => void;
+  /** Auto lets the agent switch Plan/Build itself; the toggle shows it as a third segment. */
+  autoSwitch?: boolean;
+  onSetWorkMode?: (workMode: WorkMode, autoSwitch?: boolean) => void;
   paused?: boolean;
   /** Disable composing without disabling the model picker used to recover. */
   disabledReason?: string;
@@ -782,7 +789,7 @@ export function Composer(props: ComposerProps) {
                 </MorphPopoverContent>
               </MorphPopover>}
               {!modelCatalog && onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
-              <WorkModeToggle workMode={workMode} onSetWorkMode={onSetWorkMode} />
+              <WorkModeToggle workMode={workMode} autoSwitch={autoSwitch} onSetWorkMode={onSetWorkMode} />
               <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
               {!modelCatalog && (!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
             </>)
@@ -808,7 +815,7 @@ export function Composer(props: ComposerProps) {
                 <div className="space-y-1.5">
                   {modelCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
                   {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
-                  {onSetWorkMode && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Work mode</div><WorkModeToggle workMode={workMode} onSetWorkMode={onSetWorkMode} /></div>}
+                  {onSetWorkMode && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Work mode</div><WorkModeToggle workMode={workMode} autoSwitch={autoSwitch} onSetWorkMode={onSetWorkMode} /></div>}
                   <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Permission</div><ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} inlineContent className="w-full max-w-none" /></div>
                   {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} inlineContent className="w-full max-w-none" /></div>}
                 </div>
@@ -816,7 +823,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, workMode, onSetWorkMode, paused, disabledReason, busy, placeholder, inputLabel, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
+  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, workMode, autoSwitch, onSetWorkMode, paused, disabledReason, busy, placeholder, inputLabel, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],

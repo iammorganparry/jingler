@@ -1,4 +1,5 @@
 import { workspaceEnvironment } from "./workspace-environment.js"
+import { MAX_WORK_MODE_SWITCHES } from "./runtime/agent/work-mode-tool.js"
 import { join } from "node:path"
 import { sharedPlanReviewPending } from "./runtime/agent/shared-planning.js"
 
@@ -400,10 +401,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     const getSessionOrNull = (sessionId: string) =>
       SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
 
-    const setWorkMode = (sessionId: string, chatId: string, workMode: WorkMode) =>
+    const setWorkMode = (sessionId: string, chatId: string, workMode: WorkMode, autoSwitch?: boolean) =>
       Effect.gen(function* () {
         yield* Ref.update(workModes, (m) => new Map(m).set(chatId, workMode))
-        yield* SessionStore.setWorkMode(sessionId, chatId, workMode).pipe(Effect.ignore)
+        yield* SessionStore.setWorkMode(sessionId, chatId, workMode, autoSwitch).pipe(Effect.ignore)
       })
 
     // Plan overrides the approval level for enforcement; the stored level stays untouched.
@@ -420,6 +421,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         if (((yield* Ref.get(workModes)).get(chatId) ?? workMode) === "plan") return "plan" as const
         return (yield* Ref.get(modes)).get(chatId) ?? (mode === "plan" ? defaultModeFor() : mode)
       })
+
+    // Present only with Auto switching on; allows MAX_WORK_MODE_SWITCHES agent-initiated switches per turn.
+    const workModeHostFor = (chatId: string, chat: { readonly autoSwitch?: boolean; readonly mode?: PermissionMode }) => {
+      if (chat.autoSwitch !== true) return {}
+      let switches = 0
+      const approval = () => Effect.runSync(Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor()
+      return { workModeHost: { approvalIsAuto: () => approval() === "auto", reserveSwitch: () => switches < MAX_WORK_MODE_SWITCHES && ++switches > 0 } }
+    }
 
     const followWorkMode = (sessionId: string, chatId: string, event: StreamEvent) =>
       event._tag === "WorkModeChanged" ? setWorkMode(sessionId, chatId, event.workMode) : Effect.void
@@ -1091,9 +1100,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 console.error("Failed to persist execution usage", cause)
               }))
             )
+          const workModeHost = workModeHostFor(chatId, chat)
           const checkoutOption = yield* turnCheckoutHost(sessionId, chatId, { ...session, worktreePath }, emit)
           const adapterRun = adapter.run(chatId, spec, {
             ...checkoutOption,
+            ...workModeHost,
             emit,
             recordUsage,
             canUseTool,

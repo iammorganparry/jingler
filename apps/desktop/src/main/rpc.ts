@@ -5684,9 +5684,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     Effect.flatMap(AgentRunner, (runner) =>
       runner.setMode(sessionId, chatId, mode),
     ),
-  "Agent.setWorkMode": ({ sessionId, chatId, workMode }) =>
+  "Agent.setWorkMode": ({ sessionId, chatId, workMode, autoSwitch }) =>
     Effect.flatMap(AgentRunner, (runner) =>
-      runner.setWorkMode(sessionId, chatId, workMode),
+      runner.setWorkMode(sessionId, chatId, workMode, autoSwitch),
     ),
   "Agent.setReasoning": ({ sessionId, chatId, reasoning }) =>
     setReasoning(sessionId, chatId, reasoning),
