@@ -71,6 +71,11 @@ export function toolCallLabel({ toolName, args, intent, cwd }: ToolCallLabelInpu
       const path = typeof args?.path === "string" ? args.path : ""
       return { title: path ? `Edited \`${baseName(path)}\`` : "Edited file", detail }
     }
+    case "jingler_set_work_mode": {
+      const mode = args?.mode === "build" ? "Build" : "Plan"
+      const reason = typeof args?.reason === "string" ? args.reason : ""
+      return { title: reason ? `Switched to ${mode} — ${reason}` : `Switched to ${mode}`, detail: null }
+    }
     default:
       return { title: toolName, detail }
   }
