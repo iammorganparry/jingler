@@ -2549,6 +2549,30 @@ describe("conversationMachine — stop", () => {
     actor.stop()
   })
 
+  it("settles running sub-agents even when the stop RPC fails", async () => {
+    h.stopFails = true
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({
+      _tag: "SubagentFleetChanged",
+      event: {
+        _tag: "Upsert", version: 2, eventId: "up-1", occurredAt: 15,
+        node: {
+          id: "pi-parent-1/a1", runId: "a1", subagentId: "a1", parentRuntimeSessionId: "pi-parent-1",
+          parentId: null, registryRevision: 15, childSequence: 1, startedAt: 0, updatedAt: 15,
+          status: "running"
+        } as SubagentFleetNode
+      }
+    })
+    actor.send({ type: "STOP" })
+    await waitFor(actor, (s) => s.matches(idle))
+    const last = actor.getSnapshot().context.subagentFleetEvents.at(-1)
+    expect(last?._tag === "Upsert" && last.node.status).toBe("stopped")
+    actor.stop()
+  })
+
   // Every exit from `stopping` leads onward, including the unhappy ones: a stop
   // that rejects must never strand the session in a state with no composer.
   it("moves on even when the stop RPC fails", async () => {
