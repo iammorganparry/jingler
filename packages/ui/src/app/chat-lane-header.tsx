@@ -1,6 +1,6 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { createContext, useEffect, useRef, useState, type ReactNode } from "react"
-import { ArrowLeft, ChevronDown, ChevronRight, MessagesSquare, MousePointer2, Plus, X } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronRight, Eye, Plus, X } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Kbd } from "../components/kbd.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -73,9 +73,10 @@ export function FollowAgentToggle({
           : "Follow files edited by this chat's agent"
       }
       onClick={() => onToggleFollowAgent(!followAgent)}
-      className={cn("flex-none px-1.5", followAgent && "bg-surface text-text-bright")}
+      className={cn("flex-none gap-1.5 px-1.5", followAgent && "bg-surface text-text-bright")}
     >
-      <MousePointer2 className="size-3.5" />
+      <Eye className="size-3.5" />
+      <span className="hidden @[420px]:inline">Follow agent</span>
     </Button>
   )
 }
@@ -183,7 +184,7 @@ export function ChatLaneHeader({
     <div
       ref={rootRef}
       data-testid="chat-lane-header"
-      className="flex h-10 min-w-0 flex-1 items-center gap-2 border-b border-hairline bg-sunken/70 px-3"
+      className="flex h-10 min-w-0 flex-1 items-center gap-2 @container border-b border-hairline bg-sunken/70 px-3"
     >
       {subagentView ? <SubagentBreadcrumb title={activeTitle} view={subagentView} /> : (
       <DropdownMenu.Root open={switcherOpen} onOpenChange={setSwitcherOpen}>
@@ -193,9 +194,8 @@ export function ChatLaneHeader({
             size="sm"
             data-testid="thread-switcher"
             aria-label="Switch chat thread"
-            className="min-w-0 flex-1 justify-start gap-2 px-2 text-xs"
+            className="min-w-0 max-w-[60%] justify-start gap-2 bg-surface px-2.5 text-xs"
           >
-            <MessagesSquare className="size-3.5 flex-none text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-left font-medium text-text-bright">
               {activeTitle}
             </span>
@@ -256,13 +256,15 @@ export function ChatLaneHeader({
           aria-label="New chat"
           title="New chat"
           onClick={onCreateChat}
-          className="flex-none px-1.5"
+          className="flex-none gap-1.5 px-1.5"
         >
           <Plus className="size-3.5" />
+          <span className="hidden @[420px]:inline">New chat</span>
         </Button>
       )}
 
       <div data-testid="subagent-slot" className="flex-none">{subagentSlot}</div>
+      <span className="flex-1" />
 
       {onToggleFollowAgent && (
         <FollowAgentToggle followAgent={followAgent} onToggleFollowAgent={onToggleFollowAgent} />

@@ -441,10 +441,10 @@ function describeEditorSurface(
   }
   if (surface.kind === "chat") {
     const label = chatTitleOf(session, surface.id)
-    return { label, icon: MessagesSquare, crumbs: [sessionLabel, label] }
+    return { label, icon: MessagesSquare }
   }
   if (surface.kind === "file") {
-    return { label: surface.id.split("/").at(-1) ?? surface.id, crumbs: [sessionLabel, session.branch, surface.id] }
+    return { label: surface.id.split("/").at(-1) ?? surface.id, crumbs: surface.id.split("/") }
   }
   const contribution = contributions.find((candidate) => candidate.id === surface.id)
   const label = contribution?.label ?? surface.id
