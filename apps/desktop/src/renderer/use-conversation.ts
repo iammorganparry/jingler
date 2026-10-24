@@ -108,6 +108,7 @@ export interface Conversation {
   readonly retryPrompt: (() => void) | null
   readonly decideGate: (gateId: string, decision: GateDecision) => void
   readonly setMode: (mode: PermissionMode) => void
+  readonly approvalMode: PermissionMode
   readonly workMode: WorkMode
   readonly setWorkMode: (workMode: WorkMode) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
@@ -231,7 +232,7 @@ export function useConversation(
     [actor, session.id]
   )
   const {
-    messages, mode, reasoning, skills, files,
+    messages, mode, executionMode, reasoning, skills, files,
     runtimeId, endpointId, connectionId, providerId, modelId, modelPending, queued, steeringId,
     subagents, subagentFleetEvents, subagentControlOutcomes,
     tokens, contextBreakdown, hasMoreHistory, loadingHistory,
@@ -275,6 +276,7 @@ export function useConversation(
     hasMoreHistory,
     loadingHistory,
     mode,
+    approvalMode: executionMode,
     workMode: mode === "plan" ? "plan" as const : "build" as const,
     reasoning,
     skills,

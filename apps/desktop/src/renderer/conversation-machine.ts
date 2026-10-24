@@ -1854,7 +1854,7 @@ export const conversationMachine = setup({
       if (event.type !== "SET_MODE") return {}
       void rpc.agentSetMode(context.session.id, context.chatId, event.mode)
       return isExecutionMode(event.mode)
-        ? { mode: event.mode, executionMode: event.mode }
+        ? { mode: context.mode === "plan" ? "plan" : event.mode, executionMode: event.mode }
         : { mode: event.mode }
     }),
     persistWorkMode: assign(({ context, event }) => {

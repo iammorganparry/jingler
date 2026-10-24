@@ -1516,7 +1516,7 @@ function renderMainConversation({
     hasMoreHistory={convo.hasMoreHistory}
     loadingHistory={convo.loadingHistory}
     onLoadEarlier={convo.loadOlder}
-    mode={convo.mode}
+    mode={convo.approvalMode}
     subagentNeedsAttention={subagentNeedsAttention}
     skills={convo.skills}
     files={convo.files}
