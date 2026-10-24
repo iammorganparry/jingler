@@ -689,7 +689,13 @@ test("toggle switches plan and build", async ({ launchApp }) => {
   await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
   expect(existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null).toBe(before)
 
-  await launched.window.getByRole("tab", { name: "Build" }).click()
+  // The agent is parked on plan review; stop it so the composer takes a fresh prompt.
+  await launched.window.getByRole("button", { name: "Stop", exact: true }).click()
+  const buildTab = launched.window.getByRole("tab", { name: "Build" })
+  // Split beside the plan the composer is narrow and its settings live in the Options popover.
+  if (!(await buildTab.isVisible())) await launched.window.getByRole("button", { name: "Composer options" }).click()
+  await buildTab.click()
+  await launched.window.keyboard.press("Escape")
   const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
   await composer.fill("[[escape]] write again")
   await composer.press("Enter")
