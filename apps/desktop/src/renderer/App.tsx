@@ -299,6 +299,29 @@ function useWindowControls() {
   }
 }
 
+function McpImportCard({
+  mcp,
+  ignoreDismissal
+}: {
+  readonly mcp: ReturnType<typeof useMcpSettings>;
+  readonly ignoreDismissal?: boolean;
+}) {
+  return (
+    <McpImportPrompt
+      ready={!mcp.loading && mcp.parseError === null}
+      servers={mcp.servers}
+      load={mcp.importCandidates}
+      apply={mcp.applyImport}
+      probe={async () => rpc.mcpStatus()}
+      startAuthorization={mcp.startAuthorization}
+      logTail={mcp.logTail}
+      isDismissed={rpc.mcpImportDismissed}
+      persistDismissed={rpc.mcpDismissImport}
+      ignoreDismissal={ignoreDismissal}
+    />
+  );
+}
+
 function AuthedApp({
   user,
   onSignOut,
@@ -514,33 +537,8 @@ function AuthedApp({
   const mcp = useMcpSettings();
   const voice = useVoiceSettings();
   const decideGateAllowFor = allowPendingGate;
-  const homeImportCard = (
-    <McpImportPrompt
-      ready={!mcp.loading && mcp.parseError === null}
-      servers={mcp.servers}
-      load={mcp.importCandidates}
-      apply={mcp.applyImport}
-      probe={async () => rpc.mcpStatus()}
-      startAuthorization={mcp.startAuthorization}
-      logTail={mcp.logTail}
-      isDismissed={rpc.mcpImportDismissed}
-      persistDismissed={rpc.mcpDismissImport}
-    />
-  );
-  const settingsImportCard = (
-    <McpImportPrompt
-      ready={!mcp.loading && mcp.parseError === null}
-      servers={mcp.servers}
-      load={mcp.importCandidates}
-      apply={mcp.applyImport}
-      probe={async () => rpc.mcpStatus()}
-      startAuthorization={mcp.startAuthorization}
-      logTail={mcp.logTail}
-      isDismissed={rpc.mcpImportDismissed}
-      persistDismissed={rpc.mcpDismissImport}
-      ignoreDismissal
-    />
-  );
+  const homeImportCard = <McpImportCard mcp={mcp} />;
+  const settingsImportCard = <McpImportCard mcp={mcp} ignoreDismissal />;
   const environmentController = useEnvironments();
   const providerCatalog = useProviderCatalog(environmentController.environments);
   const agentsSettings = useAgentsSettings();
