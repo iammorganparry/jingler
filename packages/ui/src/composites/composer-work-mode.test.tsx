@@ -12,6 +12,6 @@ describe("Composer work mode toggle", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Plan" }))
     expect(onSetWorkMode).toHaveBeenCalledWith("plan")
     expect(onSetMode).not.toHaveBeenCalled()
-    expect(screen.getByRole("button", { name: "Auto", exact: false })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Auto" })).toBeDefined()
   })
 })
