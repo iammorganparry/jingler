@@ -517,6 +517,16 @@ export const matchPaletteChord = (
   return e.code === "KeyK" || key === "k"
 }
 
+/** Open Settings: ⌘, on macOS, Ctrl+, elsewhere. */
+export const matchSettingsChord = (
+  e: PaletteChord,
+  isMac: boolean = isMacPlatform()
+): boolean => {
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return false
+  if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
+  return e.code === "Comma" || e.key === ","
+}
+
 /** Focused-session file picker: ⌘P (Ctrl+P elsewhere). ⌘⇧P opens Checks. */
 export const matchFileQuickOpenChord = (
   e: PaletteChord,

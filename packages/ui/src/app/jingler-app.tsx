@@ -91,6 +91,7 @@ import { CommandPalette } from "./command-palette.js"
 import { TitleSearch } from "./title-search.js"
 import {
   matchPaletteChord,
+  matchSettingsChord,
   matchFileQuickOpenChord,
   matchNeedsYouChord,
   needsYouPaletteItems,
@@ -937,6 +938,12 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
         return
       }
 
+      if (matchSettingsChord(e) && providerConnections) {
+        e.preventDefault()
+        openSettings()
+        return
+      }
+
       if (
         matchTerminalChord(e) &&
         active &&
@@ -1248,7 +1255,9 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     active,
     renderFileQuickOpen,
     useSessionTerminals,
-    openNewSession
+    openNewSession,
+    openSettings,
+    providerConnections
   ])
 
   /**

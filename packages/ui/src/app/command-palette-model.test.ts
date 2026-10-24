@@ -7,6 +7,7 @@ import {
   matchFileQuickOpenChord,
   matchNeedsYouChord,
   matchPaletteChord,
+  matchSettingsChord,
   needsYouGroupName,
   needsYouPaletteItems,
   nextNeedsYouSession,
@@ -488,5 +489,15 @@ describe("matchNeedsYouChord", () => {
     const e = chord({ code: "KeyJ", key: "j", metaKey: true, cancelable: true })
     e.preventDefault()
     expect(matchNeedsYouChord(e, MAC)).toBe(false)
+  })
+})
+
+describe("matchSettingsChord", () => {
+  it("matches ⌘, on macOS and Ctrl+, elsewhere, and nothing adjacent", () => {
+    expect(matchSettingsChord(chord({ code: "Comma", key: ",", metaKey: true }), true)).toBe(true)
+    expect(matchSettingsChord(chord({ code: "Comma", key: ",", ctrlKey: true }), false)).toBe(true)
+    expect(matchSettingsChord(chord({ code: "Comma", key: ",", ctrlKey: true }), true)).toBe(false)
+    expect(matchSettingsChord(chord({ code: "Comma", key: ",", metaKey: true, shiftKey: true }), true)).toBe(false)
+    expect(matchSettingsChord(chord({ code: "KeyK", key: "k", metaKey: true }), true)).toBe(false)
   })
 })
