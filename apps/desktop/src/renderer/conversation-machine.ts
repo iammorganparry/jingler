@@ -67,6 +67,7 @@ import {
   spawnChild,
   stopChild
 } from "xstate"
+import { queryClient } from "./query-client.js"
 import { rpc } from "./rpc-client.js"
 
 const modelMutations = new Map<string, { generation: number; tail: Promise<void> }>()
@@ -1799,6 +1800,9 @@ export const conversationMachine = setup({
         e.diff === null &&
         (toolName === null || !isFileMutationTool(toolName))
       ) return
+      // Changes view reads ["local","diff",id,...] (main checkout and every
+      // subagent workspace); invalidating the prefix refreshes them all.
+      void queryClient.invalidateQueries({ queryKey: ["local", "diff", context.session.id] })
       void rpc
         .sessionsDiffStat(context.session.id)
         .then((diffStat) => self.send({ type: "DIFF_STAT_UPDATED", diffStat }))
