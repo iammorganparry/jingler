@@ -682,24 +682,27 @@ test("plan mode blocks a write outside the plan file but lets the plan file thro
 })
 
 test("toggle switches plan and build", async ({ launchApp }) => {
-  const launched = await launchPlanMode(launchApp)
-  const agentsPath = join(launched.repoPath, "AGENTS.md")
-  const before = existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null
-  await startPlanReview(launched, "[[plan]] [[escape]] replace auth")
-  await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
-  expect(existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null).toBe(before)
+  // Plan (toggled in): the scripted agent's write outside the plan file is blocked.
+  const planned = await launchPlanMode(launchApp)
+  const plannedAgents = join(planned.repoPath, "AGENTS.md")
+  await startPlanReview(planned, "[[plan]] [[escape]] replace auth")
+  await expect.poll(() => planFile(planned), { timeout: 30_000 }).toContain("## Test strategy")
+  expect(existsSync(plannedAgents)).toBe(false)
+  await planned.app.close()
 
-  // The agent is parked on plan review; stop it so the composer takes a fresh prompt.
-  await launched.window.getByRole("button", { name: "Stop", exact: true }).click()
-  const buildTab = launched.window.getByRole("tab", { name: "Build" })
-  // Split beside the plan the composer is narrow and its settings live in the Options popover.
-  if (!(await buildTab.isVisible())) await launched.window.getByRole("button", { name: "Composer options" }).click()
-  await buildTab.click()
-  await launched.window.keyboard.press("Escape")
-  const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
-  await composer.fill("[[escape]] write again")
+  // Plan then Build (toggled back): the same write goes through.
+  const built = await launchPlanMode(launchApp)
+  const skipImport = built.window.getByRole("button", { name: "Skip import" })
+  if (await skipImport.isVisible()) await skipImport.click()
+  const composer = built.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.click()
+  await built.window.keyboard.press("Shift+Tab")
+  await expect(built.window.locator("[data-mode='plan']")).toBeVisible()
+  await built.window.getByRole("tab", { name: "Build" }).click()
+  await expect(built.window.locator("[data-mode='accept-edits']")).toBeVisible()
+  await composer.fill("[[escape]] write directly")
   await composer.press("Enter")
-  await expect.poll(() => (existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null), { timeout: 30_000 }).toBe("pwned\n")
+  await expect.poll(() => existsSync(join(built.repoPath, "AGENTS.md")), { timeout: 30_000 }).toBe(true)
 })
 
 const savedChat = (launched: LaunchedApp) => {
