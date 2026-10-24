@@ -241,7 +241,8 @@ test("opens the terminal surface from the command palette", async ({ launchApp }
 
   await expect(window.getByTestId("command-palette")).toBeHidden()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
-  await window.getByRole("button", { name: "Close Terminal", exact: true }).click()
+  // Each shell is its own editor tab (#904), named for the shell, not "Terminal".
+  await window.getByRole("button", { name: "Close zsh", exact: true }).click()
   await expect(window.locator(".xterm").first()).toBeHidden()
 })
 
@@ -297,7 +298,9 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
   const terminal = window.getByTestId("palette-item-tab:terminal")
   await expect(terminal).toBeVisible()
   await terminal.click()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+  // Each shell is its own editor tab (#904), so the tab is named for the shell.
+  const shellTab = window.getByRole("tab", { name: "zsh", exact: true })
+  await expect(shellTab).toBeVisible({ timeout: 20_000 })
 
   // Jump to the other session. It must arrive on Conversation.
   await window.keyboard.press("Meta+k")
@@ -305,7 +308,7 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
   await window.keyboard.press("Enter")
 
   await expect(window.getByTestId("session-header-identity")).toContainText("Beta session")
-  await expect(window.getByTestId("editor-tab-view-terminal")).toHaveCount(0)
+  await expect(shellTab).toHaveCount(0)
 })
 
 test("archives the active session from the palette", async ({ launchApp }) => {
