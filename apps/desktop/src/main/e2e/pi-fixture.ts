@@ -630,7 +630,7 @@ const submitResultResponse = (context: PiContext, result: string, submitCount: n
 }
 
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
-  const switched = switchPlanResponse(context)
+  const switched = switchPlanResponse(context) ?? switchBuildResponse(context)
   if (switched !== null) return switched
   const lastMessage = context.messages.at(-1)
   const planMessages = operatorText(context)
@@ -1082,10 +1082,20 @@ const switchPlanResponse = (context: PiContext): ReturnType<typeof fauxAssistant
   return fauxAssistantMessage("Stayed in plan.")
 }
 
+// `[[switch-build]]`: enter Plan through the tool, then try to leave it with no approved plan.
+const switchBuildResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  if (!latestOperatorText(context).includes("[[switch-build]]")) return null
+  const switches = recentToolResultCount(context, "jingler_set_work_mode")
+  if (switches === 0) return callTool("jingler_set_work_mode", { mode: "plan", reason: "large refactor" }, "switch-build-plan-1")
+  if (switches === 1) return callTool("jingler_set_work_mode", { mode: "build", reason: "start coding" }, "switch-build-1")
+  return fauxAssistantMessage("Still in plan.")
+}
+
 // Marker scenarios, tried in order; the first that claims the turn answers it.
 const markerResponders = [
   intentToolResponse,
   switchPlanResponse,
+  switchBuildResponse,
   switchRepoResponse,
   fileBrowserResponse,
   supervisorSubagentResponse,
