@@ -223,7 +223,6 @@ test("closing an untouched chat tab removes it from the sidebar", async ({ launc
   await expect(window.getByText("Keep this chat.")).toBeVisible()
 
   // Chat-only groups use ChatLaneHeader with a dedicated "New chat" button
-  await window.getByRole("button", { name: "New tab" }).first().click()
   await window.getByTestId("new-chat-button").click()
   await expect(window.getByTestId("thread-switcher")).toContainText("Chat 2")
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toBeVisible()
@@ -362,4 +361,12 @@ test("legacy split shortcuts cannot create duplicate panes", async ({ launchApp 
   await window.keyboard.press("Meta+Backslash")
   await window.keyboard.press("Meta+Shift+Backslash")
   await expect(groups(window)).toHaveCount(1)
+})
+
+test("session chrome: header chips, no chat breadcrumb, New chat button", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true })
+  await expect(window.getByTestId("session-header-identity")).toBeVisible()
+  await expect(window.getByTestId("header-branch")).toBeVisible()
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" })).toHaveCount(0)
+  await expect(window.getByTestId("new-chat-button")).toBeVisible()
 })

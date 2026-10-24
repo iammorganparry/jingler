@@ -624,12 +624,12 @@ test("decorates agent edits with a turn label and counts them in the file breadc
   await expect(label).toBeVisible()
   await expect(followed.getByRole("button", { name: /Keep|Revert/ })).toHaveCount(0)
   await expect(
-    window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "src/config.ts" }).getByText(/\b1 agent edit$/)
+    window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "config.ts" }).getByText(/\b1 agent edit$/)
   ).toBeVisible()
 
   // One header row: breadcrumb, Diff/Edit and Follow agent share a y, with no second toolbar bar.
   const body = window.locator('[data-surface*="src/config.ts"]').filter({ visible: true })
-  const crumb = window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "src/config.ts" })
+  const crumb = window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "config.ts" })
   const [crumbBox, modeBox, followBox] = await Promise.all([
     crumb.boundingBox(),
     crumb.getByRole("tab", { name: "Edit src/config.ts" }).boundingBox(),
