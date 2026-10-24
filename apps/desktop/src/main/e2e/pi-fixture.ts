@@ -630,6 +630,8 @@ const submitResultResponse = (context: PiContext, result: string, submitCount: n
 }
 
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  const switched = switchPlanResponse(context)
+  if (switched !== null) return switched
   const lastMessage = context.messages.at(-1)
   const planMessages = operatorText(context)
   const planStart = planMessages.findLastIndex((text) => text.includes("[[plan]]"))
