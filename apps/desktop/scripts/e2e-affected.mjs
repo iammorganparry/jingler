@@ -9,7 +9,7 @@ import { normalizeE2eArgs } from "./run-e2e-args.js"
 
 const desktopDir = join(dirname(fileURLToPath(import.meta.url)), "..")
 const e2eDir = join(desktopDir, "e2e")
-const git = (...args) => execFileSync("git", args, { cwd: desktopDir, encoding: "utf8" }).split("\n").filter(Boolean)
+const git = (...args) => execFileSync("git", args, { cwd: join(desktopDir, "../.."), encoding: "utf8" }).split("\n").filter(Boolean)
 
 const args = normalizeE2eArgs(process.argv.slice(2))
 const baseAt = args.indexOf("--base")
@@ -23,7 +23,7 @@ const map = JSON.parse(readFileSync(join(e2eDir, "affected-map.json"), "utf8"))
 // `--relative=` is not used: git prints repo-root paths with --full-name, which the map expects.
 const changedFiles = () => {
   const mergeBase = git("merge-base", base, "HEAD")[0]
-  return [...new Set([...git("diff", "--name-only", "--full-name", mergeBase), ...git("ls-files", "--others", "--exclude-standard", "--full-name")])]
+  return [...new Set([...git("diff", "--name-only", mergeBase), ...git("ls-files", "--others", "--exclude-standard")])]
 }
 
 let selection
