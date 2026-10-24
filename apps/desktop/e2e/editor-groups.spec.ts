@@ -364,7 +364,8 @@ test("legacy split shortcuts cannot create duplicate panes", async ({ launchApp 
 })
 
 test("session chrome: header chips, no chat breadcrumb, New chat button", async ({ launchApp }) => {
-  const { window } = await launchApp({ configured: true, withRepo: true })
+  const { window } = await launchApp({ configured: true, isolateSystemHome: true, withRepo: true, sessions })
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
   await expect(window.getByTestId("session-header-identity")).toBeVisible()
   await expect(window.getByTestId("header-branch")).toBeVisible()
   await expect(window.getByRole("navigation", { name: "Breadcrumb" })).toHaveCount(0)
