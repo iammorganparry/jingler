@@ -1,5 +1,6 @@
 import type { HomeStart } from "../screens/empty-conversation.js"
 import type { SubagentFleetNode } from "@jingler/core"
+import type { UseSessionTerminals } from "./terminal-panel.js"
 import { defaultProps } from "../lib/default-props.js"
 import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, matchSplitEditorChord, surfaceCommandForShortcut, tabShortcutHint } from "./app-shortcuts.js"
 import {
@@ -379,8 +380,8 @@ export interface JinglerAppProps {
     ctx: { onConnectGithub: () => void }
   ) => ReactNode
   /** Render the Issue tab — the rich linked-issue view. */
-  /** Render the per-session Terminal view. */
-  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
+  /** Hook supplying the session's shells (each is an editor tab). */
+  useSessionTerminals?: UseSessionTerminals
   /** Render the embedded browser inside its owning session pane. */
   renderBrowser?: (session: Session, visible: boolean) => ReactNode
   /** Make a nested chat-owned surface the session's canonical active chat. */
@@ -667,7 +668,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         onHeaderViewsChange={onHeaderViewsChange}
         sidebarCollapsed={sidebarCollapsed}
         renderReviewTray={renderReviewTray}
-        renderTerminalDock={renderTerminalDock}
+        useSessionTerminals={useSessionTerminals}
         selectTabRequest={tabRequest}
         onTabRequestHandled={clearTabRequest}
         version={version}
@@ -697,7 +698,7 @@ function getProjectMenuProps() {
           }
         : undefined,
       onLocateProject: onBrowseProject && onRegisterProject ? locateProject : undefined,
-      onOpenSessionTerminal: renderTerminalDock ? openSessionTerminal : undefined
+      onOpenSessionTerminal: useSessionTerminals ? openSessionTerminal : undefined
     }
   }
 
@@ -869,7 +870,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, subagentCounts, subagentAttentionCounts, subagentEntries, onOpenSubagent, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, notificationPermission, onOpenNotificationSystemSettings, offloadCompute, onSaveOffloadCompute, offloadStatus, onRetryOffload, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, planTemplate, onSavePlanTemplate, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, voice, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, subagentPrNodes, onOpenSessionPr, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView, obsidianExplanations, onSaveObsidianExplanations, obsidianVaultConfigured } = defaultProps(props, {
+const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, subagentCounts, subagentAttentionCounts, subagentEntries, onOpenSubagent, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, notificationPermission, onOpenNotificationSystemSettings, offloadCompute, onSaveOffloadCompute, offloadStatus, onRetryOffload, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, planTemplate, onSavePlanTemplate, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, voice, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, useSessionTerminals, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, subagentPrNodes, onOpenSessionPr, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView, obsidianExplanations, onSaveObsidianExplanations, obsidianVaultConfigured } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -939,7 +940,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
       if (
         matchTerminalChord(e) &&
         active &&
-        renderTerminalDock
+        useSessionTerminals
       ) {
         e.preventDefault()
         setTabRequest((previous) => ({
@@ -1246,7 +1247,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     split,
     active,
     renderFileQuickOpen,
-    renderTerminalDock,
+    useSessionTerminals,
     openNewSession
   ])
 
@@ -1305,7 +1306,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
         ...(tabContributions ?? [])
       ])) {
         if (tab.id === BUILTIN_TAB.browser && !renderBrowser) continue
-        if (tab.id === BUILTIN_TAB.terminal && !renderTerminalDock) continue
+        if (tab.id === BUILTIN_TAB.terminal && !useSessionTerminals) continue
         items.push({
           id: `tab:${tab.id}`,
           kind: "tab",
@@ -1332,7 +1333,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
         tab.id !== BUILTIN_TAB.conversation &&
         tab.id !== BUILTIN_TAB.files &&
         !(tab.id === BUILTIN_TAB.browser && !renderBrowser) &&
-        !(tab.id === BUILTIN_TAB.terminal && !renderTerminalDock)
+        !(tab.id === BUILTIN_TAB.terminal && !useSessionTerminals)
     )
     items.push(
       ...viewPaletteItems(views, (viewId) =>
@@ -1484,7 +1485,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     needsYouSessions,
     selectSession,
     onCreateSession,
-    renderTerminalDock,
+    useSessionTerminals,
     renderBrowser,
     onArchiveSession,
     onRestoreSession,

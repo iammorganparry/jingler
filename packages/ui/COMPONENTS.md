@@ -249,7 +249,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | SubagentScopeBar | `app/subagent-scope-bar.tsx` | One-line bar atop content scoped to a child: `Scoped to <agent> · <branch> · PR #N` + `Show all agents`. | agent, branch, prNumber, onShowAll | yes | #563 (8.12) |
 | AgentView, FleetAgentView | `app/subagent-view.tsx` | Read-only child agent transcript. | node, messages, providerId, loading, error, controlOutcome | no | — |
 | TabBar | `app/tab-bar.tsx` | Content tab strip. | — | yes | — |
-| TerminalDock, TerminalPanel | `app/terminal-panel.tsx` | Terminal dock, and the Terminal view's resizable panel (drag handle default 240, height persisted per session, tab strip, "No terminals" empty state, exited shell Restart). | dock, onDockChange, visible, onToggle, tabs, activeId; panel: sessionId, tabs, activeId, onNew, onRestart | yes | #469 (8.10) |
+| TerminalDock, TerminalPanel | `app/terminal-panel.tsx` | Terminal dock, and one shell's editor-tab body (live cell, exited-shell Restart bar, cwd/last-exit footer); tab chrome is the editor tab bar. | dock, onDockChange, visible, onToggle, tabs, activeId; panel: tab, onRestart, cwdLabel, renderTerminal | yes | #469 (8.10) |
 | TitleBar | `app/title-bar.tsx` | Window title bar; draws WindowControls when platform is set and not darwin. | title, actions, platform, windowControls | yes | #394 (3.11) |
 | WindowControls | `app/window-controls.tsx` | Minimize / maximize-restore / close for Windows and Linux; red hover on Close only. | maximized, onMinimize, onToggleMaximize, onClose | yes | #394 (3.11) |
 | TitleSearch | `app/title-search.tsx` | Global sidebar search. | — | no | — |

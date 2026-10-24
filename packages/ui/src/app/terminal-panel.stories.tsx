@@ -17,11 +17,7 @@ const meta = {
     )
   ],
   args: {
-    sessionId: "story",
-    activeId: "t1",
-    onSelect: () => {},
-    onNew: () => {},
-    onClose: () => {},
+    tab: { id: "t1", title: "dev", status: "running" } as TerminalTab,
     onRestart: () => {},
     cwdLabel: "~/repos/jingler",
     renderTerminal: cell
@@ -31,19 +27,8 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-const tabs: ReadonlyArray<TerminalTab> = [
-  { id: "t1", title: "dev", status: "running" },
-  { id: "t2", title: "test", status: "running" }
-]
-
-export const Tabs: Story = { args: { tabs, lastExit: 0 } }
-
-export const Empty: Story = { args: { tabs: [], activeId: null } }
+export const Running: Story = {}
 
 export const ShellExited: Story = {
-  args: {
-    tabs: [tabs[0] as TerminalTab, { id: "t2", title: "test", status: "exited", exitCode: 1 }],
-    activeId: "t2",
-    lastExit: 1
-  }
+  args: { tab: { id: "t2", title: "test", status: "exited", exitCode: 1 } }
 }
