@@ -984,6 +984,29 @@ describe("SessionStore", () => {
     expect(failureOf(exit)?._tag).toBe("SessionNotFoundError")
   })
 
+  it("setBranch and setCheckoutBranch keep the checkout's own branch in step", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Branch Session" }))
+        const co = (id: string, repoPath: string) => ({
+          id, projectId: "p", repo: id, repoPath, worktreePath: `/w/${id}`,
+          workspaceMode: "worktree" as const, branch: "main", baseBranch: "main", prNumber: null
+        })
+        yield* SessionStore.setCheckouts(created.id, {
+          ...created, checkouts: [co("web", "/r/web"), co("api", "/r/api")], activeCheckoutId: "web"
+        })
+        yield* SessionStore.setBranch(created.id, "feat/x")
+        yield* SessionStore.setCheckoutBranch(created.id, "api", "feat/x")
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.branch).toBe("feat/x")
+    expect(exit.value.checkouts?.map((c) => c.branch)).toEqual(["feat/x", "feat/x"])
+  })
+
   it("setPrNumber links (and clears) a session's PR across a fresh read", async () => {
     const exit = await runExit(
       Effect.gen(function* () {

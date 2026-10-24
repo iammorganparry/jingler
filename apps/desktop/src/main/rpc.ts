@@ -201,6 +201,7 @@ import type {
   ReviewSubmitKind,
   ReasoningSetting,
   Session,
+  SessionCheckout,
   GitHubAppConnectionStatus,
   GitHubSessionRoute,
   GitHubRelayDelivery,
@@ -2445,6 +2446,15 @@ const postReviewToPr = (
     );
   });
 
+/** Store a checkout's live worktree branch when the agent moved it off the recorded one. */
+const syncCheckoutBranch = (sessionId: string, checkout: SessionCheckout) =>
+  GitService.branchAt(checkout.worktreePath!).pipe(
+    Effect.flatMap((live) =>
+      live === null || live === checkout.branch ? Effect.void : SessionStore.setCheckoutBranch(sessionId, checkout.id, live),
+    ),
+    Effect.ignore,
+  );
+
 /** Detect a PR in every non-active checkout's own worktree and store it on that checkout. */
 const detectOtherCheckoutPrs = (session: Session) =>
   Effect.forEach(
@@ -2452,7 +2462,7 @@ const detectOtherCheckoutPrs = (session: Session) =>
       (c) => c.id !== activeCheckoutOf(session).id && c.worktreePath !== undefined,
     ),
     (checkout) =>
-      GitHubApi.prForWorktree(checkout.worktreePath!).pipe(
+      syncCheckoutBranch(session.id, checkout).pipe(Effect.zipRight(GitHubApi.prForWorktree(checkout.worktreePath!)),
         Effect.orElseSucceed(() => null),
         Effect.flatMap((found) =>
           found === null || found === checkout.prNumber
@@ -2479,7 +2489,12 @@ export const githubDetectPr = (sessionId: string) =>
       GitHubApi.prForWorktree(session.worktreePath),
       GitService.branchAt(session.worktreePath),
     ]);
-    if (n === null) return null;
+    if (n === null) {
+      if (liveBranch !== null && liveBranch !== session.branch) {
+        yield* SessionStore.setBranch(session.id, liveBranch).pipe(Effect.ignore);
+      }
+      return null;
+    }
     const persistLink = SessionStore.setPrNumber(session.id, n).pipe(
       Effect.zipRight(
         liveBranch === null ? Effect.void : SessionStore.setBranch(session.id, liveBranch),
