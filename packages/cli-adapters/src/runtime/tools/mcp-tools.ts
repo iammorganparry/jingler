@@ -12,20 +12,13 @@ import type { ProviderId, ProviderModelId, RuntimeDiagnosticMcpHealth } from "@j
 import { Data, Effect, Schema } from "effect"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { loginShellEnvironment } from "../../login-shell-env.js"
-import { ToolError, type ToolRegistry, type ToolRisk } from "./tool-registry.js"
+import { ToolError, toolRoles, codeReadModes, type ToolRegistry, type ToolRisk } from "./tool-registry.js"
 
 const TOOL_PAGE_LIMIT = 32
 const TOOL_TIMEOUT_MS = 60_000
 const TOOL_OUTPUT_BUDGET = 16_000
-const roles = [
-  "conversation",
-  "plan",
-  "plan-execution",
-  "review",
-  "context-digest",
-  "background"
-] as const
-const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
+const roles = toolRoles
+const modes = codeReadModes
 const argumentsSchema = Schema.Record({ key: Schema.String, value: Schema.Unknown })
 const progressiveSearchInput = Schema.Struct({
   query: Schema.String,

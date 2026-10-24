@@ -5,10 +5,10 @@ import type {
   PluginAgentToolSessionContext
 } from "../../plugin-host-protocol.js"
 import { Schema } from "effect"
-import type { PluginToolOrigin, ToolRegistry } from "./tool-registry.js"
+import { codeReadModes, type PluginToolOrigin, type ToolRegistry } from "./tool-registry.js"
 
 const roles = ["conversation", "plan", "plan-execution", "review", "background"] as const satisfies ReadonlyArray<AgentRole>
-const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const satisfies ReadonlyArray<RuntimeMode>
+const modes = codeReadModes
 const PluginToolInput = Schema.Record({ key: Schema.String, value: Schema.Unknown })
 
 const issueReferenceOf = (value: unknown): IssueReference | null => {
