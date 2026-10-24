@@ -772,7 +772,10 @@ test("agent cannot leave plan without an approved plan", async ({ launchApp }) =
   await composer.click()
   await composer.fill("[[switch-build]] start coding")
   await composer.press("Enter")
-  await expect(window.getByRole("button", { name: "Work mode Switched to Build — start coding" })).toBeVisible({ timeout: 30_000 })
+  const buildCard = window.getByRole("button", { name: "Work mode Switched to Build — start coding" })
+  await expect(buildCard).toBeVisible({ timeout: 30_000 })
+  // The refusal sits in the collapsed card body.
+  await buildCard.click()
   await expect(window.getByText("Cannot switch to build", { exact: false })).toBeVisible()
   await expect(window.locator("[data-mode='plan']")).toBeVisible()
   await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("plan")
