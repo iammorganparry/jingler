@@ -19,6 +19,7 @@ import type {
   GateDecision,
   Message,
   PermissionMode,
+  WorkMode,
   PlannotatorProjection,
   ProviderConnectionId,
   ProviderId,
@@ -107,6 +108,8 @@ export interface Conversation {
   readonly retryPrompt: (() => void) | null
   readonly decideGate: (gateId: string, decision: GateDecision) => void
   readonly setMode: (mode: PermissionMode) => void
+  readonly workMode: WorkMode
+  readonly setWorkMode: (workMode: WorkMode) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
   readonly setModel: (
     runtimeId: AgentRuntimeId,
@@ -191,6 +194,7 @@ export function useConversation(
         answerQuestion: (requestId, answers) =>
           actor.send({ type: "ANSWER_QUESTION", requestId, answers }),
         setMode: (m) => actor.send({ type: "SET_MODE", mode: m }),
+        setWorkMode: (workMode) => actor.send({ type: "SET_WORK_MODE", workMode }),
         setReasoning: (value) =>
           actor.send({ type: "SET_REASONING", reasoning: value }),
         setModel: (runtime, endpoint, connection, provider, selectedModel) =>
@@ -216,6 +220,7 @@ export function useConversation(
         | "decideGate"
         | "answerQuestion"
         | "setMode"
+        | "setWorkMode"
         | "setReasoning"
         | "setModel"
         | "stop"
@@ -270,6 +275,7 @@ export function useConversation(
     hasMoreHistory,
     loadingHistory,
     mode,
+    workMode: mode === "plan" ? "plan" as const : "build" as const,
     reasoning,
     skills,
     files,

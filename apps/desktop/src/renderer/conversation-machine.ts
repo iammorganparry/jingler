@@ -520,6 +520,7 @@ type ConversationEvent =
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
+  | { type: "SET_WORK_MODE"; workMode: "plan" | "build" }
   | {
       type: "SET_MODEL"
       runtimeId: AgentRuntimeId
@@ -1856,6 +1857,11 @@ export const conversationMachine = setup({
         ? { mode: event.mode, executionMode: event.mode }
         : { mode: event.mode }
     }),
+    persistWorkMode: assign(({ context, event }) => {
+      if (event.type !== "SET_WORK_MODE") return {}
+      void rpc.agentSetWorkMode(context.session.id, context.chatId, event.workMode)
+      return { mode: event.workMode === "plan" ? "plan" : context.executionMode }
+    }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}
       void rpc.agentSetReasoning(context.session.id, context.chatId, event.reasoning)
@@ -2170,6 +2176,7 @@ export const conversationMachine = setup({
        */
       on: {
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // The composer is enabled from the first paint, so a prompt can be sent
         // before the transcript lands — and a dropped one is invisible: the box
         // clears and the operator believes they sent it. Hold it and run it the
@@ -2296,6 +2303,7 @@ export const conversationMachine = setup({
           { actions: "settleLateSteer" }
         ],
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // Re-read the worktree diff on demand (e.g. after a revert from the rail).
         REFRESH_DIFF: { target: "refreshingDiff" }
       }
@@ -2394,6 +2402,7 @@ export const conversationMachine = setup({
         DECIDE_GATE: { actions: "optimisticGate" },
         ANSWER_QUESTION: { actions: "optimisticAnswer" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // Stopping PARKS the queue rather than clearing it — the operator asked
         // the agent to halt, not to destroy what they typed. The rows stay on
         // screen and inert until acted on (see `queueParked`). Live sub-agent
@@ -2431,6 +2440,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     },
     /**
@@ -2474,6 +2484,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     },
     // After a turn ends, re-read the worktree diff so the Changes rail reflects
@@ -2538,6 +2549,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     }
   }
