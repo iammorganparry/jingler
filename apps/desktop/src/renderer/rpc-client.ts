@@ -820,8 +820,9 @@ export const rpc = {
   agentSetWorkMode: (
     sessionId: string,
     chatId: string,
-    workMode: WorkMode
-  ): Promise<void> => run((c) => c.Agent.setWorkMode({ sessionId, chatId, workMode })),
+    workMode: WorkMode,
+    autoSwitch?: boolean
+  ): Promise<void> => run((c) => c.Agent.setWorkMode({ sessionId, chatId, workMode, ...(autoSwitch === undefined ? {} : { autoSwitch }) })),
   agentSetReasoning: (
     sessionId: string,
     chatId: string,

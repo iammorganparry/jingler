@@ -110,7 +110,8 @@ export interface Conversation {
   readonly setMode: (mode: PermissionMode) => void
   readonly approvalMode: PermissionMode
   readonly workMode: WorkMode
-  readonly setWorkMode: (workMode: WorkMode) => void
+  readonly autoSwitch: boolean
+  readonly setWorkMode: (workMode: WorkMode, autoSwitch?: boolean) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
   readonly setModel: (
     runtimeId: AgentRuntimeId,
@@ -195,7 +196,7 @@ export function useConversation(
         answerQuestion: (requestId, answers) =>
           actor.send({ type: "ANSWER_QUESTION", requestId, answers }),
         setMode: (m) => actor.send({ type: "SET_MODE", mode: m }),
-        setWorkMode: (workMode) => actor.send({ type: "SET_WORK_MODE", workMode }),
+        setWorkMode: (workMode, autoSwitch) => actor.send({ type: "SET_WORK_MODE", workMode, autoSwitch }),
         setReasoning: (value) =>
           actor.send({ type: "SET_REASONING", reasoning: value }),
         setModel: (runtime, endpoint, connection, provider, selectedModel) =>
@@ -232,7 +233,7 @@ export function useConversation(
     [actor, session.id]
   )
   const {
-    messages, mode, executionMode, reasoning, skills, files,
+    messages, mode, executionMode, autoSwitch, reasoning, skills, files,
     runtimeId, endpointId, connectionId, providerId, modelId, modelPending, queued, steeringId,
     subagents, subagentFleetEvents, subagentControlOutcomes,
     tokens, contextBreakdown, hasMoreHistory, loadingHistory,
@@ -277,6 +278,7 @@ export function useConversation(
     loadingHistory,
     mode,
     approvalMode: executionMode,
+    autoSwitch,
     workMode: mode === "plan" ? "plan" as const : "build" as const,
     reasoning,
     skills,
