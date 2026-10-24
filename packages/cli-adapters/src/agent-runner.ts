@@ -424,8 +424,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     const followWorkMode = (sessionId: string, chatId: string, event: StreamEvent) =>
       event._tag === "WorkModeChanged" ? setWorkMode(sessionId, chatId, event.workMode) : Effect.void
 
-    // Legacy composer entry point: "plan" maps to the plan work mode; any other
-    // value is an approval level and leaves plan, as the old mode switch did.
+    // Legacy entry point: "plan" maps to the plan work mode; any other
+    // value is an approval level and leaves the work mode alone.
     const setMode = (
       sessionId: string,
       chatIdOrMode: string,
@@ -437,7 +437,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         if (mode === "plan") return yield* setWorkMode(sessionId, chatId, "plan")
         yield* Ref.update(modes, (m) => new Map(m).set(chatId, mode))
         yield* persistMode(sessionId, chatId, mode)
-        yield* setWorkMode(sessionId, chatId, "build")
       })
 
     const decideGate = (

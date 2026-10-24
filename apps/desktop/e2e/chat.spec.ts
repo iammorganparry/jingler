@@ -239,19 +239,13 @@ test("the mode chip lives in the composer and Shift+Tab cycles all modes", async
   await expect(window.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "accept-edits")
 
-  // Shift+Tab cycles accept-edits → auto → plan → ask for every pi model.
+  // Shift+Tab flips Plan/Build and leaves the approval level alone.
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByRole("button", { name: "Auto", exact: true })).toBeVisible()
-  await expect(surface).toHaveAttribute("data-mode", "auto")
-
-  await window.keyboard.press("Shift+Tab")
-  // Plan mode is reachable for every certified pi model and themes the composer purple.
-  await expect(window.getByRole("button", { name: "Plan", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "plan")
+  await expect(window.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
 
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByRole("button", { name: "Ask Before Actions", exact: true })).toBeVisible()
-  await expect(surface).toHaveAttribute("data-mode", "ask")
+  await expect(surface).toHaveAttribute("data-mode", "accept-edits")
 })
 
 test("thinking strength is a compact per-session composer control", async ({ launchApp }) => {
