@@ -641,7 +641,7 @@ export const sessionDiff = (id: string, checkoutId?: string, workspacePath?: str
         .split("\n")
         .some((line) => line.startsWith("worktree ") && real(line.slice(9)) === target);
       if (!known) return EMPTY_REVIEW_DIFF;
-      return yield* WorkspaceService.diff(target);
+      return yield* WorkspaceService.diff(target, session?.baseBranch);
     }
     if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
     return yield* WorkspaceService.diff(session.worktreePath, session.baseBranch);
