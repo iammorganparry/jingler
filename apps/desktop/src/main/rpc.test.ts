@@ -978,6 +978,49 @@ describe("RPC handlers", () => {
       expect(patch).toEqual(EMPTY_REVIEW_DIFF);
     });
 
+    it("scopes a subagent workspace diff to the session's branch merge-base, keeping committed work", async () => {
+      const repo = join(dir, "subagent-base");
+      mkdirSync(repo, { recursive: true });
+      const git = (...args: string[]) =>
+        execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo, stdio: "ignore" });
+      git("init", "-b", "main");
+      writeFileSync(join(repo, "a.txt"), "a\n");
+      git("add", ".");
+      git("commit", "-m", "base");
+      git("checkout", "-b", "feature");
+      writeFileSync(join(repo, "committed.txt"), "c\n");
+      git("add", ".");
+      git("commit", "-m", "branch work");
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "based",
+            repo: "widget",
+            branch: "feature",
+            baseBranch: "main",
+            title: "Based",
+            status: "idle",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: "2026-08-08T10:00:00.000Z",
+            worktreePath: repo,
+            chats: [],
+            activeChatId: null,
+          },
+        ]),
+      );
+      const review = await Effect.runPromise(
+        sessionDiff("based", undefined, repo).pipe(
+          Effect.provide(Layer.mergeAll(base, SessionStore.Default, WorkspaceService.Default)),
+        ),
+      );
+      expect(review.files.map((f) => f.path)).toEqual(["committed.txt"]);
+    });
+
     it("surfaces git failures instead of reporting no changes", async () => {
       mkdirSync(root, { recursive: true });
       writeFileSync(

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { JinglerSubagentName, type AgentRunSpec } from "@jingler/core"
-import { Schema } from "effect"
+import { JSONSchema, Schema } from "effect"
 import type { SubagentDelegationRequest } from "pi-subagents/delegation"
 import type {
   SubagentDelegationResponse,
@@ -58,6 +58,24 @@ const AsyncWorkflowInput = Schema.Struct({
     tasks: Schema.Array(AsyncTask).pipe(Schema.minItems(1), Schema.maxItems(8))
   })
 })
+
+/**
+ * Flat object schema for providers and child brokers: a top-level `anyOf` is
+ * dropped when a child tool schema is flattened, leaving no `async` property.
+ */
+const providerInputSchema = {
+  type: "object" as const,
+  properties: {
+    ...Object.fromEntries(
+      ([ForegroundNativeSubagentInput, AsyncSingleInput, AsyncWorkflowInput] as ReadonlyArray<Schema.Schema.AnyNoContext>).flatMap((member) =>
+        Object.entries((JSONSchema.make(member) as { properties: Record<string, object> }).properties)
+      )
+    ),
+    async: { type: "boolean" }
+  },
+  required: [],
+  additionalProperties: false
+}
 
 type NativeSubagentInput =
   | typeof ForegroundNativeSubagentInput.Type
@@ -249,6 +267,7 @@ export const registerNativeSubagentTool = (
       AsyncSingleInput,
       AsyncWorkflowInput
     ),
+    providerInputSchema,
     risk: "read",
     roles: codeReadRoles,
     modes: codeReadModes,

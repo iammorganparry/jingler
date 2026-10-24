@@ -624,6 +624,9 @@ export const makeLiveDeviceSessionCommandExecutor = (
         )
       : Effect.succeed(explicit)
 
+  const baseBranchOf = (sessionId: string) =>
+    deviceSession(sessionId).pipe(Effect.map((session) => session.baseBranch))
+
   return makeDeviceSessionCommandExecutor({
     create: (input) => run(Effect.gen(function* () {
       const session = yield* SessionStore.create(input)
@@ -764,14 +767,18 @@ export const makeLiveDeviceSessionCommandExecutor = (
       limit: input.limit ?? 100
     })),
     diff: (sessionId) => run(
-      repoPath(sessionId).pipe(Effect.flatMap((path) => WorkspaceService.diff(path)))
+      Effect.zip(repoPath(sessionId), baseBranchOf(sessionId)).pipe(
+        Effect.flatMap(([path, base]) => WorkspaceService.diff(path, base))
+      )
     ),
     diffStat: (sessionId) => run(
-      repoPath(sessionId).pipe(Effect.flatMap((path) => WorkspaceService.diffStat(path)))
+      Effect.zip(repoPath(sessionId), baseBranchOf(sessionId)).pipe(
+        Effect.flatMap(([path, base]) => WorkspaceService.diffStat(path, base))
+      )
     ),
     fileDiff: (sessionId, filePath) => run(
-      repoPath(sessionId).pipe(
-        Effect.flatMap((path) => WorkspaceService.boundedFileDiff(path, filePath))
+      Effect.zip(repoPath(sessionId), baseBranchOf(sessionId)).pipe(
+        Effect.flatMap(([path, base]) => WorkspaceService.boundedFileDiff(path, filePath, base))
       )
     ),
     files: (sessionId, explicit) => run(

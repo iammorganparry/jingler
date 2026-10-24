@@ -16,6 +16,7 @@ import {
   STOPPED_NOTE,
   userMessage
 } from "@jingler/core"
+import { queryClient } from "./query-client.js"
 import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -1081,6 +1082,19 @@ describe("conversationMachine — queue while busy", () => {
     actor.send({ type: "UNQUEUE", id: queuedId(actor, 0) })
     expect(accepted).toHaveBeenCalledOnce()
     expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+
+  it("invalidates the Changes diff queries when a subagent finishes a file edit", async () => {
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({ _tag: "ToolEnd", id: "sub-t1", agentId: "sub-1", status: "success", meta: null, diff: { added: 1, removed: 0 }, preview: null })
+    await waitFor(actor, () => invalidate.mock.calls.length > 0)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["local", "diff", session.id] })
+    invalidate.mockRestore()
     actor.stop()
   })
 

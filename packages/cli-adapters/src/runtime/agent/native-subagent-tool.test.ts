@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { NativeSubagentDelegate } from "./native-subagent-tool.js"
 import { registerNativeSubagentTool } from "./native-subagent-tool.js"
 import type { PiSubagentAsyncDelegate } from "./pi-subagent-rpc.js"
+import { subagentCapabilityTools } from "../subagents/subagent-capability-broker.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 
 const spec: AgentRunSpec = {
@@ -124,6 +125,16 @@ describe("native PI-backed subagent tool", () => {
     )
     return registry
   }
+
+  it("exposes async true and false to child brokers", () => {
+    const registry = new ToolRegistry({} as never)
+    registerNativeSubagentTool(registry, spec, (async () => ({})) as never, (async () => ({})) as never)
+    const tool = subagentCapabilityTools(registry, "conversation", "auto").find((t) => t.id === "subagent")
+    const properties = tool?.inputSchema.properties as Record<string, unknown>
+    expect(properties.async).toEqual({ type: "boolean" })
+    expect(properties.workflow).toBeDefined()
+    expect(properties.agent).toBeDefined()
+  })
 
   it("starts an async single child through PI RPC", async () => {
     const spawnSubagent = vi.fn<PiSubagentAsyncDelegate>(async () => ({
