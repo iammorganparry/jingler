@@ -16,6 +16,7 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "e2e": "node ./scripts/run-e2e.mjs",
+    "e2e:affected": "node ./scripts/e2e-affected.mjs",
     "e2e:fast": "SKIP_E2E_BUILD=1 node ./scripts/run-e2e.mjs",
     "e2e:report": "playwright show-report",
     "build:bundled-plugins": "node ./scripts/build-bundled-plugins.mjs",
