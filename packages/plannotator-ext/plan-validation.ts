@@ -34,9 +34,15 @@ const validateTicketShape = (
   }
 }
 
-/** Validate the explicit, ID-tagged plan format without rejecting legacy plans. */
+/** Validate the staged plan format. Parsing stays lenient for legacy plans; only submission is gated on this. */
 export const validatePlanMarkdown = (content: string): string[] => {
-  if (!/^##\s+.+?<!--\s*id:\s*[\w-]+\s*-->\s*$/m.test(content)) return []
+  if (!/^##\s+.+?<!--\s*id:\s*[\w-]+\s*-->\s*$/m.test(content)) {
+    return [
+      "Plan has no staged deliverables. Write each stage as `## Stage title <!-- id: stable-id -->` with the subsections " +
+        "Deliverable, User story, Approach, tasks (- [ ] steps), Technical explanation, Acceptance (with test refs), " +
+        "Definition of Done and Files, plus a top-level Mermaid flow diagram and a `## Test strategy` section."
+    ]
+  }
 
   const { stages, sections } = parsePlanMarkdown(content)
   const errors = validateDocumentShape(content, sections)

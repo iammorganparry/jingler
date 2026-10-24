@@ -337,6 +337,17 @@ test("submission rejects a plan with an unsafe diff path and no test strategy", 
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
 })
 
+test("submission rejects a flat checklist plan with the staged-shape error", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched, "[[plan]] [[flat-plan]] replace auth")
+
+  await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
+  expect(planFile(launched)).toContain("Plan has no staged deliverables")
+
+  await openPlanTab(launched)
+  await approveReview(launched)
+})
+
 test("a new review in the same chat is presented and can be approved", async ({
   launchApp
 }) => {
