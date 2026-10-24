@@ -1635,10 +1635,12 @@ export const conversationMachine = setup({
         }
       }
       if (e._tag === "PlannotatorStateChanged") {
-        if (e.state.phase === "executing" && context.mode === "plan") {
-          self.send({ type: "SET_MODE", mode: "auto" })
-        }
         return { plannotator: e.state }
+      }
+      // The server switched Plan -> Build (plan approval); follow it locally
+      // without echoing an RPC, landing on the approval level the chat kept.
+      if (e._tag === "WorkModeChanged") {
+        return e.workMode === "build" && context.mode === "plan" ? { mode: context.executionMode } : {}
       }
       if (e._tag === "PlanProposed") {
         return {
