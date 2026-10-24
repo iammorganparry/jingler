@@ -183,17 +183,16 @@ test("chats stay left while files and views share a persistent right pane", asyn
   await groups(window).nth(1).getByRole("button", { name: "New tab" }).click()
   await window.getByTestId("new-tab-option-terminal").click()
   await expect(groups(window)).toHaveCount(2)
-  await expect(groups(window).nth(1).getByTestId("editor-tab-view-terminal")).toBeVisible()
+  await expect(groups(window).nth(1).locator('[data-testid^="editor-tab-terminal-"]')).toBeVisible()
 
   // Dropping a chat on the content pane still routes it to the chat pane.
-  await dragTo(window, '[data-testid="session-tree-chat-c_side"] button', '[aria-label="Editor group: Terminal"]', 0.5)
+  await dragTo(window, '[data-testid="session-tree-chat-c_side"] button', '[aria-label="Editor group: zsh"]', 0.5)
   await expect(groups(window)).toHaveCount(2)
   await expect(groups(window).nth(0).getByTestId("editor-tab-chat-c_side")).toBeVisible()
   await expect(groups(window).nth(1).getByTestId("editor-tab-chat-c_side")).toHaveCount(0)
 
-  await tree.getByTestId("session-tree-view-terminal").hover()
-  await tree.getByRole("button", { name: "Close Terminal everywhere" }).click()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toHaveCount(0)
+  await window.getByRole("button", { name: "Close zsh", exact: true }).click()
+  await expect(window.locator('[data-testid^="editor-tab-terminal-"]')).toHaveCount(0)
   await expect(groups(window)).toHaveCount(2)
 
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Beta session" }).first().click()
@@ -274,15 +273,15 @@ test("dragging file and view tabs creates horizontal and vertical splits", async
   await expect(groups(window)).toHaveCount(3)
   await expect(window.getByTestId("editor-split-row")).toBeVisible()
 
-  await groups(window).nth(1).getByRole("tab", { name: "a.ts" }).click()
+  await groups(window).nth(1).getByRole("tab", { name: "a.ts", exact: true }).click()
   await groups(window).nth(1).getByRole("button", { name: "New tab" }).click()
   await window.getByTestId("new-tab-option-terminal").click()
-  await dragTo(window, '[data-testid="editor-tab-view-terminal"]', '[aria-label="Editor group: Terminal"]', 0.5, 0.95)
+  await dragTo(window, '[data-testid^="editor-tab-terminal-"]', '[aria-label="Editor group: zsh"]', 0.5, 0.95)
 
   await expect(groups(window)).toHaveCount(4)
   await expect(window.getByTestId("editor-split-column")).toBeVisible()
   await expect(window.getByTestId("editor-tab-file-b.ts")).toBeVisible()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+  await expect(window.locator('[data-testid^="editor-tab-terminal-"]')).toBeVisible()
 })
 
 test("dragging a tab shows five labelled drop zones, highlights the hovered one and splits on an edge drop", async ({ launchApp }) => {
@@ -330,7 +329,7 @@ test("⌘T opens the focused group's tab-type chooser", async ({ launchApp }) =>
   await window.keyboard.press("Meta+t")
   await expect(window.getByTestId("new-tab-command-menu")).toBeVisible()
   await window.getByTestId("palette-item-new-tab:terminal").click()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+  await expect(window.locator('[data-testid^="editor-tab-terminal-"]')).toBeVisible()
 })
 
 test("⌘W closes the focused editor tab without closing the app window", async ({ launchApp }) => {
