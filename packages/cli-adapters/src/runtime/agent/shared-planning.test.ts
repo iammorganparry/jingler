@@ -324,6 +324,20 @@ describe("shared harness planning", () => {
     expect(nextEvents).toContainEqual(expect.objectContaining({ _tag: "PlannotatorStateChanged", state: expect.objectContaining({ checklist: [{ step: 1, text: "first $&", completed: true }, { step: 2, text: "second (test: a.test.ts::works)", completed: true }] }) }))
   })
 
+  it("approval sets build", async () => {
+    const f = await setup(); const spec = { ...specFor(f.root), mode: "auto" as const }
+    const runtime = f.wrap(async function* (registry, spec, context) {
+      await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
+      yield done
+    })
+    const running = f.run(runtime, spec)
+    const reviewId = await f.review()
+    expect(f.events).not.toContainEqual({ _tag: "WorkModeChanged", workMode: "build" })
+    await Effect.runPromise(runtime.decidePlanReview(ownerFor(spec), "s", "a", { reviewId, approved: true }))
+    await running
+    expect(f.events).toContainEqual({ _tag: "WorkModeChanged", workMode: "build" })
+  })
+
   it("enters planning when an existing chat switches modes without resetting approved plan turns", async () => {
     const f = await setup(); let turn = 0
     const runtime = f.wrap(async function* (registry, spec, context) {
