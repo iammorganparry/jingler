@@ -24,7 +24,10 @@ const ToolTarget = Schema.Struct({
   /** Browser tools target a URL, a CSS selector, or a JS expression. */
   url: Schema.optional(Schema.String),
   selector: Schema.optional(Schema.String),
-  expression: Schema.optional(Schema.String)
+  expression: Schema.optional(Schema.String),
+  /** `jingler_set_work_mode` arguments. */
+  mode: Schema.optional(Schema.Literal("plan", "build")),
+  reason: Schema.optional(Schema.String)
 })
 
 const decodeText = Schema.decodeUnknownOption(TextResultPart)
@@ -136,6 +139,7 @@ type ToolResultEvent = Extract<
 
 export const toolTarget = (args: unknown): string | null => {
   const target = Option.getOrUndefined(decodeTarget(args))
+  if (target?.mode !== undefined) return `Switched to ${target.mode === "plan" ? "Plan" : "Build"}${target.reason ? ` — ${target.reason}` : ""}`
   if (target?.path !== undefined) return target.path
   if (target?.command !== undefined) return target.command
   if (target?.url !== undefined) return target.url
