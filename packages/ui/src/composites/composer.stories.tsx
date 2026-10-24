@@ -75,7 +75,6 @@ function ComposerFixture() {
       repo="jingler"
       branch="feat/adopt-beui-component-system"
       diff={{ files: 3, added: 118, removed: 42 }}
-      allowPlan
       onSend={() => {}}
     />
   )
