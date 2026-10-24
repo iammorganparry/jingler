@@ -19,7 +19,8 @@ import {
   ToolRegistry,
   type ToolDefinition,
   type ToolRegistryOptions,
-  type WorkspaceCwd
+  type WorkspaceCwd,
+  codeReadModes
 } from "../tools/tool-registry.js"
 import {
   registerWorkspaceInspectionTools,
@@ -32,7 +33,7 @@ import { registerCheckoutTool, toolCwd } from "../tools/checkout-tools.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 
 const roles = ["conversation", "plan", "plan-execution", "background"] as const
-const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
+const modes = codeReadModes
 
 const controlTool = <Input, Encoded>(
   input: Pick<

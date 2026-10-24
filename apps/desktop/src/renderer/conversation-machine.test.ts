@@ -2245,7 +2245,7 @@ describe("conversationMachine — persisted status", () => {
 })
 
 describe("conversationMachine — Plannotator projection", () => {
-  it("stores Plannotator state outside the transcript and enters auto for execution", async () => {
+  it("stores Plannotator state outside the transcript and follows the server's build switch", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
     actor.send({ type: "SET_MODE", mode: "plan" })
@@ -2279,8 +2279,11 @@ describe("conversationMachine — Plannotator projection", () => {
       sections: []
     })
     expect(actor.getSnapshot().context.messages).toHaveLength(messageCount)
-    await waitFor(actor, (snapshot) => snapshot.context.mode === "auto")
-    expect(actor.getSnapshot().context.executionMode).toBe("auto")
+    // The server (not the renderer) switches to build on approval; the approval level is untouched.
+    emit({ _tag: "WorkModeChanged", workMode: "build" })
+    const { mode, executionMode } = actor.getSnapshot().context
+    expect(mode).toBe(executionMode)
+    expect(mode).not.toBe("plan")
     actor.stop()
   })
 

@@ -1,5 +1,5 @@
 import { Match, Schema } from "effect"
-import { DiffStat } from "./domain.js"
+import { DiffStat, WorkMode } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
 import { FileChangeSet } from "./runtime/file-change.js"
 import { PlannotatorProjection } from "./plannotator-projection.js"
@@ -758,6 +758,8 @@ export const StreamEvent = Schema.Union(
   Schema.TaggedStruct("PlannotatorStateChanged", {
     state: PlannotatorProjection
   }),
+  /** Server-side Plan/Build switch (e.g. plan approval); the renderer follows it. */
+  Schema.TaggedStruct("WorkModeChanged", { workMode: WorkMode }),
   /** The agent proposed a plan (ExitPlanMode) — appends a new interactive Plan part. */
   Schema.TaggedStruct("PlanProposed", { plan: Plan }),
   /** A runner-authoritative update to an existing plan (comment/routed/status sync). */
@@ -1137,7 +1139,7 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
       )
     })),
 
-    Match.tag("SessionIssueLinksChanged", "PlannotatorStateChanged", "SessionCompletionDeclared", "SessionSettled", () => msg),
+    Match.tag("SessionIssueLinksChanged", "PlannotatorStateChanged", "WorkModeChanged", "SessionCompletionDeclared", "SessionSettled", () => msg),
 
     Match.tag("GateRequested", (e) => {
       const part: GatePart = { _tag: "Gate", gate: e.gate }

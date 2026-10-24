@@ -1025,7 +1025,7 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
   const chat = initialConversationChat(input)
   return {
     session: input.session, chatId: chat.id, messages: [], sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] }, remotePublishProgress: null,
-    mode: chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
+    mode: chat.workMode === "plan" ? "plan" : chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
     skills: [], files: [], runtimeId: chat.runtimeId ?? input.session.runtimeId ?? null, endpointId: chat.endpointId ?? input.session.endpointId ?? null,
     connectionId: chat.connectionId ?? input.session.connectionId ?? null, providerId: chat.providerId ?? input.session.providerId ?? null,
     modelId: chat.modelId ?? input.session.modelId ?? null, modelPending: false, diffStat: { added: 0, removed: 0, files: 0 }, patchAt: 0,
@@ -1036,6 +1036,12 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
     loadingHistory: false, reviewer: null, reviewPhase: "starting", reviewStartedAt: null
   }
 }
+
+// The server switched Plan -> Build (plan approval); land on the approval level the chat kept.
+const followWorkModeChange = (
+  context: { readonly mode: PermissionMode; readonly executionMode: PermissionMode },
+  workMode: "plan" | "build"
+) => (workMode === "build" && context.mode === "plan" ? { mode: context.executionMode } : {})
 
 export const conversationMachine = setup({
   types: {
@@ -1635,11 +1641,11 @@ export const conversationMachine = setup({
         }
       }
       if (e._tag === "PlannotatorStateChanged") {
-        if (e.state.phase === "executing" && context.mode === "plan") {
-          self.send({ type: "SET_MODE", mode: "auto" })
-        }
         return { plannotator: e.state }
       }
+      // The server switched Plan -> Build (plan approval); follow it locally
+      // without echoing an RPC, landing on the approval level the chat kept.
+      if (e._tag === "WorkModeChanged") return followWorkModeChange(context, e.workMode)
       if (e._tag === "PlanProposed") {
         return {
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),

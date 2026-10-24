@@ -12,6 +12,7 @@ import type {
   Message,
   PeerAgentMessageResult,
   PermissionMode,
+  WorkMode,
   AgentEndpointId,
   AgentRuntimeId,
   ProviderConnectionId,
@@ -46,7 +47,6 @@ import { FileSystem, type Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
-import { modeToRestore } from "./exec-mode.js"
 import { isTerminal, routeOf } from "./turn-events.js"
 import {
   composeTurnPrompt,
@@ -261,14 +261,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     // Per-chat live HITL state, seeded from the Chat record on first use.
     const modes = yield* Ref.make(new Map<string, PermissionMode>())
     // planId → the pending plan (shared across prompt/approve/revise/stop).
-    // chatId → the exec mode to restore when a plan is approved (captured on
-    // the switch into "plan").
-    const priorModes = yield* Ref.make(new Map<string, PermissionMode>())
-    // chatId → the user's default exec mode (read from their claude/codex
-    // config at run start). Used as the restore fallback when there's no prior
-    // exec mode to fall back to — so approving a plan lands in the mode they
-    // normally run in, not a hardcoded guess.
-    const execDefaults = yield* Ref.make(new Map<string, PermissionMode>())
+    // Per-chat Plan/Build, seeded from the Chat record. Persisted by the session
+    // store; the Ref only makes an in-run switch visible to the live turn.
+    const workModes = yield* Ref.make(new Map<string, WorkMode>())
     // chatId → live handles onto the current run, for the out-of-band plan RPCs.
     const active = yield* Ref.make(new Map<string, ActiveRun>())
     const touchedFiles = yield* Ref.make(new Map<string, ReadonlyArray<string>>())
@@ -405,6 +400,32 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     const getSessionOrNull = (sessionId: string) =>
       SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
 
+    const setWorkMode = (sessionId: string, chatId: string, workMode: WorkMode) =>
+      Effect.gen(function* () {
+        yield* Ref.update(workModes, (m) => new Map(m).set(chatId, workMode))
+        yield* SessionStore.setWorkMode(sessionId, chatId, workMode).pipe(Effect.ignore)
+      })
+
+    // Plan overrides the approval level for enforcement; the stored level stays untouched.
+    const turnModes = (chatId: string, stored: { readonly workMode?: WorkMode; readonly mode?: PermissionMode }) =>
+      Effect.gen(function* () {
+        const workMode = (yield* Ref.get(workModes)).get(chatId) ?? stored.workMode ?? "build"
+        const approval = (yield* Ref.get(modes)).get(chatId) ?? stored.mode ?? defaultModeFor()
+        return { workMode, sessionMode: (workMode === "plan" ? "plan" : approval) as PermissionMode }
+      })
+
+    // Re-read per tool call so an in-run switch (plan approval) applies this turn.
+    const liveModeFor = (chatId: string, workMode: WorkMode, mode: PermissionMode) =>
+      Effect.gen(function* () {
+        if (((yield* Ref.get(workModes)).get(chatId) ?? workMode) === "plan") return "plan" as const
+        return (yield* Ref.get(modes)).get(chatId) ?? (mode === "plan" ? defaultModeFor() : mode)
+      })
+
+    const followWorkMode = (sessionId: string, chatId: string, event: StreamEvent) =>
+      event._tag === "WorkModeChanged" ? setWorkMode(sessionId, chatId, event.workMode) : Effect.void
+
+    // Legacy composer entry point: "plan" maps to the plan work mode; any other
+    // value is an approval level and leaves plan, as the old mode switch did.
     const setMode = (
       sessionId: string,
       chatIdOrMode: string,
@@ -413,22 +434,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.gen(function* () {
         const chatId = maybeMode === undefined ? sessionId : chatIdOrMode
         const mode = (maybeMode ?? chatIdOrMode) as PermissionMode
-        // Entering plan mode: remember the exec mode to fall back to on approval.
-        if (mode === "plan") {
-          const current =
-            (yield* Ref.get(modes)).get(chatId) ??
-            (yield* getSessionOrNull(sessionId))?.chats.find((chat) => chat.id === chatId)?.mode
-          const prior = modeToRestore(current, (yield* Ref.get(execDefaults)).get(chatId))
-          yield* Ref.update(priorModes, (m) => new Map(m).set(chatId, prior))
-        }
+        if (mode === "plan") return yield* setWorkMode(sessionId, chatId, "plan")
         yield* Ref.update(modes, (m) => new Map(m).set(chatId, mode))
-        // Plan mode is TRANSIENT — never persist it to the session. If we did, a
-        // restart (or any run with an empty in-memory `modes`) would resurrect
-        // plan mode from `session.mode` with no `priorModes` captured, so
-        // approving the plan would fall back to "accept-edits" and re-gate every
-        // command. Keeping the real exec mode persisted means `session.mode` is
-        // always the mode to restore on approval.
-        if (mode !== "plan") yield* persistMode(sessionId, chatId, mode)
+        yield* persistMode(sessionId, chatId, mode)
+        yield* setWorkMode(sessionId, chatId, "build")
       })
 
     const decideGate = (
@@ -571,8 +580,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const { session, chat, connectionId, modelId } = yield* resolveTurnChat(sessionId, chatId)
           yield* TranscriptStore.adoptLegacy(sessionId, chatId)
 
-          const sessionMode =
-            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor()
+          const { workMode, sessionMode } = yield* turnModes(chatId, chat)
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
@@ -583,8 +591,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
-          const execDefault = defaultModeFor()
-          yield* Ref.update(execDefaults, (m) => new Map(m).set(chatId, execDefault))
           // The agent always runs in the session's recorded working checkout.
           //
           // This comment used to claim an empty value "would fail loudly on a
@@ -842,6 +848,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // and `error`. The first terminal owns the turn; folding the
               // second printed the same context-overflow message twice.
               if (!(yield* claimTurnTerminal(event, sawTerminal, turnSettled))) return
+              yield* followWorkMode(sessionId, chatId, event)
                   // Tracked before the early returns below, so background-task and
                   // sub-agent events still count toward "what did this run actually
                   // emit" — a run that produced only sub-agent chatter and then
@@ -902,9 +909,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           const canUseTool = (req: PermissionRequest): Effect.Effect<PermissionDecision> =>
             Effect.gen(function* () {
-              // Re-read the live mode each call so an in-run change (e.g. a plan
-              // approval restoring the exec mode) takes effect on this same turn.
-              const liveMode = (yield* Ref.get(modes)).get(chatId) ?? mode
+              const liveMode = yield* liveModeFor(chatId, workMode, mode)
               const decision = verdict(liveMode, allow, req)
               if (decision === "allow") return "allow" as const
               if (decision === "deny") return "deny" as const
@@ -1539,8 +1544,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* drop(locks)
         yield* drop(modes)
         yield* approvals.forgetChat(chatId)
-        yield* drop(priorModes)
-        yield* drop(execDefaults)
+        yield* drop(workModes)
         yield* drop(touchedFiles)
       })
 
@@ -1594,6 +1598,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       decideGate,
       answerQuestion,
       setMode,
+      setWorkMode,
       setModel,
       steer,
       stop,

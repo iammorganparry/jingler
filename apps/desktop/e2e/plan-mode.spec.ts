@@ -681,3 +681,44 @@ test("plan mode blocks a write outside the plan file but lets the plan file thro
   await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
   expect(existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null).toBe(before)
 })
+
+const savedChat = (launched: LaunchedApp) => {
+  const all = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")) as ReadonlyArray<{
+    readonly id: string
+    readonly chats: ReadonlyArray<{ readonly workMode?: string; readonly mode?: string }>
+  }>
+  return all.find((session) => session.id === "s_plannotator")?.chats[0]
+}
+
+test("approving a plan switches the chat to build and keeps its approval level", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await (await ensurePlanTab(launched)).click()
+  await expect(review(launched)).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => savedChat(launched)?.workMode).toBe("plan")
+  await approveReview(launched)
+  await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("build")
+  expect(savedChat(launched)?.mode).toBe("auto") // Shift+Tab passes through auto on the way to plan
+})
+
+test("a plan chat comes back in plan after an app restart", async ({ launchApp }) => {
+  const first = await launchPlanMode(launchApp)
+  await startPlanReview(first)
+  await (await ensurePlanTab(first)).click()
+  await expect(review(first)).toBeVisible({ timeout: 30_000 })
+  await first.app.close()
+
+  const reopened = await launchApp({
+    configured: true,
+    withRepo: true,
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    authServer: first.authServer,
+    githubServer: first.githubServer,
+    githubRelay: first.githubRelay
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  await expect(reopened.window.locator("[data-mode='plan']")).toBeVisible({ timeout: 20_000 })
+  expect(savedChat(reopened)?.mode).toBe("auto") // Shift+Tab passes through auto on the way to plan
+})

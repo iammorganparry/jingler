@@ -288,6 +288,14 @@ export const PermissionMode = Schema.Literal(
 );
 export type PermissionMode = Schema.Schema.Type<typeof PermissionMode>;
 
+/** Whether a chat is investigating (`plan`, read-only) or doing work (`build`). Independent of approval level. */
+export const WorkMode = Schema.Literal("plan", "build");
+export type WorkMode = Schema.Schema.Type<typeof WorkMode>;
+
+/** How often a chat pauses for approval. `PermissionMode` keeps `plan` only as a legacy decode value. */
+export const ApprovalLevel = Schema.Literal("ask", "accept-edits", "auto");
+export type ApprovalLevel = Schema.Schema.Type<typeof ApprovalLevel>;
+
 /** Claude's provider-native adaptive-thinking effort values. */
 export const ClaudeReasoningEffort = Schema.Literal(
   "low",
@@ -393,6 +401,8 @@ export const Chat = Schema.Struct({
   updatedAt: Schema.String,
   /** Permission choices are restored independently for each chat. */
   mode: Schema.optional(PermissionMode),
+  /** Plan/Build, persisted per chat; absent means build. */
+  workMode: Schema.optional(WorkMode),
   reasoning: Schema.optional(ReasoningSetting),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   contextTokens: Schema.optional(Schema.Number),

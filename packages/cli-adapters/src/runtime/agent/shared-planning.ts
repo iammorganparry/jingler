@@ -188,6 +188,7 @@ class PlanningSession {
         }
         this.state = { ...this.state, phase: decision.approved ? "executing" : "planning", reviewPending: false }
         await this.save()
+        if (decision.approved && this.binding) await Effect.runPromise(this.binding.context.publishEvent({ _tag: "WorkModeChanged", workMode: "build" }))
         pending.resolve(decision)
       } catch (error) { pending.deciding = false; throw error }
     })

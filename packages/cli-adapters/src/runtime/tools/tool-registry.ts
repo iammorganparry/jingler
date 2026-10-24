@@ -20,6 +20,7 @@ export type ToolIdempotency = "safe" | "keyed" | "unsafe"
 
 export const codeReadRoles = ["conversation", "plan", "plan-execution", "review", "background"] as const
 export const codeWriteRoles = ["conversation", "plan-execution", "background"] as const
+export const toolRoles = ["conversation", "plan", "plan-execution", "review", "context-digest", "background"] as const
 export const codeReadModes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 export const codeWriteModes = ["ask", "accept-edits", "auto"] as const
 
