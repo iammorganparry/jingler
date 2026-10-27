@@ -2626,8 +2626,9 @@ function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {
       : s
   )
   // The sidebar's "N agents" and Running hint read the fleet feed, not the
-  // legacy list above: a run that ends on its own must settle it too, as Stop does.
-  const settledFleet = boundedFleetEvents(settleStoppedFleet(context.subagentFleetEvents, Date.now()))
+  // legacy list above: a run that ends on its own must settle it too, as Stop does
+  // (a child blocked on the operator's answer legitimately outlives the turn).
+  const settledFleet = boundedFleetEvents(settleStoppedFleet(context.subagentFleetEvents, Date.now(), true))
   // `Done.tokens` NEVER reaches the context meter. It is the run's
   // cumulative spend (see the `Usage` schema note in conversation.ts) —
   // cache reads counted once per tool call — so on a long session it runs
