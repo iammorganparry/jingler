@@ -43,6 +43,13 @@ for the full architecture guide; this file is the short list of standing rules.
 - **Never hardcode a colour in a component** — use the `--sb-*` theme tokens
   (see the Theming section of `CLAUDE.md`).
 
+- **Run CI checks on the Mac mini with Dagger before pushing more commits.**
+  `scripts/dagger-mini.sh [branch] [ci/lint ci/typecheck ci/test ...]` runs
+  the `ci` Dagger module against your pushed branch on `clive.local`; warm
+  re-runs take seconds instead of a CI queue. Check the mini's free disk
+  first and run one check at a time. Setup, limits and recovery:
+  `docs/dagger-mac-mini.md`.
+
 - **Investigating memory or performance? Measure with the built-in monitor,
   don't guess.** Every dev launch (`pnpm dev`, never packaged builds) runs a
   perf monitor that samples process + renderer counters every ~20s and serves
