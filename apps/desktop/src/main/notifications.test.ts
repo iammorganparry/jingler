@@ -134,7 +134,7 @@ describe("openNotificationSystemSettings", () => {
       calls.push(url)
       return Promise.resolve()
     }, "darwin")
-    expect(calls).toEqual(["x-apple.systempreferences:com.apple.preference.notifications"])
+    expect(calls).toEqual(["x-apple.systempreferences:com.apple.Notifications-Settings.extension"])
   })
 
   it("is a no-op on platforms other than macOS", () => {
