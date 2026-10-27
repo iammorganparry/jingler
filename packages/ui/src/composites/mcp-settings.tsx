@@ -66,6 +66,8 @@ export interface McpSettingsProps {
     source: McpImportSourceId,
     connectors?: boolean
   ) => Promise<ReadonlyArray<McpImportCandidateView>>
+  /** Host-rendered import card, shown above the list when importable servers are detected. */
+  readonly importEntry?: React.ReactNode
   readonly applyImport: (
     source: McpImportSourceId,
     names: ReadonlyArray<string>,
@@ -676,7 +678,8 @@ export function McpSettings({
   reveal,
   logTail,
   importCandidates,
-  applyImport
+  applyImport,
+  importEntry
 }: McpSettingsProps) {
   const [actionError, setActionError] = React.useState<string | null>(null)
   const [authSetupServer, setAuthSetupServer] = React.useState<McpServer | null>(null)
@@ -719,6 +722,8 @@ export function McpSettings({
         </Callout>
       ) : null}
       {actionError ? <div role="alert"><Callout tone="red">{actionError}</Callout></div> : null}
+
+      {importEntry}
 
       {servers.length === 0 && !loading && parseError === null ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-line px-4 py-10">

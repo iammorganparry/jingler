@@ -91,6 +91,7 @@ import { CommandPalette } from "./command-palette.js"
 import { TitleSearch } from "./title-search.js"
 import {
   matchPaletteChord,
+  matchSettingsChord,
   matchFileQuickOpenChord,
   matchNeedsYouChord,
   needsYouPaletteItems,
@@ -924,9 +925,15 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
       return true
   }
 
+  function handleSettingsChord(e: KeyboardEvent) {
+      if (!matchSettingsChord(e) || !providerConnections) return false
+      e.preventDefault()
+      openSettings()
+      return true
+  }
+
   const onKey = (e: KeyboardEvent) => {
-      if (handleFileQuickOpen(e)) return
-      if (handleNeedsYouChord(e)) return
+      if ([handleFileQuickOpen, handleNeedsYouChord, handleSettingsChord].some((handle) => handle(e))) return
       // The palette goes FIRST, and in this listener rather than one of its own.
       // Three window-level keydown handlers racing for the same event is how a
       // chord ends up meaning two things depending on mount order.
@@ -1248,7 +1255,9 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     active,
     renderFileQuickOpen,
     useSessionTerminals,
-    openNewSession
+    openNewSession,
+    openSettings,
+    providerConnections
   ])
 
   /**
