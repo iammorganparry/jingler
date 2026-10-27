@@ -86,6 +86,10 @@ export const shouldNotify = ({
 export const notificationPermission = (
   isSupported: () => boolean = () => Notification.isSupported()
 ): NotificationPermission => {
+  // E2E-only stub: Electron cannot report a blocked permission, so specs inject it.
+  if (process.env.JINGLER_E2E === "1" && process.env.JINGLER_E2E_NOTIFICATION_PERMISSION === "denied") {
+    return "denied"
+  }
   try {
     return isSupported() ? "unknown" : "unsupported"
   } catch {
@@ -99,14 +103,17 @@ export const notificationPermission = (
  * macOS only: `x-apple.systempreferences:` is the one URL scheme that opens
  * System Settings straight to the Notifications pane, and it is meaningless on
  * Windows or Linux — there is no platform-neutral equivalent, so this is a
- * no-op there rather than opening something misleading.
+ * no-op there rather than opening something misleading. The `.extension` id is the
+ * macOS 13+ System Settings pane (Electron documents `shell.openExternal` for
+ * custom URL schemes: https://www.electronjs.org/docs/latest/api/shell#shellopenexternalurl-options;
+ * pane ids: https://github.com/bvanpeski/SystemPreferences/blob/main/macos_preferencepanes-Ventura.md).
  */
 export const openNotificationSystemSettings = (
   openExternal: (url: string) => Promise<void> = (url) => shell.openExternal(url),
   platform: string = process.platform
 ): void => {
   if (platform !== "darwin") return
-  void openExternal("x-apple.systempreferences:com.apple.preference.notifications").catch(() => {
+  void openExternal("x-apple.systempreferences:com.apple.Notifications-Settings.extension").catch(() => {
     // Best-effort: a failed hand-off to System Settings is not worth surfacing.
   })
 }
