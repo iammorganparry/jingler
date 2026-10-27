@@ -73,8 +73,8 @@ export function IndeterminateBar({
     <div className={cn("h-1 overflow-hidden rounded-full bg-surface", className)}>
       {determinate ? (
         <span
-          className={cn("block h-full rounded-full transition-[width] duration-300", tone)}
-          style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+          className={cn("block h-full w-full origin-left rounded-full transition-transform duration-300", tone)}
+          style={{ transform: `scaleX(${Math.min(1, Math.max(0, progress))})` }}
         />
       ) : (
         <span className={cn("block h-full w-1/3 animate-bar rounded-full", tone)} />

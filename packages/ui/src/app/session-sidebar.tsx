@@ -247,7 +247,7 @@ function UpdateButton({ update, compact = false }: { update: SidebarUpdate; comp
         compact ? "absolute bottom-0.5 left-1 right-1 h-0.5" : "h-1 w-full"
       )}
     >
-      <span className="block h-full bg-blue transition-[width]" style={{ width: `${update.percent ?? 0}%` }} />
+      <span className="block h-full w-full origin-left bg-blue transition-transform" style={{ transform: `scaleX(${(update.percent ?? 0) / 100})` }} />
     </span>
   )
   const action = UPDATE_ACTION[update.kind]
