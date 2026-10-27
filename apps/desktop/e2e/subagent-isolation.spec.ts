@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process"
+import { resolve } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 
 test("isolated subagent: its file shows under the child checkout, not Main, and a jingler/sub/ branch exists", async ({ launchApp }) => {
   const { window, repoPath } = await launchApp({
     configured: true,
+    e2eEnv: { JINGLER_SUBAGENT_PROCESS_WORKER: resolve(import.meta.dirname, "isolated-subagent-process-worker.mjs") },
     withRepo: true,
     sessions: ({ repoPath: worktreePath }) => [{
       id: "s_isolated",
