@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { existsSync, writeFileSync } from "node:fs"
 import { ConfigService } from "@jingler/cli-adapters/config"
 import { GitService } from "@jingler/cli-adapters/git"
 import { ProjectService } from "@jingler/cli-adapters/projects"
@@ -28,6 +29,7 @@ import {
   endpointSelectionAvailable,
   ensureDeviceProject,
   makeDeviceSessionCommandExecutor,
+  makeLiveDeviceSessionCommandExecutor,
   piConnectionForSelection,
   type DeviceExecutorServices
 } from "./device-executor.js"
@@ -528,6 +530,35 @@ it.each([true, false])("prepares only the requested remote project when an unimp
     if (sameOrigin) expect(result.value.project.path).toBe(checkout)
     else expect(result.value.project.path).toMatch(/checkout-[a-f0-9]{8}$/)
     expect(existsSync(join(checkout, ".git"))).toBe(true)
+  } finally {
+    temp.cleanup()
+  }
+})
+
+it("passes the session baseBranch through diff, diffStat and fileDiff so committed branch work is kept", async () => {
+  const temp = withTempRoot()
+  try {
+    const repo = initGitRepo(join(temp.root, "..", "repo"))
+    const executor = makeLiveDeviceSessionCommandExecutor(temp.root, "device-test")
+    const created = await executor.execute(command("Sessions.create", {
+      repoPath: repo,
+      repoName: "repo",
+      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("codex-subscription"),
+      providerId: Schema.decodeUnknownSync(ProviderId)("openai-codex"),
+      modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5.6-sol"),
+      baseBranch: "main"
+    }), async () => undefined) as Session
+    const worktree = created.worktreePath as string
+    writeFileSync(join(worktree, "committed.txt"), "already committed\n")
+    execFileSync("git", ["add", "-A"], { cwd: worktree })
+    execFileSync("git", ["commit", "-m", "agent work", "--no-gpg-sign"], { cwd: worktree })
+    const at = (operation: string, payload: unknown) => ({ ...command(operation, payload), sessionId: created.id })
+    const stat = await executor.execute(at("Sessions.diffStat", {}), async () => undefined)
+    const diff = await executor.execute(at("Sessions.diff", {}), async () => undefined)
+    const file = await executor.execute(at("Sessions.fileDiff", { path: "committed.txt" }), async () => undefined)
+    expect(stat).toMatchObject({ files: 1, added: 1 })
+    expect(JSON.stringify(diff)).toContain("committed.txt")
+    expect(JSON.stringify(file)).toContain("already committed")
   } finally {
     temp.cleanup()
   }
