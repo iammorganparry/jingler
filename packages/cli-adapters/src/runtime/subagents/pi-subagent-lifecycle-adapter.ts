@@ -381,6 +381,8 @@ export class PiSubagentLifecycleAdapter {
   readonly #events: EventBus
   readonly #parentRuntimeSessionId: string
   readonly #parentCwd: string | undefined
+  /** Foreground delegation cwd by child runId, so progress nodes can report an isolated checkout. */
+  readonly #delegationCwds = new Map<string, string>()
   readonly #parentRuntimeSessionIds: ReadonlySet<string>
   readonly #asyncRunsDir: string | undefined
   readonly #emitExternal: (event: SubagentFleetEvent) => void
@@ -483,7 +485,10 @@ export class PiSubagentLifecycleAdapter {
       }), (request.timeoutMs ?? 30 * 60_000) + 5_000)
       const unsubscribeUpdate = this.#events.on(DELEGATION_UPDATE_EVENT, (payload) => {
         const update = payload as SubagentDelegationUpdate
-        if (matches(update)) onUpdate(update)
+        if (matches(update)) {
+          if (update.runId !== undefined) this.#delegationCwds.set(update.runId, request.cwd)
+          onUpdate(update)
+        }
       })
       const unsubscribeResponse = this.#events.on(DELEGATION_RESPONSE_EVENT, (payload) => {
         const response = payload as SubagentDelegationResponse
@@ -683,7 +688,8 @@ export class PiSubagentLifecycleAdapter {
           usage: progressChildUsage(child, existing),
           artifacts: existing?.artifacts ?? [],
           attention: existing?.attention ?? null,
-          workspace: existing?.workspace ?? null,
+          workspace: childWorkspace(this.#delegationCwds.get(subagentId), this.#parentCwd) ??
+            existing?.workspace ?? null,
           prNumber: existing?.prNumber ?? null
         }
       })

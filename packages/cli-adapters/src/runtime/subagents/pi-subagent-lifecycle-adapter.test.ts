@@ -1,5 +1,6 @@
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent"
 import type { SubagentFleetEvent } from "@jingler/core"
+import { execFileSync } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -1151,6 +1152,50 @@ describe("PiSubagentLifecycleAdapter", () => {
         event.node.sessionFile === "/sessions/child.jsonl"
       )).toBe(true)
     } finally {
+      adapter.stop()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("gives a foreground child workspace only when its delegation cwd is a separate checkout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fleet-workspace-"))
+    const parentCwd = join(root, "main")
+    const childCwd = join(root, "child")
+    const git = (cwd: string, ...args: Array<string>) => execFileSync("git", args, { cwd, stdio: "ignore" })
+    await mkdir(parentCwd)
+    git(parentCwd, "init", "-q")
+    git(parentCwd, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+    git(parentCwd, "worktree", "add", "-q", "-b", "child-branch", childCwd)
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentRuntimeSessionId: "parent-1",
+      parentCwd,
+      controlJournal: null,
+      emit: () => undefined
+    })
+    const abort = new AbortController()
+    try {
+      for (const [runId, cwd] of [["isolated-run", childCwd], ["shared-run", parentCwd]] as const) {
+        const request = { requestId: runId, ownerRunId: "owner", nodeId: runId }
+        void adapter.delegate({
+          ...request, agent: "worker", task: "t", context: "fresh", cwd, result: { kind: "text" }
+        }, abort.signal).catch(() => undefined)
+        events.emit("prompt-template:subagent:update", { ...request, runId })
+        adapter.progress({
+          runId: `tool-${runId}`,
+          mode: "single",
+          children: [{
+            index: 0, runId, agent: "worker", status: "running", task: "t",
+            tokens: 0, toolCount: 0, durationMs: 1, sessionFile: null
+          }]
+        })
+      }
+      const byId = (id: string) => adapter.snapshot().nodes.find((node) => node.subagentId === id)
+      expect(byId("isolated-run")?.workspace).toMatchObject({ branch: "child-branch" })
+      expect(byId("shared-run")?.workspace).toBeNull()
+    } finally {
+      abort.abort()
       adapter.stop()
       await rm(root, { recursive: true, force: true })
     }
