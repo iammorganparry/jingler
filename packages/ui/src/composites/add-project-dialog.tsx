@@ -199,7 +199,7 @@ function GitHubRepositoryPicker(props: {
         />
         <Button disabled={!props.remoteUrl.trim()} onClick={props.onCloneRemote}>Continue</Button>
       </div>
-      <div className="px-4 pt-3 text-[10px] font-medium uppercase tracking-wide text-dim">Or choose from GitHub</div>
+      <div className="px-4 pt-3 text-[10px] font-medium text-dim">Or choose from GitHub</div>
       <Command loop>
       <CommandInput placeholder="Search GitHub repositories…" />
       <CommandList className="max-h-[420px] min-h-[260px]">
@@ -265,7 +265,7 @@ function CloneConfirmation(props: {
         </span>
       </div>
       <label className="block space-y-1.5">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Clone destination</span>
+        <span className="text-[10px] font-medium text-muted-foreground">Clone destination</span>
         <div className="flex min-h-10 items-center gap-2 rounded-md bg-hover px-3 text-[12px] text-text">
           <Folder size={15} className="flex-none text-muted-foreground" />
           <span className="truncate">{props.destination}</span>

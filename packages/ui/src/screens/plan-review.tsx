@@ -121,7 +121,7 @@ function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<Conte
       ?.scrollIntoView({ behavior: "smooth", block: "start" })
   return (
     <nav aria-label="Plan contents" className="sticky top-10 hidden max-h-[calc(100vh-120px)] w-52 flex-none self-start overflow-y-auto @min-[1000px]:block">
-      <p className="m-0 mb-2 px-2 font-mono text-[11px] uppercase tracking-wide text-dim">Contents</p>
+      <p className="m-0 mb-2 px-2 font-mono text-[11px] text-dim">Contents</p>
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {items.map((item) => (
           <li key={item.id}>
@@ -333,7 +333,7 @@ export function PlanReview({ document: latest, canApprove = true, onApprove, onR
           <PlanContents items={contents} scroller={container} />
         <article ref={content} className="sb-plan flex min-w-0 max-w-[760px] flex-1 flex-col">
           <header className="flex flex-col gap-2 border-b border-hairline pb-4">
-            <p className="m-0 font-mono text-[12px] uppercase tracking-[0.06em] text-dim">
+            <p className="m-0 font-mono text-[12px] text-dim">
               Plan · revision {document.revision} · {document.status}
             </p>
             <h1 className="sb-plan-doc-title m-0">{plan.title}</h1>
