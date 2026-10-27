@@ -1181,7 +1181,7 @@ describe("PiSubagentLifecycleAdapter", () => {
         void adapter.delegate({
           ...request, agent: "worker", task: "t", context: "fresh", cwd, result: { kind: "text" }
         }, abort.signal).catch(() => undefined)
-        events.emit("prompt-template:subagent:update", { ...request, runId })
+        events.emit("prompt-template:subagent:update", { ...request, runId: `tool-${runId}` })
         adapter.progress({
           runId: `tool-${runId}`,
           mode: "single",

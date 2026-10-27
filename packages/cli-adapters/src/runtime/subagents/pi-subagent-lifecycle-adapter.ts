@@ -381,7 +381,7 @@ export class PiSubagentLifecycleAdapter {
   readonly #events: EventBus
   readonly #parentRuntimeSessionId: string
   readonly #parentCwd: string | undefined
-  /** Foreground delegation cwd by child runId, so progress nodes can report an isolated checkout. */
+  /** Foreground delegation cwd by tool-call run id, so progress nodes can report an isolated checkout. */
   readonly #delegationCwds = new Map<string, string>()
   readonly #parentRuntimeSessionIds: ReadonlySet<string>
   readonly #asyncRunsDir: string | undefined
@@ -688,7 +688,7 @@ export class PiSubagentLifecycleAdapter {
           usage: progressChildUsage(child, existing),
           artifacts: existing?.artifacts ?? [],
           attention: existing?.attention ?? null,
-          workspace: childWorkspace(this.#delegationCwds.get(subagentId), this.#parentCwd) ??
+          workspace: childWorkspace(this.#delegationCwds.get(input.runId), this.#parentCwd) ??
             existing?.workspace ?? null,
           prNumber: existing?.prNumber ?? null
         }
