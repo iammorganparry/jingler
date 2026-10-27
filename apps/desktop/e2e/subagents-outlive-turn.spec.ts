@@ -163,3 +163,18 @@ test("#509: a held subagent's question bumps the sidebar needs-you count and lig
     "Should I include the archived tabs in the tab bar survey?"
   )
 })
+
+test("Q12: a turn that ends on its own leaves no Running / agent count on the sidebar row", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByPlaceholder("Message the agent…").fill("[[held-subagents]] [[held-abandons]] survey the app")
+  await window.getByPlaceholder("Message the agent…").press("Enter")
+  await expect(window.getByTestId("session-subagent-count-s_subagents")).toHaveText("· 2 agents")
+
+  // The scripted agent finishes by itself (~4s of waits); no Stop is pressed.
+  await expect(window.getByTestId("session-subagent-count-s_subagents")).toHaveCount(0, { timeout: 30_000 })
+  await expect(window.getByTestId("session-sidebar")).not.toContainText("Running")
+})
