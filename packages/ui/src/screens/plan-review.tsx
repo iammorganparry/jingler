@@ -334,7 +334,7 @@ export function PlanReview({ document: latest, canApprove = true, onApprove, onR
         <article ref={content} className="sb-plan flex min-w-0 max-w-[760px] flex-1 flex-col">
           <header className="flex flex-col gap-2 border-b border-hairline pb-4">
             <p className="m-0 font-mono text-[12px] text-dim">
-              Plan · revision {document.revision} · {document.status}
+              Plan revision {document.revision} ({document.status})
             </p>
             <h1 className="sb-plan-doc-title m-0">{plan.title}</h1>
             {plan.stages.length > 0 && (

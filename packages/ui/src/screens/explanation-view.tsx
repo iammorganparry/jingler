@@ -78,9 +78,6 @@ function ExplanationArticle({ document }: { readonly document: ExplanationDocume
         <ExplanationContents sections={document.sections} />
         <article aria-label="Technical explanation" className="sb-plan flex min-w-0 max-w-[760px] flex-1 flex-col">
           <header className="border-b border-hairline pb-8">
-            <p className="m-0 flex items-center gap-2 font-mono text-[12px] text-dim">
-              <Sparkles className="size-3.5" /> Explanation
-            </p>
             <h1 className="sb-plan-doc-title mt-2">{document.title}</h1>
             <p className="sb-plan-lead mt-3 text-muted-foreground">{document.summary}</p>
           </header>

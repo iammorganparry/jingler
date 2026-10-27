@@ -171,8 +171,8 @@ function NativeEndpointRow({
     <div className="py-2.5 text-[12.5px] text-muted-foreground">
       {endpoint.runtimeId === "claude" ? (
         <span>
-          {endpoint.label} · {endpoint.status} · {endpoint.targetId}
-          {endpoint.status === "signed-out" && <span> · Run <code>claude auth login</code> on this target, then refresh runtimes.</span>}
+          {endpoint.label}, {endpoint.status}, {endpoint.targetId}
+          {endpoint.status === "signed-out" && <span>. Run <code>claude auth login</code> on this target, then refresh runtimes.</span>}
           {endpoint.status === "unsupported" && <span> · Install the supported Claude Code version on this target.</span>}
         </span>
       ) : (

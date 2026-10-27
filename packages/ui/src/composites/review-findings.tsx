@@ -405,7 +405,6 @@ export function ReviewFindings({
               <span>to the agent</span>
             </span>
           )}
-          {split.toAgent.length > 0 && split.toPr.length > 0 && <span className="text-dim">·</span>}
           {split.toPr.length > 0 && (
             <span className="flex items-center gap-[5px]">
               <MessageSquare size={11} strokeWidth={2.25} className="text-blue" />
@@ -421,7 +420,6 @@ export function ReviewFindings({
           */}
           {resolved > 0 && (
             <>
-              <span className="text-dim">·</span>
               <span className="flex items-center gap-[5px]">
                 <GitCommitHorizontal size={12} strokeWidth={2.25} className="text-muted-foreground" />
                 <span className="tabular-nums text-text">{resolved}</span>

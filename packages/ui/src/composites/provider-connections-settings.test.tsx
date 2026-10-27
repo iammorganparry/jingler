@@ -132,7 +132,7 @@ describe("ProviderConnectionsSettings", () => {
     expect(screen.queryByRole("button", { name: "Sign in to Codex CLI" })).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Codex CLI: Sign in required" }))
-    expect(screen.getAllByText("Codex CLI · signed-out · desktop")).toHaveLength(2)
+    expect(screen.getAllByText("Codex CLI, signed-out, desktop")).toHaveLength(2)
     expect(screen.getAllByRole("button", { name: "Sign in to Codex CLI" })).toHaveLength(1)
     expect(screen.queryByRole("button", { name: "Open browser" })).toBeNull()
 
