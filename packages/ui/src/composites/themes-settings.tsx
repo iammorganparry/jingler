@@ -175,7 +175,7 @@ export function ThemesSettings({
             <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-muted-foreground">
               {skipped.map((s) => (
                 <li key={s.path}>
-                  {s.path.split("/").pop()} — {s.message}
+                  {s.path.split("/").pop()}, {s.message}
                 </li>
               ))}
             </ul>

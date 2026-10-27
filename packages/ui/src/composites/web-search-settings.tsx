@@ -119,7 +119,7 @@ export function WebSearchSettings({
               value={apiKey}
               disabled={loading || busy}
               aria-label={`${label(provider)} API key`}
-              placeholder={configured ? `${label(provider)} key configured — enter a replacement` : `${label(provider)} API key`}
+              placeholder={configured ? `${label(provider)} key configured, enter a replacement` : `${label(provider)} API key`}
               autoComplete="off"
               onChange={(event) => setApiKey(event.target.value)}
             />

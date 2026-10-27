@@ -116,7 +116,7 @@ const initialLoad = fromPromise<InitialData>(async () => {
 });
 
 const scanFailure = (dir: string, reason: string) =>
-  new Error(`Couldn't read ${dir} — ${reason}`);
+  new Error(`Couldn't read ${dir}, ${reason}`);
 
 /**
  * Open the native picker, persist, and scan; null when the user cancels. The
@@ -373,7 +373,7 @@ export const appMachine = setup({
                 onError: {
                   target: "idle",
                   actions: assign(({ event }) => ({
-                    error: `Couldn't add projects — ${messageOf(event.error)}`,
+                    error: `Couldn't add projects, ${messageOf(event.error)}`,
                   })),
                 },
               },

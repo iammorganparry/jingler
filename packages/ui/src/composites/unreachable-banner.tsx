@@ -18,7 +18,7 @@ export function UnreachableBanner({ onRetry }: { onRetry: () => void }) {
         </Button>
       ]}
     >
-      Can&apos;t reach Jingler — you can keep working locally
+      Can&apos;t reach Jingler, you can keep working locally
     </BannerShell>
   )
 }

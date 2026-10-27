@@ -282,7 +282,7 @@ export const BUILTIN_TAB_META: Record<
     icon: Workflow,
     order: 50,
     blurb:
-      "Deterministic multi-agent runs — Build → Review → Reconcile across worktrees."
+      "Deterministic multi-agent runs, Build → Review → Reconcile across worktrees."
   }
 }
 

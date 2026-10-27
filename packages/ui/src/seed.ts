@@ -28,7 +28,7 @@ export const SEED_CONVERSATION: ReadonlyArray<Message> = [
       },
       {
         _tag: "Text",
-        text: "Swapped the store and added a refresh guard, then opened PR #482. A reviewer requested a change on the 401 path — addressing it now."
+        text: "Swapped the store and added a refresh guard, then opened PR #482. A reviewer requested a change on the 401 path, addressing it now."
       },
       {
         _tag: "Tool",
@@ -49,7 +49,7 @@ export const SEED_CONVERSATION: ReadonlyArray<Message> = [
           kind: "command",
           title: "Approval needed · run a command",
           detail:
-            "Not in your allowlist. Agents never run shell commands until you allow — the edit above was applied under this mode.",
+            "Not in your allowlist. Agents never run shell commands until you allow, the edit above was applied under this mode.",
           command: "npm test -- auth",
           allowLabel: "npm test",
           status: "pending"

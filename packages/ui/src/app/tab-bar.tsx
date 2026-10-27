@@ -357,7 +357,7 @@ function renderEditableTitle() {
           data-testid={pane ? `pane-chip-${pane.index}` : "conversation-tab"}
           title={
             pane
-              ? `Pane ${pane.index + 1} — ${identity} (double-click to rename)`
+              ? `Pane ${pane.index + 1}, ${identity} (double-click to rename)`
               : `${identity} (double-click to rename)`
           }
           tabIndex={canRenameTitle ? 0 : undefined}

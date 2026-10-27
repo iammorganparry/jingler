@@ -55,7 +55,7 @@ export function AssetView({
         <AssetNotice
           icon={<FileWarning className="size-6 text-muted-foreground" aria-hidden />}
           title="Too large to show as a table"
-          detail={`${payload.path} is ${formatBytes(payload.size)} — parsing it inline would freeze the window. Open it in another tool instead.`}
+          detail={`${payload.path} is ${formatBytes(payload.size)}, parsing it inline would freeze the window. Open it in another tool instead.`}
           onReveal={onReveal}
         />
       ) : (
@@ -217,7 +217,7 @@ export function AssetTooLarge({
     <AssetNotice
       icon={<FileWarning className="size-6" aria-hidden />}
       title="File too large to preview"
-      detail={`${path} is ${formatBytes(size)} — over the ${formatBytes(cap)} preview limit.`}
+      detail={`${path} is ${formatBytes(size)}, over the ${formatBytes(cap)} preview limit.`}
       onReveal={onReveal}
     />
   )

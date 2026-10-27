@@ -75,7 +75,7 @@ export function BranchDriftBanner({
       icon={<GitBranch size={13} />}
       actions={adopt ? [adopt, fork] : [fork]}
     >
-      Checkout moved off <span className="font-mono">{pinnedBranch}</span> — the repository is now on{" "}
+      Checkout moved off <span className="font-mono">{pinnedBranch}</span>, the repository is now on{" "}
       <span className="font-mono">{live}</span>
     </BannerShell>
   )

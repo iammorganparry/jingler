@@ -140,7 +140,7 @@ function OutcomeLine({ outcome }: { outcome: FindingOutcome }) {
     return (
       <div
         className="flex items-center gap-[5px] text-[10.5px] leading-none text-muted-foreground"
-        title={`${outcome.sha.slice(0, 7)} — ${outcome.subject}`}
+        title={`${outcome.sha.slice(0, 7)}, ${outcome.subject}`}
       >
         <GitCommitHorizontal size={11} strokeWidth={2.25} />
         <span>Resolved in</span>

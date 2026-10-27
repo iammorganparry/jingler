@@ -1570,8 +1570,8 @@ function renderMainConversation({
     onHandoffAllQueued={handoffAllQueued}
     steeringId={convo.steeringId}
     handoffHint={handoffModel
-      ? `Hand off — run this in a new chat on ${handoffModel}`
-      : "Hand off — run this in a new chat"}
+      ? `Hand off, run this in a new chat on ${handoffModel}`
+      : "Hand off, run this in a new chat"}
     providerCatalog={providerCatalog}
     agentEndpointCatalog={agentEndpointCatalog}
     endpointId={convo.endpointId}

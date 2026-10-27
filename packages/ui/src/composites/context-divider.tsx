@@ -94,7 +94,7 @@ export function ContextDivider({
         <div className="mt-2 space-y-3 rounded-md border border-line bg-surface p-3">
           <p className="text-[11px] leading-relaxed text-dim">
             Your full history above is unchanged. This is what the agent carried
-            forward into a fresh conversation — {kept} item{kept === 1 ? "" : "s"} kept.
+            forward into a fresh conversation, {kept} item{kept === 1 ? "" : "s"} kept.
           </p>
           <Section title="Goal" items={[digest.goal]} />
           <Section title="Decisions" items={digest.decisions} />

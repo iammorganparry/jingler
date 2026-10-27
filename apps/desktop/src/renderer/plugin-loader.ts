@@ -319,7 +319,7 @@ export const loadPluginUi = async (
       ok: false,
       error: {
         id: manifest.id,
-        message: `${unsupported.join(" and ")} — declared but not honoured by this build, so it would silently do nothing. Remove ${unsupported.length > 1 ? "them" : "it"} from the manifest; tabs, panes, commands and getSession all work.`
+        message: `${unsupported.join(" and ")}, declared but not honoured by this build, so it would silently do nothing. Remove ${unsupported.length > 1 ? "them" : "it"} from the manifest; tabs, panes, commands and getSession all work.`
       }
     }
   }
@@ -429,7 +429,7 @@ async function importPluginUi(
       ok: false,
       error: {
         id: manifest.id,
-        message: `${manifest.ui} has no default export — a plugin's UI entry must \`export default definePlugin(...)\``
+        message: `${manifest.ui} has no default export, a plugin's UI entry must \`export default definePlugin(...)\``
       }
     }
   }
