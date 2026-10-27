@@ -434,6 +434,15 @@ const prsFromCheckouts = (session: Session): Session => {
   return { ...session, prs, prNumber: active ? active.prNumber : session.prNumber }
 }
 
+/** Set the scalar `branch` and keep the active checkout's own record in step (labels read the checkout). */
+const withActiveCheckoutBranch = <S extends Session>(session: S, branch: string): S => ({
+  ...session,
+  branch,
+  ...(session.checkouts
+    ? { checkouts: session.checkouts.map((c) => (c.id === session.activeCheckoutId ? { ...c, branch } : c)) }
+    : {})
+})
+
 /**
  * Keep `prs` (the stack, bottom first) and `prNumber` (its top) consistent.
  * Sessions persisted before stacks existed have only `prNumber`; they read as a
@@ -1747,9 +1756,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         semanticBranchProposal?: Session["semanticBranchProposal"]
       ) =>
         update(id, (s) => ({
-          ...s,
+          ...withActiveCheckoutBranch(s, branch),
           title,
-          branch,
           ...propertiesWhen(semanticBranchProposal !== undefined, { semanticBranchProposal }),
           semanticBranchPending: false
         }))
@@ -1761,7 +1769,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
      * (plans, PR link, GitHub routing) is preserved by `update`'s read-modify-write.
      */
     const setBranch = (id: string, branch: string) =>
-        update(id, (s) => ({ ...s, branch }))
+        update(id, (s) => withActiveCheckoutBranch(s, branch))
 
       /** Manual rename — pins the title so the agent stops auto-retitling it. */
       const renameTitle = (id: string, title: string) =>
@@ -1811,6 +1819,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const checkouts = single.checkouts?.map((c) => (c.id === single.activeCheckoutId ? { ...c, prNumber } : c))
           return migrateSessionPrs({ ...single, prNumber, ...(checkouts ? { checkouts } : {}) })
         })
+
+      /** Record the live branch of one specific checkout (not necessarily the active one). */
+      const setCheckoutBranch = (id: string, checkoutId: string, branch: string) =>
+        update(id, (session) => reduceCheckouts(session, { type: "update", checkoutId, patch: { branch } }))
 
       /** Link a PR to one specific checkout (not necessarily the active one). */
       const setCheckoutPr = (id: string, checkoutId: string, prNumber: number | null) =>
@@ -2249,6 +2261,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         addAllowlist,
         setPrNumber,
         setCheckoutPr,
+        setCheckoutBranch,
         appendPr,
         setGitHubLink,
         claimGitHubFeedback,

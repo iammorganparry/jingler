@@ -2471,9 +2471,10 @@ export const conversationMachine = setup({
         onDone: { target: "refreshingDiff", actions: "settleStoppedFleet" },
         // A failed stop still means we are no longer streaming: the turn was
         // already settled by `settleStoppedRun` on the way in.
-        onError: { target: "refreshingDiff" }
+        // The run is gone either way, so its sub-agents must not keep the row "Running".
+        onError: { target: "refreshingDiff", actions: "settleStoppedFleet" }
       },
-      after: { [STOP_SETTLE_CAP]: { target: "refreshingDiff" } },
+      after: { [STOP_SETTLE_CAP]: { target: "refreshingDiff", actions: "settleStoppedFleet" } },
       on: {
         // Keep accepting sends — they run once the diff settles, as elsewhere.
         SEND: [
