@@ -116,7 +116,7 @@ describe("ThemesSettings — broken theme files", () => {
       skipped: [{ path: "/home/me/jingler/themes/broken.json", message: "type: is missing" }]
     })
     expect(screen.getByText(/1 theme file could not be read/)).toBeTruthy()
-    expect(screen.getByText(/broken\.json — type: is missing/)).toBeTruthy()
+    expect(screen.getByText(/broken\.json, type: is missing/)).toBeTruthy()
   })
 
   it("still shows every theme that did load", () => {
