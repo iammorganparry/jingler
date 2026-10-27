@@ -132,13 +132,13 @@ describe("ProviderConnectionsSettings", () => {
     expect(screen.queryByRole("button", { name: "Sign in to Codex CLI" })).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Codex CLI: Sign in required" }))
-    expect(screen.getAllByText("Codex CLI · signed-out · desktop")).toHaveLength(2)
+    expect(screen.getAllByText("Codex CLI, signed-out, desktop")).toHaveLength(2)
     expect(screen.getAllByRole("button", { name: "Sign in to Codex CLI" })).toHaveLength(1)
     expect(screen.queryByRole("button", { name: "Open browser" })).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Claude Code: 1/2 ready" }))
     expect(screen.getByText("claude auth login")).toBeTruthy()
-    expect(screen.getAllByText(/Claude Code · .* · device/u).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Claude Code, .*, device/u).length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole("button", { name: "PI: Needs provider" }))
     expect(screen.getByRole("button", { name: "Open browser" })).toBeTruthy()

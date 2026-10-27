@@ -22,12 +22,12 @@ export function QuestionSummary({
   return (
     <div className={cn("flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel px-3.5 py-3", className)}>
       {cancelled ? (
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.4px] text-dim">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-dim">
           <CircleSlash className="size-3.5" />
           Stopped before answering
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.4px] text-green">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-green">
           <CircleCheck className="size-3.5" />
           Your answer
         </div>

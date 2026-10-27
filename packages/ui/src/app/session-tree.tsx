@@ -221,7 +221,7 @@ export const SessionTree = memo(function SessionTree({
       })}
       {files.length > 0 && (
         <>
-          <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-dim">Files</p>
+          <p className="px-2 pb-0.5 pt-1.5 text-[10px] text-dim">Files</p>
           {files.map((f) => {
             const diff = fileDiffs?.[f.id]
             return item(
@@ -239,7 +239,7 @@ export const SessionTree = memo(function SessionTree({
             type="button"
             aria-expanded={closedOpen}
             onClick={() => setClosedOpen((v) => !v)}
-            className="px-2 pb-0.5 pt-1.5 text-left text-[10px] uppercase tracking-wider text-dim hover:text-text"
+            className="px-2 pb-0.5 pt-1.5 text-left text-[10px] text-dim hover:text-text"
           >
             Closed ({closed.length})
           </button>
@@ -263,7 +263,7 @@ export const SessionTree = memo(function SessionTree({
       )}
       {sessionViews.length > 0 && (
         <>
-          <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-dim">Session views</p>
+          <p className="px-2 pb-0.5 pt-1.5 text-[10px] text-dim">Session views</p>
           {sessionViews.map(viewItem)}
         </>
       )}

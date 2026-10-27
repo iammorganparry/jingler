@@ -210,7 +210,7 @@ export function SubagentChip({ subagents, onOpenSubagent, peers = [], onMessageP
           <Rows rows={running} now={now} onOpen={onOpenSubagent} />
           {finished.length > 0 && (
             <>
-              <DropdownMenu.Label className="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-dim">
+              <DropdownMenu.Label className="px-2.5 pt-2 pb-1 text-[10px] font-medium text-dim">
                 Done ({finished.length})
               </DropdownMenu.Label>
               <Rows rows={finished} now={now} onOpen={onOpenSubagent} />
@@ -218,7 +218,7 @@ export function SubagentChip({ subagents, onOpenSubagent, peers = [], onMessageP
           )}
           {peers.length > 0 && onMessagePeer !== undefined && (
             <>
-              <DropdownMenu.Label className="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-dim">
+              <DropdownMenu.Label className="px-2.5 pt-2 pb-1 text-[10px] font-medium text-dim">
                 Peers · {peers.length}
               </DropdownMenu.Label>
               {peers.map((agent) => (

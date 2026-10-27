@@ -291,7 +291,7 @@ export function VoiceLevelMeter({ level, elapsedMs }: { level: number; elapsedMs
   return (
     <span className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums text-muted-foreground" role="status" aria-label="Recording level">
       <span className="h-1.5 w-12 overflow-hidden rounded-full bg-panel">
-        <span className="block h-full rounded-full bg-purple transition-[width] duration-100" style={{ width: `${Math.round(Math.min(1, Math.max(0, level)) * 100)}%` }} />
+        <span className="block h-full w-full origin-left rounded-full bg-purple transition-transform duration-100" style={{ transform: `scaleX(${Math.min(1, Math.max(0, level))})` }} />
       </span>
       {formatElapsed(elapsedMs)}
     </span>

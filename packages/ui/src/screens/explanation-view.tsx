@@ -52,7 +52,7 @@ function ExplanationContents({ sections }: { readonly sections: ExplanationDocum
   if (sections.length < 2) return null
   return (
     <nav aria-label="Explanation contents" className="sticky top-10 hidden max-h-[calc(100vh-120px)] w-52 flex-none self-start overflow-y-auto @min-[1000px]:block">
-      <p className="m-0 mb-2 px-2 font-mono text-[11px] uppercase tracking-wide text-dim">Contents</p>
+      <p className="m-0 mb-2 px-2 font-mono text-[11px] text-dim">Contents</p>
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {sections.map((section) => (
           <li key={section.id}>
@@ -78,9 +78,6 @@ function ExplanationArticle({ document }: { readonly document: ExplanationDocume
         <ExplanationContents sections={document.sections} />
         <article aria-label="Technical explanation" className="sb-plan flex min-w-0 max-w-[760px] flex-1 flex-col">
           <header className="border-b border-hairline pb-8">
-            <p className="m-0 flex items-center gap-2 font-mono text-[12px] uppercase tracking-[0.06em] text-dim">
-              <Sparkles className="size-3.5" /> Explanation
-            </p>
             <h1 className="sb-plan-doc-title mt-2">{document.title}</h1>
             <p className="sb-plan-lead mt-3 text-muted-foreground">{document.summary}</p>
           </header>

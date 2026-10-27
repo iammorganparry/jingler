@@ -85,11 +85,9 @@ export function OAuthRow({
   return (
     <div className="flex items-center gap-1.5 text-[12px] text-text-body">
       <span className="text-dim">OAuth</span>
-      <span className="text-dim">·</span>
       <span>Signed in as {account}</span>
       {onSignOut !== undefined && (
         <>
-          <span className="text-dim">·</span>
           <Button variant="danger" size="sm" onClick={onSignOut}>
             Sign out
           </Button>

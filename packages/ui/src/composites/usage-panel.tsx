@@ -59,8 +59,8 @@ function WindowRow({ window: w }: { window: UsageWindow }) {
       </div>
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface">
         <div
-          className="h-full rounded-full transition-[width]"
-          style={{ width: `${pct}%`, background: barColor(w.status) }}
+          className="h-full w-full origin-left rounded-full transition-transform"
+          style={{ transform: `scaleX(${pct / 100})`, background: barColor(w.status) }}
         />
       </div>
       <span className="w-[66px] flex-none text-right font-mono text-[11px] text-text-body">

@@ -531,7 +531,7 @@ return (<GithubSection
           return (
             <div key={group.label} className={cn("flex flex-col gap-0.5", compact && "items-center")}>
               {!compact && (
-                <div className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-text-dim">
+                <div className="px-2.5 pb-1 pt-2 text-[11px] font-semibold text-text-dim">
                   {group.label}
                 </div>
               )}

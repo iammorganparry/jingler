@@ -266,7 +266,7 @@ export function MorphPopoverContent({
             visibility: layout ? "visible" : "hidden",
             transformOrigin: originFor(side, align),
           }}
-          className="pointer-events-auto fixed z-[9999] [filter:drop-shadow(0_10px_18px_rgba(0,0,0,0.14))]"
+          className="pointer-events-auto fixed z-[9999] [filter:drop-shadow(0_10px_18px_var(--sb-shadow))]"
         >
           <motion.div
             ref={ctx.contentRef}

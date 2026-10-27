@@ -11,7 +11,7 @@ const SUCCESS = "bg-green text-white"
 /** An animated "draw-in" check mark (design's success state). */
 function CheckDraw() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="flex-none">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="flex-none">
       <path
         d="M20 6L9 17l-5-5"
         stroke="currentColor"

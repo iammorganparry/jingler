@@ -82,7 +82,7 @@ export function ReviewDrawer({ pr, drawer, onPromote }: { pr: PullRequest; drawe
         </Button>
       </div>
       <p className="border-b border-hairline px-3 py-2 font-mono text-[11px] text-muted-foreground">
-        diff {pr.changedFiles} files · {pr.reviewThreads.length} threads · checks {checksPassed(pr)}/{pr.checks.length}
+        diff {pr.changedFiles} files, {pr.reviewThreads.length} threads, checks {checksPassed(pr)}/{pr.checks.length}
       </p>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
         {undecided.length > 1 && (
