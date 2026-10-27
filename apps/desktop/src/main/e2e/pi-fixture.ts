@@ -280,7 +280,9 @@ const heldUnsteeredResponse = (
   direct: boolean
 ): ReturnType<typeof fauxAssistantMessage> => {
   const settles = prompt.includes("[[held-settles]]")
-  if (settles && resultsAfterLatestPrompt > HELD_SETTLE_AFTER_WAITS) {
+  // [[held-abandons]]: the turn ends on its own WITHOUT the children ever reporting terminal.
+  const abandons = prompt.includes("[[held-abandons]]")
+  if ((settles || abandons) && resultsAfterLatestPrompt > HELD_SETTLE_AFTER_WAITS) {
     return fauxAssistantMessage("Both agents reported back.")
   }
   const waitPhase = settles && resultsAfterLatestPrompt === HELD_SETTLE_AFTER_WAITS ? "settle" : "wait"
