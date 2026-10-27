@@ -774,7 +774,7 @@ function MessageTurnImpl({
           icon={<ProviderIcon providerId={providerId ?? undefined} mono />}
           style={{ color: providerColor(providerId) }}
         >
-          {providerLabel(providerId)}
+          <span>{providerLabel(providerId)}</span>
         </Eyebrow>
       ) : (
         <Eyebrow>You</Eyebrow>
