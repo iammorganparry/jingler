@@ -2625,6 +2625,9 @@ function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {
       ? { ...s, status: "done" as const, message: settleStreaming(s.message) }
       : s
   )
+  // The sidebar's "N agents" and Running hint read the fleet feed, not the
+  // legacy list above: a run that ends on its own must settle it too, as Stop does.
+  const settledFleet = boundedFleetEvents(settleStoppedFleet(context.subagentFleetEvents, Date.now()))
   // `Done.tokens` NEVER reaches the context meter. It is the run's
   // cumulative spend (see the `Usage` schema note in conversation.ts) —
   // cache reads counted once per tool call — so on a long session it runs
@@ -2638,6 +2641,7 @@ function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {
       messages,
       foldsSinceCompaction,
       subagents: settled,
+      subagentFleetEvents: settledFleet,
       runStartedAt: null,
       lastOutcome: "done" as const,
       pendingExternalInstruction: null,
@@ -2649,6 +2653,7 @@ function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {
       messages,
       foldsSinceCompaction,
       subagents: settled,
+      subagentFleetEvents: settledFleet,
       runStartedAt: null,
       lastOutcome: "failed" as const,
       pendingExternalInstruction: null,
