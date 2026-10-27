@@ -500,7 +500,7 @@ case "End": {
       inert={!context.open}
       style={{ left: position.x, top: position.y }}
       className={cn(
-        "fixed z-[100] [filter:drop-shadow(0_18px_28px_rgba(0,0,0,0.2))]",
+        "fixed z-[100] [filter:drop-shadow(0_18px_28px_var(--sb-shadow))]",
         context.open ? "pointer-events-auto" : "pointer-events-none",
       )}
     >

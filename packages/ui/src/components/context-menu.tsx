@@ -114,7 +114,7 @@ break
       transition={reduce ? { duration: 0.1 } : SPRING_PANEL}
       style={position}
       onKeyDown={onKeyDown}
-      className="fixed z-[101] min-w-56 overflow-hidden rounded-[12px] border border-line bg-panel p-1.5 text-text-bright outline-none [filter:drop-shadow(0_18px_28px_rgba(0,0,0,0.2))]"
+      className="fixed z-[101] min-w-56 overflow-hidden rounded-[12px] border border-line bg-panel p-1.5 text-text-bright outline-none [filter:drop-shadow(0_18px_28px_var(--sb-shadow))]"
     >
       {items.map((item, index) => {
         const Icon = item.icon
