@@ -72,7 +72,8 @@ export function McpImportPrompt({
   startAuthorization,
   logTail,
   isDismissed,
-  persistDismissed
+  persistDismissed,
+  ignoreDismissal = false
 }: {
   readonly ready: boolean
   readonly servers: ReadonlyArray<McpServer>
@@ -87,6 +88,8 @@ export function McpImportPrompt({
   readonly logTail: (name: string) => Promise<{ readonly lines: ReadonlyArray<string> }>
   readonly isDismissed: () => Promise<boolean>
   readonly persistDismissed: () => Promise<void>
+  /** Settings entry point: offer the import even after Home's card was dismissed, and don't persist "Not now". */
+  readonly ignoreDismissal?: boolean
 }) {
   const [reviewOpen, setReviewOpen] = useState(false)
   const started = useRef(false)
@@ -135,10 +138,10 @@ export function McpImportPrompt({
   useEffect(() => {
     if (!ready || started.current) return
     started.current = true
-    void resolveImportDismissed(isDismissed, persistDismissed).then((dismissed) => {
+    void (ignoreDismissal ? Promise.resolve(false) : resolveImportDismissed(isDismissed, persistDismissed)).then((dismissed) => {
       if (!dismissed) send({ type: "START" })
     })
-  }, [ready, send, isDismissed, persistDismissed])
+  }, [ready, send, isDismissed, persistDismissed, ignoreDismissal])
 
   const open = reviewOpen && DIALOG_STATES.some((name) => state.matches(name))
   const done = state.matches("done")
@@ -146,7 +149,7 @@ export function McpImportPrompt({
 
   const dismiss = () => {
     setReviewOpen(false)
-    void persistDismissed().catch(() => {})
+    if (!ignoreDismissal) void persistDismissed().catch(() => {})
     send({ type: "DISMISS" })
   }
 

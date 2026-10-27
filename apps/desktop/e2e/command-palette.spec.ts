@@ -442,3 +442,11 @@ test("the Chat scope narrows results and Tab cycles back to Workspace", async ({
   await window.getByPlaceholder(PLACEHOLDER).press("Tab")
   await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
 })
+
+test("⌘, opens Settings, as Home's shortcut list advertises", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.keyboard.press("Meta+,")
+  await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
+})

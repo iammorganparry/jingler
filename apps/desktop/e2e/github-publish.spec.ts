@@ -300,15 +300,14 @@ test("a draft PR shows the Draft pill and Mark ready for review removes it", asy
   })
   await expect(appShell(window)).toBeVisible()
   await window.getByTestId("header-view-checks").click()
-  await showPullRequestDetails(window)
-
-  // In a narrow group the details drawer is modal, so the PR header behind it is aria-hidden.
-  const pill = window.getByRole("heading", { level: 2, includeHidden: true }).getByText("Draft", { exact: true })
+  // Mark ready lives in the PR header itself, no need to open the details drawer.
+  const header = window.getByTestId("reading-header")
+  const pill = header.getByText("Draft", { exact: true })
   await expect(pill).toBeVisible({ timeout: 20_000 })
-  await window.getByRole("button", { name: "Mark ready for review" }).click()
+  await header.getByRole("button", { name: "Mark ready for review" }).click()
   await expect.poll(() => githubServer.operations, { timeout: 15_000 }).toContain("pr ready")
   await expect(pill).toHaveCount(0, { timeout: 15_000 })
-  await expect(window.getByRole("button", { name: "Mark ready for review" })).toHaveCount(0)
+  await expect(header.getByRole("button", { name: "Mark ready for review" })).toHaveCount(0)
 })
 
 test("a behind PR lists its blocker with Update branch and disables Merge with the reason", async ({ launchApp }) => {

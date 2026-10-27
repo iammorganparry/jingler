@@ -144,3 +144,24 @@ test("shows neutral import results with Connect for OAuth and View log for a fai
     await mcp.close()
   }
 })
+
+test("Settings › MCP servers offers the import found on Home, even after Home's card is dismissed", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    seed: ({ home }) => {
+      writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { docs: { command: "node", args: ["d.mjs"] } } }))
+    }
+  })
+  const home = window.getByTestId("import-card")
+  await expect(home.getByText(/Found 1 server/)).toBeVisible()
+  await home.getByRole("button", { name: "Not now" }).click()
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: "MCP servers" }).click()
+  await expect(window.getByText("No servers configured yet.")).toBeVisible()
+  const card = window.getByTestId("import-card")
+  await expect(card.getByText(/Found 1 server/)).toBeVisible()
+  await card.getByRole("button", { name: "Review" }).click()
+  await expect(window.getByRole("button", { name: "Import 1 server" })).toBeVisible()
+})
