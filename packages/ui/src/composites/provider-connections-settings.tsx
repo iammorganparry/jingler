@@ -327,7 +327,7 @@ function ConnectionsList({
           {endpoints.map(({ endpoint }) => (
             <div key={endpoint.id} className="flex items-center gap-2.5 px-2 py-2.5 text-[12.5px] text-muted-foreground">
               <StatusDot tone={endpointDotTone(endpoint.status)} size={7} />
-              <span>{endpoint.label} · {endpoint.status} · {endpoint.targetId}</span>
+              <span>{endpoint.label}, {endpoint.status}, {endpoint.targetId}</span>
             </div>
           ))}
         </fieldset>

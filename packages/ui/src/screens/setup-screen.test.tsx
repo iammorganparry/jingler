@@ -242,8 +242,8 @@ describe("SetupScreen", () => {
 
   it("distinguishes PI connections from the native Claude CLI", () => {
     render(<SetupScreen {...props({ step: "provider", agentEndpointCatalog: endpointCatalog })} />)
-    expect(screen.getByText("PI · Claude Max · ready")).toBeTruthy()
-    expect(screen.getByText("Claude Code · signed-out")).toBeTruthy()
+    expect(screen.getByText("PI · Claude Max, ready")).toBeTruthy()
+    expect(screen.getByText("Claude Code, signed-out")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Connect Claude through PI" })).toBeTruthy()
   })
 

@@ -86,7 +86,7 @@ const connectionDetail = (connection: CatalogConnection): string =>
     connection.account?.displayLabel ?? connection.account?.fingerprint ?? connection.id,
     connection.subscription.planLabel,
     connection.subscription.confirmedBillingRoute
-  ].filter(Boolean).join(" · ")
+  ].filter(Boolean).join(", ")
 
 export function ProviderSetupStep({
   catalog,

@@ -138,7 +138,7 @@ describe("ProviderConnectionsSettings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Claude Code: 1/2 ready" }))
     expect(screen.getByText("claude auth login")).toBeTruthy()
-    expect(screen.getAllByText(/Claude Code · .* · device/u).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Claude Code, .*, device/u).length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole("button", { name: "PI: Needs provider" }))
     expect(screen.getByRole("button", { name: "Open browser" })).toBeTruthy()
