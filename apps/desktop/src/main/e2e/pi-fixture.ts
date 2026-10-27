@@ -1093,8 +1093,28 @@ const switchBuildResponse = (context: PiContext): ReturnType<typeof fauxAssistan
   return fauxAssistantMessage("Still in plan.")
 }
 
+// `[[isolated-subagent]]`: the real subagent tool with isolation:"worktree"; the child's
+// task carries `[[isolated-child-write]]` so the child's own turn writes one file.
+const isolatedSubagentResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  const prompt = latestOperatorText(context)
+  if (prompt.includes("[[isolated-child-write]]")) {
+    return recentToolResultCount(context, WRITE_TOOL) === 0
+      ? callTool(WRITE_TOOL, { path: "src/isolated.ts", content: "export const isolated = true\n" }, "isolated-child-write-1")
+      : fauxAssistantMessage("Wrote src/isolated.ts.")
+  }
+  if (!prompt.includes("[[isolated-subagent]]")) return null
+  return recentToolResultCount(context, SUBAGENT_TOOL) === 0
+    ? callTool(
+      SUBAGENT_TOOL,
+      { agent: "reviewer", task: "[[isolated-child-write]] Write src/isolated.ts.", isolation: "worktree" },
+      "isolated-subagent-1"
+    )
+    : fauxAssistantMessage("Isolated child finished.")
+}
+
 // Marker scenarios, tried in order; the first that claims the turn answers it.
 const markerResponders = [
+  isolatedSubagentResponse,
   intentToolResponse,
   switchPlanResponse,
   switchBuildResponse,
