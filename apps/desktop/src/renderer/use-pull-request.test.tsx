@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { Session } from "@jingler/core"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, renderHook } from "@testing-library/react"
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { Schema } from "effect"
 import type { ReactNode } from "react"
 import { afterEach, expect, it, vi } from "vitest"
@@ -11,7 +11,8 @@ import { PR_REFRESH_MS, usePullRequest } from "./use-pull-request.js"
 vi.mock("./rpc-client.js", () => ({
   rpc: {
     githubPr: vi.fn(),
-    githubDetectPr: vi.fn()
+    githubDetectPr: vi.fn(),
+    githubMarkReady: vi.fn()
   }
 }))
 
@@ -58,5 +59,20 @@ it("refreshes the visible pull request every ten seconds", async () => {
 
   await act(async () => vi.advanceTimersByTimeAsync(PR_REFRESH_MS))
   expect(rpc.githubPr).toHaveBeenCalledTimes(2)
+  client.clear()
+})
+
+it("flips a draft PR to open in the cache once markReady succeeds", async () => {
+  vi.mocked(rpc.githubPr).mockResolvedValue({ number: 320, state: "draft", isDraft: true, mergeBlockers: [], timeline: [], reviewThreads: [] } as never)
+  vi.mocked(rpc.githubMarkReady).mockResolvedValue(undefined)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  )
+  const session = { id: "session-1", prNumber: 320 } as never
+  const { result } = renderHook(() => usePullRequest(session, { connected: true, autoDetect: false }), { wrapper })
+  await waitFor(() => expect(result.current.pr?.state).toBe("draft"))
+  await act(async () => result.current.markReady())
+  await waitFor(() => expect(result.current.pr).toMatchObject({ state: "open", isDraft: false }))
   client.clear()
 })

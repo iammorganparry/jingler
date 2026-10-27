@@ -150,6 +150,11 @@ export function PrViewHeader({
               <Button variant="secondary" size="sm" onClick={onReview}>Review</Button>
             </Tooltip>
           )}
+          {onMarkReady && pr.state === "draft" && (
+            <Button variant="secondary" size="sm" disabled={markingReady} onClick={onMarkReady}>
+              {markingReady ? "Marking ready…" : "Mark ready for review"}
+            </Button>
+          )}
           {onOpenSession && (
             <Button
               variant="secondary"

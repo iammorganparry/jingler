@@ -130,7 +130,12 @@ export function usePullRequest(
   // read is invalidated so the header + side panel leave the Draft state.
   const markReadyMutation = useMutation({
     mutationFn: () => rpc.githubMarkReady(session.id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
+    // Write the new state into the cache instead of invalidating: GitHub can serve
+    // the stale draft right after the mutation, and the 10s poll reconciles later.
+    onSuccess: () =>
+      qc.setQueryData<PullRequest | null>(prKey(session.id, prNumber), (old) =>
+        old ? { ...old, isDraft: false, state: old.state === "draft" ? "open" : old.state } : old
+      )
   })
   const markReady = useCallback(
     () => markReadyMutation.mutateAsync().then(() => undefined),

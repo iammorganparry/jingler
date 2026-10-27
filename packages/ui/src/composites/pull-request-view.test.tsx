@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import type { PublishCheckpoint, PullRequest, SessionPr } from "@jingler/core"
 import { userEvent } from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -512,7 +512,19 @@ describe("PullRequestView draft side panel", () => {
   it("calls onMarkReady from the secondary Mark ready for review button", async () => {
     const onMarkReady = vi.fn()
     view({ onMarkReady })
-    await userEvent.click(screen.getByRole("button", { name: "Mark ready for review" }))
+    // Header action + side panel action.
+    const buttons = screen.getAllByRole("button", { name: "Mark ready for review" })
+    expect(buttons).toHaveLength(2)
+    await userEvent.click(buttons[1]!)
+    expect(onMarkReady).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces Mark ready for review in the header of a draft", async () => {
+    const onMarkReady = vi.fn()
+    view({ onMarkReady })
+    const header = screen.getByRole("heading", { level: 2 }).closest("header") ?? document.body
+    const button = within(header).getAllByRole("button", { name: "Mark ready for review" })[0]!
+    await userEvent.click(button)
     expect(onMarkReady).toHaveBeenCalledTimes(1)
   })
 
