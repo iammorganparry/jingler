@@ -81,7 +81,7 @@ export const Agents: Story = {
 export const Callouts: Story = {
   render: () => (
     <div className="flex w-80 flex-col gap-2">
-      <Callout tone="yellow">Large workflow — 26 agents.</Callout>
+      <Callout tone="yellow">Large workflow, 26 agents.</Callout>
       <Callout tone="green">Verified by a reviewer.</Callout>
     </div>
   )

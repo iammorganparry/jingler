@@ -31,7 +31,7 @@ export const AsyncButtons: Story = {
       >
         Create PR
       </AsyncButton>
-      <AsyncButton variant="danger" errorLabel="Failed — retry" onClick={() => wait(900, true)}>
+      <AsyncButton variant="danger" errorLabel="Failed, retry" onClick={() => wait(900, true)}>
         Will fail
       </AsyncButton>
       {/* Terminal: holds the "Sent" state — can't be re-fired. */}

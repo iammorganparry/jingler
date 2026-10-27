@@ -349,7 +349,7 @@ export const WorkspaceScanFailed: Story = {
     <SetupScreen
       step="workspace"
       github={disconnectedGithub}
-      error="Couldn't read ~/code — permission denied"
+      error="Couldn't read ~/code, permission denied"
       reposDir="~/code"
       onChooseDir={noop}
       onContinue={noop}

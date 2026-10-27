@@ -122,12 +122,12 @@ describe("ConversationView — queued messages", () => {
         mode="accept-edits"
         queued={queued(4)}
         onHandoffQueued={onHandoffQueued}
-        handoffHint="Hand off — run this in a new chat on opus"
+        handoffHint="Hand off, run this in a new chat on opus"
       />
     )
     // Addressed by id like every other row action, and the tooltip names the
     // target model so "hand off" is not a leap of faith.
-    fireEvent.click(screen.getAllByTitle("Hand off — run this in a new chat on opus")[2]!)
+    fireEvent.click(screen.getAllByTitle("Hand off, run this in a new chat on opus")[2]!)
     expect(onHandoffQueued).toHaveBeenCalledWith("q2")
   })
 

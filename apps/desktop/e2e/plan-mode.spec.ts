@@ -756,7 +756,7 @@ test("agent enters plan via tool", async ({ launchApp }) => {
   await composer.click()
   await composer.fill("[[switch-plan]] refactor auth")
   await composer.press("Enter")
-  await expect(window.getByText("Switched to Plan — large refactor")).toBeVisible({ timeout: 30_000 })
+  await expect(window.getByText("Switched to Plan, large refactor")).toBeVisible({ timeout: 30_000 })
   await expect(window.locator("[data-mode='plan']")).toBeVisible()
   await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("plan")
   expect(existsSync(join(launched.repoPath, "AGENTS.md"))).toBe(false)
@@ -772,7 +772,7 @@ test("agent cannot leave plan without an approved plan", async ({ launchApp }) =
   await composer.click()
   await composer.fill("[[switch-build]] start coding")
   await composer.press("Enter")
-  const buildCard = window.getByRole("button", { name: "Work mode Switched to Build — start coding" })
+  const buildCard = window.getByRole("button", { name: "Work mode Switched to Build, start coding" })
   await expect(buildCard).toBeVisible({ timeout: 30_000 })
   // The refusal sits in the collapsed card body.
   await buildCard.click()
