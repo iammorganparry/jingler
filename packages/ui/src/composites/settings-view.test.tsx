@@ -391,6 +391,22 @@ describe("Devices settings", () => {
   });
 });
 
+describe("SettingsView notifications", () => {
+  afterEach(cleanup)
+
+  it("warns and opens System Settings only when macOS has blocked notifications", async () => {
+    const open = vi.fn()
+    const { rerender } = render(
+      <SettingsView initialSection="notifications" githubConnection={githubDisconnected} notificationPermission="denied" onOpenNotificationSystemSettings={open} />
+    )
+    expect(screen.getByText("Notifications are blocked by macOS")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Open System Settings" }))
+    expect(open).toHaveBeenCalledOnce()
+    rerender(<SettingsView initialSection="notifications" githubConnection={githubDisconnected} notificationPermission="unknown" onOpenNotificationSystemSettings={open} />)
+    expect(screen.queryByText("Notifications are blocked by macOS")).toBeNull()
+  })
+})
+
 describe("SettingsView", () => {
   it("renders grouped navigation", () => {
     render(<SettingsView initialSection="general" githubConnection={githubDisconnected} />)
