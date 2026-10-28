@@ -517,7 +517,7 @@ const EditorGroup = memo(function EditorGroup({
       <div
         data-testid="editor-tab-strip"
         {...tabStripHandlers}
-        className="relative flex h-8 flex-none items-stretch border-b border-hairline bg-sunken"
+        className="relative flex h-10 flex-none items-stretch border-b border-hairline bg-sunken"
       >
         <div role="tablist" className="sb-no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto">
           {group.tabs.map((surface) => (
