@@ -1,5 +1,14 @@
 # @jingler/cli-adapters
 
+## 0.11.3
+
+### Patch Changes
+
+- 4dec34d: The Claude model picker now lists whatever your installed Claude Code offers (including Sonnet 5.5 and Fable 5.1) instead of a fixed list, and `sonnet` subagents run on the newest Sonnet.
+  - @jingler/core@0.11.3
+  - @jingler/plannotator-ext@0.11.3
+  - @jingler/themes@0.11.3
+
 ## 0.11.2
 
 ### Patch Changes
