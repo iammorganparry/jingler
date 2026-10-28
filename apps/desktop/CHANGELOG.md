@@ -1,5 +1,16 @@
 # @jingler/desktop
 
+## 0.12.0
+
+### Minor Changes
+
+- dcfebb2: A redesigned Jingler. The app shell, sidebar, chat, composer, Changes, Checks and PR views, plans, subagent fleet, browser preview, settings, onboarding and notifications all have a new look. You can now switch between Plan and Build from the composer, run subagents in their own worktree, and see each checkout's live branch.
+
+### Patch Changes
+
+- c6bb811: Archiving a merged workspace now frees its worktree's disk space. Worktrees with uncommitted changes or unpushed commits are kept, and the archived row shows why.
+  - @jingler/plannotator-ext@0.12.0
+
 ## 0.11.3
 
 ### Patch Changes
