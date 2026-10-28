@@ -392,10 +392,10 @@ function ChangedFilesBody({
         <OmittedFilesNotice files={omittedFiles} diffLineLimit={diffLineLimit} />
         <TurnFilterBar turns={turns} value={turnId} onChange={onTurnChange} />
         <PrFilterBar layers={prLayers} value={prNumber} onChange={onPrNumberChange} />
-        {allFiles.length === 0 ? (
-          <ChangedFilesEmptyState hasPrLayers={prLayers.length >= 2} />
-        ) : multiAgent ? (
+        {multiAgent ? (
           <AgentScopedFileList trees={agentTrees} scope={agentScope} onScopeChange={onAgentScopeChange} activePath={activePath} onSelectFile={onSelectFile} />
+        ) : allFiles.length === 0 ? (
+          <ChangedFilesEmptyState hasPrLayers={prLayers.length >= 2} />
         ) : (
           <ReviewFileRail
             files={files}

@@ -17,9 +17,10 @@ import {
   ProviderId,
   ProviderModelId
 } from "@jingler/core"
-import { FileSystem, Path } from "@effect/platform"
+import { CommandExecutor, FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
+import { createChildWorktree } from "../subagents/child-worktree.js"
 import { ConfigService } from "../../config.js"
 import { EnvironmentService } from "../../environment.js"
 import { SecretStore } from "../../secret-store.js"
@@ -212,6 +213,7 @@ export const makePiAgentRuntimeLive = (
     const paths = yield* AppPaths
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
+    const commandExecutor = yield* CommandExecutor.CommandExecutor
     const config = yield* ConfigService
     const secretStore = yield* SecretStore
     const providers = yield* ProviderConnections
@@ -722,7 +724,8 @@ export const makePiAgentRuntimeLive = (
         foregroundDelegate ?? handle.delegateSubagent!,
         handle.spawnSubagent,
         handle.subagentAgentNames,
-        context.checkouts === undefined ? undefined : () => activeCheckoutCwd(context.checkouts!)
+        context.checkouts === undefined ? undefined : () => activeCheckoutCwd(context.checkouts!),
+        createChildWorktree(paths, fs, path, commandExecutor)
       ))
       return registry
     })
