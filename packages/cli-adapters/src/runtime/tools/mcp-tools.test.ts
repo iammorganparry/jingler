@@ -193,6 +193,19 @@ it("keeps configured MCP catalogs out of the provider prompt until searched", as
   expect(state.closes).toBe(3)
 })
 
+it("never registers a tool the operator disabled for that server", async () => {
+  const disabledServer: RuntimeMcpServer = { ...server, disabledTools: ["navigate"] }
+  const registry = new ToolRegistry()
+  await Effect.runPromise(
+    registerMcpTools(
+      registry,
+      [{ server: disabledServer, risk: "network" }],
+      fakeFactory({ calls: [], closes: 0 })
+    )
+  )
+  expect(registry.capabilitiesFor("conversation", "ask").map(({ id }) => id)).toEqual([])
+})
+
 it("discovers, namespaces, validates, invokes, and closes stateless MCP clients", async () => {
     const state: FakeClientState = { calls: [], closes: 0 }
     const registry = new ToolRegistry()
@@ -209,7 +222,7 @@ it("discovers, namespaces, validates, invokes, and closes stateless MCP clients"
     ).toEqual(["mcp__jingler-browser__navigate"])
     expect(
       registry.providerInputSchemaFor("mcp__jingler-browser__navigate")
-    ).toEqual(tool.inputSchema)
+    ).toEqual({ ...tool.inputSchema, properties: { ...tool.inputSchema.properties, intent: expect.objectContaining({ type: "string" }) } })
 
     const invalid = await Effect.runPromise(
       registry.execute({

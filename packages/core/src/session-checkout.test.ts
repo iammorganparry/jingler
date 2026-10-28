@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   activeCheckoutOf,
+  agentCwdOf,
   checkoutsOf,
+  hasNoRepo,
   migrateSessionCheckouts,
   ownedWorktreePaths,
   PRIMARY_CHECKOUT_ID,
@@ -78,5 +80,40 @@ describe("checkout reducer", () => {
 
   it("direct-mode checkouts are not owned worktrees", () => {
     expect(ownedWorktreePaths({ ...legacy, workspaceMode: "direct" })).toEqual([]);
+  });
+});
+
+describe("Auto (zero-checkout) sessions", () => {
+  const auto: Parameters<typeof checkoutsOf>[0] = {
+    id: "s-auto",
+    repo: "",
+    branch: "",
+    prNumber: null,
+    checkouts: [],
+  };
+
+  it("has no repoPath/worktreePath on its placeholder checkout", () => {
+    const checkout = activeCheckoutOf(auto);
+    expect(checkout.repoPath).toBeUndefined();
+    expect(checkout.worktreePath).toBeUndefined();
+  });
+
+  it("hasNoRepo is true only for the placeholder checkout, false once a real repo is attached", () => {
+    expect(hasNoRepo(activeCheckoutOf(auto))).toBe(true);
+    expect(hasNoRepo(activeCheckoutOf(legacy))).toBe(false);
+    const attached = reduceCheckouts(auto, { type: "attach", checkout: web });
+    expect(hasNoRepo(activeCheckoutOf(attached))).toBe(false);
+  });
+
+  it("agentCwdOf falls back to the scratch folder with no checkouts, and to the checkout once attached", () => {
+    expect(agentCwdOf(auto, "/scratch/s-auto")).toBe("/scratch/s-auto");
+    const attached = reduceCheckouts(auto, { type: "attach", checkout: web });
+    expect(agentCwdOf(attached, "/scratch/s-auto")).toBe("/w/web");
+    // attaching drops the placeholder, leaving only the real checkout
+    expect(attached.checkouts).toHaveLength(1);
+  });
+
+  it("agentCwdOf prefers a legacy session's worktree/repo over the scratch fallback", () => {
+    expect(agentCwdOf(legacy, "/scratch/s1")).toBe("/w/api");
   });
 });

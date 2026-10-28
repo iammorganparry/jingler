@@ -21,11 +21,14 @@ import type {
   ProviderModelId,
   RuntimeContinuation,
   Session,
+  SessionPr,
   SettledSessionStatus,
   WorkspaceLifecycle,
-  WorkspaceMode
+  WorkspaceMode,
+  WorkMode
 } from "@jingler/core"
 import {
+  defaultModeFor,
   type GitHubApiError,
   GitError,
   issueReferenceOf,
@@ -38,7 +41,7 @@ import {
   UNTITLED_SESSION,
   workspaceModeOf
 } from "@jingler/core"
-import { Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths } from "@jingler/core"
+import { Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths, reduceCheckouts } from "@jingler/core"
 import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, type Path } from "@effect/platform"
@@ -48,6 +51,7 @@ import { AppPaths } from "./app-paths.js"
 import { displayNameFromCreativeSlug, freeCreativeName } from "./creative-name.js"
 import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
+import { runGit } from "./command.js"
 import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime-identity.js"
 
 const updateWorkspaceReadiness = (session: Session): void => {
@@ -71,6 +75,7 @@ const LegacyChatObject = Schema.Struct({
   id: Schema.optional(Schema.Unknown),
   providerId: Schema.optional(Schema.Unknown),
   mode: Schema.optional(Schema.Unknown),
+  workMode: Schema.optional(Schema.Unknown),
   reasoning: Schema.optional(Schema.Unknown)
 })
 const LegacyChatWithId = Schema.Struct({ id: Schema.String })
@@ -95,6 +100,12 @@ const LegacySessionWithRepo = Schema.Struct({
   repo: Schema.optional(Schema.Unknown)
 })
 
+/** Settings a new chat inherits from the chat it was forked or replaced from. */
+const carriedChatSettings = (from: Chat | undefined) => {
+  const keys = ["mode", "workMode", "autoSwitch", "reasoning", "connectionId", "providerId", "modelId", "allowlist"] as const
+  return Object.fromEntries(keys.flatMap((key) => (from?.[key] === undefined ? [] : [[key, from[key]]])))
+}
+
 const propertiesWhen = <T extends object>(condition: boolean, properties: T) =>
   condition ? properties : {}
 
@@ -114,15 +125,26 @@ const runtimeMode = (value: unknown): PermissionMode | undefined => {
     case "ask":
     case "accept-edits":
     case "auto":
-    case "plan":
       return value
     default:
       return undefined
   }
 }
 
-const persistedMode = (value: unknown): PermissionMode | undefined =>
-  runtimeMode(value) ?? (typeof value === "string" ? "ask" : undefined)
+/**
+ * Stored approval level. Legacy `plan` becomes the default level (the plan half
+ * moves to `persistedWorkMode`); an unknown string falls back to the default
+ * instead of silently coercing to `ask`.
+ */
+const persistedMode = (value: unknown): PermissionMode | undefined => {
+  const known = runtimeMode(value)
+  if (known !== undefined || value === undefined || value === null) return known
+  if (value !== "plan") console.warn(`Unknown stored chat mode ${JSON.stringify(value)}; using the default approval level`)
+  return defaultModeFor()
+}
+
+const persistedWorkMode = (workMode: unknown, legacyMode: unknown): WorkMode | undefined =>
+  workMode === "plan" || workMode === "build" ? workMode : legacyMode === "plan" ? "plan" : undefined
 
 const initialChat = (
   sessionId: string,
@@ -138,6 +160,7 @@ const initialChat = (
   } = {}
 ): Chat => {
   const mode = persistedMode(legacy.mode)
+  const workMode = persistedWorkMode(legacy.workMode, legacy.mode)
   const allowlist =
     Array.isArray(legacy.allowlist) &&
     legacy.allowlist.every((entry) => typeof entry === "string")
@@ -155,6 +178,7 @@ const initialChat = (
     createdAt: now,
     updatedAt: now,
     ...propertiesWhen(mode !== undefined, { mode }),
+    ...propertiesWhen(workMode !== undefined, { workMode }),
     ...propertiesWhen(allowlist !== undefined, { allowlist }),
     ...propertiesWhen(contextTokens !== undefined, { contextTokens }),
     ...runtime
@@ -254,6 +278,7 @@ export const migrateSessionChats = (value: unknown): unknown => {
     return {
       ...chat,
       ...propertiesWhen(persistedMode(chat.mode) !== undefined, { mode: persistedMode(chat.mode) }),
+      ...propertiesWhen(persistedWorkMode(chat.workMode, chat.mode) !== undefined, { workMode: persistedWorkMode(chat.workMode, chat.mode) }),
       ...propertiesWhen(chat.reasoning === undefined && reasoning !== undefined, { reasoning })
     }
   }
@@ -386,6 +411,53 @@ export const migrateSessionIssue = (session: Session): Session => {
   const linkedIssues = mergeIssueReferences([], issueReferencesOf(session))
   const selected = issueReferenceOf(session)
   return withCanonicalIssues(session, linkedIssues, selected)
+}
+
+/**
+ * A multi-checkout session tracks one PR per checkout: `prs` lists them (active
+ * checkout last, repo-labelled) after any stack layers that belong to none, and
+ * `prNumber` keeps mirroring the ACTIVE checkout. Returns the session itself when no checkout has a PR.
+ */
+const prsFromCheckouts = (session: Session): Session => {
+  const checkouts = session.checkouts ?? []
+  const withPr = checkouts.filter((c) => c.prNumber !== null)
+  if (withPr.length === 0) return session
+  const owned = new Set(withPr.map((c) => c.prNumber))
+  const entry = (c: (typeof checkouts)[number]): SessionPr => ({
+    ...(session.prs?.find((pr) => pr.number === c.prNumber) ?? {}),
+    number: c.prNumber as number,
+    repo: c.repo
+  })
+  const ordered = [...withPr.filter((c) => c.id !== session.activeCheckoutId), ...withPr.filter((c) => c.id === session.activeCheckoutId)]
+  const prs = [...(session.prs ?? []).filter((pr) => !owned.has(pr.number)), ...ordered.map(entry)]
+  const active = checkouts.find((c) => c.id === session.activeCheckoutId)
+  return { ...session, prs, prNumber: active ? active.prNumber : session.prNumber }
+}
+
+/** Set the scalar `branch` and keep the active checkout's own record in step (labels read the checkout). */
+const withActiveCheckoutBranch = <S extends Session>(session: S, branch: string): S => ({
+  ...session,
+  branch,
+  ...(session.checkouts
+    ? { checkouts: session.checkouts.map((c) => (c.id === session.activeCheckoutId ? { ...c, branch } : c)) }
+    : {})
+})
+
+/**
+ * Keep `prs` (the stack, bottom first) and `prNumber` (its top) consistent.
+ * Sessions persisted before stacks existed have only `prNumber`; they read as a
+ * one-element stack. Deterministic, so it is safe on every read and write.
+ */
+export const migrateSessionPrs = (session: Session): Session => {
+  const withPrs = session.checkouts && session.checkouts.length > 1 ? prsFromCheckouts(session) : session
+  if (withPrs !== session) return withPrs
+  const prs = session.prs ?? []
+  if (prs.length > 0) {
+    const top = prs[prs.length - 1]!.number
+    return session.prNumber === top && session.prs === prs ? session : { ...session, prs, prNumber: top }
+  }
+  if (session.prNumber === null) return session
+  return { ...session, prs: [{ number: session.prNumber }] }
 }
 
 /**
@@ -565,7 +637,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* fs
             .makeDirectory(paths.root, { recursive: true })
             .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create ~/jingler", cause })))
-          const encoded = yield* Schema.encode(SessionArray)(sessions.map(migrateSessionIssue)).pipe(
+          const encoded = yield* Schema.encode(SessionArray)(sessions.map((session) => migrateSessionPrs(migrateSessionIssue(session)))).pipe(
             Effect.mapError((cause) => new GitError({ message: "Failed to encode sessions", cause }))
           )
           // Write-then-RENAME, never write in place.
@@ -733,6 +805,53 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             ...propertiesWhen(options.defaultReasoning !== undefined, { reasoning: options.defaultReasoning })
           })
+
+          // Auto: no repo chosen yet. No worktree, no checkout — the agent
+          // attaches one later via `switch_checkout`. Starts in a scratch
+          // folder so there is always SOME cwd for the runtime to launch in.
+          if (input.repoPath === undefined) {
+            const fs = yield* FileSystem.FileSystem
+            const paths = yield* AppPaths
+            const scratchDir = `${paths.root}/sessions/${id}`
+            yield* fs
+              .makeDirectory(scratchDir, { recursive: true })
+              .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create session scratch folder", cause })))
+            // The file-change tracker diffs the cwd with git, so the scratch folder must be a repo.
+            yield* runGit(scratchDir, ["init", "-q"])
+            const autoSession: Session = {
+              id,
+              checkpointExecutionHistory: "clean",
+              ...checkpointCreationFields(input),
+              ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
+              repo: "",
+              branch: "",
+              checkouts: [],
+              title,
+              ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
+                initialPrompt: input.initialPrompt?.trim()
+              }),
+              autoTitle: explicit.length === 0,
+              status: "idle",
+              ...selection,
+              diff: { added: 0, removed: 0 },
+              prNumber: null,
+              costUsd: 0,
+              tokens: 0,
+              updatedAt: now,
+              chats: [chat],
+              activeChatId: chat.id,
+              worktreePath: scratchDir
+            }
+            yield* atomically(
+              Effect.gen(function* () {
+                const current = yield* readAll()
+                yield* ensureSessionIdAvailable(current, autoSession.id)
+                yield* writeAll([autoSession, ...current])
+              })
+            )
+            return autoSession
+          }
+
           const makeSession = (
             workspace: { path: string; branch: string; repoPath: string },
             workspaceMode: WorkspaceMode
@@ -742,7 +861,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...checkpointCreationFields(input),
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-            repo: input.repoName,
+            // Non-Auto creation always supplies `repoName`; Auto (no `repoPath`)
+            // returns above before this closure is ever called.
+            repo: input.repoName!,
             ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
             branch: workspace.branch,
             ...propertiesWhen(workspaceMode === "worktree" && input.continueBranch !== true, { semanticBranchPending: true }),
@@ -763,7 +884,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: workspace.path,
             workspaceMode,
             repoPath: workspace.repoPath,
-            baseBranch: input.baseBranch,
+            // Non-Auto creation always supplies `baseBranch`; Auto (no `repoPath`)
+            // returns above before this closure is ever called.
+            baseBranch: input.baseBranch!,
             ...propertiesWhen(
               workspaceMode === "worktree" && input.projectId !== undefined && input.environmentId === undefined,
               { workspaceLifecycle: initialWorkspaceLifecycle(input, now) }
@@ -771,11 +894,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
 
           if (input.useWorktree === false) {
-            const identity = yield* GitService.repositoryIdentity(input.repoPath)
+            const identity = yield* GitService.repositoryIdentity(input.repoPath!)
             const reservation = makeSession(
               {
                 path: identity.repoPath,
-                branch: input.baseBranch,
+                branch: input.baseBranch!,
                 repoPath: identity.repoPath
               },
               "direct"
@@ -821,7 +944,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                 )
                 const branch = yield* GitService.switchBranch(
                   identity.repoPath,
-                  input.baseBranch
+                  input.baseBranch!
                 ).pipe(
                   Effect.tapError(() =>
                     atomically(
@@ -1156,12 +1279,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
-              ...propertiesWhen(source?.mode !== undefined, { mode: source?.mode }),
-              ...propertiesWhen(source?.reasoning !== undefined, { reasoning: source?.reasoning }),
-              ...propertiesWhen(source?.connectionId !== undefined, { connectionId: source?.connectionId }),
-              ...propertiesWhen(source?.providerId !== undefined, { providerId: source?.providerId }),
-              ...propertiesWhen(source?.modelId !== undefined, { modelId: source?.modelId }),
-              ...propertiesWhen(source?.allowlist !== undefined, { allowlist: source?.allowlist })
+              ...carriedChatSettings(source)
             }
             return {
               ...session,
@@ -1210,12 +1328,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
-              ...propertiesWhen(closed?.mode !== undefined, { mode: closed?.mode }),
-              ...propertiesWhen(closed?.reasoning !== undefined, { reasoning: closed?.reasoning }),
-              ...propertiesWhen(closed?.connectionId !== undefined, { connectionId: closed?.connectionId }),
-              ...propertiesWhen(closed?.providerId !== undefined, { providerId: closed?.providerId }),
-              ...propertiesWhen(closed?.modelId !== undefined, { modelId: closed?.modelId }),
-              ...propertiesWhen(closed?.allowlist !== undefined, { allowlist: closed?.allowlist })
+              ...carriedChatSettings(closed)
             }
             const chats = remaining.length > 0 ? remaining : [replacement]
             const activeChatId =
@@ -1277,6 +1390,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             )
           }
         })
+
+      /** Persist one chat's Plan/Build work mode. */
+      const setWorkMode = (id: string, chatId: string, workMode: WorkMode, autoSwitch?: boolean) =>
+        update(id, (session) => ({
+          ...session,
+          chats: session.chats.map((chat) => (chat.id === chatId ? { ...chat, workMode, ...propertiesWhen(autoSwitch !== undefined, { autoSwitch }) } : chat))
+        }))
 
       const setAgentModel = (
         id: string,
@@ -1636,9 +1756,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         semanticBranchProposal?: Session["semanticBranchProposal"]
       ) =>
         update(id, (s) => ({
-          ...s,
+          ...withActiveCheckoutBranch(s, branch),
           title,
-          branch,
           ...propertiesWhen(semanticBranchProposal !== undefined, { semanticBranchProposal }),
           semanticBranchPending: false
         }))
@@ -1650,7 +1769,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
      * (plans, PR link, GitHub routing) is preserved by `update`'s read-modify-write.
      */
     const setBranch = (id: string, branch: string) =>
-        update(id, (s) => ({ ...s, branch }))
+        update(id, (s) => withActiveCheckoutBranch(s, branch))
 
       /** Manual rename — pins the title so the agent stops auto-retitling it. */
       const renameTitle = (id: string, title: string) =>
@@ -1695,7 +1814,29 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             githubFeedbackSemanticKeys: _semanticKeys,
             ...unlinked
           } = session
-          return { ...unlinked, prNumber }
+          const { prs: _prs, ...single } = unlinked
+          // Keep the active checkout's own record in step with the scalar mirror.
+          const checkouts = single.checkouts?.map((c) => (c.id === single.activeCheckoutId ? { ...c, prNumber } : c))
+          return migrateSessionPrs({ ...single, prNumber, ...(checkouts ? { checkouts } : {}) })
+        })
+
+      /** Record the live branch of one specific checkout (not necessarily the active one). */
+      const setCheckoutBranch = (id: string, checkoutId: string, branch: string) =>
+        update(id, (session) => reduceCheckouts(session, { type: "update", checkoutId, patch: { branch } }))
+
+      /** Link a PR to one specific checkout (not necessarily the active one). */
+      const setCheckoutPr = (id: string, checkoutId: string, prNumber: number | null) =>
+        update(id, (session) =>
+          migrateSessionPrs(reduceCheckouts(session, { type: "update", checkoutId, patch: { prNumber } }))
+        )
+
+      /** Add a PR on top of the stack (or update it in place when `number` is already in it). */
+      const appendPr = (id: string, pr: SessionPr) =>
+        update(id, (session) => {
+          const prs = session.prs ?? []
+          const at = prs.findIndex((existing) => existing.number === pr.number)
+          const next = at === -1 ? [...prs, pr] : prs.map((existing, i) => (i === at ? { ...existing, ...pr } : existing))
+          return migrateSessionPrs({ ...session, prs: next })
         })
 
       /** Persist the live worktree/PR identity as one routing transition. */
@@ -1708,13 +1849,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           readonly branch?: string
         }
       ) =>
-        update(id, (session) => ({
-          ...session,
-          ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
-          prNumber: link.prNumber,
-          githubInstallationId: link.installationId,
-          githubRepositoryId: link.repositoryId
-        }))
+        update(id, (session) => {
+          const { prs: _prs, ...single } = session
+          return migrateSessionPrs({
+            ...single,
+            ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
+            prNumber: link.prNumber,
+            githubInstallationId: link.installationId,
+            githubRepositoryId: link.repositoryId
+          })
+        })
 
     /**
      * Exactly-once claim, validated and persisted atomically before the
@@ -2100,6 +2244,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
+      const setImportedFrom = (sessionId: string, importedFrom: NonNullable<Session["importedFrom"]>) =>
+        atomically(
+          Effect.gen(function* () {
+            const sessions = yield* readAll();
+            const updated = sessions.map(s =>
+              s.id === sessionId ? { ...s, importedFrom } : s
+            );
+            yield* writeAll(updated);
+            const found = updated.find(s => s.id === sessionId);
+            if (!found) return yield* Effect.fail(new SessionNotFoundError({ sessionId }));
+            return found;
+          })
+        );
+
       return {
         list,
         get,
@@ -2113,6 +2271,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         discardClosedChat,
         reopenChat,
         setMode,
+        setWorkMode,
         setAgentModel,
         confirmAgentStart,
         confirmAgentModel,
@@ -2137,6 +2296,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setStatus,
         addAllowlist,
         setPrNumber,
+        setCheckoutPr,
+        setCheckoutBranch,
+        appendPr,
         setGitHubLink,
         claimGitHubFeedback,
         markGitHubFeedbackDispatched,
@@ -2150,6 +2312,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setWorktreePath,
         setCheckouts,
         setProject,
+        setImportedFrom,
         setIssue,
         addIssues,
         selectIssue,
@@ -2290,7 +2453,7 @@ function* createIsolatedSession(
   writeAll: (sessions: ReadonlyArray<Session>) => Effect.Effect<void, GitError, PersistEnv>,
   checkWorkspaceSetup: (session: Session) => Effect.Effect<Session, GitError, PersistEnv | Path.Path>
 ) {
-  const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
+  const worktreePath = yield* GitService.worktreePathFor(input.repoName!, slug)
   if (existing.some((s) => s.worktreePath === worktreePath)) {
     return yield* Effect.fail(
       new GitError({
@@ -2302,16 +2465,16 @@ function* createIsolatedSession(
   // first task-understanding/retitle pass proposes a semantic branch and
   // GitService creates it; a user-supplied title pins display text only.
   const worktree = yield* GitService.createDetachedWorktree({
-    repoPath: input.repoPath,
-    repoName: input.repoName,
+    repoPath: input.repoPath!,
+    repoName: input.repoName!,
     slug,
-    baseBranch: input.baseBranch
+    baseBranch: input.baseBranch!
   })
   if (input.continueBranch === true) {
-    yield* GitService.checkoutBranch(worktree.path, input.baseBranch)
+    yield* GitService.checkoutBranch(worktree.path, input.baseBranch!)
   }
   let session = makeSession(
-    input.continueBranch === true ? { ...worktree, branch: input.baseBranch } : worktree,
+    input.continueBranch === true ? { ...worktree, branch: input.baseBranch! } : worktree,
     "worktree"
   )
   // `existing` was read above (for the friendly-name collision check).
@@ -2347,7 +2510,11 @@ function* readPersistedSessions(fs: FileSystem.FileSystem) {
     const decoded = Schema.decodeUnknownEither(SessionSchema)(
       migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
     )
-    if (Either.isRight(decoded)) { const migrated = migrateSessionCheckouts(decoded.right); updateWorkspaceReadiness(migrated); sessions.push(migrated) }
+    if (Either.isRight(decoded)) {
+      const session = migrateSessionCheckouts(migrateSessionPrs(decoded.right))
+      updateWorkspaceReadiness(session)
+      sessions.push(session)
+    }
   }
   return sessions
 }

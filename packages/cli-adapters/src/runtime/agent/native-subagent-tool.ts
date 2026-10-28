@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { JinglerSubagentName, type AgentRunSpec } from "@jingler/core"
-import { Schema } from "effect"
+import { JSONSchema, Schema } from "effect"
 import type { SubagentDelegationRequest } from "pi-subagents/delegation"
 import type {
   SubagentDelegationResponse,
@@ -15,6 +15,7 @@ import type {
 const Task = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(100_000))
 const Context = Schema.Literal("fresh", "fork")
 const Thinking = Schema.Literal("off", "minimal", "low", "medium", "high", "xhigh", "max")
+const Isolation = Schema.Literal("none", "worktree")
 const Timeout = Schema.Number.pipe(Schema.greaterThan(0), Schema.lessThanOrEqualTo(2_147_483_647))
 
 const ForegroundNativeSubagentInput = Schema.Struct({
@@ -29,7 +30,8 @@ const ForegroundNativeSubagentInput = Schema.Struct({
     hard: Schema.Number.pipe(Schema.greaterThan(0)),
     block: Schema.optional(Schema.Union(Schema.Array(Schema.String), Schema.Literal("*")))
   })),
-  artifacts: Schema.optional(Schema.Boolean)
+  artifacts: Schema.optional(Schema.Boolean),
+  isolation: Schema.optional(Isolation)
 })
 type ForegroundNativeSubagentInput = typeof ForegroundNativeSubagentInput.Type
 
@@ -48,16 +50,36 @@ const AsyncSingleInput = Schema.Struct({
   task: Task,
   context: Schema.optional(Context),
   thinking: Schema.optional(Thinking),
-  timeoutMs: Schema.optional(Timeout)
+  timeoutMs: Schema.optional(Timeout),
+  isolation: Schema.optional(Isolation)
 })
 
 const AsyncWorkflowInput = Schema.Struct({
   async: Schema.Literal(true),
+  isolation: Schema.optional(Isolation),
   workflow: Schema.Struct({
     mode: Schema.Literal("parallel", "chain"),
     tasks: Schema.Array(AsyncTask).pipe(Schema.minItems(1), Schema.maxItems(8))
   })
 })
+
+/**
+ * Flat object schema for providers and child brokers: a top-level `anyOf` is
+ * dropped when a child tool schema is flattened, leaving no `async` property.
+ */
+const providerInputSchema = {
+  type: "object" as const,
+  properties: {
+    ...Object.fromEntries(
+      ([ForegroundNativeSubagentInput, AsyncSingleInput, AsyncWorkflowInput] as ReadonlyArray<Schema.Schema.AnyNoContext>).flatMap((member) =>
+        Object.entries((JSONSchema.make(member) as { properties: Record<string, object> }).properties)
+      )
+    ),
+    async: { type: "boolean" }
+  },
+  required: [],
+  additionalProperties: false
+}
 
 type NativeSubagentInput =
   | typeof ForegroundNativeSubagentInput.Type
@@ -229,6 +251,21 @@ const executeAsync = async (
   }
 }
 
+/** Creates a git worktree off `parentCwd`'s HEAD for one child and returns its path. */
+export type CreateChildWorktree = (parentCwd: string, childId: string) => Promise<string>
+
+const childCwdFor = (
+  input: NativeSubagentInput,
+  parentCwd: string,
+  create: CreateChildWorktree | undefined
+): Promise<string> | string => {
+  if (input.isolation !== "worktree") return parentCwd
+  if (create === undefined) {
+    throw new ToolError("execution-failed", "Worktree isolation is unavailable for this session")
+  }
+  return create(parentCwd, randomUUID().slice(0, 8))
+}
+
 /** One native-harness contract: foreground leaves plus bounded detached workflows. */
 export const registerNativeSubagentTool = (
   registry: ToolRegistry,
@@ -237,7 +274,8 @@ export const registerNativeSubagentTool = (
   asyncDelegate?: PiSubagentAsyncDelegate,
   asyncAgentNames?: Readonly<Record<string, string>>,
   /** The parent's active checkout directory, read once per spawn so a child never inherits later switches. */
-  activeCwd?: () => string
+  activeCwd?: () => string,
+  createChildWorktree?: CreateChildWorktree
 ): void => {
   if (!registry.canRegister("subagent")) return
   registry.register({
@@ -249,6 +287,7 @@ export const registerNativeSubagentTool = (
       AsyncSingleInput,
       AsyncWorkflowInput
     ),
+    providerInputSchema,
     risk: "read",
     roles: codeReadRoles,
     modes: codeReadModes,
@@ -256,9 +295,11 @@ export const registerNativeSubagentTool = (
     outputBudget: 128_000,
     cancellable: true,
     idempotency: "unsafe",
-    execute: (input: NativeSubagentInput, context) =>
-      input.async === true
-        ? executeAsync(asyncDelegate, spec, input, context, activeCwd?.() ?? spec.cwd, asyncAgentNames)
-        : executeDelegation(delegate, spec, input, context, activeCwd?.() ?? spec.cwd)
+    execute: async (input: NativeSubagentInput, context) => {
+      const cwd = await childCwdFor(input, activeCwd?.() ?? spec.cwd, createChildWorktree)
+      return input.async === true
+        ? executeAsync(asyncDelegate, spec, input, context, cwd, asyncAgentNames)
+        : executeDelegation(delegate, spec, input, context, cwd)
+    }
   })
 }

@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useMachine } from "@xstate/react"
 import { ChevronRight, File, GitBranch, type LucideIcon, Plug, Zap } from "lucide-react"
 import {
   CommandDialog,
@@ -6,14 +7,21 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
-  CommandList,
-  CommandShortcut
+  CommandList
 } from "../components/command.js"
+import { Kbd } from "../components/kbd.js"
+import { StatusDot } from "../components/status-dot.js"
+import { SegmentedControl } from "../components/segmented-control.js"
+import { Badge } from "../components/badge.js"
+import { commandPaletteMachine } from "./command-palette-machine.js"
 import {
   groupPaletteItems,
   itemKeywords,
+  itemsInScope,
+  prefixChipFor,
   type PaletteItem,
   type PaletteItemKind,
+  type PaletteScope,
   scoreItem
 } from "./command-palette-model.js"
 
@@ -53,7 +61,8 @@ export function CommandPalette({
   items,
   placeholder = PALETTE_PLACEHOLDER,
   emptyMessage = "No matching commands",
-  testId = "command-palette"
+  testId = "command-palette",
+  showScopes = true
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -61,15 +70,19 @@ export function CommandPalette({
   placeholder?: string
   emptyMessage?: string
   testId?: string
+  /** The Workspace · Chat switch and its Tab shortcut. Off for single-purpose pickers. */
+  showScopes?: boolean
 }) {
-  const [query, setQuery] = React.useState("")
+  const [state, send] = useMachine(commandPaletteMachine)
+  const { query, scope, prefixActive } = state.context
+  const chip = prefixChipFor(scope)
 
   // The query is per-OPENING, not persistent. Reopening onto the last search is
   // the palette answering a question you asked a minute ago — and worse, the
   // first keystroke then appends to it rather than starting a new search.
   React.useEffect(() => {
-    if (!open) setQuery("")
-  }, [open])
+    if (!open) send({ type: "RESET" })
+  }, [open, send])
 
   // cmdk mounts every item it is given and re-scores them all on each keystroke.
   // That is fine for a handful of commands but not for a repo's file list, where
@@ -78,19 +91,20 @@ export function CommandPalette({
   // fall under the cap and render exactly as before.
   const groups = React.useMemo(() => {
     const search = query.trim()
+    const scoped = itemsInScope(items, scope)
     if (search.length === 0) {
       return groupPaletteItems(
-        items.length > MAX_RENDERED_ITEMS ? items.slice(0, MAX_RENDERED_ITEMS) : items
+        scoped.length > MAX_RENDERED_ITEMS ? scoped.slice(0, MAX_RENDERED_ITEMS) : scoped
       )
     }
-    const ranked = items
+    const ranked = scoped
       .map((item) => ({ item, score: scoreItem(item.id, search, [...itemKeywords(item)]) }))
       .filter((scored) => scored.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, MAX_RENDERED_ITEMS)
       .map((scored) => scored.item)
     return groupPaletteItems(ranked)
-  }, [items, query])
+  }, [items, query, scope])
 
   /**
    * Close FIRST, then run.
@@ -116,8 +130,45 @@ export function CommandPalette({
       // scored and a list cmdk rendered, which can disagree.
       filter={scoreItem}
       data-testid={testId}
+      onKeyDown={(event) => {
+        if (!showScopes || event.key !== "Tab" || event.shiftKey) return
+        event.preventDefault()
+        send({ type: "CYCLE_SCOPE" })
+      }}
     >
-      <CommandInput placeholder={placeholder} value={query} onValueChange={setQuery} />
+      <CommandInput
+        placeholder={chip ? `Search ${chip.label.toLowerCase()}…` : placeholder}
+        value={query}
+        onValueChange={(value) => send({ type: "QUERY_CHANGED", value })}
+        onKeyDown={(event) => {
+          if (event.key !== "Backspace" || query.length > 0) return
+          send({ type: "BACKSPACE_EMPTY" })
+        }}
+        prefixChip={
+          chip ? (
+            <span data-testid="palette-prefix-chip">
+              <Badge tone="blue" size="sm">
+                {chip.prefix} {chip.label}
+              </Badge>
+            </span>
+          ) : undefined
+        }
+      />
+      {showScopes && !prefixActive && (
+        <div className="px-2 pt-2">
+          <SegmentedControl
+            aria-label="Palette scope"
+            size="sm"
+            fullWidth
+            value={scope}
+            onChange={(next) => send({ type: "SET_SCOPE", scope: next })}
+            items={[
+              { value: "workspace", label: "Workspace" },
+              { value: "chat", label: "Chat" }
+            ]}
+          />
+        </div>
+      )}
       <CommandList>
         <CommandEmpty>{emptyMessage}</CommandEmpty>
         {groups.map((group) => (
@@ -141,13 +192,23 @@ export function CommandPalette({
                       {item.detail}
                     </span>
                   )}
-                  {item.hint && <CommandShortcut>{item.hint}</CommandShortcut>}
+                  {item.status && (
+                    <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <StatusDot tone="bg-line-strong" size={6} />
+                      {item.status}
+                    </span>
+                  )}
+                  {item.hint && <Kbd className="ml-auto">{item.hint}</Kbd>}
                 </CommandItem>
               )
             })}
           </CommandGroup>
         ))}
       </CommandList>
+      <div className="flex h-8 items-center gap-4 border-t border-line px-3 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5"><Kbd>↵</Kbd> open</span>
+        {showScopes && <span className="flex items-center gap-1.5"><Kbd>Tab</Kbd> scope</span>}
+      </div>
     </CommandDialog>
   )
 }

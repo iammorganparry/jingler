@@ -28,49 +28,6 @@ const parseGithubSlug = (url: string | null): string | null => {
   return match?.[1] ?? null
 }
 
-/**
- * Keep only the hunks of a unified `diff` whose NEW-side line range overlaps
- * [startLine, endLine], reassembled with the file header so it stays a valid
- * patch. Returns null when the diff has no hunks, or none overlap. Pure — used
- * to reverse-apply just the selected lines when reverting a range.
- */
-export const filterDiffHunks = (
-  diff: string,
-  startLine: number,
-  endLine: number
-): string | null => {
-  const lines = diff.split("\n")
-  const firstHunk = lines.findIndex((l) => l.startsWith("@@"))
-  if (firstHunk === -1) return null
-  const header = lines.slice(0, firstHunk)
-
-  const hunks: Array<Array<string>> = []
-  let current: Array<string> | null = null
-  for (const line of lines.slice(firstHunk)) {
-    if (line.startsWith("@@")) {
-      if (current) hunks.push(current)
-      current = [line]
-    } else if (current) {
-      current.push(line)
-    }
-  }
-  if (current) hunks.push(current)
-
-  const lo = Math.min(startLine, endLine)
-  const hi = Math.max(startLine, endLine)
-  const kept = hunks.filter((h) => {
-    const m = h[0]!.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/)
-    if (!m) return false
-    const newStart = Number(m[1])
-    const newCount = m[2] === undefined ? 1 : Number(m[2])
-    // A zero-line hunk (pure deletion) still anchors at newStart.
-    const newEnd = newStart + Math.max(newCount, 1) - 1
-    return newStart <= hi && newEnd >= lo
-  })
-  if (kept.length === 0) return null
-  return [...header, ...kept.flat()].join("\n") + "\n"
-}
-
 type ScanEnv = FileSystem.FileSystem | Path.Path
 
 /** Bounded-recursive scan for git repos under `rootDir`; stops at the first `.git`. */
@@ -265,14 +222,32 @@ const boundReviewPatch = (
   return { patch: kept.join(""), omittedPaths }
 }
 
+/**
+ * The commit a session's changes are measured from: the merge-base of its base
+ * branch (`origin/<base>` first, then local) and HEAD. Falls back to HEAD when
+ * no base is given or none resolves, i.e. uncommitted-only.
+ */
+const resolveDiffBase = (worktreePath: string, baseRef: string | null | undefined) =>
+  baseRef == null || baseRef === ""
+    ? Effect.succeed("HEAD")
+    : Effect.firstSuccessOf(
+        [`origin/${baseRef}`, baseRef].map((candidate) =>
+          runGit(worktreePath, ["merge-base", candidate, "HEAD"]).pipe(
+            Effect.map((out) => out.trim()),
+            Effect.filterOrFail((sha) => sha.length > 0, () => "empty")
+          )
+        )
+      ).pipe(Effect.orElseSucceed(() => "HEAD"))
+
 const reviewDiffFromIndex = (
   worktreePath: string,
-  environment: Readonly<Record<string, string>>
+  environment: Readonly<Record<string, string>>,
+  base: string
 ) =>
   Effect.gen(function* () {
     const counted = yield* runGitWithEnv(
       worktreePath,
-      ["diff", "--cached", "--find-renames", "--numstat", "-z", "HEAD"],
+      ["diff", "--cached", "--find-renames", "--numstat", "-z", base],
       environment
     ).pipe(Effect.map(numstatFiles))
     if (counted.length === 0) return EMPTY_REVIEW_DIFF
@@ -294,13 +269,13 @@ const reviewDiffFromIndex = (
     const raw = yield* runGitWithEnv(
       worktreePath,
       included.length === files.length
-        ? ["diff", "--cached", "--find-renames", "HEAD"]
+        ? ["diff", "--cached", "--find-renames", base]
         : [
             "--literal-pathspecs",
             "diff",
             "--cached",
             "--find-renames",
-            "HEAD",
+            base,
             "--",
             ...included.flatMap((file) =>
               file.oldPath === null ? [file.path] : [file.oldPath, file.path]
@@ -414,12 +389,13 @@ const stagedPathsForFile = (worktreePath: string, path: string) =>
 const boundedFileDiffFromIndex = (
   worktreePath: string,
   path: string,
-  environment: Readonly<Record<string, string>>
+  environment: Readonly<Record<string, string>>,
+  base: string
 ) =>
   Effect.gen(function* () {
     const nameStatus = yield* runGitWithEnv(
       worktreePath,
-      ["diff", "--cached", "--find-renames", "--name-status", "-z", "HEAD"],
+      ["diff", "--cached", "--find-renames", "--name-status", "-z", base],
       environment
     )
     const paths = diffPaths(nameStatus, path)
@@ -432,7 +408,7 @@ const boundedFileDiffFromIndex = (
         "--find-renames",
         "--numstat",
         "-z",
-        "HEAD",
+        base,
         "--",
         ...paths
       ],
@@ -450,7 +426,7 @@ const boundedFileDiffFromIndex = (
       }
     }
     const [beforeBytes, afterBytes] = yield* Effect.all([
-      gitObjectSize(worktreePath, `HEAD:${paths[0]}`, environment),
+      gitObjectSize(worktreePath, `${base}:${paths[0]}`, environment),
       gitObjectSize(worktreePath, `:${paths.at(-1)}`, environment)
     ])
     if (beforeBytes + afterBytes > FILE_DIFF_BYTE_LIMIT) {
@@ -465,7 +441,7 @@ const boundedFileDiffFromIndex = (
     }
     const patch = yield* runGitWithEnv(
       worktreePath,
-      ["--literal-pathspecs", "diff", "--cached", "--find-renames", "HEAD", "--", ...paths],
+      ["--literal-pathspecs", "diff", "--cached", "--find-renames", base, "--", ...paths],
       environment
     )
     return patch.length > FILE_DIFF_BYTE_LIMIT
@@ -576,27 +552,33 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
        * crosses IPC, and never reaches the renderer's diff parser.
        */
       diff: (
-        worktreePath: string
+        worktreePath: string,
+        baseRef?: string | null
       ): Effect.Effect<
         WorkspaceReviewDiff,
         GitError,
         FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
       > =>
-        withStagedWorktree(worktreePath, null, (environment) =>
-          reviewDiffFromIndex(worktreePath, environment)
+        Effect.flatMap(resolveDiffBase(worktreePath, baseRef), (base) =>
+          withStagedWorktree(worktreePath, null, (environment) =>
+            reviewDiffFromIndex(worktreePath, environment, base)
+          )
         ),
 
       /** Count a worktree diff without materializing or transporting its patch. */
       diffStat: (
-        worktreePath: string
+        worktreePath: string,
+        baseRef?: string | null
       ): Effect.Effect<
         WorkspaceDiffStat,
         GitError,
         FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
-      > => stagedWorktreeGit(
-        worktreePath,
-        ["diff", "--cached", "--find-renames", "--numstat", "-z", "HEAD"]
-      ).pipe(Effect.map(numstat)),
+      > =>
+        Effect.flatMap(resolveDiffBase(worktreePath, baseRef), (base) =>
+          stagedWorktreeGit(worktreePath, [
+            "diff", "--cached", "--find-renames", "--numstat", "-z", base
+          ]).pipe(Effect.map(numstat))
+        ),
 
       /**
        * Load one selected file's patch. Numstat is checked first so a generated
@@ -605,16 +587,22 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
        */
       boundedFileDiff: (
         worktreePath: string,
-        path: string
+        path: string,
+        baseRef?: string | null
       ): Effect.Effect<
         WorkspaceFileDiff,
         GitError,
         FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
       > =>
-        Effect.flatMap(stagedPathsForFile(worktreePath, path), (stagedPaths) =>
-          withStagedWorktree(worktreePath, stagedPaths, (environment) =>
-            boundedFileDiffFromIndex(worktreePath, path, environment)
-          )
+        Effect.flatMap(
+          Effect.all([
+            stagedPathsForFile(worktreePath, path),
+            resolveDiffBase(worktreePath, baseRef)
+          ]),
+          ([stagedPaths, base]) =>
+            withStagedWorktree(worktreePath, stagedPaths, (environment) =>
+              boundedFileDiffFromIndex(worktreePath, path, environment, base)
+            )
         ),
 
       /** The uncommitted working diff for one file (`git diff HEAD -- <path>`). */
@@ -629,36 +617,7 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
         worktreePath: string,
         path: string
       ): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> =>
-        runGit(worktreePath, ["--literal-pathspecs", "checkout", "HEAD", "--", path]).pipe(Effect.asVoid),
-
-      /**
-       * Revert just the uncommitted changes in a NEW-file line range: take the
-       * file's working diff, keep the hunks overlapping [startLine, endLine], and
-       * reverse-apply them to the worktree (`git apply -R`). A no-op when nothing
-       * in that range changed. Reverting whole overlapping hunks keeps the patch
-       * valid — sub-hunk splitting would corrupt context.
-       */
-      revertRange: (
-        worktreePath: string,
-        path: string,
-        startLine: number,
-        endLine: number
-      ): Effect.Effect<void, GitError, FileSystem.FileSystem | CommandExecutor.CommandExecutor> =>
-        Effect.gen(function* () {
-          const full = yield* runGit(worktreePath, ["--literal-pathspecs", "diff", "HEAD", "--", path])
-          const patch = filterDiffHunks(full, startLine, endLine)
-          if (patch === null) return
-          const fs = yield* FileSystem.FileSystem
-          const tmp = yield* fs
-            .makeTempFile()
-            .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to stage revert patch", cause })))
-          yield* fs
-            .writeFileString(tmp, patch)
-            .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to write revert patch", cause })))
-          yield* runGit(worktreePath, ["apply", "-R", tmp]).pipe(
-            Effect.ensuring(fs.remove(tmp).pipe(Effect.ignore))
-          )
-        })
+        runGit(worktreePath, ["--literal-pathspecs", "checkout", "HEAD", "--", path]).pipe(Effect.asVoid)
     })
   }
 ) {}

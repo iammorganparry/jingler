@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { testProviderCatalog } from "../test-support.js"
 import { Composer } from "./composer.js"
@@ -24,6 +24,12 @@ const { id: connectionId } = catalog.connections[0]!.connection
 const { id: modelId } = catalog.connections[0]!.models[0]!
 
 describe("Composer send row", () => {
+  it("rings the send button with the context meter", () => {
+    render(<Composer contextMeter={{ tokens: 50_000, triggerAt: 100_000 }} />)
+    expect(screen.getByRole("button", { name: "Context usage 50%" })).toBeDefined()
+    expect(screen.getByRole("button", { name: /Send/ })).toBeDefined()
+  })
+
   it("replaces the pending branch label as soon as the session branch settles", () => {
     const { rerender } = render(
       <Composer branch="main" branchPending repo="widget" />
@@ -111,6 +117,7 @@ describe("Composer send row", () => {
 
   it("fills one bar per rung of the selected model's reasoning ladder", () => {
     render(<Composer providerCatalog={catalog} connectionId={connectionId} modelId={modelId} reasoningEffort="high" />)
+    fireEvent.click(screen.getByRole("button", { name: "Model settings" }))
     const chip = () => screen.getByRole("button", { name: "Thinking strength" })
     expect(filledBars(chip())).toBe(3)
   })

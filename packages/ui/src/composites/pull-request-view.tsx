@@ -1,83 +1,61 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import type {
-  PrLabel,
+  IssueReference,
   PrMergeMethod,
+  SessionPr,
   PrReviewThread,
-  PrState,
   PrTimelineItem,
   PublishCheckpoint,
   PublishStep,
   PullRequest,
+  ReviewComment,
   ReviewSubmitKind
 } from "@jingler/core"
-import { Check, Download, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
-import { cn } from "../lib/cn.js"
-import { atLeast, useWidthTier } from "../hooks/width-tier.js"
+import { GitCommit, GitPullRequest, PanelRight } from "lucide-react"
+import { Stepper } from "../components/status-row.js"
+import { useContainerWidth } from "../hooks/use-container-width.js"
+import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from "../components/drawer.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
-import { Card } from "../components/card.js"
+import { Eyebrow } from "../components/eyebrow.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { Markdown } from "../components/markdown.js"
 import { Callout } from "../components/callout.js"
-import { Spinner } from "../components/loading.js"
-import { DiffStat } from "../components/diff-stat.js"
-import { StatusDot } from "../components/status-dot.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { MotionTabs } from "../components/beui/controls.js"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/beui/select.js"
 import { PrCheckRow } from "./pr-check-row.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { PrReviewGroup } from "./pr-review-group.js"
-import { PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
+import { ReadinessChecklist } from "./readiness-checklist.js"
+import { LabelChip, PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
+import { WorkflowSection } from "./workflow-section.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
+import { PrStackRail, type PrStackNav } from "./pr-stack-rail.js"
+import { PrSwitcher } from "./pr-switcher.js"
+import { PrViewHeader } from "./pr-view-header.js"
+import { ReviewDrawer, useReviewDrawer, type ReviewRun } from "./review-drawer.js"
+import { addedDrafts, draftsToReviewComments, type ReviewFindingDraft } from "./review-drawer-machine.js"
 
 type PrEvidence = "overview" | "commits" | "checks" | "files"
 
-/** Per-state colouring for the header status lozenge. */
-const stateMeta: Record<PrState, { label: string; text: string; bg: string; border: string; dot: string }> = {
-  open: { label: "Open", text: "text-green", bg: "bg-green/[0.13]", border: "border-green/30", dot: "bg-green" },
-  merged: { label: "Merged", text: "text-purple", bg: "bg-purple/[0.13]", border: "border-purple/30", dot: "bg-purple" },
-  closed: { label: "Closed", text: "text-red", bg: "bg-red/[0.08]", border: "border-red/30", dot: "bg-red" },
-  draft: { label: "Draft", text: "text-dim", bg: "bg-hover", border: "border-line", dot: "bg-line-strong" }
+/** Conversation and Checks carry the readiness checklist; Commits and Files do not. */
+const showsReadiness = (evidence: PrEvidence) => evidence !== "commits" && evidence !== "files"
+
+/** Files opens in place when a panel is supplied, otherwise hands off to `onOpenFiles`. */
+function selectEvidence(value: string, panel: ReactNode, onOpenFiles: (() => void) | undefined, set: (value: PrEvidence) => void) {
+  if (value === "files" && !panel) onOpenFiles?.()
+  else set(value as PrEvidence)
 }
 
-/** The bordered status lozenge (green Open / purple Merged / red Closed / neutral Draft). */
-function StatePill({ state }: { state: PrState }) {
-  const m = stateMeta[state]
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg border px-[11px] py-1 text-[12px] font-semibold",
-        m.text,
-        m.bg,
-        m.border
-      )}
-    >
-      <StatusDot tone={m.dot} size={7} glow={false} />
-      {m.label}
-    </span>
-  )
-}
-
-/** A single PR label chip, tinted with the label's own colour when known. */
-function LabelChip({ label }: { label: PrLabel }) {
-  if (!label.color) {
-    return (
-      <Badge tone="neutral" size="sm">
-        {label.name}
-      </Badge>
-    )
-  }
-  const hex = `#${label.color.replace(/^#/, "")}`
-  return (
-    <span
-      className="rounded-md px-[9px] py-0.5 text-[10.5px]"
-      style={{ color: hex, backgroundColor: `${hex}22` }}
-    >
-      {label.name}
-    </span>
-  )
-}
+const evidenceTabs = (pr: PullRequest, onOpenFiles: (() => void) | undefined, filesPanel: ReactNode) => [
+  { value: "overview", label: "Conversation" },
+  { value: "commits", label: `Commits ${pr.commits}` },
+  { value: "files", label: `Files ${pr.changedFiles}`, disabled: !(onOpenFiles ?? filesPanel) },
+  { value: "checks", label: checksLabel(pr) }
+]
 
 /**
  * One entry in the merged timeline: either a top-level review / issue comment,
@@ -119,21 +97,48 @@ const buildFeed = (pr: PullRequest): ReadonlyArray<FeedEntry> => {
   return entries.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
 }
 
-const PUBLISH_PROGRESS: ReadonlyArray<{ readonly step: PublishStep; readonly label: string }> = [
-  { step: "verifying-branch", label: "Verify semantic branch" },
-  { step: "generating-metadata", label: "Prepare commit and pull request" },
-  { step: "staging", label: "Stage session changes" },
-  { step: "committing", label: "Create commit" },
-  { step: "authenticating", label: "Authenticate with GitHub App" },
-  { step: "pushing", label: "Push branch" },
-  { step: "resolving-pr", label: "Find existing pull request" },
-  { step: "creating-pr", label: "Create pull request" },
-  { step: "updating-pr", label: "Update pull request description" },
-  { step: "linking", label: "Link pull request to session" }
-]
+type PublishPhase = "commit" | "push" | "open-pr"
 
-const publishStepLabel = (step: PublishStep): string =>
-  PUBLISH_PROGRESS.find((candidate) => candidate.step === step)?.label ?? step
+const PUBLISH_PHASE_LABELS: Record<PublishPhase, string> = {
+  commit: "Commit",
+  push: "Push",
+  "open-pr": "Open PR"
+}
+
+const publishPhaseFromStep = (step: PublishStep): PublishPhase | null => {
+  if (step === "idle" || step === "complete" || step === "failed" || step === "no-changes") return null
+  if (step === "verifying-branch" || step === "generating-metadata" || step === "staging" || step === "committing") return "commit"
+  if (step === "inspecting" || step === "authenticating" || step === "pushing") return "push"
+  return "open-pr"
+}
+
+const PUBLISH_PHASES: ReadonlyArray<PublishPhase> = ["commit", "push", "open-pr"]
+
+function PublishStepper({ publish }: { publish: PublishCheckpoint }) {
+  const active = publishPhaseFromStep(publish.step) ?? (publish.resumeFrom ? publishPhaseFromStep(publish.resumeFrom) : null)
+  const current = publish.step === "complete" ? PUBLISH_PHASES.length : active ? PUBLISH_PHASES.indexOf(active) : 0
+  return <Stepper className="mt-2" steps={PUBLISH_PHASES.map((phase) => PUBLISH_PHASE_LABELS[phase])} current={current} />
+}
+
+/** Loading skeleton or retryable error while there is no PR yet; null once the Create-PR / PR views can render. */
+function renderLoadState(pr: PullRequest | null, connected: boolean, busy: boolean, loadError: string | null | undefined, onRetryLoad?: () => void) {
+  // Not connected: fall through to the not-connected panel — a read would only fail.
+  if (pr !== null || !connected) return null
+  // Avoid flashing the "Create PR" empty state before the PR resolves.
+  if (busy) {
+    return (
+      <div aria-label="Loading pull request" className="flex flex-1 flex-col gap-[18px] px-[30px] py-[26px]">
+        <ListSkeleton rows={5} rowHeight={28} gap={12} />
+      </div>
+    )
+  }
+  if (!loadError) return null
+  return (
+    <div className="flex flex-1 flex-col px-[30px] py-[26px]">
+      <InlineError message={loadError} onRetry={onRetryLoad} />
+    </div>
+  )
+}
 
 export interface PullRequestViewProps {
   pr: PullRequest | null
@@ -142,15 +147,24 @@ export interface PullRequestViewProps {
   connectionMessage?: string
   connectionActionLabel?: string
   busy?: boolean
+  /** The PR failed to load — shown with Retry instead of the Create PR empty state. */
+  loadError?: string | null
+  onRetryLoad?: () => void
   /** The authenticated GitHub login — to detect the viewer's own PR (no self-approve). */
   viewerLogin?: string | null
   /** Authoritative main-process publish progress. */
   publish?: PublishCheckpoint | null
   publishing?: boolean
   branch?: string
+  /** The session base branch (e.g., "main"). */
+  baseBranch?: string
+  /** The session PR stack (ordered, bottom layer first). */
+  prs?: ReadonlyArray<SessionPr>
+  /** Present when the session holds a PR stack: enables the header switcher and the Checks rail. */
+  stack?: PrStackNav
   /** The owning session's title, for the "routed to <session>" copy. */
   sessionTitle?: string
-  onCreatePr?: () => Promise<void> | void
+  onCreatePr?: (base?: string) => Promise<void> | void
   onRetryPublish?: () => void
   onConnectGithub?: () => void
   onSubmitReview?: (input: { body: string; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
@@ -172,6 +186,8 @@ export interface PullRequestViewProps {
   closeError?: string | null
   /** Open this PR's changed files in Jingler or GitHub. */
   onOpenFiles?: () => void
+  /** This PR's own changed files; when set, the Files tab shows it in place instead of calling `onOpenFiles`. */
+  filesPanel?: ReactNode
   onMerge?: (method: PrMergeMethod) => Promise<void> | void
   /** A merge is in flight — disables the button and shows a spinner. */
   merging?: boolean
@@ -191,6 +207,21 @@ export interface PullRequestViewProps {
   readOnly?: boolean
   /** The adversarial review panel's state + actions (right rail). */
   review?: PrSidePanelProps["review"]
+  /** The PR's conflicting files, named in the "Ask agent to resolve conflicts" prompt. */
+  conflictedFiles?: PrSidePanelProps["conflictedFiles"]
+  onResolveConflicts?: PrSidePanelProps["onResolveConflicts"]
+  /** The workspace setup/run lifecycle — collapsed Workflow section in the rail. */
+  workflow?: PrSidePanelProps["workflow"]
+  /** The issue this PR closes, shown in the rail. */
+  linkedIssue?: IssueReference
+  /** Draft review findings. Supplying this (even empty) enables the Review drawer — sidebar inbox only. */
+  reviewDrafts?: ReadonlyArray<ReviewFindingDraft>
+  /** The live review producing `reviewDrafts`; started when the drawer first opens. */
+  reviewRun?: ReviewRun
+  /** Promote the drawer review to a session; receives the markdown summary of the drafts. */
+  onPromoteReview?: (summary: string) => void
+  /** Post added drafts as inline comments on a PR with no session (inbox). */
+  onSubmitInlineReview?: (input: { body: string; comments: ReadonlyArray<ReviewComment> }) => Promise<void> | void
 }
 
 /**
@@ -198,16 +229,57 @@ export interface PullRequestViewProps {
  * in the centre column, with reviewers / checks / merge state in the right rail.
  * Pure presentational: all data + actions come through props.
  */
-export function PullRequestView({
+/** The PR description rendered as the opening comment; placeholder when empty. */
+function PrDescriptionCard({ pr, repository }: { pr: PullRequest; repository?: string }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <Avatar initial={pr.author.login.charAt(0).toUpperCase()} src={githubAvatarUrl(pr.author.login)} tone="orange" size={20} />
+        <span className="text-[13px] font-medium text-text-bright">{pr.author.login}</span>
+        <span className="text-[12px] text-muted-foreground">opened this</span>
+        <span className="font-mono text-[11px] text-dim">{relativeTime(pr.createdAt)}</span>
+      </div>
+      {pr.body?.trim() ? (
+        <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
+      ) : (
+        <p className="text-[13px] text-muted-foreground">No description provided.</p>
+      )}
+    </section>
+  )
+}
+
+/** Below this container width the rail collapses into a sheet. */
+const RAIL_COLLAPSE_BELOW = 900
+
+/**
+ * Measures its own box (not the window) so a narrow split pane collapses the
+ * rail even on a wide display. Width 0 is the pre-measurement frame: stay docked.
+ */
+export function PullRequestView(props: PullRequestViewProps) {
+  const [ref, width] = useContainerWidth<HTMLDivElement>()
+  return (
+    <div ref={ref} className="flex min-h-0 min-w-0 flex-1">
+      <PullRequestViewBody {...props} compact={width !== 0 && width < RAIL_COLLAPSE_BELOW} />
+    </div>
+  )
+}
+
+function PullRequestViewBody({
+  compact,
   pr,
   connected,
   connectionMessage,
   connectionActionLabel = "Connect GitHub",
   busy = false,
+  loadError,
+  onRetryLoad,
   viewerLogin,
   publish,
   publishing = false,
   branch,
+  baseBranch,
+  prs,
+  stack,
   onCreatePr,
   onRetryPublish,
   onConnectGithub,
@@ -225,6 +297,7 @@ export function PullRequestView({
   closing = false,
   closeError,
   onOpenFiles,
+  filesPanel,
   onMerge,
   merging = false,
   mergeError,
@@ -235,36 +308,38 @@ export function PullRequestView({
   updatingBranch = false,
   updateBranchError,
   readOnly = false,
-  review
-}: PullRequestViewProps) {
+  review,
+  conflictedFiles,
+  onResolveConflicts,
+  workflow,
+  linkedIssue,
+  reviewDrafts,
+  reviewRun,
+  onPromoteReview,
+  onSubmitInlineReview
+}: PullRequestViewProps & { compact: boolean }) {
+  const drawer = useReviewDrawer(reviewDrafts, reviewRun)
+  const onReview = drawer.enabled ? () => drawer.send({ type: "TOGGLE" }) : undefined
          function renderDetailsToggle() {
-           return (!roomy && (
-        <button
-          type="button"
-          aria-label={railOpen ? "Close pull request details" : "Pull request details"}
-          aria-pressed={railOpen}
-          title={
-            railOpen
-              ? "Close details"
-              : readOnly && !onMerge
-                ? "Reviewers and checks"
-                : "Reviewers, checks and merge"
-          }
-          onClick={() => setRailOpen((v) => !v)}
-          className={cn(
-            "absolute right-2 top-2 z-40 flex size-7 items-center justify-center rounded-md border border-line bg-sunken shadow-lg transition-colors",
-            railOpen ? "text-blue" : "text-dim hover:text-text-bright"
-          )}
-        >
-          <PanelRight size={15} />
-        </button>
-      ))
+           return (
+        <DrawerTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Pull request details"
+            title={readOnly && !onMerge ? "Reviewers and checks" : "Reviewers, checks and merge"}
+            className="absolute right-2 top-2 z-40 size-7"
+          >
+            <PanelRight size={15} />
+          </Button>
+        </DrawerTrigger>
+      )
          }
 
   function renderPullRequestBody(pr: NonNullable<PullRequestViewProps["pr"]>) {
     return (<div className="flex min-w-0 flex-1 flex-col">
         {/*
-          Same reading column as the Conversation view — 760px, centred, on a
+          Same reading column as the shared ReadingShell — 720px, centred, on a
           30px gutter, with the scrollbar gutter reserved on BOTH edges so the
           column sits on the window's true centre axis rather than shifting when
           a scrollbar appears. Switching tabs shouldn't move the text you were
@@ -272,7 +347,7 @@ export function PullRequestView({
           to line lengths nothing else in the app does.
         */}
         <div className="flex flex-1 flex-col overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
-          <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-[18px]">
+          <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col gap-[18px]">
             {publish?.step === "failed" && (
               <div
                 aria-live="polite"
@@ -289,49 +364,18 @@ export function PullRequestView({
             )}
           {/* PR header */}
           <div className="flex flex-col gap-[11px]">
-            <div className="flex items-center gap-[9px]">
-              <StatePill state={pr.state} />
-              <span className="font-mono text-[12px] text-dim">#{pr.number}</span>
-              <div className="flex-1" />
-              {onOpenSession && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={Boolean(sessionActionDisabledReason)}
-                  title={sessionActionDisabledReason}
-                  onClick={onOpenSession}
-                >
-                  <Download size={14} aria-hidden />
-                  {sessionActionLabel}
-                </Button>
-              )}
-              {onOpenOnGithub && (
-                <button
-                  type="button"
-                  onClick={onOpenOnGithub}
-                  className="font-mono text-[11px] text-dim hover:text-text"
-                >
-                  Open on GitHub ↗
-                </button>
-              )}
-            </div>
-            <h2 className="text-pretty text-[20px] font-bold tracking-[-0.2px] text-text-bright">
-              {pr.title}
-            </h2>
-            <div className="flex flex-wrap items-center gap-x-[10px] gap-y-1.5 font-mono text-[11.5px] text-muted-foreground">
-              <Badge tone="neutral" size="sm">
-                {pr.headRefName} → {pr.baseRefName}
-              </Badge>
-              <DiffStat added={pr.additions} removed={pr.deletions} />
-              <span className="text-line">|</span>
-              <span>{pr.commits} commits</span>
-              <span className="text-line">·</span>
-              <span>{pr.changedFiles} files</span>
-              <span className="text-line">·</span>
-              <span>
-                opened {relativeTime(pr.createdAt)} by {pr.author.login}
-              </span>
-            </div>
+            <PrViewHeader
+              pr={pr}
+              onOpenSession={onOpenSession}
+              sessionActionLabel={sessionActionLabel}
+              sessionActionDisabledReason={sessionActionDisabledReason}
+              onOpenOnGithub={onOpenOnGithub}
+              onMarkReady={readOnly && !onMerge ? undefined : onMarkReady}
+              markingReady={markingReady}
+              onRequestClose={onClosePr && !(readOnly && !onMerge) ? () => setCloseConfirmOpen(true) : undefined}
+              onReview={onReview}
+              switcher={stack ? <PrSwitcher {...stack} /> : undefined}
+            />
             {pr.labels.length > 0 && (
               <div className="flex flex-wrap gap-[7px]">
                 {pr.labels.map((label) => (
@@ -342,20 +386,15 @@ export function PullRequestView({
             <MotionTabs
               className="pt-1"
               variant="underline"
+              size="sm"
+              ariaLabel="Pull request sections"
               value={evidence}
-              onChange={(value) => {
-                if (value === "files") onOpenFiles?.()
-                else setEvidence(value)
-              }}
-              items={[
-                { value: "overview", label: "Overview" },
-                { value: "commits", label: `Commits ${pr.commits}` },
-                { value: "checks", label: `Checks ${pr.checks.length}` },
-                { value: "files", label: `Files changed ${pr.changedFiles}`, disabled: !onOpenFiles }
-              ]}
+              onChange={(value) => selectEvidence(value, filesPanel, onOpenFiles, setEvidence)}
+              items={evidenceTabs(pr, onOpenFiles, filesPanel)}
             />
           </div>
 
+          {showsReadiness(evidence) && <ReadinessChecklist pr={pr} />}
           {renderReviewEvidence(pr)}
           </div>
         </div>
@@ -364,8 +403,9 @@ export function PullRequestView({
 
          function renderReviewEvidence(pr: NonNullable<PullRequestViewProps["pr"]>) {
            if (evidence === "commits") return (<CommitEvidence pr={pr} />)
+           if (evidence === "files" && filesPanel) return filesPanel
 return (evidence === "checks" ? (
-            <CheckEvidence pr={pr} />
+            <CheckEvidence pr={pr} stack={stack} />
           ) : (
           <>
           {/*
@@ -378,35 +418,12 @@ return (evidence === "checks" ? (
             + timestamp are what let you tell a stale description from a current
             one.
           */}
-          {pr.body !== null && pr.body.trim().length > 0 && (
-            <Card>
-              <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-[11px]">
-                <Avatar
-                  initial={pr.author.login.charAt(0).toUpperCase()}
-                  src={githubAvatarUrl(pr.author.login)}
-                  tone="orange"
-                  size={22}
-                />
-                <span className="text-[13px] font-semibold text-text-bright">
-                  {pr.author.login}
-                </span>
-                <span className="text-[11.5px] text-muted-foreground">opened this</span>
-                <div className="flex-1" />
-                <span className="font-mono text-[11px] text-dim">
-                  {relativeTime(pr.createdAt)}
-                </span>
-              </div>
-              <div className="px-[14px] py-[11px]">
-                <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
-              </div>
-            </Card>
-          )}
-
-          <div className="h-px bg-line" />
+          <PrDescriptionCard pr={pr} repository={repository} />
 
           {/* Timeline — top-level reviews/comments and inline thread groups, interleaved */}
+          <Eyebrow>Timeline</Eyebrow>
           {feed.length === 0 ? (
-            <p className="text-[13px] text-dim">No reviews or comments yet.</p>
+            <EmptyState title="No reviews or comments yet" description="Reviews and comments on this pull request will appear here." />
           ) : (
             feed.map((entry) =>
               entry.kind === "item" ? (
@@ -438,9 +455,13 @@ return (evidence === "checks" ? (
               <PrReviewComposer
                 connected={connected}
                 commentOnly={readOnly}
+                pending={addedDrafts(drawer.context)}
+                onSubmitted={() => drawer.send({ type: "SUBMITTED" })}
                 selfAuthored={Boolean(viewerLogin) && viewerLogin === pr.author.login}
                 onSubmit={(input) =>
-                  readOnly ? onComment?.(input.body) : onSubmitReview?.(input)
+                  readOnly && onSubmitInlineReview && input.pending.length > 0
+                    ? onSubmitInlineReview({ body: input.inlineBody, comments: draftsToReviewComments(input.pending) })
+                    : readOnly ? onComment?.(input.body) : onSubmitReview?.(input)
                 }
               />
             </div>
@@ -449,6 +470,7 @@ return (evidence === "checks" ? (
           ))
          }
 
+         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: existing complexity
          function renderCreatePullRequest() {
            return (<div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
         <span className="flex size-14 items-center justify-center rounded-2xl bg-surface text-dim">
@@ -468,12 +490,42 @@ return (evidence === "checks" ? (
               <Button
                 size="md"
                 disabled={busy || publishing}
-                onClick={() => onCreatePr()}
+                onClick={() => onCreatePr(selectedBase)}
               >
                 <GitPullRequest size={14} />
                 {getPublishing()}
               </Button>
               {branch && <p className="text-[11px] text-muted-foreground">Branch: <code>{branch}</code></p>}
+              {(baseBranch || (prs && prs.length > 0)) && (
+                <div className="flex w-full flex-col gap-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">
+                    Base
+                  </label>
+                  <Select
+                    value={selectedBase}
+                    onValueChange={setSelectedBase}
+                  >
+                    <SelectTrigger
+                      className="h-8 text-xs"
+                      aria-label="Select base branch for pull request"
+                    >
+                      <SelectValue placeholder="Select base branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {baseBranch && (
+                        <SelectItem value={baseBranch}>
+                          {baseBranch}
+                        </SelectItem>
+                      )}
+                      {prs?.map((pr) => pr.branch && (
+                        <SelectItem key={pr.number} value={pr.branch}>
+                          Stack on #{pr.number}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               {publish && publish.step !== "idle" && (
                 <div
                   aria-live="polite"
@@ -482,27 +534,11 @@ return (evidence === "checks" ? (
                   <p className="font-medium text-text-bright">
                     {getStep(publish)}
                   </p>
-                  <ol className="mt-2 flex flex-col gap-1.5">
-                    {PUBLISH_PROGRESS.map(({ step, label }) => {
-                      const done = publish.completed.includes(step)
-                      const active = publish.step === step || publish.resumeFrom === step
-                      return (
-                        <li
-                          key={step}
-                          className={cn("flex items-center gap-2", active && "font-medium text-text-bright")}
-                        >
-                          <span className="flex size-3.5 shrink-0 items-center justify-center">
-                            {done ? <Check size={12} aria-hidden /> : active && publishing ? <Spinner size={12} /> : "·"}
-                          </span>
-                          <span>{label}</span>
-                        </li>
-                      )
-                    })}
-                  </ol>
+                  <PublishStepper publish={publish} />
                   {publish.error && <Callout tone="red" className="mt-2">{publish.error}</Callout>}
                   {publish.step === "failed" && onRetryPublish && (
                     <Button variant="secondary" size="sm" className="mt-3" onClick={onRetryPublish}>
-                      Retry from {publish.resumeFrom ?? "inspection"}
+                      Retry from {publish.resumeFrom ? PUBLISH_PHASE_LABELS[publishPhaseFromStep(publish.resumeFrom) ?? "commit"] : "inspection"}
                     </Button>
                   )}
                 </div>
@@ -531,7 +567,8 @@ return (evidence === "checks" ? (
            if (publish.step === "failed") return ("Publishing stopped")
            if (publish.step === "no-changes") return ("Nothing to publish")
            if (publish.step === "complete" && publish.prNumber !== undefined) return (`Pull request #${publish.prNumber} linked`)
-           return (`Current step: ${publishStepLabel(publish.step)}`)
+           const phase = publishPhaseFromStep(publish.step)
+           return phase ? `Current step: ${PUBLISH_PHASE_LABELS[phase]}` : "Publishing"
          }
 
          function getPublishing() {
@@ -548,34 +585,33 @@ return (evidence === "checks" ? (
   // Below `wide` the 352px rail floats instead of docking: the centre column is a
   // 760px reading measure with 60px of gutter, so a docked rail in a 500px pane
   // left roughly 88px of it — narrower than the PR title.
-  const roomy = atLeast(useWidthTier(), "wide")
   const [railOpen, setRailOpen] = useState(false)
+  // Base branch choice for stacking PRs
+  const [selectedBase, setSelectedBase] = useState<string | undefined>(() => {
+    const topPr = prs && prs.length > 0 ? prs[prs.length - 1] : undefined
+    return topPr?.branch ?? baseBranch
+  })
   const [evidence, setEvidence] = useState<PrEvidence>("overview")
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   useEffect(() => {
-    if (roomy) setRailOpen(false)
-  }, [roomy])
-  useEffect(() => {
-    if (!railOpen) return
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setRailOpen(false)
-    }
-    window.addEventListener("keydown", close)
-    return () => window.removeEventListener("keydown", close)
-  }, [railOpen])
+    if (!compact) setRailOpen(false)
+  }, [compact])
 
-  // Loading — avoid flashing the "Create PR" empty state before the PR resolves.
-  if (pr === null && busy) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-        <Spinner size={20} />
-        <span className="text-[13px]">Loading pull request…</span>
-      </div>
-    )
-  }
+  const loadView = renderLoadState(pr, connected, busy, loadError, onRetryLoad)
+  if (loadView) return loadView
   if (pr === null) {
+    // Workspace setup/run is independent of whether a PR exists yet — a
+    // worktree session reaches the Checks tab before publishing, and that's
+    // exactly when setup is most likely to still need a retry or skip.
     return (
-      renderCreatePullRequest()
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        {renderCreatePullRequest()}
+        {workflow && (
+          <div className="flex w-[280px] flex-none flex-col border-l border-hairline bg-panel">
+            <WorkflowSection {...workflow} />
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -584,37 +620,24 @@ return (evidence === "checks" ? (
   const feed = buildFeed(pr)
   const repository = /github\.com\/([^/]+\/[^/]+)\//.exec(pr.url)?.[1]
 
-  return (
-    <div className="relative flex min-h-0 min-w-0 flex-1">
-      {onClosePr && (
-        <ConfirmDialog
-          open={closeConfirmOpen}
-          onOpenChange={setCloseConfirmOpen}
-          title={`Close pull request #${pr.number}?`}
-          description="The pull request can be reopened later on GitHub."
-          confirmLabel="Close pull request"
-          tone="danger"
-          onConfirm={async () => {
-            try {
-              await onClosePr()
-            } catch (cause) {
-              setCloseConfirmOpen(false)
-              throw cause
-            }
-          }}
-        />
-      )}
-      {/* Centre column: header + timeline + sticky composer */}
-      {renderPullRequestBody(pr)}
+  function renderRail(pr: PullRequest) {
+    if (drawer.open) return <ReviewDrawer pr={pr} drawer={drawer} onPromote={onPromoteReview} />
+    if (!compact) return sidePanel
+    return (
+      <Drawer open={railOpen} onOpenChange={setRailOpen}>
+        {renderDetailsToggle()}
+        <DrawerContent className="w-[280px]">
+          <DrawerTitle className="sr-only">Pull request details</DrawerTitle>
+          <DrawerDescription className="sr-only">Reviewers, checks and merge</DrawerDescription>
+          {sidePanel}
+        </DrawerContent>
+      </Drawer>
+    )
+  }
 
-      {/* Right rail — docked when there's room, a floating sheet when not. */}
-      {renderDetailsToggle()}
-      <PrSidePanel
-        // The rail holds the merge button, so it can't just be dropped at narrow
-        // widths — it has to remain reachable, which is what the toggle above is
-        // for. Hidden rather than unmounted so its scroll position and merge-
-        // method choice survive being closed.
-        className={cn(!roomy && "absolute inset-y-0 right-0 z-30 shadow-2xl", !(roomy || railOpen) && "hidden")}
+  const sidePanel = (
+    <PrSidePanel
+        className={compact ? "min-h-0 flex-1 border-l-0" : undefined}
         pr={pr}
         connected={connected}
         onMerge={onMerge}
@@ -630,11 +653,47 @@ return (evidence === "checks" ? (
         updatingBranch={updatingBranch}
         updateBranchError={updateBranchError}
         review={review}
+        conflictedFiles={conflictedFiles}
+        onResolveConflicts={onResolveConflicts}
+        workflow={workflow}
         readOnly={readOnly && !onMerge}
+        linkedIssue={linkedIssue}
+        stack={stack}
       />
+  )
+
+  return (
+    <div className="relative flex min-h-0 min-w-0 flex-1">
+      {onClosePr && (
+        <ConfirmDialog
+          open={closeConfirmOpen}
+          onOpenChange={setCloseConfirmOpen}
+          title={`Close pull request #${pr.number}?`}
+          description="The pull request can be reopened later on GitHub."
+          confirmLabel="Close pull request"
+          destructive
+          onConfirm={async () => {
+            try {
+              await onClosePr()
+            } catch (cause) {
+              setCloseConfirmOpen(false)
+              throw cause
+            }
+          }}
+        />
+      )}
+      {/* Centre column: header + timeline + sticky composer */}
+      {renderPullRequestBody(pr)}
+
+      {/* Right rail — docked at 280px, or a sheet below 900px opened from the header button. */}
+      {renderRail(pr)}
     </div>
   )
 }
+
+/** `Checks 3/4` (passed/total), or bare `Checks` when none are reported. */
+const checksLabel = (pr: PullRequest) =>
+  pr.checks.length === 0 ? "Checks" : `Checks ${pr.checks.filter((c) => c.status === "pass").length}/${pr.checks.length}`
 
 function CommitEvidence({ pr }: { pr: PullRequest }) {
   const commits = pr.commitItems ?? []
@@ -664,13 +723,33 @@ function CommitEvidence({ pr }: { pr: PullRequest }) {
   )
 }
 
-function CheckEvidence({ pr }: { pr: PullRequest }) {
-  if (pr.checks.length === 0) {
-    return <p className="text-[13px] text-dim">No checks reported.</p>
-  }
+function CheckEvidence({ pr, stack }: { pr: PullRequest; stack?: PrStackNav }) {
+  const checks =
+    pr.checks.length === 0 ? (
+      <EmptyState title="No checks reported" description="CI results will appear here once a run starts." />
+    ) : (
+      <div className="flex flex-col overflow-hidden rounded-lg border border-line bg-panel">
+        {pr.checks.map((check) => <PrCheckRow key={check.name.toLowerCase()} check={check} />)}
+      </div>
+    )
+  if (!stack) return checks
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-line bg-panel p-4">
-      {pr.checks.map((check) => <PrCheckRow key={check.name.toLowerCase()} check={check} />)}
+    <div className="flex items-start gap-6">
+      <PrStackRail
+        layers={stack.layers}
+        selected={stack.selected}
+        onSelect={stack.onSelect}
+        mergeState={stack.mergeState}
+        merged={stack.merged}
+        mergeError={stack.mergeError}
+        onMergeStack={stack.onMergeStack}
+        onResume={stack.onResume}
+        mergeMethod={stack.mergeMethod}
+        onMergeMethod={stack.onMergeMethod}
+        restacking={stack.restacking}
+        onRestack={stack.onRestack}
+      />
+      <div className="min-w-0 flex-1">{checks}</div>
     </div>
   )
 }

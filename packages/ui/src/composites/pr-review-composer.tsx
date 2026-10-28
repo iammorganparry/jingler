@@ -3,6 +3,7 @@ import type { ReviewSubmitKind } from "@jingler/core"
 import { AsyncButton } from "../components/async-button.js"
 import { Callout } from "../components/callout.js"
 import { Toggle } from "../components/toggle.js"
+import { composeReviewBody, type ReviewFindingDraft } from "./review-drawer-machine.js"
 
 /**
  * The sticky bottom review composer for the Pull Request tab — a comment draft,
@@ -14,6 +15,8 @@ export function PrReviewComposer({
   selfAuthored = false,
   commentOnly = false,
   ariaLabel,
+  pending = [],
+  onSubmitted,
   onSubmit
 }: {
   connected: boolean
@@ -26,7 +29,10 @@ export function PrReviewComposer({
   commentOnly?: boolean
   /** Accessible name for the draft textarea. */
   ariaLabel?: string
-  onSubmit: (input: { body: string; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
+  /** Findings added from the review drawer; sent with the review body, nothing posts until submit. */
+  pending?: ReadonlyArray<ReviewFindingDraft>
+  onSubmitted?: () => void
+  onSubmit: (input: { body: string; inlineBody: string; pending: ReadonlyArray<ReviewFindingDraft>; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
 }) {
   const [body, setBody] = React.useState("")
   const [routeToAgent, setRouteToAgent] = React.useState(!commentOnly)
@@ -37,7 +43,8 @@ export function PrReviewComposer({
     setError(null)
     const submitted = body
     try {
-      await onSubmit({ body: submitted.trim(), kind, routeToAgent })
+      await onSubmit({ body: composeReviewBody(submitted.trim(), pending), inlineBody: submitted.trim(), pending, kind, routeToAgent })
+      onSubmitted?.()
       // Text typed while the request was pending is unsent; keep it.
       setBody((current) => (current === submitted ? "" : current))
     } catch (e) {
@@ -58,6 +65,13 @@ export function PrReviewComposer({
         rows={2}
         className="w-full resize-none bg-transparent px-[14px] py-[11px] text-[13.5px] text-text-body outline-none placeholder:text-dim"
       />
+      {pending.length > 0 && (
+        <ul data-testid="pr-pending-comments" className="flex flex-col gap-1 px-[14px] pb-[11px] text-[12px] text-text-body">
+          {pending.map((d) => (
+            <li key={d.id}><code className="font-mono text-muted-foreground">{d.path}:{d.line}</code>, {d.body}</li>
+          ))}
+        </ul>
+      )}
       {!connected && (
         <div className="px-[14px] pb-[11px]">
           <Callout tone="blue">Connect GitHub to post reviews.</Callout>
@@ -72,26 +86,25 @@ export function PrReviewComposer({
         {!commentOnly && (
           <label className="flex items-center gap-2 text-[11.5px] text-text">
             <Toggle checked={routeToAgent} onCheckedChange={setRouteToAgent} />
-            Route to agent
+            Also send to agent
           </label>
         )}
         <div className="flex-1" />
         <AsyncButton
           variant="secondary"
-          disabled={!connected || (commentOnly && body.trim().length === 0)}
+          disabled={!connected || (commentOnly && body.trim().length === 0 && pending.length === 0)}
           pendingLabel="Posting…"
           successLabel="Commented"
           onClick={() => submit("comment")}
         >
           Comment
         </AsyncButton>
-        {/* Approve / request-changes are hidden on your own PR — GitHub forbids
-            self-approval, so only Comment is offered. */}
-        {!commentOnly && !selfAuthored && (
+        {/* GitHub forbids self-approval, so on your own PR these are disabled; Comment stays. */}
+        {!commentOnly && (
           <>
             <AsyncButton
               variant="danger"
-              disabled={!connected}
+              disabled={!connected || selfAuthored}
               pendingLabel="Requesting…"
               successLabel="Requested"
               onClick={() => submit("request-changes")}
@@ -100,7 +113,7 @@ export function PrReviewComposer({
             </AsyncButton>
             <AsyncButton
               variant="primary"
-              disabled={!connected}
+              disabled={!connected || selfAuthored}
               pendingLabel="Approving…"
               successLabel="Approved"
               onClick={() => submit("approve")}

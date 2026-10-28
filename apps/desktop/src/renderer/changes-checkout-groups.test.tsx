@@ -10,7 +10,11 @@ import { rpc } from "./rpc-client.js"
 vi.mock("./rpc-client.js", () => ({
   rpc: { sessionsDiff: vi.fn(), githubFiles: vi.fn(), githubDiff: vi.fn(), githubPr: vi.fn() }
 }))
-vi.mock("./conversation-registry.js", () => ({ getConversationActor: vi.fn() }))
+vi.mock("./conversation-registry.js", () => {
+  const snapshot = { context: { messages: [] } }
+  const actor = { subscribe: () => ({ unsubscribe: () => {} }), getSnapshot: () => snapshot }
+  return { getConversationActor: vi.fn(() => actor) }
+})
 vi.mock("./use-adversarial-review.js", () => ({
   useAdversarialReview: () => ({ review: null, sentFindingIds: new Set<string>(), sendFindingToAgent: () => {} })
 }))

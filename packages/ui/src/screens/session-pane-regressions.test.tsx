@@ -3,13 +3,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { editorTabMime } from "../app/editor-groups.js"
 import { resetEditorLayouts } from "../app/editor-layout-machine.js"
 import { testSession as session } from "../test-support.js"
-import { SessionPane } from "./session-pane.js"
+import { SessionPane as BareSessionPane } from "./session-pane.js"
+import { SessionPaneWithHeaderViews as SessionPane } from "./session-pane-header-views-host.js"
 
 beforeEach(() => {
   localStorage.clear()
   resetEditorLayouts()
 })
 afterEach(cleanup)
+
+
+/** 
+ * Click a chat tab or thread option, handling both ChatLaneHeader (chat-only) 
+ * and normal tab strip (mixed surfaces).
+ */
+const clickChat = (chatId: string, title?: string) => {
+  // Try normal tab first (mixed surfaces)
+  if (title) {
+    const tab = screen.queryByRole("tab", { name: title })
+    if (tab) {
+      fireEvent.click(tab)
+      return
+    }
+  }
+  // Fall back to thread switcher (chat-only)
+  fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+  fireEvent.click(screen.getByTestId(`chat-option-${chatId}`))
+}
 
 describe("SessionPane editor-group regressions", () => {
   it("updates an already-mounted Plan body when its step target changes", () => {
@@ -60,7 +80,7 @@ describe("SessionPane editor-group regressions", () => {
         getData: () => JSON.stringify({ surface: { kind: "chat", id: "chat-b" } })
       }
     })
-    fireEvent.click(within(screen.getByTestId("editor-tab-chat-chat-a")).getByRole("tab"))
+        clickChat("chat-a")
     fireEvent.click(screen.getByTestId("chat-b-conversation").querySelector("button")!)
     expect(screen.getByTestId("chat-b-plan")).toBeTruthy()
     expect(screen.queryByTestId("chat-a-plan")).toBeNull()
@@ -78,7 +98,7 @@ describe("SessionPane editor-group regressions", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
+        clickChat(owner.activeChatId, "Chat 1")
 
     expect(focusChat).toHaveBeenCalledExactlyOnceWith(owner.id, owner.activeChatId)
   })
@@ -101,7 +121,8 @@ describe("SessionPane editor-group regressions", () => {
       />
     )
 
-    fireEvent.click(within(screen.getByTestId("editor-tab-chat-chat-b")).getByRole("button", { name: "Close Chat 2" }))
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close Chat 2" }))
 
     expect(discard).toHaveBeenCalledOnce()
     expect(discard).toHaveBeenCalledWith(owner.id, "chat-b")
@@ -182,7 +203,8 @@ describe("SessionPane editor-group regressions", () => {
     })
     const view = render(<SessionPane session={owner} renderConversation={(chat) => <div>{chat.activeChatId}</div>} />)
     view.rerender(<SessionPane session={{ ...owner, activeChatId: "chat-b" }} renderConversation={(chat) => <div>{chat.activeChatId}</div>} />)
-    expect(within(screen.getByTestId("editor-group")).getAllByRole("tab")).toHaveLength(2)
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    expect(screen.getAllByTestId(/^chat-option-/)).toHaveLength(2)
   })
 
   it("mounts one visible terminal in the content pane", () => {
@@ -190,11 +212,40 @@ describe("SessionPane editor-group regressions", () => {
       <SessionPane
         session={session({ id: "terminal-visible" })}
         renderConversation={() => <div>chat</div>}
-        renderTerminal={(_owner, visible) => <span data-testid="terminal-visible">{String(visible)}</span>}
+        useSessionTerminals={() => ({
+          tabs: [{ id: "t1", title: "zsh", status: "running" }],
+          hydrated: true,
+          create: async () => "t1",
+          close: async () => {},
+          restart: async () => "t1",
+          renderTerminal: (_id, visible) => <span data-testid="terminal-visible">{String(visible)}</span>
+        })}
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }))
     expect(screen.getAllByTestId("terminal-visible").map((node) => node.textContent)).toEqual(["true"])
+    expect(screen.getByTestId("editor-tab-terminal-t1")).toBeTruthy()
     expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
+  })
+
+  it("closing a shell tab kills that terminal", () => {
+    const close = vi.fn(async () => {})
+    render(
+      <SessionPane
+        session={session({ id: "terminal-close" })}
+        renderConversation={() => <div>chat</div>}
+        useSessionTerminals={() => ({
+          tabs: [{ id: "t1", title: "zsh", status: "running" }, { id: "t2", title: "zsh", status: "running" }],
+          hydrated: true,
+          create: async () => "t3",
+          close,
+          restart: async () => "t1",
+          renderTerminal: (id) => <span>{id}</span>
+        })}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Terminal" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close zsh 2" }))
+    expect(close).toHaveBeenCalledWith("t2")
   })
 })

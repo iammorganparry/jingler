@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { appShell, expect, test, type LaunchedApp } from "./fixtures.js";
 
-const SUBSCRIPTION_ENTITLEMENT = /Test subscription · subscription/;
+const SUBSCRIPTION_ENTITLEMENT = /Test subscription, subscription/;
 const SUBSCRIPTION_BILLING = /billing: subscription/;
 const DETERMINISTIC_MODEL = /^Deterministic pi model 1/u;
 const PROVIDERS_NAV = /Providers/u;
@@ -50,8 +50,10 @@ const finishProviderSetup = async (
     launched.window.getByRole("button", { name: "Open browser" }),
   ).toBeHidden();
   await launched.window.getByRole("button", { name: "Continue" }).click();
+  // #487 removed the standalone resources onboarding step; onboarding now
+  // continues straight to the import-sessions step.
   await expect(
-    launched.window.getByRole("heading", { name: "Import agent resources" }),
+    launched.window.getByRole("heading", { name: "Import existing sessions?" }),
   ).toBeVisible();
   await launched.window.getByRole("button", { name: "Skip for now" }).click();
   await expect(appShell(launched.window)).toBeVisible();
@@ -62,6 +64,24 @@ const finishProviderSetup = async (
     launched.window.getByText(routeLabel, { exact: true }).first(),
   ).toBeVisible();
   await expect(launched.window.getByText(SUBSCRIPTION_BILLING)).toBeVisible();
+};
+
+const PROVIDER_ICON_KIND: Record<string, string> = {
+  "Claude CLI subscription": "claude",
+  "ChatGPT Codex subscription": "codex",
+};
+
+const expectAccountRowLogo = async (
+  launched: LaunchedApp,
+  routeLabel: string,
+): Promise<void> => {
+  const kind = PROVIDER_ICON_KIND[routeLabel];
+  if (!kind) throw new Error(`no expected provider-icon kind for ${routeLabel}`);
+  const row = launched.window
+    .getByRole("button", { name: new RegExp(routeLabel) })
+    .first();
+  await expect(row.locator(`[data-provider-icon="${kind}"]`)).toBeVisible();
+  await expect(row.locator("[data-provider-fallback]")).toHaveCount(0);
 };
 
 test("connects the local Claude CLI subscription without collecting credentials", async ({
@@ -80,6 +100,7 @@ test("connects the local Claude CLI subscription without collecting credentials"
   await launched.window.getByRole("button", { name: "Connect Claude through PI" }).click();
   await expect(launched.window.getByPlaceholder("Claude setup-token")).toHaveCount(0);
   await finishProviderSetup(launched, "Claude CLI subscription");
+  await expectAccountRowLogo(launched, "Claude CLI subscription");
 
   const metadata = readFileSync(
     join(launched.home, "jingler", "runtime", "provider-connections.json"),
@@ -199,9 +220,10 @@ test("reconnects a restored subscription whose encrypted credential is missing",
     ),
   ).toBeVisible();
 
-  await launched.window
-    .getByRole("button", { name: "Reconnect in browser" })
-    .click();
+  await launched.window.getByRole("button", { name: "Reconnect", exact: true }).click();
+  const sheet = launched.window.getByRole("dialog");
+  await expect(sheet.getByRole("button", { name: "Use device code" })).toBeVisible();
+  await sheet.getByRole("button", { name: "Open browser" }).click();
 
   await expect(
     launched.window.getByText(SUBSCRIPTION_BILLING),
@@ -209,6 +231,127 @@ test("reconnects a restored subscription whose encrypted credential is missing",
   await expect(
     launched.window.getByRole("button", { name: DETERMINISTIC_MODEL }),
   ).toBeVisible();
+});
+
+test("cancels a hung Codex OAuth login from the reconnect sheet", async ({
+  launchApp,
+}) => {
+  const connectionId = "codex-login-hangs";
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-reauthentication",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+      codexLoginHangs: true,
+    },
+    seed: ({ home }) => {
+      const runtime = join(home, "jingler", "runtime");
+      mkdirSync(runtime, { recursive: true });
+      writeFileSync(
+        join(runtime, "provider-connections.json"),
+        JSON.stringify([
+          {
+            id: connectionId,
+            providerId: "openai-codex",
+            authKind: "openai-codex-oauth",
+            account: { fingerprint: "missing-credential", displayLabel: null },
+            targetId: "desktop",
+            status: "authenticated",
+            subscription: {
+              entitlement: "active",
+              planLabel: "Test subscription",
+              expiresAt: "2026-08-22T09:32:34.581Z",
+              quotaLabel: null,
+              rateLimitLabel: null,
+              confirmedBillingRoute: "subscription",
+            },
+            createdAt: "2026-08-12T09:32:36.863Z",
+            updatedAt: "2026-08-12T09:32:36.863Z",
+          },
+        ]),
+      );
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
+  await launched.window.getByRole("button", { name: "Reconnect", exact: true }).click();
+  const sheet = launched.window.getByRole("dialog");
+  await sheet.getByRole("button", { name: "Open browser" }).click();
+
+  await expect(
+    sheet.getByText("Waiting for browser sign-in…"),
+  ).toBeVisible();
+  await sheet.getByRole("button", { name: "Cancel" }).click();
+
+  await expect(
+    sheet.getByRole("button", { name: "Open browser" }),
+  ).toBeVisible();
+  await expect(
+    sheet.getByText("Waiting for browser sign-in…"),
+  ).toBeHidden();
+});
+
+test("keeps the typed API key and shows an error when verification rejects it", async ({
+  launchApp,
+}) => {
+  const connectionId = "codex-reject-api-key";
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-reauthentication",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+      rejectApiKey: "The provider rejected this API key.",
+    },
+    seed: ({ home }) => {
+      const runtime = join(home, "jingler", "runtime");
+      mkdirSync(runtime, { recursive: true });
+      writeFileSync(
+        join(runtime, "provider-connections.json"),
+        JSON.stringify([
+          {
+            id: connectionId,
+            providerId: "openai-codex",
+            authKind: "openai-codex-oauth",
+            account: { fingerprint: "missing-credential", displayLabel: null },
+            targetId: "desktop",
+            status: "authenticated",
+            subscription: {
+              entitlement: "active",
+              planLabel: "Test subscription",
+              expiresAt: "2026-08-22T09:32:34.581Z",
+              quotaLabel: null,
+              rateLimitLabel: null,
+              confirmedBillingRoute: "subscription",
+            },
+            createdAt: "2026-08-12T09:32:36.863Z",
+            updatedAt: "2026-08-12T09:32:36.863Z",
+          },
+        ]),
+      );
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
+  await launched.window.getByRole("button", { name: "Reconnect", exact: true }).click();
+  const sheet = launched.window.getByRole("dialog");
+  await sheet.getByRole("tab", { name: "API key" }).click();
+  await sheet.getByPlaceholder("Provider API key").fill("sk-bad");
+  await sheet.getByRole("button", { name: "Save API key" }).click();
+
+  await expect(
+    sheet.getByText("The provider rejected this API key."),
+  ).toBeVisible();
+  await expect(sheet.getByPlaceholder("Provider API key")).toHaveValue("sk-bad");
 });
 
 test("adds a provider from settings after provider onboarding was skipped", async ({
@@ -289,7 +432,7 @@ test("rejects a duplicate provider connection from settings", async ({ launchApp
   ).toBeVisible();
   await expect(
     launched.window.getByRole("button", {
-      name: "Remove ChatGPT Codex subscription connection",
+      name: "Sign out ChatGPT Codex subscription connection",
     }),
   ).toHaveCount(1);
 });
@@ -355,7 +498,7 @@ test("provider onboarding remains reachable at the minimum window height", async
   await expect(continueButton).toBeVisible();
   await continueButton.click();
   await expect(
-    launched.window.getByRole("heading", { name: "Import agent resources" }),
+    launched.window.getByRole("heading", { name: "Import existing sessions?" }),
   ).toBeVisible();
 });
 
@@ -375,9 +518,12 @@ test("skips provider setup and preserves that choice across restart", async ({
   await expect(
     first.window.getByRole("button", { name: "Continue" }),
   ).toBeDisabled();
+  await expect(
+    first.window.getByText("Connect a provider to continue, or skip for now.", { exact: true }),
+  ).toBeVisible();
   await first.window.getByRole("button", { name: "Skip for now" }).click();
   await expect(
-    first.window.getByRole("heading", { name: "Import agent resources" }),
+    first.window.getByRole("heading", { name: "Import existing sessions?" }),
   ).toBeVisible();
   await first.window.getByRole("button", { name: "Skip for now" }).click();
   await expect(appShell(first.window)).toBeVisible();
@@ -398,66 +544,6 @@ test("skips provider setup and preserves that choice across restart", async ({
   ).toHaveCount(0);
 });
 
-test("imports every detected agent resource in one action", async ({
-  launchApp,
-}) => {
-  const launched = await launchApp({
-    withRepo: true,
-    isolateSystemHome: true,
-    piFixture: {
-      scenarioId: "onboarding-import-all",
-      authRoute: "api-key",
-      seedConnection: false,
-    },
-    seed: ({ home }) => {
-      const skills = join(home, ".agents", "skills");
-      for (const [id, description] of Array.from({ length: 12 }, (_, index) => [
-        `resource-${String(index + 1).padStart(2, "0")}`,
-        `Agent resource ${index + 1}`,
-      ] as const)) {
-        const directory = join(skills, id);
-        mkdirSync(directory, { recursive: true });
-        writeFileSync(
-          join(directory, "SKILL.md"),
-          `name: ${id}\ndescription: ${description}\n`,
-        );
-      }
-    },
-  });
-  await chooseFixtureRepo(launched);
-  await launched.window.getByRole("button", { name: "Skip for now" }).click();
-
-  const list = launched.window.getByTestId("resource-candidate-list");
-  await expect(list).toBeVisible();
-  expect(
-    await list.evaluate((element) => element.scrollHeight > element.clientHeight),
-  ).toBe(true);
-  const search = launched.window.getByRole("searchbox", {
-    name: "Search agent resources",
-  });
-  await search.fill("resource-12");
-  await expect(
-    launched.window.getByText("resource-12", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    launched.window.getByText("resource-01", { exact: true }),
-  ).toHaveCount(0);
-  await launched.window.getByRole("button", { name: "Import all" }).click();
-  await expect(appShell(launched.window)).toBeVisible();
-
-  await launched.window.getByRole("button", { name: "Account menu" }).click();
-  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
-  await launched.window
-    .getByRole("button", { name: "Agents & skills" })
-    .click();
-  await expect(
-    launched.window.getByText("resource-01", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    launched.window.getByText("resource-12", { exact: true }),
-  ).toBeVisible();
-});
-
 test("detects native Claude during onboarding without a PI connection", async ({ launchApp }) => {
   const launched = await launchApp({
     withRepo: true,
@@ -465,11 +551,89 @@ test("detects native Claude during onboarding without a PI connection", async ({
     e2eEnv: { JINGLER_CLAUDE_BINARY: resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/agent/fixtures/claude-tools.mjs") }
   })
   await chooseFixtureRepo(launched)
-  await expect(launched.window.getByText("Claude Code · ready", { exact: true })).toBeVisible()
+  await expect(launched.window.getByText("Claude Code, ready", { exact: true })).toBeVisible()
   await launched.window.getByRole("button", { name: "Continue", exact: true }).click()
-  await expect(launched.window.getByRole("heading", { name: "Import agent resources" })).toBeVisible()
+  await expect(launched.window.getByRole("heading", { name: "Import existing sessions?" })).toBeVisible()
   await launched.window.getByRole("button", { name: "Skip for now" }).click()
   await expect(appShell(launched.window)).toBeVisible()
   await launched.window.reload()
   await expect(appShell(launched.window)).toBeVisible()
 })
+
+test("a signed-out subscription offers Reconnect in place and never falls back to an API key", async ({
+  launchApp,
+}) => {
+  const connectionId = "codex-signed-out";
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-reauthentication",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+    },
+    sessions: [
+      {
+        id: "s_signed_out",
+        repo: "widget",
+        branch: "chore/signed-out",
+        title: "Signed out run",
+        status: "idle",
+        diff: { added: 0, removed: 0 },
+        prNumber: null,
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: "2026-09-26T00:00:00.000Z",
+        chats: [
+          {
+            id: "c_signed_out",
+            title: null,
+            createdAt: "2026-09-26T00:00:00.000Z",
+            updatedAt: "2026-09-26T00:00:00.000Z",
+            connectionId,
+            providerId: "openai-codex",
+            modelId: "openai-codex/gpt-5.6-sol",
+          },
+        ],
+      },
+    ],
+    seed: ({ home }) => {
+      const runtime = join(home, "jingler", "runtime");
+      mkdirSync(runtime, { recursive: true });
+      writeFileSync(
+        join(runtime, "provider-connections.json"),
+        JSON.stringify([
+          {
+            id: connectionId,
+            providerId: "openai-codex",
+            authKind: "openai-codex-oauth",
+            account: { fingerprint: "signed-out", displayLabel: null },
+            targetId: "desktop",
+            status: "expired",
+            subscription: {
+              entitlement: "active",
+              planLabel: "Test subscription",
+              expiresAt: null,
+              quotaLabel: null,
+              rateLimitLabel: null,
+              confirmedBillingRoute: "subscription",
+            },
+            createdAt: "2026-08-12T09:32:36.863Z",
+            updatedAt: "2026-08-12T09:32:36.863Z",
+          },
+        ]),
+      );
+    },
+  });
+
+  await window.getByText("Signed out run").first().click();
+  const card = window.getByRole("region", { name: "Provider signed out" });
+  await expect(card).toContainText("signed out during this run");
+  await expect(card).toContainText("never falls back to an API key");
+  await card.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await window.getByRole("dialog").getByRole("button", { name: "Open browser" }).click();
+  await expect(
+    window.getByRole("region", { name: "Provider reconnected" }).getByRole("button", { name: "Resume run", exact: true }),
+  ).toBeVisible();
+});

@@ -5,18 +5,50 @@ for the full architecture guide; this file is the short list of standing rules.
 
 ## Standing rules
 
+- **Build views only from the cataloged components.** Every atom and molecule
+  lives in `packages/ui` and is listed in `packages/ui/COMPONENTS.md`. Features
+  and views compose those; they never re-implement a button, pill, badge, kbd,
+  toggle, segmented control, search field, filter chips, toast, dialog,
+  drawer, hover card, banner, status row, skeleton, empty state or avatar
+  inline. If you need one that isn't in the catalog, add it to `packages/ui`
+  (with a story and test) and a row in `COMPONENTS.md` first, in its own PR,
+  then use it. Reviewers reject PRs that inline a cataloged primitive.
+
+- **Redesign work targets `epic/redesign`.** Each redesign issue is one
+  well-scoped PR into the `epic/redesign` branch, which merges to `main` when
+  the epics close. Every view or state gets a Storybook story, compared side
+  by side with its Paper board (file `01M4K9KPAEC70CQCJ6P8MPARJN`, page
+  "02 · Improved") for visual parity; attach both screenshots to the PR.
+  Spec: `docs/ux-audit/03-redesign-spec.md`; backlog:
+  `docs/ux-audit/05-backlog.md`.
+
 - **Every new user-facing feature ships an end-to-end test.** Add a Playwright
   `_electron` spec under `apps/desktop/e2e/` that drives the feature through the
   real built app (the scripted agent stands in for the harness — see
   `apps/desktop/e2e/fixtures.ts`). The e2e suite is not in CI, so run it locally
-  with `pnpm --filter @jingler/desktop e2e` before opening a PR. Unit/Storybook
+  with `pnpm --filter @jingler/desktop e2e:affected` before opening a PR (it runs only the
+  specs your change can reach, via `apps/desktop/e2e/affected-map.json`) and the full
+  `pnpm --filter @jingler/desktop e2e` suite before a release. Unit/Storybook
   coverage is welcome too, but it does not replace the e2e.
 
 - **Keep `pnpm lint`, `pnpm typecheck`, and `pnpm test` green** before opening a
-  PR — CI runs all three.
+  PR — CI runs all three. Root `pnpm typecheck` builds `@jingler/server`, whose
+  production env check needs the same placeholders CI sets (`ci.yml`):
+  `BETTER_AUTH_SECRET=ci-only-better-auth-placeholder-at-least-32-bytes BETTER_AUTH_URL=https://ci.invalid CRON_SECRET=ci-only-cron-placeholder-at-least-32-bytes pnpm typecheck`.
+
+- **Sign-in is optional.** The app boots signed out and onboarding never
+  requires auth; sign-in is only offered from the sidebar footer's account
+  menu via the sign-in dialog. Never gate the app or onboarding on a session.
 
 - **Never hardcode a colour in a component** — use the `--sb-*` theme tokens
   (see the Theming section of `CLAUDE.md`).
+
+- **Run CI checks on the Mac mini with Dagger before pushing more commits.**
+  `scripts/dagger-mini.sh [branch] [ci/lint ci/typecheck ci/test ...]` runs
+  the `ci` Dagger module against your pushed branch on `clive.local`; warm
+  re-runs take seconds instead of a CI queue. Check the mini's free disk
+  first and run one check at a time. Setup, limits and recovery:
+  `docs/dagger-mac-mini.md`.
 
 - **Investigating memory or performance? Measure with the built-in monitor,
   don't guess.** Every dev launch (`pnpm dev`, never packaged builds) runs a

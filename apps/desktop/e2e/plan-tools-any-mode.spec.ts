@@ -81,6 +81,14 @@ test("plan scratchpad tracks progress in a normal session without plan mode", as
     launched.window.getByRole("tab", { name: PLAN_DRAWER_TAB }).first()
   ).toContainText("1/2", { timeout: 20_000 })
 
+  // Rows stay neutral: done / todo carry no failed-or-stopped status line or
+  // Retry/Resume actions (those only draw for failed, interrupted, blocked).
+  const rows = taskList.locator("[data-testid^='plan-progress-stage-']")
+  await expect(rows.first()).toHaveAttribute("data-status", "done")
+  await expect(rows.nth(1)).toHaveAttribute("data-status", "todo")
+  await expect(taskList.locator("[data-testid^='plan-progress-status-']")).toHaveCount(0)
+  await expect(taskList.getByRole("button", { name: /Retry step|Resume/ })).toHaveCount(0)
+
   // The session never left accept-edits, and no review ever opened — but the
   // Plan tab appears anyway: a created plan is viewable the moment it exists.
   await expect(launched.window.locator("[data-mode='accept-edits']")).toBeVisible()

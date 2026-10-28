@@ -4,6 +4,7 @@ import {
   dedupeChecks,
   isGitHubAccessWebhook,
   mapCheck,
+  mapLinkedPrs,
   mapPrCommit,
   mapPrView,
   mapPullRequestListItem,
@@ -14,6 +15,54 @@ import {
 } from "./github-mappers.js"
 
 describe("GitHub response mappers", () => {
+  describe("mapLinkedPrs", () => {
+    it("maps a cross-referenced timeline event whose source is a pull request", () => {
+      const result = mapLinkedPrs([
+        {
+          event: "cross-referenced",
+          source: {
+            issue: {
+              number: 42,
+              html_url: "https://github.com/acme/widget/pull/42",
+              state: "open",
+              pull_request: {}
+            }
+          }
+        }
+      ])
+      expect(result).toEqual([{ number: 42, state: "open", url: "https://github.com/acme/widget/pull/42" }])
+    })
+
+    it("reports merged state from the pull request's merged_at", () => {
+      const result = mapLinkedPrs([
+        {
+          event: "cross-referenced",
+          source: {
+            issue: {
+              number: 7,
+              html_url: "https://github.com/acme/widget/pull/7",
+              state: "closed",
+              pull_request: { merged_at: "2026-08-01T00:00:00Z" }
+            }
+          }
+        }
+      ])
+      expect(result).toEqual([{ number: 7, state: "merged", url: "https://github.com/acme/widget/pull/7" }])
+    })
+
+    it("ignores non-cross-referenced events and cross-references to other issues", () => {
+      const result = mapLinkedPrs([
+        { event: "labeled" },
+        {
+          event: "cross-referenced",
+          source: { issue: { number: 9, html_url: "https://github.com/acme/widget/issues/9", state: "open" } }
+        }
+      ])
+      expect(result).toEqual([])
+    })
+  })
+
+
   it("combines REST reviews, comments, checks, requested reviewers, and merge blockers", () => {
     const pull = mapPrView({
       number: 14,

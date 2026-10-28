@@ -63,7 +63,7 @@ test("requesting a magic link shows the sent confirmation", async ({ launchApp }
   await openSignIn(window)
   await window.getByPlaceholder("you@company.com").fill("founder@example.com")
   await window.getByRole("button", { name: /send magic link/i }).click()
-  await expect(window.getByText(/sign-in link sent to/i)).toBeVisible()
+  await expect(window.getByText(/link\s+expires in 15 min/i)).toBeVisible()
   await expect(window.getByText("founder@example.com")).toBeVisible()
   expect(authServer.sentEmails).toContain("founder@example.com")
 })
@@ -157,4 +157,101 @@ test("the account menu shows the user and signs out", async ({ launchApp }) => {
   await expect(window.getByRole("menuitem", { name: "Sign in" })).toBeVisible()
   await expect(appShell(window)).toBeVisible()
   await expect(signInHeading(window)).toHaveCount(0)
+})
+
+test("Cancel leaves the browser hand-off and returns to the sign-in options", async ({ launchApp }) => {
+  const { window, app } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  await app.evaluate(({ shell }) => {
+    shell.openExternal = async () => {}
+  })
+  await window.getByRole("button", { name: /continue with github/i }).click()
+  await expect(window.getByText(/finish signing in in your browser/i)).toBeVisible()
+  await expect(window.getByRole("button", { name: /continue with github/i })).toHaveCount(0)
+  await window.getByRole("button", { name: "Cancel" }).click()
+  await expect(window.getByText(/finish signing in in your browser/i)).toHaveCount(0)
+  await expect(window.getByRole("button", { name: /continue with github/i })).toBeVisible()
+})
+
+test("Retry re-sends after a rejected magic link and reaches the sent state", async ({ launchApp }) => {
+  const { window, authServer } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  await window.getByPlaceholder("you@company.com").fill("flaky@example.com")
+  await window.getByRole("button", { name: /send magic link/i }).click()
+  await expect(window.getByText(/couldn't send the sign-in link/i)).toBeVisible()
+  expect(authServer.sentEmails).toEqual([])
+  await window.getByRole("button", { name: "Retry" }).click()
+  await expect(window.getByText(/link\s+expires in 15 min/i)).toBeVisible()
+  expect(authServer.sentEmails).toEqual(["flaky@example.com"])
+})
+
+test("Resend sends the magic link again and locks for the cooldown", async ({ launchApp }) => {
+  const { window, authServer } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  await window.getByPlaceholder("you@company.com").fill("founder@example.com")
+  await window.getByRole("button", { name: /send magic link/i }).click()
+  await expect(window.getByText(/link\s+expires in 15 min/i)).toBeVisible()
+  await window.getByRole("button", { name: "Resend" }).click()
+  await expect(window.getByRole("button", { name: "Sent again ✓" })).toBeDisabled()
+  await expect.poll(() => authServer.sentEmails).toEqual(["founder@example.com", "founder@example.com"])
+})
+
+test("the sign-in dialog is a standard dialog panel that closes on success", async ({ launchApp }) => {
+  const { window, completeDeepLinkSignIn } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  const dialog = window.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("heading", { name: "Sign in to Jingler" })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /continue with github/i })).toBeVisible()
+  await completeDeepLinkSignIn()
+  await expect(dialog).toHaveCount(0)
+})
+
+test("a denied OAuth callback returns to the sign-in options with a cancelled message", async ({ launchApp }) => {
+  const { window, completeDeniedOAuth } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  await window.getByRole("button", { name: /continue with github/i }).click()
+  await expect(window.getByText(/finish signing in in your browser/i)).toBeVisible()
+  await completeDeniedOAuth("denied")
+  await expect(window.getByText(/github sign-in was cancelled/i)).toBeVisible()
+  await expect(window.getByRole("button", { name: "Retry" })).toBeVisible()
+  await expect(signInHeading(window)).toBeVisible()
+})
+
+test("an offline boot shows the app with the unreachable banner, not the sign-in wall", async ({ launchApp }) => {
+  // A stored token, but the auth server refuses connections: unreachable, not signed out.
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [seeded],
+    authSessionServer: { url: "http://127.0.0.1:1", token: "e2e-token" }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await expect(sessionRow(window, "Seeded session")).toBeVisible()
+  await expect(window.getByText("Can't reach Jingler, you can keep working locally")).toBeVisible()
+  await expect(signInHeading(window)).toHaveCount(0)
+
+  // Retry re-checks; the server is still down, so the banner stays and the app keeps working.
+  await window.getByRole("button", { name: "Retry" }).click()
+  await expect(window.getByText("Can't reach Jingler, you can keep working locally")).toBeVisible()
+  await expect(sessionRow(window, "Seeded session")).toBeVisible()
+})
+
+test("a signed-out launch completes onboarding and the sidebar footer offers Sign in", async ({ launchApp }) => {
+  const { window, app, reposDir } = await launchApp({
+    signedIn: false,
+    withRepo: true,
+    piFixture: { scenarioId: "onboarding-provider-skip", authRoute: "api-key", seedConnection: false }
+  })
+  await app.evaluate(({ dialog }, selected) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] })
+  }, reposDir)
+  await window.getByRole("button", { name: "Choose repos folder" }).click()
+  await window.getByRole("button", { name: "Continue", exact: true }).click()
+  await window.getByRole("button", { name: "Skip for now", exact: true }).click()
+  await window.getByRole("button", { name: "Skip for now", exact: true }).click()
+  await window.getByRole("button", { name: "Skip for now", exact: true }).click()
+  await expect(appShell(window)).toBeVisible()
+  await expect(signInHeading(window)).toHaveCount(0)
+  await openSignIn(window)
 })

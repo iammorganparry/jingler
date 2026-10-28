@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, sessionRow, test } from "./fixtures.js"
+import { appShell, confirmArchive, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -53,7 +53,7 @@ test("⌘K opens the palette and jumps to a session", async ({ launchApp }) => {
   await expect(appShell(window)).toBeVisible()
   // The newest session is the one on screen at rest, so jumping to the other is
   // an observable change rather than a coincidence.
-  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Alpha session")
+  await expect(window.getByTestId("session-header-identity")).toContainText("Alpha session")
 
   await window.keyboard.press("Meta+k")
   await expect(window.getByTestId("command-palette")).toBeVisible()
@@ -67,15 +67,15 @@ test("⌘K opens the palette and jumps to a session", async ({ launchApp }) => {
   await window.keyboard.press("Enter")
 
   await expect(window.getByTestId("command-palette")).toBeHidden()
-  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Beta session")
+  await expect(window.getByTestId("session-header-identity")).toContainText("Beta session")
 })
 
-test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) => {
+test("⌘K reopens the palette, and Escape closes it", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 
   await expect(appShell(window)).toBeVisible()
 
-  await window.keyboard.press("Meta+p")
+  await window.keyboard.press("Meta+k")
   await expect(window.getByTestId("command-palette")).toBeVisible()
 
   await window.keyboard.press("Escape")
@@ -86,7 +86,7 @@ test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) 
   await expect(window.getByPlaceholder(PLACEHOLDER)).toHaveValue("")
 })
 
-test("⌘⇧P searches only the active session and opens its file as a tab", async ({
+test("⌘P searches only the active session and opens its file as a tab", async ({
   launchApp
 }) => {
   const gadgetPath = (reposDir: string) => join(reposDir, "gadget")
@@ -120,7 +120,7 @@ test("⌘⇧P searches only the active session and opens its file as a tab", asy
   await expect(appShell(window)).toBeVisible()
   await sessionRow(window, "Beta session").first().click()
 
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   const picker = window.getByTestId("file-quick-open")
   await expect(picker).toBeVisible()
   const input = window.getByPlaceholder("Open a file in Beta session…")
@@ -141,7 +141,7 @@ test("⌘⇧P searches only the active session and opens its file as a tab", asy
   // Alpha's picker cannot see Beta's worktree, and Alpha has its own layout.
   await sessionRow(window, "Alpha session").first().click()
   await expect(window.getByTestId("editor-tab-file-beta-only.custom")).toHaveCount(0)
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in Alpha session…").fill("beta-only")
   await expect(window.getByText("No matching files in this session", { exact: true })).toBeVisible({
     timeout: 15_000
@@ -241,7 +241,8 @@ test("opens the terminal surface from the command palette", async ({ launchApp }
 
   await expect(window.getByTestId("command-palette")).toBeHidden()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
-  await window.getByRole("button", { name: "Close Terminal", exact: true }).click()
+  // Each shell is its own editor tab (#904), named for the shell, not "Terminal".
+  await window.getByRole("button", { name: "Close zsh", exact: true }).click()
   await expect(window.locator(".xterm").first()).toBeHidden()
 })
 
@@ -287,7 +288,7 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
     ]
   })
 
-  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Alpha session")
+  await expect(window.getByTestId("session-header-identity")).toContainText("Alpha session")
 
   // A worktree session surfaces the Terminal tab — see `builtinTabContributions`.
   await window.keyboard.press("Meta+k")
@@ -297,15 +298,17 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
   const terminal = window.getByTestId("palette-item-tab:terminal")
   await expect(terminal).toBeVisible()
   await terminal.click()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+  // Each shell is its own editor tab (#904), so the tab is named for the shell.
+  const shellTab = window.getByRole("tab", { name: "zsh", exact: true })
+  await expect(shellTab).toBeVisible({ timeout: 20_000 })
 
   // Jump to the other session. It must arrive on Conversation.
   await window.keyboard.press("Meta+k")
   await window.getByPlaceholder(PLACEHOLDER).fill("Beta")
   await window.keyboard.press("Enter")
 
-  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Beta session")
-  await expect(window.getByTestId("editor-tab-view-terminal")).toHaveCount(0)
+  await expect(window.getByTestId("session-header-identity")).toContainText("Beta session")
+  await expect(shellTab).toHaveCount(0)
 })
 
 test("archives the active session from the palette", async ({ launchApp }) => {
@@ -315,8 +318,135 @@ test("archives the active session from the palette", async ({ launchApp }) => {
 
   await window.keyboard.press("Meta+k")
   await window.getByTestId("palette-item-action:archive-session").click()
+  await confirmArchive(window)
 
   // Archived is a FILTER, and the default hides it — so the row leaving the
   // sidebar IS the outcome.
   await expect(sessionRow(window, "Alpha session")).toBeHidden()
+})
+
+test("typing '>' switches to the Commands prefix scope and shows its chip", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.keyboard.press("Meta+k")
+  await expect(window.getByTestId("command-palette")).toBeVisible()
+
+  // The placeholder itself changes once a prefix scope is active, so the
+  // input is found by its dialog rather than by the (now stale) placeholder.
+  const input = window.getByTestId("command-palette").locator("input")
+  await input.fill(">")
+  await expect(window.getByTestId("palette-prefix-chip")).toBeVisible()
+  await expect(window.getByTestId("palette-prefix-chip")).toContainText("Commands")
+
+  // Backspace on the now-empty input clears the prefix scope back to Workspace.
+  await input.press("Backspace")
+  await expect(window.getByTestId("palette-prefix-chip")).toHaveCount(0)
+})
+
+/**
+ * #507: a session blocked on the operator (a pending question) must surface
+ * as its own "Needs you" group at the top of the palette, and picking it must
+ * land the operator back on that session with the question still visible —
+ * same scripted-question setup as `notification-question.spec.ts`'s
+ * `[[ask]]` trick, but driven through the palette instead of a notification
+ * click.
+ */
+test("the 'Needs you' palette group jumps to a session blocked on a question", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [
+      { ...seededSessions[0]!, id: "sess-a", title: "Session A", worktreePath: repoPath },
+      { ...seededSessions[1]!, id: "sess-b", title: "Session B", worktreePath: repoPath }
+    ]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  // Session A: ask a question while it's active.
+  await sessionRow(window, "Session A").click()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[ask]] migrate the store")
+  await composer.press("Enter")
+  await expect(window.getByText("Agent needs your input")).toBeVisible({ timeout: 15_000 })
+
+  // The operator looks away: switch to Session B, which has no pending question.
+  await sessionRow(window, "Session B").click()
+  await expect(window.getByText("Agent needs your input")).toHaveCount(0)
+
+  // The palette's first group is "Needs you (1)", listing Session A.
+  await window.keyboard.press("Meta+k")
+  await expect(window.getByText("Needs you (1)")).toBeVisible()
+  const needsYouRow = window.getByTestId("palette-item-needs-you:sess-a")
+  await expect(needsYouRow).toBeVisible()
+  await needsYouRow.click()
+
+  // Session A is active again, question still visible.
+  await expect(window.getByTestId("command-palette")).toBeHidden()
+  await expect(window.getByTestId("session-header-identity")).toContainText(
+    "Session A"
+  )
+  await expect(window.getByText("Agent needs your input")).toBeVisible()
+})
+
+/**
+ * ⌘J ("Go to next workspace that needs you") is the global binding the
+ * palette's own "Needs you" action lists as its hint (#507); it must switch
+ * straight to the blocked session without going through the palette at all.
+ */
+test("⌘J switches to the session that needs you", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [
+      { ...seededSessions[0]!, id: "sess-a", title: "Session A", worktreePath: repoPath },
+      { ...seededSessions[1]!, id: "sess-b", title: "Session B", worktreePath: repoPath }
+    ]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await sessionRow(window, "Session A").click()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[ask]] migrate the store")
+  await composer.press("Enter")
+  await expect(window.getByText("Agent needs your input")).toBeVisible({ timeout: 15_000 })
+
+  await sessionRow(window, "Session B").click()
+  await expect(window.getByText("Agent needs your input")).toHaveCount(0)
+
+  await window.keyboard.press("Meta+j")
+
+  await expect(window.getByTestId("session-header-identity")).toContainText(
+    "Session A"
+  )
+  await expect(window.getByText("Agent needs your input")).toBeVisible()
+})
+
+test("the Chat scope narrows results and Tab cycles back to Workspace", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [{ ...seededSessions[0]!, worktreePath: repoPath }, seededSessions[1]!]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.keyboard.press("Meta+k")
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
+
+  await window.getByRole("tab", { name: "Chat", exact: true }).click()
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeHidden()
+  await expect(window.getByTestId("palette-item-tab:terminal")).toBeVisible()
+
+  await window.getByPlaceholder(PLACEHOLDER).press("Tab")
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
+})
+
+test("⌘, opens Settings, as Home's shortcut list advertises", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.keyboard.press("Meta+,")
+  await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
 })

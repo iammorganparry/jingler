@@ -20,7 +20,7 @@ const SURFACES = ["canvas", "sunken", "panel", "editor", "surface"] as const
 const LINES = ["border", "line", "line-strong"] as const
 const TEXT = ["text-bright", "text-body", "text", "muted", "dim"] as const
 const ACCENTS = ["blue", "green", "yellow", "red", "purple", "cyan", "orange"] as const
-const BRAND = ["brand", "brand-hover"] as const
+const BRAND = ["brand", "brand-hover", "primary-fill", "primary-fg", "primary-hover", "primary-disabled"] as const
 
 function Swatch({ token }: { token: string }) {
   return (
@@ -57,7 +57,7 @@ export const Palette: StoryObj = {
       <Row
         title="Surfaces"
         tokens={SURFACES}
-        note="Warm-neutral greys stepping off #212121, the wordmark's own colour. Never hue-shifted toward the brand — a red-washed editor is unreadable over a long session."
+        note="Graphite: cool-neutral near-black greys. Never hue-shifted toward the brand — a red-washed editor is unreadable over a long session."
       />
       <Row title="Lines" tokens={LINES} />
       <Row title="Text ramp" tokens={TEXT} note="Loudest to quietest. muted and dim are exempt from the 4.5:1 bar on purpose: they exist to recede." />

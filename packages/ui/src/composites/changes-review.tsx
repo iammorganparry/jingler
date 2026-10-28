@@ -16,20 +16,34 @@ import type {
 } from "@jingler/core"
 import { jinglerDark, toTokens } from "@jingler/themes"
 import { Maximize2, Minimize2 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 import { Button } from "../components/button.js"
+import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
-import { SegmentedControl } from "../components/segmented-control.js"
+import { DiffStat } from "../components/diff-stat.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
+import { FilterChips } from "../components/filter-chips.js"
 import { PierreProvider, type PierreCodeViewProps } from "../diff/pierre-provider.js"
 import type { JinglerLineSelection } from "../diff/pierre-selection.js"
 import { cn } from "../lib/cn.js"
 import { feedbackCounts } from "../lib/review-feedback.js"
 import { useOptionalThemeTokens, useThemeSyntax } from "../theme-provider.js"
+import { AgentFileRows } from "./agent-file-rows.js"
+import { AgentScopeFilter } from "./agent-scope-filter.js"
 import { filterReviewFiles } from "./review-file-filter.js"
+import {
+  CHANGES_SCOPE_ALL,
+  mergeAgentTrees,
+  sumAgentRows,
+  type AgentTreeChanges
+} from "./review-agent-scope.js"
 import { ReviewFileRail } from "./review-file-rail.js"
-import { ReviewFindingRow, rankFindings } from "./review-findings.js"
+import { FindingsList, rankFindings } from "./review-findings.js"
 import { createReviewCodeFiles, ReviewCodeView } from "./review-code-view.js"
+import { narrowToTurn, type ReviewTurn } from "./review-turns.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
+import { TurnFilter } from "./turn-filter.js"
+import { PrFilter, type PrFilterLayer } from "./pr-filter.js"
 import { useCodeReviewView } from "./use-code-review-view.js"
 
 /** Which diff a review shows — the PR, or the worktree's uncommitted changes. */
@@ -81,7 +95,7 @@ export function OmittedFilesNotice({
       data-testid="review-omitted-files"
       className="flex-none border-b border-hairline bg-panel/40 p-3"
     >
-      <Callout tone="yellow">
+      <Callout tone="blue">
         {files.length === 1
           ? "One file is too large to show inline"
           : `${count.format(files.length)} files are too large to show inline`}
@@ -111,6 +125,9 @@ export interface ExplorerPanelProps {
   readonly onFilterChange: (filter: ExplorerFilter) => void
   readonly localAvailable: boolean
   readonly prAvailable: boolean
+  readonly localCount?: number
+  readonly prCount?: number
+  readonly prNumber?: number
   /** The repository tree, or `ChangedFilesExplorer` when filtered. */
   readonly children: ReactNode
 }
@@ -127,8 +144,17 @@ export function ExplorerPanel({
   onFilterChange,
   localAvailable,
   prAvailable,
+  localCount,
+  prCount,
+  prNumber,
   children
 }: ExplorerPanelProps) {
+  const options = [
+    { value: "all" as const, label: "All" },
+    ...(localAvailable ? [{ value: "local" as const, label: "Changed", count: localCount }] : []),
+    ...(prAvailable ? [{ value: "pr" as const, label: prNumber ? `PR #${prNumber}` : "PR", count: prCount }] : [])
+  ]
+
   return (
     <section aria-label="Worktree explorer" className="flex h-full min-h-0 flex-col">
       <div className="flex-none border-b border-hairline px-3 py-2">
@@ -139,15 +165,11 @@ export function ExplorerPanel({
           </div>
         ) : null}
         <div className="mt-2">
-          <SegmentedControl<ExplorerFilter>
+          <FilterChips
+            options={options}
             value={filter}
             onChange={onFilterChange}
-            className="w-full"
-            items={[
-              { value: "all", label: "All files" },
-              { value: "local", label: "Uncommitted", disabled: !localAvailable },
-              { value: "pr", label: "Pull request", disabled: !prAvailable }
-            ]}
+            ariaLabel="Explorer filter"
           />
         </div>
       </div>
@@ -159,6 +181,15 @@ export function ExplorerPanel({
 export interface ChangedFilesExplorerProps {
   readonly files: readonly PrFileChange[]
   readonly fileDiffs: readonly { readonly path: string; readonly diff: string }[]
+  /**
+   * Per-checkout changed files (main + each subagent worktree with its own
+   * files). Fewer than two trees renders exactly the single-tree list below;
+   * two or more switches to the agent scope filter and per-agent rows.
+   */
+  readonly agentTrees?: readonly AgentTreeChanges[]
+  /** Agent scope (CHANGES_SCOPE_ALL, CHANGES_SCOPE_MAIN or a subagent id); local state when omitted. */
+  readonly agentScope?: string
+  readonly onAgentScopeChange?: (scope: string) => void
   readonly omittedFiles?: readonly ReviewOmittedFile[]
   readonly diffLineLimit?: number
   readonly drafts: readonly ReviewDraft[]
@@ -167,24 +198,115 @@ export interface ChangedFilesExplorerProps {
   readonly review?: AdversarialReview | null
   readonly activePath: string | null
   readonly onSelectFile: (path: string) => void
+  /** Right-click → "Discard file changes" on a row; omit when nothing local can be discarded. */
+  readonly onDiscardFile?: (path: string) => void
+  /** Agent turns that changed files; the filter shows when there are any. */
+  readonly turns?: readonly ReviewTurn[]
+  readonly turnId?: string | null
+  readonly onTurnChange?: (turnId: string | null) => void
+  /** Stack layers the PR filter can select between; the filter shows with two or more. */
+  readonly prLayers?: readonly PrFilterLayer[]
+  readonly prNumber?: number | null
+  readonly onPrNumberChange?: (number: number) => void
+  /** The change list is still loading: show placeholder rows at real height. */
+  readonly loading?: boolean
+  /** The change list failed to load; `onRetry` adds the Retry button. */
+  readonly error?: string | null
+  readonly onRetry?: () => void
 }
 
 /**
  * The Explorer, filtered to one diff source's changed files: search, kind and
  * feedback filters, per-file status and counts, and viewed progress.
  */
-export function ChangedFilesExplorer({
-  files: allFiles,
-  fileDiffs,
-  omittedFiles = [],
-  diffLineLimit = 0,
-  drafts,
-  reviewThreads = [],
-  review = null,
+/** The turn filter strip; renders nothing without turns or a change handler. */
+function TurnFilterBar({
+  turns,
+  value,
+  onChange
+}: {
+  readonly turns: ComponentProps<typeof TurnFilter>["turns"]
+  readonly value: string | null
+  readonly onChange: ((id: string | null) => void) | undefined
+}) {
+  if (turns.length === 0 || !onChange) return null
+  return (
+    <div className="flex-none border-b border-hairline p-2">
+      <TurnFilter turns={turns} value={value} onChange={onChange} />
+    </div>
+  )
+}
+
+/** The PR-layer filter strip; renders nothing without two or more stack layers. */
+function PrFilterBar({
+  layers,
+  value,
+  onChange
+}: {
+  readonly layers: readonly PrFilterLayer[]
+  readonly value: number | null
+  readonly onChange: ((number: number) => void) | undefined
+}) {
+  if (layers.length < 2 || !onChange || value === null) return null
+  return (
+    <div className="flex-none border-b border-hairline p-2">
+      <PrFilter layers={layers} value={value} onChange={onChange} />
+    </div>
+  )
+}
+
+/** The changed-files list once two or more agent trees exist: scope filter plus per-agent rows. */
+function AgentScopedFileList({
+  trees,
+  scope,
+  onScopeChange,
   activePath,
   onSelectFile
-}: ChangedFilesExplorerProps) {
-  const controls = useCodeReviewView()
+}: {
+  readonly trees: readonly AgentTreeChanges[]
+  readonly scope: string
+  readonly onScopeChange: (scope: string) => void
+  readonly activePath: string | null
+  readonly onSelectFile: (path: string) => void
+}) {
+  const rows = useMemo(() => mergeAgentTrees(trees, scope), [trees, scope])
+  const totals = useMemo(() => sumAgentRows(rows), [rows])
+  const activeKey = rows.find((row) => row.file.path === activePath)?.key ?? null
+  return (
+    <>
+      <div className="flex h-[42px] flex-none items-center gap-2 border-b border-hairline px-[14px]">
+        <span className="flex-1 text-[12px] font-semibold text-text-bright">Changed files</span>
+        <DiffStat added={totals.added} removed={totals.removed} className="text-[10.5px]" />
+      </div>
+      <div className="flex-none border-b border-hairline p-2">
+        <AgentScopeFilter trees={trees} value={scope} onChange={onScopeChange} />
+      </div>
+      <AgentFileRows rows={rows} activeKey={activeKey} onSelectRow={(row) => onSelectFile(row.file.path)} />
+    </>
+  )
+}
+
+/** The empty state for a zero-file layer: a PR-stack-specific message once there's a layer to blame. */
+function ChangedFilesEmptyState({ hasPrLayers }: { readonly hasPrLayers: boolean }) {
+  return hasPrLayers ? (
+    <EmptyState title="No commits in this layer" description="Pick another PR layer to see its changes." />
+  ) : (
+    <EmptyState title="No changes yet" description="Files the agent edits show up here." />
+  )
+}
+
+/** The computed file list, feedback counts and derived stats `ChangedFilesExplorer` renders. */
+function useChangedFilesView(
+  sourceFiles: readonly PrFileChange[],
+  sourceDiffs: readonly { readonly path: string; readonly diff: string }[],
+  turn: ReviewTurn | null,
+  drafts: readonly ReviewDraft[],
+  reviewThreads: readonly PrReviewThread[],
+  review: AdversarialReview | null,
+  controls: ReturnType<typeof useCodeReviewView>
+) {
+  const allFiles = useMemo(() => narrowToTurn(sourceFiles, turn), [sourceFiles, turn])
+  const fileDiffs = useMemo(() => narrowToTurn(sourceDiffs, turn), [sourceDiffs, turn])
   const feedback = useMemo(
     () =>
       feedbackCounts({
@@ -222,13 +344,58 @@ export function ChangedFilesExplorer({
   const added = files.reduce((sum, file) => sum + file.additions, 0)
   const removed = files.reduce((sum, file) => sum + file.deletions, 0)
   const viewed = files.filter((file) => file.viewed).length
+  return { allFiles, fileDiffs, feedback, files, statusByPath, added, removed, viewed }
+}
 
+/** The loaded-and-non-empty body: file list, turn/PR filter bars, no-match banner. */
+function ChangedFilesBody({
+  omittedFiles,
+  diffLineLimit,
+  turns,
+  turnId,
+  onTurnChange,
+  prLayers,
+  prNumber,
+  onPrNumberChange,
+  multiAgent,
+  agentTrees,
+  agentScope,
+  onAgentScopeChange,
+  activePath,
+  onSelectFile,
+  onDiscardFile,
+  view,
+  controls
+}: {
+  readonly omittedFiles: readonly ReviewOmittedFile[]
+  readonly diffLineLimit: number
+  readonly turns: readonly ReviewTurn[]
+  readonly turnId: string | null
+  readonly onTurnChange: ((id: string | null) => void) | undefined
+  readonly prLayers: readonly PrFilterLayer[]
+  readonly prNumber: number | null
+  readonly onPrNumberChange: ((number: number) => void) | undefined
+  readonly multiAgent: boolean
+  readonly agentTrees: readonly AgentTreeChanges[]
+  readonly agentScope: string
+  readonly onAgentScopeChange: (scope: string) => void
+  readonly activePath: string | null
+  readonly onSelectFile: (path: string) => void
+  readonly onDiscardFile: ((path: string) => void) | undefined
+  readonly view: ReturnType<typeof useChangedFilesView>
+  readonly controls: ReturnType<typeof useCodeReviewView>
+}) {
+  const { allFiles, fileDiffs: _fileDiffs, feedback, files, statusByPath, added, removed, viewed } = view
   return (
     <ReviewPierre>
       <div data-testid="changed-files-explorer" className="flex h-full min-h-0 flex-col">
         <OmittedFilesNotice files={omittedFiles} diffLineLimit={diffLineLimit} />
-        {allFiles.length === 0 ? (
-          <div className="p-4 text-[12px] text-dim">No changes to review.</div>
+        <TurnFilterBar turns={turns} value={turnId} onChange={onTurnChange} />
+        <PrFilterBar layers={prLayers} value={prNumber} onChange={onPrNumberChange} />
+        {multiAgent ? (
+          <AgentScopedFileList trees={agentTrees} scope={agentScope} onScopeChange={onAgentScopeChange} activePath={activePath} onSelectFile={onSelectFile} />
+        ) : allFiles.length === 0 ? (
+          <ChangedFilesEmptyState hasPrLayers={prLayers.length >= 2} />
         ) : (
           <ReviewFileRail
             files={files}
@@ -242,6 +409,7 @@ export function ChangedFilesExplorer({
             viewed={viewed}
             controls={controls}
             onSelectFile={onSelectFile}
+            onDiscardFile={onDiscardFile}
           />
         )}
         {allFiles.length > 0 && files.length === 0 ? (
@@ -257,6 +425,76 @@ export function ChangedFilesExplorer({
   )
 }
 
+export function ChangedFilesExplorer({
+  files: sourceFiles,
+  fileDiffs: sourceDiffs,
+  omittedFiles = [],
+  diffLineLimit = 0,
+  drafts,
+  reviewThreads = [],
+  review = null,
+  activePath,
+  onSelectFile,
+  onDiscardFile,
+  turns = [],
+  turnId = null,
+  onTurnChange,
+  prLayers = [],
+  prNumber = null,
+  onPrNumberChange,
+  loading = false,
+  error = null,
+  onRetry,
+  agentTrees = [],
+  agentScope,
+  onAgentScopeChange
+}: ChangedFilesExplorerProps) {
+  const [localScope, setLocalScope] = useState(CHANGES_SCOPE_ALL)
+  const controls = useCodeReviewView()
+  // More than one tree (main + at least one subagent worktree) switches the
+  // list to the agent-scoped rows; a single tree renders exactly as before.
+  const multiAgent = agentTrees.length > 1
+  const turn = turns.find((candidate) => candidate.id === turnId) ?? null
+  const view = useChangedFilesView(sourceFiles, sourceDiffs, turn, drafts, reviewThreads, review, controls)
+
+  if (error !== null) {
+    return (
+      <div data-testid="changed-files-explorer" className="p-3">
+        <InlineError message={error} onRetry={onRetry} />
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div data-testid="changed-files-explorer" className="p-3">
+        <ListSkeleton rows={6} rowHeight={24} gap={6} />
+      </div>
+    )
+  }
+
+  return (
+    <ChangedFilesBody
+      omittedFiles={omittedFiles}
+      diffLineLimit={diffLineLimit}
+      turns={turns}
+      turnId={turn?.id ?? null}
+      onTurnChange={onTurnChange}
+      prLayers={prLayers}
+      prNumber={prNumber}
+      onPrNumberChange={onPrNumberChange}
+      multiAgent={multiAgent}
+      agentTrees={agentTrees}
+      agentScope={agentScope ?? localScope}
+      onAgentScopeChange={onAgentScopeChange ?? setLocalScope}
+      activePath={activePath}
+      onSelectFile={onSelectFile}
+      onDiscardFile={onDiscardFile}
+      view={view}
+      controls={controls}
+    />
+  )
+}
+
 export interface ReviewFileDiffProps {
   readonly file: PrFileChange
   /** This file's unified diff. */
@@ -266,6 +504,8 @@ export interface ReviewFileDiffProps {
   readonly reviewThreads?: readonly PrReviewThread[]
   readonly review?: AdversarialReview | null
   readonly sentFindingIds?: ReadonlySet<string>
+  readonly dismissedFindingIds?: ReadonlySet<string>
+  readonly onDismissFinding?: (findingId: string, dismissed?: boolean) => void
   readonly connected: boolean
   readonly routeTargetSession: string | null
   readonly focused: boolean
@@ -275,19 +515,19 @@ export interface ReviewFileDiffProps {
   readonly onSendComment?: (comment: ReviewDraftInput) => void
   readonly onRemoveDraft: (id: string) => void
   readonly onToggleViewed: (path: string, viewed: boolean) => void
-  readonly onRevertLines?: (range: { path: string; startLine: number; endLine: number }) => void
-  readonly onRevertFile?: (path: string) => void
   readonly onDeslopFile?: (path: string) => void
   readonly onSendFindingToAgent?: (findingId: string) => void
   readonly onTokenEnter?: PierreCodeViewProps["onTokenEnter"]
   readonly onTokenLeave?: PierreCodeViewProps["onTokenLeave"]
   /** Rendered at the start of the header, e.g. the Files view's mode toggle. */
   readonly toolbar?: ReactNode
+  /** Omit the header row; the host (a file tab) renders the badge and focus control in its own header. */
+  readonly headerless?: boolean
 }
 
 /**
  * One changed file's review diff: inline drafts, PR threads, anchored findings,
- * viewed toggle, reverts and deslop — everything the stacked Changes view did,
+ * viewed toggle and deslop — everything the stacked Changes view did,
  * scoped to the file the Explorer opened.
  */
 export function ReviewFileDiff({
@@ -298,6 +538,8 @@ export function ReviewFileDiff({
   reviewThreads = [],
   review = null,
   sentFindingIds,
+  dismissedFindingIds,
+  onDismissFinding,
   connected,
   routeTargetSession,
   focused,
@@ -306,13 +548,12 @@ export function ReviewFileDiff({
   onSendComment,
   onRemoveDraft,
   onToggleViewed,
-  onRevertLines,
-  onRevertFile,
   onDeslopFile,
   onSendFindingToAgent,
   onTokenEnter,
   onTokenLeave,
-  toolbar
+  toolbar,
+  headerless = false
 }: ReviewFileDiffProps) {
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
   const local = source === "local"
@@ -339,11 +580,9 @@ export function ReviewFileDiff({
 
   return (
     <div data-testid="review-file-diff" className="flex h-full min-h-0 flex-col bg-editor">
-      <div className="flex h-8 flex-none items-center gap-2 border-b border-hairline bg-panel px-2">
+      {headerless ? null : <div className="flex h-8 flex-none items-center gap-2 border-b border-hairline bg-panel px-2">
         {toolbar}
-        <span className="rounded bg-sunken px-1.5 py-px text-[10px] font-medium text-dim">
-          {local ? "Uncommitted" : "Pull request"}
-        </span>
+        <Badge size="xs">{local ? "Uncommitted" : "Pull request"}</Badge>
         <div className="flex-1" />
         <Button
           type="button"
@@ -358,7 +597,7 @@ export function ReviewFileDiff({
           {focused ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           {focused ? "Exit focus" : "Focus"}
         </Button>
-      </div>
+      </div>}
       <ReviewPierre>
         <ReviewCodeView
           entries={entries}
@@ -369,9 +608,10 @@ export function ReviewFileDiff({
           findingsByPath={findingsByPath}
           review={activeReview}
           sentFindingIds={sentFindingIds}
+          dismissedFindingIds={dismissedFindingIds}
+          onDismissFinding={onDismissFinding}
           connected={connected}
           routeTargetSession={routeTargetSession}
-          local={local}
           compactActions={false}
           collapseViewed={false}
           onSelectionChange={setSelection}
@@ -380,8 +620,6 @@ export function ReviewFileDiff({
           onSendComment={onSendComment}
           onRemoveDraft={onRemoveDraft}
           onToggleViewed={onToggleViewed}
-          onRevertLines={local ? onRevertLines : undefined}
-          onRevertFile={local ? onRevertFile : undefined}
           onDeslopFile={onDeslopFile}
           onSendFindingToAgent={onSendFindingToAgent}
           onTokenEnter={onTokenEnter}
@@ -400,6 +638,8 @@ export interface ReviewSidebarProps {
   readonly connectionActionLabel?: string
   readonly review?: AdversarialReview | null
   readonly sentFindingIds?: ReadonlySet<string>
+  readonly dismissedFindingIds?: ReadonlySet<string>
+  readonly onDismissFinding?: (findingId: string, dismissed?: boolean) => void
   readonly routeTargetSession: string | null
   /** Paths that are part of this review; findings elsewhere are "general". */
   readonly paths: ReadonlySet<string>
@@ -422,6 +662,8 @@ export function ReviewSidebar({
   connectionActionLabel = "Connect GitHub",
   review = null,
   sentFindingIds,
+  dismissedFindingIds,
+  onDismissFinding,
   routeTargetSession,
   paths,
   onConnectGithub,
@@ -461,16 +703,15 @@ export function ReviewSidebar({
           <span className="text-[11px] font-semibold uppercase tracking-[0.4px] text-dim">
             Review · general
           </span>
-          {general.map((finding) => (
-            <ReviewFindingRow
-              key={finding.id}
-              finding={finding}
-              sent={sentFindingIds?.has(finding.id) ?? false}
-              canRoute={routeTargetSession !== null}
-              review={activeReview}
-              onSendToAgent={onSendFindingToAgent}
-            />
-          ))}
+          <FindingsList
+            findings={general}
+            review={activeReview}
+            sentFindingIds={sentFindingIds}
+            canRoute={routeTargetSession !== null}
+            onSendFindingToAgent={onSendFindingToAgent}
+            dismissedFindingIds={dismissedFindingIds}
+            onDismissFinding={onDismissFinding}
+          />
         </div>
       ) : null}
       <div className={cn("flex min-h-0 flex-1", drafts.length === 0 && "hidden")}>

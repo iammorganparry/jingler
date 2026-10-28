@@ -18,6 +18,37 @@ const rowOrder = () =>
     el.getAttribute("data-testid")!.replace("session-row-", "")
   )
 
+describe("SessionSidebar row context menu", () => {
+  it("offers Rename, Archive, Copy branch and Open in terminal and wires them", () => {
+    const openInTerminal = vi.fn()
+    const writeText = vi.fn()
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    render(<SessionSidebar activeSessionId={null} onSelect={() => {}} onRename={() => {}}
+      onArchive={() => {}} onOpenInTerminal={openInTerminal}
+      sessions={[session({ id: "m", branch: "feat/m" })]} defaultFilters={DEFAULT_FILTERS} />)
+    fireEvent.contextMenu(screen.getByTestId("session-row-m"))
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Rename", "Archive", "Copy branch", "Open in terminal"
+    ])
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy branch" }))
+    expect(writeText).toHaveBeenCalledWith("feat/m")
+    fireEvent.contextMenu(screen.getByTestId("session-row-m"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in terminal" }))
+    expect(openInTerminal).toHaveBeenCalledWith("m")
+  })
+
+  it("restores per-project filter choices when the project changes", () => {
+    localStorage.clear()
+    localStorage.setItem("sb.sidebar.filters.v2.b", JSON.stringify({ ...DEFAULT_FILTERS, sortBy: "name", groupBy: "none" }))
+    const list = [session({ id: "z", title: "Zed", updatedAt: "2026-07-17T00:00:00.000Z" }), session({ id: "a", title: "Ace" })]
+    const { rerender } = render(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={list} projectId="a" />)
+    expect(rowOrder()).toEqual(["z", "a"])
+    rerender(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={list} projectId="b" />)
+    expect(rowOrder()).toEqual(["a", "z"])
+    localStorage.clear()
+  })
+})
+
 describe("SessionSidebar session identity", () => {
   it("renders persistent data as an ordinary session without pin controls", () => {
     const select = vi.fn()
@@ -230,6 +261,23 @@ describe("SessionSidebar archived sessions", () => {
   })
 })
 
+describe("SessionSidebar subagent count", () => {
+  it("shows `· N agents` for a session with running subagents and hides it at zero", () => {
+    render(
+      <SessionSidebar
+        activeSessionId={null}
+        onSelect={() => {}}
+        sessions={[session({ id: "busy" }), session({ id: "quiet" }), session({ id: "solo" })]}
+        subagentCounts={{ busy: 2, quiet: 0, solo: 1 }}
+      />
+    )
+
+    expect(screen.getByTestId("session-subagent-count-busy").textContent).toBe("· 2 agents")
+    expect(screen.getByTestId("session-subagent-count-solo").textContent).toBe("· 1 agent")
+    expect(screen.queryByTestId("session-subagent-count-quiet")).toBeNull()
+  })
+})
+
 describe("SessionSidebar global destinations", () => {
   it("opens and marks Pull Requests active", () => {
     const open = vi.fn()
@@ -255,7 +303,7 @@ describe("SessionSidebar updates", () => {
     const onDismiss = vi.fn()
     const update = {
       version: "1.2.3",
-      status: "available" as const,
+      kind: "available" as const,
       dismissed: false,
       onAction,
       onDismiss
@@ -265,7 +313,8 @@ describe("SessionSidebar updates", () => {
         defaultFilters={DEFAULT_FILTERS} update={update} />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Download Jingler 1.2.3" }))
+    expect(screen.getByText("v1.2.3 available")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
     expect(onAction).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole("button", { name: "Dismiss Jingler 1.2.3 update" }))
     expect(onDismiss).toHaveBeenCalledOnce()
@@ -283,17 +332,58 @@ describe("SessionSidebar updates", () => {
     const base = { version: "1.2.3", dismissed: false, onAction: () => {}, onDismiss: () => {} }
     const { rerender } = render(
       <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
-        defaultFilters={DEFAULT_FILTERS} update={{ ...base, status: "downloading", percent: 42 }} />
+        defaultFilters={DEFAULT_FILTERS} update={{ ...base, kind: "downloading", percent: 42 }} />
     )
     expect(screen.getByText("Downloading 42%")).toBeTruthy()
     expect(screen.getByRole("progressbar", { name: "Update download progress" }).getAttribute("aria-valuenow")).toBe("42")
-    expect(screen.getByText("Downloading the update in the background.")).toBeTruthy()
 
     rerender(
       <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
-        defaultFilters={DEFAULT_FILTERS} update={{ ...base, status: "downloaded" }} />
+        defaultFilters={DEFAULT_FILTERS} update={{ ...base, kind: "downloaded" }} />
     )
-    expect(screen.getByText("Restart to update")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Restart to update" })).toBeTruthy()
+  })
+
+  it("offers Retry after a failed download", () => {
+    const onAction = vi.fn()
+    render(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS}
+        update={{ version: "1.2.3", kind: "failed", dismissed: false, onAction, onDismiss: () => {} }} />
+    )
+    expect(screen.getByText("Update failed")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onAction).toHaveBeenCalledOnce()
+  })
+
+  it("restarts straight away with no agents running", () => {
+    const onAction = vi.fn()
+    render(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS}
+        update={{ version: "1.2.3", kind: "downloaded", runningAgents: 0, dismissed: false, onAction, onDismiss: () => {} }} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Restart to update" }))
+    expect(onAction).toHaveBeenCalledOnce()
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("confirms before restarting over running agents", async () => {
+    const onAction = vi.fn()
+    render(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS}
+        update={{ version: "1.2.3", kind: "downloaded", runningAgents: 3, dismissed: false, onAction, onDismiss: () => {} }} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Restart to update" }))
+    expect(onAction).not.toHaveBeenCalled()
+    expect(screen.getByText("3 agents are running. Restarting stops them.")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Wait" }))
+    expect(onAction).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart to update" }))
+    fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }))
+    await waitFor(() => expect(onAction).toHaveBeenCalledOnce())
   })
 })
 
@@ -357,13 +447,29 @@ describe("SessionSidebar release notes", () => {
     expect(onDismiss).toHaveBeenCalledOnce()
   })
 
+  it("reopens every skipped version from the account menu after dismissal", () => {
+    const whatsNew = [
+      { version: "0.3.0", notes: ["Review changes"] },
+      { version: "0.2.2", notes: ["Send comments"] }
+    ]
+    const props = { sessions: [], activeSessionId: null, onSelect: () => {}, version: "0.3.0", whatsNew }
+    const { rerender } = render(<SessionSidebar {...props} releaseNotes={{ version: "0.3.0", notes: ["x"], onDismiss: () => {} }} />)
+    rerender(<SessionSidebar {...props} />)
+    expect(screen.queryByTestId("release-notes-card")).toBeNull()
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Account menu" }), { key: "Enter" })
+    fireEvent.click(screen.getByRole("menuitem", { name: "What's new (v0.3.0)" }))
+    const dialog = screen.getByRole("dialog")
+    expect(within(dialog).getByText("v0.3.0")).toBeTruthy()
+    expect(within(dialog).getByText("v0.2.2")).toBeTruthy()
+    expect(within(dialog).getByText("Send comments")).toBeTruthy()
+  })
+
   it("renders nothing when there is nothing new", () => {
     render(<SessionSidebar sessions={[]} activeSessionId={null} onSelect={() => {}} />)
     expect(screen.queryByTestId("release-notes-card")).toBeNull()
   })
 })
-
-const CANNOT_SELF_UPDATE = /can't update itself/
 
 describe("SessionSidebar manual updates", () => {
   it("offers the installer when the build cannot update itself", () => {
@@ -373,12 +479,11 @@ describe("SessionSidebar manual updates", () => {
         sessions={[]}
         activeSessionId={null}
         onSelect={() => {}}
-        update={{ version: "0.3.4", status: "available", manual: true, dismissed: false, onAction, onDismiss: () => {} }}
+        update={{ version: "0.3.4", kind: "manual", detail: "This build can't update itself. Open the installer.", dismissed: false, onAction, onDismiss: () => {} }}
       />
     )
-    expect(screen.getByText("Download installer")).toBeTruthy()
-    expect(screen.getByText(CANNOT_SELF_UPDATE)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Download the Jingler 0.3.4 installer" }))
+    expect(screen.getByText(/can't update itself/)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Open installer" }))
     expect(onAction).toHaveBeenCalledOnce()
   })
 })

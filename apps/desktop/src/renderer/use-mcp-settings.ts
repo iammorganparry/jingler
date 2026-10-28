@@ -1,4 +1,9 @@
-import type { McpConfigEntry, McpImportSourceId, McpServerStatus } from "@jingler/core"
+import type {
+  McpConfigEntry,
+  McpImportResolution,
+  McpImportSourceId,
+  McpServerStatus
+} from "@jingler/core"
 import type { McpSettingsProps } from "@jingler/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
@@ -46,6 +51,15 @@ export function useMcpSettings(): McpSettingsProps {
       await rpc.mcpSetAuth(name, auth)
       await invalidate()
     },
+    setDisabledTools: async (name, disabledTools) => {
+      await rpc.mcpSetDisabledTools(name, disabledTools)
+      // A tool toggle doesn't change connectivity, so keep the probe results.
+      await queryClient.invalidateQueries({ queryKey: mcpKey })
+    },
+    signOut: async (name) => {
+      await rpc.mcpSignOut(name)
+      await invalidate()
+    },
     remove: async (name: string) => {
       await rpc.mcpRemove(name)
       await invalidate()
@@ -64,14 +78,16 @@ export function useMcpSettings(): McpSettingsProps {
       await invalidate()
     },
     reveal: () => rpc.mcpReveal(),
+    logTail: (name: string) => rpc.mcpLogTail(name),
     importCandidates: (source: McpImportSourceId, connectors?: boolean) =>
       rpc.mcpImportCandidates(source, connectors),
     applyImport: async (
       source: McpImportSourceId,
       names: ReadonlyArray<string>,
+      resolutions?: Readonly<Record<string, McpImportResolution>>,
       connectors?: boolean
     ) => {
-      const imported = await rpc.mcpApplyImport(source, names, connectors)
+      const imported = await rpc.mcpApplyImport(source, names, resolutions, connectors)
       await invalidate()
       return imported
     }

@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react"
-import type { ReactNode } from "react"
+import type { KeyboardEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activityLabel, checkoutsOf, displayStatusOf, issueReferenceOf } from "@jingler/core"
+import { activeCheckoutOf, activityLabel, checkoutsOf, displayStatusOf, hasNoRepo, issueReferenceOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
   ChevronRight,
   Cloud,
+  Copy,
   GitMerge,
   Monitor,
+  Pencil,
+  SquareTerminal,
   type LucideIcon,
   Trash2
 } from "lucide-react"
@@ -53,19 +56,31 @@ function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: str
   )
 }
 
+/** One "repo #N" per checkout PR for multi-repo sessions; plain "#N" otherwise; null with no PR. */
+const prLabelOf = (session: Session): string | null => {
+  const repoPrs = (session.prs ?? []).filter((pr) => pr.repo !== undefined)
+  if (repoPrs.length > 0) return repoPrs.map((pr) => `${pr.repo} #${pr.number}`).join(" · ")
+  return session.prNumber === null ? null : `#${session.prNumber}`
+}
+
 /** A session row for the sidebar list. Active state gets the blue ring. */
+const repoLabelOf = (session: Session): string => (hasNoRepo(activeCheckoutOf(session)) ? "No repo" : session.repo)
+
 export function SessionRow({
   session,
   environment,
   repoOwner,
   activity,
+  interrupted,
   prState,
+  subagentCount = 0,
   active = false,
   onSelect,
   onRename,
   onArchive,
   onRestore,
   onDelete,
+  onOpenInTerminal,
   expanded,
   onToggleExpanded,
   className
@@ -79,6 +94,8 @@ export function SessionRow({
    * falls back to the persisted `session.status`.
    */
   activity?: SessionActivity
+  /** The last run was cut off by a restart; ignored while there is live activity. */
+  interrupted?: boolean
   /**
    * Live state of the session's linked PR. A merged/closed PR badges the row
    * rather than retiring the session: one session can outlive several PRs (open
@@ -90,6 +107,8 @@ export function SessionRow({
    * (or null) for a session with no PR, which renders a hollow ring.
    */
   prState?: SessionPrStatus | null
+  /** Running subagents in this session; the `· N agents` hint is hidden at zero. */
+  subagentCount?: number
   active?: boolean
   onSelect?: (id: string) => void
   /** Manual rename (double-click the title) — pins the auto-generated name. */
@@ -100,11 +119,14 @@ export function SessionRow({
   onRestore?: (id: string) => void
   /** Permanently delete a session (the caller confirms first). */
   onDelete?: (id: string) => void | Promise<void>
+  /** Open the session's worktree in its terminal (context menu). */
+  onOpenInTerminal?: (id: string) => void
   /** Whether the row's chat tree is shown. Absent hides the chevron. */
   expanded?: boolean
   onToggleExpanded?: (id: string) => void
   className?: string
 }) {
+  const prLabel = prLabelOf(session)
          function renderActiveRow() {
            return (<motion.div
       layoutId={session.archived ? undefined : `session-${session.id}`}
@@ -114,6 +136,8 @@ export function SessionRow({
       <div
         data-testid={`session-row-${session.id}`}
         onClick={() => pendingAction === null && onSelect?.(session.id)}
+        tabIndex={0}
+        onKeyDown={selectOnEnter}
         aria-busy={pendingAction !== null}
         className={cn(
           "group relative flex cursor-pointer flex-col gap-[7px] rounded-lg border px-2.5 py-2 transition-colors",
@@ -125,16 +149,16 @@ export function SessionRow({
       >
         {hoverActions}
         <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
-          <RepoMark repo={session.repo} owner={repoOwner} />
+          <RepoMark repo={repoLabelOf(session)} owner={repoOwner} />
           <span className="min-w-0 flex-1 truncate font-medium">
-            {session.repo}
+            {repoLabelOf(session)}
             {checkoutsOf(session).length > 1 && (
               <span data-testid={`session-repos-${session.id}`}> · {checkoutsOf(session).length} repos</span>
             )}
           </span>
           <span
             title={detail}
-            className={cn("flex flex-none items-center gap-1 font-medium tabular-nums", statusTextClass[status])}
+            className={cn("flex shrink-0 items-center gap-1 whitespace-nowrap font-medium tabular-nums", statusTextClass[status])}
           >
             {display === "thinking" || display === "running" ? (
               <ThinkingOrb compact label={label} />
@@ -142,6 +166,14 @@ export function SessionRow({
             {label}
             {age ? ` ${age}` : ""}
           </span>
+          {subagentCount > 0 && (
+            <span
+              data-testid={`session-subagent-count-${session.id}`}
+              className="shrink-0 whitespace-nowrap font-medium tabular-nums text-muted-foreground"
+            >
+              · {subagentCount} {subagentCount === 1 ? "agent" : "agents"}
+            </span>
+          )}
         </div>
         {renderEditableSessionTitle()}
         {renderActiveMetadata()}
@@ -207,34 +239,41 @@ export function SessionRow({
           </span>)
     }
 
-    return (<div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
+    return (<div className="flex min-w-0 items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
           {renderBranchLabel()}
           {linkedIssue && (
             <span
-              className="flex-none text-green"
+              className="shrink-0 whitespace-nowrap text-green"
               aria-label={`Linked issue ${linkedIssue.identifier}`}
               title={`${linkedIssue.identifier}: ${linkedIssue.title}`}
             >
               {linkedIssue.identifier}
             </span>
           )}
-          {session.prNumber !== null && (
+          {prLabel !== null && (
             <span
-              className="flex flex-none items-center gap-1"
-              title={`Pull request #${session.prNumber}`}
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap"
+              title={`Pull request ${prLabel}`}
             >
-              <PrStatusGlyph pr={prState} />
-              <span>#{session.prNumber}</span>
+              <PrStatusGlyph
+                pr={prState}
+                stack={session.prs?.map((layer) => ({ state: layer.state ?? "open", checks: layer.checks ?? null }))}
+              />
+              <span>{prLabel}</span>
             </span>
           )}
           <div className="flex-1" />
           {environment && (
-            <span data-testid={`session-environment-${session.id}`} className="max-w-[96px] truncate text-dim" title={`${environment.name} · ${environment.state}`}>
+            <span data-testid={`session-environment-${session.id}`} className="max-w-[96px] shrink-0 truncate whitespace-nowrap text-dim" title={`${environment.name} · ${environment.state}`}>
               {environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}
             </span>
           )}
           {(session.diff.added > 0 || session.diff.removed > 0) && (
-            <DiffStat added={session.diff.added} removed={session.diff.removed} />
+            <DiffStat
+              added={session.diff.added}
+              removed={session.diff.removed}
+              className="shrink-0 whitespace-nowrap"
+            />
           )}
           <span
             data-testid={`session-location-${session.id}`}
@@ -322,39 +361,14 @@ export function SessionRow({
          }
 
          function getSessionActions() {
-           if (pendingAction !== null) return ([])
-return ([
-    ...(session.archived
-      ? onRestore
-        ? [
-            {
-              label: "Restore",
-              icon: ArchiveRestore,
-              onSelect: () => onRestore(session.id)
-            }
-          ]
-        : []
-      : onArchive
-        ? [
-            {
-              label: "Archive",
-              icon: Archive,
-              onSelect: runArchive
-            }
-          ]
-        : []),
-    ...(onDelete
-      ? [
-          {
-            label: "Delete",
-            icon: Trash2,
-            tone: "danger" as const,
-            separated: true,
-            onSelect: () => onDelete(session.id)
-          }
-        ]
-      : [])
-  ])
+           if (pendingAction !== null) return []
+           return sessionMenuItems(session, {
+             rename: onRename ? () => setDraft(session.title) : undefined,
+             archive: onArchive ? runArchive : undefined,
+             restore: onRestore ? () => onRestore(session.id) : undefined,
+             openInTerminal: onOpenInTerminal ? () => onOpenInTerminal(session.id) : undefined,
+             remove: onDelete ? () => onDelete(session.id) : undefined
+           })
          }
 
          function getTitle() {
@@ -366,7 +380,7 @@ return ([
 
   // One rollup, three jobs: what the row says, what colour it says it in, and
   // whether it dims. The label is one of five words — never the tool or target.
-  const display = displayStatusOf(activity, session.status)
+  const display = displayStatusOf(activity, session.status, interrupted)
   const status = displayStatusTone[display]
   const label = displayStatusLabel[display]
   const linkedIssue = issueReferenceOf(session)
@@ -406,6 +420,11 @@ return ([
   const withMenu = (node: ReactNode) =>
     actions.length > 0 ? <ContextMenu items={actions}>{node}</ContextMenu> : node
 
+  // The row is focusable so its context menu opens from the keyboard (Menu / Shift+F10).
+  const selectOnEnter = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.target === e.currentTarget && e.key === "Enter") onSelect?.(session.id)
+  }
+
   const commit = () => {
     if (draft === null) return
     const next = draft.trim()
@@ -421,6 +440,8 @@ return ([
       <div
         data-testid={`session-row-${session.id}`}
         onClick={() => pendingAction === null && onSelect?.(session.id)}
+        tabIndex={0}
+        onKeyDown={selectOnEnter}
         aria-busy={pendingAction !== null}
         className={cn(
           "group relative flex cursor-pointer flex-col gap-[6px] rounded-lg border px-2.5 py-2 transition-colors",
@@ -451,6 +472,29 @@ return ([
     // drag.
     renderActiveRow()
   )
+}
+
+type SessionMenuHandlers = Record<
+  "rename" | "archive" | "restore" | "openInTerminal" | "remove",
+  (() => void) | undefined
+>
+
+/** The row's context-menu items; an item is present only when its handler is. */
+function sessionMenuItems(session: Session, h: SessionMenuHandlers): ContextMenuItem[] {
+  const items: Array<ContextMenuItem | false | undefined> = [
+    !session.archived && h.rename && { label: "Rename", icon: Pencil, onSelect: h.rename },
+    session.archived
+      ? h.restore && { label: "Restore", icon: ArchiveRestore, onSelect: h.restore }
+      : h.archive && { label: "Archive", icon: Archive, onSelect: h.archive },
+    {
+      label: "Copy branch",
+      icon: Copy,
+      onSelect: () => void navigator.clipboard?.writeText(session.branch)
+    },
+    h.openInTerminal && { label: "Open in terminal", icon: SquareTerminal, onSelect: h.openInTerminal },
+    h.remove && { label: "Delete", icon: Trash2, tone: "danger", separated: true, onSelect: h.remove }
+  ]
+  return items.filter((item): item is ContextMenuItem => Boolean(item))
 }
 
 const idleStatus = (status: ReturnType<typeof displayStatusOf>): boolean =>

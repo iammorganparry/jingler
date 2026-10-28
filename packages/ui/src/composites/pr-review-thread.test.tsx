@@ -150,3 +150,16 @@ describe("PrReviewThreadView repository context", () => {
       expect(screen.getByText("#12").closest("a")?.getAttribute("href")).toBe("https://github.com/acme/widget/issues/12"))
   })
 })
+
+describe("PrReviewThreadView actions", () => {
+  it("calls onReply with the first comment's databaseId and onResolve with the thread id", async () => {
+    const onReply = vi.fn()
+    const onResolve = vi.fn()
+    render(<PrReviewThreadView thread={thread()} onReply={onReply} onResolve={onResolve} />)
+    fireEvent.change(screen.getByPlaceholderText("Reply…"), { target: { value: "  thanks  " } })
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }))
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith(1001, "thanks"))
+    fireEvent.click(screen.getByRole("button", { name: "Resolve conversation" }))
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith("PRRT_1", true))
+  })
+})

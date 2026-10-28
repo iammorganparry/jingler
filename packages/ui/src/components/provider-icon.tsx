@@ -52,12 +52,15 @@ const PROVIDER_COLOR: Record<ProviderIconKind, string> = {
   opencode: "var(--sb-text-bright)"
 }
 
-const iconKindForProvider = (providerId: ProviderId): ProviderIconKind =>
+/** `null` = no brand mark for this provider; callers render a letter tile. */
+const iconKindForProvider = (providerId: ProviderId): ProviderIconKind | null =>
   providerId === "anthropic"
     ? "claude"
     : providerId === "openai" || providerId === "openai-codex"
       ? "codex"
-      : "opencode"
+      : providerId === "opencode"
+        ? "opencode"
+        : null
 
 export const providerLabel = (
   providerId: ProviderId | null | undefined
@@ -80,7 +83,7 @@ export const providerLabel = (
 
 export const providerColor = (
   providerId: ProviderId | null | undefined
-): string => PROVIDER_COLOR[providerId == null ? "opencode" : iconKindForProvider(providerId)]
+): string => PROVIDER_COLOR[(providerId == null ? "opencode" : iconKindForProvider(providerId)) ?? "opencode"]
 
 export function ProviderIcon({
   providerId,
@@ -95,6 +98,20 @@ export function ProviderIcon({
   className?: string
 }) {
   const kind = providerId === undefined ? "opencode" : iconKindForProvider(providerId)
+  if (kind === null)
+    return (
+      <span
+        data-provider-fallback
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.65) }}
+        className={cn(
+          "inline-grid shrink-0 place-items-center rounded-[3px] bg-surface font-semibold uppercase leading-none text-muted-foreground",
+          className
+        )}
+        aria-hidden
+      >
+        {(providerId ?? "?").charAt(0)}
+      </span>
+    )
   const icon = ICONS[kind]
   return (
     <svg
@@ -104,6 +121,7 @@ export function ProviderIcon({
       fill="currentColor"
       style={mono ? undefined : { color: PROVIDER_COLOR[kind] }}
       className={cn("shrink-0", className)}
+      data-provider-icon={kind}
       aria-hidden
     >
       <path d={icon.d} fillRule={icon.fillRule} />

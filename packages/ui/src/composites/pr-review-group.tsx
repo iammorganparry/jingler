@@ -34,24 +34,24 @@ export function PrReviewGroup({
 
   return (
     <div className="flex items-start gap-[11px]">
-      <span className="mt-0.5 flex size-[26px] flex-none items-center justify-center rounded-full bg-blue/12">
-        <MessageSquare size={13} className="text-blue" />
+      <span className="mt-0.5 flex size-[26px] flex-none items-center justify-center rounded-full bg-surface">
+        <MessageSquare size={13} className="text-muted-foreground" />
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-[9px]">
         <div className="flex items-center gap-[9px]">
           <Avatar
             initial={opener.author.charAt(0).toUpperCase()}
             src={opener.authorAvatarUrl ?? githubAvatarUrl(opener.author)}
-            tone={opener.isBot ? "purple" : "orange"}
+            tone="dim"
             size={22}
           />
           <span className="text-[13px] font-semibold text-text-bright">{opener.author}</span>
           {opener.isBot && (
-            <Badge tone="purple" size="xs">
+            <Badge tone="neutral" size="xs">
               Bot
             </Badge>
           )}
-          <span className="text-[11.5px] font-semibold text-blue">reviewed</span>
+          <span className="text-[11.5px] font-semibold text-muted-foreground">reviewed</span>
           <span className="font-mono text-[11px] text-dim">{relativeTime(opener.createdAt)}</span>
         </div>
         {threads.map((thread) => (

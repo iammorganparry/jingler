@@ -1,5 +1,6 @@
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent"
 import type { SubagentFleetEvent } from "@jingler/core"
+import { execFileSync } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -1150,6 +1151,41 @@ describe("PiSubagentLifecycleAdapter", () => {
         event.node.status === "completed" &&
         event.node.sessionFile === "/sessions/child.jsonl"
       )).toBe(true)
+    } finally {
+      adapter.stop()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("gives a foreground child its pi-subagents worktree, and the shared checkout none", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fleet-workspace-"))
+    const parentCwd = join(root, "main")
+    const git = (cwd: string, ...args: Array<string>) => execFileSync("git", args, { cwd, stdio: "ignore" })
+    await mkdir(parentCwd)
+    git(parentCwd, "init", "-q")
+    git(parentCwd, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+    git(parentCwd, "worktree", "add", "-q", "-b", "child-branch", join(root, "pi-worktree-isolated-run-0"))
+    const adapter = new PiSubagentLifecycleAdapter({
+      events: createEventBus(),
+      parentRuntimeSessionId: "parent-1",
+      parentCwd,
+      controlJournal: null,
+      emit: () => undefined
+    })
+    try {
+      for (const runId of ["isolated-run", "shared-run"]) {
+        adapter.progress({
+          runId,
+          mode: "single",
+          children: [{
+            index: 0, runId: null, agent: "worker", status: "running", task: "t",
+            tokens: 0, toolCount: 0, durationMs: 1, sessionFile: null
+          }]
+        })
+      }
+      const byId = (id: string) => adapter.snapshot().nodes.find((node) => node.subagentId === id)
+      expect(byId("isolated-run:step:0")?.workspace).toMatchObject({ branch: "child-branch" })
+      expect(byId("shared-run:step:0")?.workspace).toBeNull()
     } finally {
       adapter.stop()
       await rm(root, { recursive: true, force: true })

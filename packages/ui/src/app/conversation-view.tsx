@@ -1,4 +1,5 @@
 import { updateTranscriptRowKeys } from "./transcript-row-keys.js"
+import { useJumpToTurn } from "./jump-to-turn.js"
 import { defaultProps } from "../lib/default-props.js"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { planDocumentToPlan } from "@jingler/core"
@@ -14,6 +15,7 @@ import type {
   McpRemoteAuth,
   McpServer,
   PermissionMode,
+  WorkMode,
   PlanDocument,
   ProviderCatalog,
   ProviderConnectionId,
@@ -27,25 +29,28 @@ import type {
 } from "@jingler/core"
 import { type VirtualItem, useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
-import { ArrowUp, Lock, RotateCcw } from "lucide-react"
+import { ArrowUp, Globe, Lock, RotateCcw } from "lucide-react"
 import type { ArchiveReason, ContextPhase } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
-import { Composer, type ComposerCodeReference } from "../composites/composer.js"
+import { Composer, type ComposerCodeReference, type ComposerVoiceInput } from "../composites/composer.js"
 import { ThinkingOrb } from "../components/loading.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import {
+  isSubagentSpawnMessage,
+  McpAuthContext,
   MessageTurn,
   PlanProgressContext,
   ToolStopContext
 } from "../composites/message-turn.js"
 import { PlanApprovalCard } from "../composites/plan-card.js"
+import { sendPlanStageAction } from "../composites/plan-progress-dock.js"
 import { createMessageRailPreview, MessageScroller } from "../composites/beui/messages.js"
 import type { PreviewRailItem } from "../components/beui/overlays.js"
+import { summarizeTurn, turnRailMeta } from "./conversation-turns.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
-import { ContextMeter } from "../composites/context-meter.js"
 import { RunStats } from "../composites/run-stats.js"
 
 /**
@@ -131,9 +136,66 @@ const activeRailIdFor = (
   return userIndex === undefined ? undefined : itemKeys[userIndex]
 }
 
-/** Shift+Tab cycles Jingler's provider-neutral permission modes. */
-const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
-const MODE_CYCLE_WITH_PLAN: ReadonlyArray<PermissionMode> = [...MODE_CYCLE, "plan"]
+/** The rail tick for one user turn: its preview text plus attention/checkpoint colour and file stats. */
+const buildRailItem = (
+  messages: ReadonlyArray<Message>,
+  messageIndex: number,
+  nextUserIndex: number,
+  userIndex: number,
+  turnCount: number,
+  id: string,
+  checkpointed: boolean,
+  subagentNeedsAttention: boolean
+): PreviewRailItem => {
+  const responseTurn = messages.slice(messageIndex + 1).find(candidate => candidate.role === "assistant")
+  const summary = summarizeTurn(messages.slice(messageIndex + 1, nextUserIndex), subagentNeedsAttention)
+  return {
+    id,
+    ...createMessageRailPreview(railText(messages[messageIndex]!), responseTurn ? railText(responseTurn) : ""),
+    ariaLabel: `Go to user message ${userIndex + 1} of ${turnCount}`,
+    kind: summary.attention ?? (checkpointed ? "checkpoint" : undefined),
+    meta: turnRailMeta(userIndex + 1, summary)
+  }
+}
+
+const sameRailItem = (a: PreviewRailItem, b: PreviewRailItem): boolean =>
+  a.id === b.id && a.label === b.label && a.description === b.description && a.ariaLabel === b.ariaLabel && a.kind === b.kind && a.meta === b.meta
+
+/** Hover-card controls for a rail tick: Jump, Filter Changes, and Revert to here where a checkpoint exists. */
+const useRailActions = ({ items, checkpointCount, hasMoreHistory, onSelect, onRevertToTurn, onFilterChanges }: {
+  items: ReadonlyArray<PreviewRailItem>
+  checkpointCount: number
+  hasMoreHistory: boolean
+  onSelect: (item: PreviewRailItem) => void
+  onRevertToTurn?: (turn: number) => void
+  onFilterChanges?: () => void
+}) => useCallback((item: PreviewRailItem) => {
+  const turn = items.findIndex(candidate => candidate.id === item.id) + 1
+  return (
+    <>
+      <Button size="sm" variant="secondary" onClick={() => onSelect(item)}>Jump</Button>
+      {onFilterChanges && <Button size="sm" variant="secondary" onClick={onFilterChanges}>Filter Changes</Button>}
+      {onRevertToTurn && !hasMoreHistory && turn <= checkpointCount && (
+        <Button size="sm" variant="danger" onClick={() => onRevertToTurn(turn)}>Revert to here</Button>
+      )}
+    </>
+  )
+}, [checkpointCount, hasMoreHistory, items, onFilterChanges, onRevertToTurn, onSelect])
+
+/** ⌥↑ / ⌥↓ step between turns. Scoped like Shift+Tab: only fires while focus is inside this pane. */
+const useTurnHotkeys = (items: ReadonlyArray<PreviewRailItem>, activeId: string | undefined, onSelect: (item: PreviewRailItem) => void) =>
+  useHotkeys<HTMLDivElement>(
+    ["alt+arrowup", "alt+arrowdown"],
+    event => {
+      const step = event.key === "ArrowUp" ? -1 : 1
+      const current = items.findIndex(item => item.id === activeId)
+      const target = items[Math.min(Math.max(current + step, 0), items.length - 1)]
+      if (target) onSelect(target)
+    },
+    { preventDefault: true, enableOnFormTags: true },
+    [activeId, items, onSelect]
+  )
+
 const PLANNOTATOR_PLAN_TOOLS = new Set(["plannotator_submit_plan", "plannotator_update_plan"])
 const isPlannotatorPlanTool = (part: Message["parts"][number]): boolean =>
   part._tag === "Tool" &&
@@ -153,6 +215,8 @@ export interface ConversationViewProps {
   /** Page the next window of older turns onto the front of `messages`. */
   onLoadEarlier?: () => void
   mode: PermissionMode
+  /** The active chat's subagent fleet has a pending attention request (e.g. a child asked a question) — lights the latest turn's rail tick amber. */
+  subagentNeedsAttention?: boolean
   skills?: ReadonlyArray<Skill>
   files?: ReadonlyArray<string>
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>
@@ -227,6 +291,8 @@ export interface ConversationViewProps {
    * captured at render time can point at a different message by the time it is used.
    */
   queued?: ReadonlyArray<{ id: string; text: string; images: ReadonlyArray<Attachment> }>
+  /** Queued ids held back until the connection returns ("Waiting for connection"). */
+  waitingIds?: ReadonlyArray<string>
   /** Drop a queued message before it's sent. */
   onUnqueue?: (id: string) => void
   /**
@@ -240,6 +306,12 @@ export interface ConversationViewProps {
    * separate job that shouldn't inherit 200k tokens of unrelated context".
    */
   onHandoffQueued?: (id: string) => void
+  /**
+   * Fork every queued message (ids in queue order) into its own fresh chat.
+   * Drives the queue header's `Hand off all · N`, disabled while a queued
+   * message is being sent (`steeringId`).
+   */
+  onHandoffAllQueued?: (ids: ReadonlyArray<string>) => void
   /** Rewrite a queued message in place, before it is ever sent. */
   onEditQueued?: (id: string, text: string) => void
   /** What the hand-off targets, for its tooltip (e.g. "a new chat on Opus 4.6"). */
@@ -250,8 +322,22 @@ export interface ConversationViewProps {
    * run the same prompt twice.
    */
   steeringId?: string | null
+  /**
+   * How many of the oldest turns have a restorable workspace checkpoint (their rail ticks turn blue
+   * and the hover card offers "Revert to here"). Turn N maps to the N-th oldest checkpoint.
+   */
+  checkpointCount?: number
+  /** Revert the workspace to the checkpoint taken at the start of this 1-based turn. */
+  onRevertToTurn?: (turn: number) => void
+  /** Show the session's Changes — the hover card's "Filter Changes". */
+  onFilterChanges?: () => void
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onSetMode?: (mode: PermissionMode) => void
+  workMode?: WorkMode
+  /** Auto lets the agent switch Plan/Build itself. */
+  autoSwitch?: boolean
+  onSetWorkMode?: (workMode: WorkMode, autoSwitch?: boolean) => void
+  onSwitchToAuto?: () => void
   reasoningEffort?: ReasoningEffort
   thinkingEnabled?: boolean
   onSetReasoning?: (reasoning?: ReasoningSetting) => void
@@ -260,6 +346,8 @@ export interface ConversationViewProps {
   onAnswerQuestion?: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
   /** Open the full read-only native plan projection. */
   onOpenPlanReview?: (stepId?: string) => void
+  /** An agent revealed the browser preview: shows `Preview ready · Open browser` after the transcript. */
+  previewReady?: { readonly onOpen: () => void } | null
   /** Fork a drifted direct session's work onto a new worktree session (BranchDrift banner). */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session (BranchDrift banner). */
@@ -287,6 +375,7 @@ export interface ConversationViewProps {
    */
   draft?: string
   onDraftChange?: (value: string) => void
+  voiceInput?: ComposerVoiceInput
   draftAttachments?: ReadonlyArray<Attachment>
   onDraftAttachmentsChange?: (attachments: ReadonlyArray<Attachment>) => void
   draftCodeReferences?: ReadonlyArray<ComposerCodeReference>
@@ -304,6 +393,10 @@ export interface ConversationViewProps {
   onToggleFollowAgent?: (enabled: boolean) => void
 }
 
+/** Auto sessions already skip approvals, so the question card only offers the switch from other modes. */
+const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: ConversationViewProps["onSwitchToAuto"]) =>
+  mode === "auto" ? undefined : onSwitchToAuto
+
 /**
  * The session workspace pane: the mode bar + interleaved transcript + composer,
  * with the live Changes rail (the worktree's real diff). Purely presentational —
@@ -312,8 +405,9 @@ export interface ConversationViewProps {
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, waitingIds, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, workMode, autoSwitch, onSetWorkMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
+    checkpointCount: 0,
     loadingHistory: false,
     skills: [],
     files: [],
@@ -343,22 +437,25 @@ export function ConversationView(props:  ConversationViewProps) {
 function renderSessionAnalytics() {
              return (!archived && (busy || runStartedAt !== null || tokens > 0) && (
             <div className="mb-1.5 flex min-w-0 flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
-              <ContextMeter
-                tokens={tokens}
-                breakdown={contextBreakdown}
-                triggerAt={contextTriggerAt}
-                phase={contextPhase}
-                preparing={contextPreparing}
-                digestReady={contextDigestReady}
-                stalled={contextStalled}
-                held={contextHeld}
-                heldReason={contextHeldReason}
-                onCompactNow={onCompactNow}
-              />
               <RunStats startedAt={runStartedAt} busy={busy} />
             </div>
           ))
            }
+
+         function getContextMeter() {
+           return {
+             tokens,
+             breakdown: contextBreakdown,
+             triggerAt: contextTriggerAt,
+             phase: contextPhase,
+             preparing: contextPreparing,
+             digestReady: contextDigestReady,
+             stalled: contextStalled,
+             held: contextHeld,
+             heldReason: contextHeldReason,
+             ...(onCompactNow ? { onCompactNow } : {})
+           }
+         }
 
          function renderComposerArea() {
 
@@ -383,6 +480,7 @@ function renderSessionAnalytics() {
                         images={item.images.length}
                         handoffHint={handoffHint}
                         sending={sending}
+                        waiting={waitingIds?.includes(item.id) ?? false}
                         {...actions}
                       />
                     )
@@ -416,8 +514,10 @@ function renderSessionAnalytics() {
             </div>
           ) : question ? (
             <QuestionCard
+              key={question.id}
               request={question}
               onSubmit={(answers) => onAnswerQuestion?.(question.id, answers)}
+              onSwitchToAuto={autoSwitchLink(mode, onSwitchToAuto)}
             />
           ) : (
             <>
@@ -445,6 +545,17 @@ function renderSessionAnalytics() {
                     running turn — which throws away the text of a row the operator
                     is part-way through editing, at a moment they did not cause.
                   */}
+                  {onHandoffAllQueued && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="self-end"
+                      disabled={steeringId != null}
+                      onClick={() => onHandoffAllQueued(queued.map((item) => item.id))}
+                    >
+                      Hand off all · {queued.length}
+                    </Button>
+                  )}
                   {queued.slice(0, queueLimit).map(renderQueuedMessage)}
                   {queued.length > QUEUE_PREVIEW && (
                     <button
@@ -492,12 +603,16 @@ function renderSessionAnalytics() {
                 reasoningEffort={reasoningEffort}
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}
-                allowPlan
+                workMode={workMode}
+                autoSwitch={autoSwitch}
+                onSetWorkMode={onSetWorkMode}
+                contextMeter={getContextMeter()}
                 onSend={onSend}
                 onStop={onStop}
                 initialValue={initialDraft}
                 value={draft}
                 onValueChange={onDraftChange}
+                voiceInput={voiceInput}
                 attachments={draftAttachments}
                 onAttachmentsChange={onDraftAttachmentsChange}
                 codeReferences={draftCodeReferences}
@@ -505,6 +620,7 @@ function renderSessionAnalytics() {
                 onCodeReferencesClear={onDraftCodeReferencesClear}
                 planDocument={planDocument ?? undefined}
                 onOpenPlanStage={(stageId) => onOpenPlanReview?.(stageId)}
+                onPlanStageAction={sendPlanStageAction(onSend)}
                 autoFocus={autoFocusComposer}
                 focusKey={focusKey}
               />
@@ -528,6 +644,7 @@ function renderSessionAnalytics() {
   const [queueExpanded, setQueueExpanded] = useState(false)
   const queueLimit = queueExpanded ? queued.length : QUEUE_PREVIEW
   const planAnchorIndex = planTranscriptAnchorIndex(messages)
+  const latestSpawnIndex = messages.findLastIndex(isSubagentSpawnMessage)
   const planAnchorPartIndex = planAnchorIndex < 0
     ? -1
     : messages[planAnchorIndex]!.parts.findLastIndex(isPlannotatorPlanTool)
@@ -535,23 +652,18 @@ function renderSessionAnalytics() {
     planAnchorIndex >= 0 &&
     planDocument.plan.sections.length + planDocument.plan.stages.length > 0
 
-  // Shift+Tab cycles the HITL mode (works while typing in the composer). Plan
-  // is part of the same Jingler-owned contract for every certified model.
+  // Shift+Tab flips Plan/Build (works while typing in the composer); approval has its own dropdown.
   //
   // Scoped to THIS pane via the ref `useHotkeys` returns (attached to the root
   // below), so it only fires while focus is inside this view. A split view
   // mounts one ConversationView per pane, and an unscoped document-level binding
   // fires in EVERY mounted pane at once — so a single Shift+Tab cycled every
   // composer's mode, not just the focused one's.
-  const cycle = MODE_CYCLE_WITH_PLAN
   const modeHotkeyRef = useHotkeys<HTMLDivElement>(
     "shift+tab",
-    () => {
-      const i = cycle.indexOf(mode)
-      onSetMode?.(cycle[(i + 1) % cycle.length]!)
-    },
+    () => onSetWorkMode?.(workMode === "plan" ? "build" : "plan"),
     { enableOnFormTags: true, preventDefault: true },
-    [mode, onSetMode, cycle]
+    [workMode, onSetWorkMode]
   )
 
   // Escape halts a running agent. Deliberately NOT `enableOnFormTags` (unlike
@@ -592,31 +704,34 @@ function renderSessionAnalytics() {
     const previous = previousRailItems.current
     let reusedAll = previous.length === userMessageIndexes.length
     const next = userMessageIndexes.map((messageIndex, userIndex) => {
-      const message = messages[messageIndex]!
-      const responseTurn = messages.slice(messageIndex + 1).find(candidate => candidate.role === "assistant")
-      const item = {
-        id: itemKeys[messageIndex]!,
-        ...createMessageRailPreview(railText(message), responseTurn ? railText(responseTurn) : ""),
-        ariaLabel: `Go to user message ${userIndex + 1} of ${userMessageIndexes.length}`
-      }
+      const item = buildRailItem(
+        messages,
+        messageIndex,
+        userMessageIndexes[userIndex + 1] ?? messages.length,
+        userIndex,
+        userMessageIndexes.length,
+        itemKeys[messageIndex]!,
+        // Turn numbers only line up with checkpoints once the whole history is loaded.
+        !hasMoreHistory && userIndex < checkpointCount,
+        // Only the latest turn's fleet is live — a prior turn's subagents are long done.
+        userIndex === userMessageIndexes.length - 1 && subagentNeedsAttention === true
+      )
       const old = previous[userIndex]
-      if (
-        old !== undefined &&
-        old.id === item.id &&
-        old.label === item.label &&
-        old.description === item.description &&
-        old.ariaLabel === item.ariaLabel
-      ) return old
+      if (old !== undefined && sameRailItem(old, item)) return old
       reusedAll = false
       return item
     })
     const result = reusedAll ? previous : next
     previousRailItems.current = result
     return result
-  }, [itemKeys, messages, userMessageIndexes])
+  }, [checkpointCount, hasMoreHistory, itemKeys, messages, userMessageIndexes])
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
+  const mcpAuth = useMemo(
+    () => onAuthorizeMcp === undefined ? null : { servers: mcpServers ?? [], authorize: onAuthorizeMcp },
+    [mcpServers, onAuthorizeMcp]
+  )
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => viewport,
@@ -655,6 +770,14 @@ function renderSessionAnalytics() {
     virtualizer.scrollToIndex(index, { align: last ? "end" : "center" })
   }, [itemKeys, messages.length, virtualizer])
 
+  const jumpToIndex = useCallback((index: number) => {
+    setFollowing(index === messages.length - 1)
+    virtualizer.scrollToIndex(index, { align: "center" })
+  }, [messages.length, virtualizer])
+  useJumpToTurn(focusKey, messages, jumpToIndex)
+  const renderRailActions = useRailActions({ items: messageRailItems, checkpointCount, hasMoreHistory, onSelect: handleRailSelect, onRevertToTurn: props.onRevertToTurn, onFilterChanges: props.onFilterChanges })
+  const turnHotkeyRef = useTurnHotkeys(messageRailItems, activeRailId, handleRailSelect)
+
   // Preserve the viewport across a "Load earlier" prepend: capture the scroll
   // metrics at click, then after the older page lands add back exactly the height
   // it introduced above the reader. Anchoring by height delta (not an index) is
@@ -681,7 +804,7 @@ function renderSessionAnalytics() {
 
   return (
     <div ref={modeHotkeyRef} className="flex min-h-0 min-w-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={turnHotkeyRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
         {archived && (
           <ArchivedBanner
             reason={archived.reason}
@@ -696,6 +819,7 @@ function renderSessionAnalytics() {
           navigationItems={messageRailItems}
           navigationActiveId={activeRailId}
           onNavigationSelect={handleRailSelect}
+          renderNavigationActions={renderRailActions}
           followOutput={following && messages.length > 0}
           onFollowChange={setFollowing}
           busy={busy}
@@ -730,6 +854,7 @@ function renderSessionAnalytics() {
             </div>
           )}
           <PlanProgressContext.Provider value={planDocument}>
+          <McpAuthContext.Provider value={mcpAuth}>
           <ToolStopContext.Provider value={busy ? (onStop ?? null) : null}>
           <div
             ref={transcriptRef}
@@ -753,8 +878,10 @@ function renderSessionAnalytics() {
                       message={m}
                       providerId={m.providerId ?? providerId}
                       onDecideGate={onDecideGate}
+                      onSwitchToAuto={onSwitchToAuto}
                       onForkOntoBranch={onForkOntoBranch}
                       onAdoptBranch={onAdoptBranch}
+                      showSubagentRow={item.index === latestSpawnIndex}
                       afterPart={planDocument !== null && showPlanTranscriptCard && item.index === planAnchorIndex
                         ? {
                             index: planAnchorPartIndex,
@@ -787,7 +914,16 @@ function renderSessionAnalytics() {
             })}
           </div>
           </ToolStopContext.Provider>
+          </McpAuthContext.Provider>
           </PlanProgressContext.Provider>
+          {props.previewReady ? (
+            <div className="mx-auto mt-2 flex w-full max-w-[760px] justify-start">
+              <Button variant="secondary" size="sm" data-testid="preview-ready-chip" onClick={props.previewReady.onOpen}>
+                <Globe size={12} aria-hidden />
+                Preview ready · Open browser
+              </Button>
+            </div>
+          ) : null}
           {busy ? (
             <div className="mx-auto mt-1 flex w-full max-w-[760px] justify-start" data-testid="chat-thinking-orb">
               <ThinkingOrb />

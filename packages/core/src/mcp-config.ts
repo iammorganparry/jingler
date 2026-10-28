@@ -72,6 +72,8 @@ export const McpConfigRemote = Schema.Struct({
   displayName: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
   iconUrl: Schema.optional(McpIconUrl),
   enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /** Tool names the operator has turned off for this server. Absent means none. */
+  disabledTools: Schema.optional(Schema.Array(Schema.String)),
   timeout: Schema.optional(Schema.Number.pipe(Schema.positive()))
 }).pipe(
   Schema.filter(
@@ -96,6 +98,8 @@ export const McpConfigLocal = Schema.Struct({
   displayName: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
   iconUrl: Schema.optional(McpIconUrl),
   enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /** Tool names the operator has turned off for this server. Absent means none. */
+  disabledTools: Schema.optional(Schema.Array(Schema.String)),
   timeout: Schema.optional(Schema.Number.pipe(Schema.positive()))
 })
 export type McpConfigLocal = Schema.Schema.Type<typeof McpConfigLocal>
@@ -145,6 +149,50 @@ export const mcpNameError = (name: string): string | null => {
 export const McpImportSourceId = Schema.Literal("claude", "codex", "opencode")
 export type McpImportSourceId = Schema.Schema.Type<typeof McpImportSourceId>
 
+/** Operator's choice for an import candidate whose name clashes with an existing server. */
+export const McpImportResolution = Schema.Literal("keep-mine", "replace", "keep-both")
+export type McpImportResolution = Schema.Schema.Type<typeof McpImportResolution>
+
+/** First `base`, then `base-2`, `base-3`, … — whichever isn't already in `taken`. Used by "keep both". */
+export const firstFreeName = (base: string, taken: ReadonlySet<string>): string => {
+  if (!taken.has(base)) return base
+  let suffix = 2
+  while (taken.has(`${base}-${suffix}`)) suffix++
+  return `${base}-${suffix}`
+}
+
+/**
+ * Apply per-name conflict resolutions to a requested import selection.
+ * No resolution for a conflicting name = current behaviour (skip, i.e. "keep mine").
+ */
+export const applyImportResolutions = (
+  selected: ReadonlyArray<{ readonly name: string; readonly entry: McpConfigEntry }>,
+  existingNames: ReadonlySet<string>,
+  resolutions: Readonly<Record<string, McpImportResolution>>
+): ReadonlyArray<{ readonly name: string; readonly entry: McpConfigEntry }> => {
+  const taken = new Set(existingNames)
+  const out: Array<{ name: string; entry: McpConfigEntry }> = []
+  for (const candidate of selected) {
+    const conflict = existingNames.has(candidate.name)
+    if (!conflict) {
+      out.push(candidate)
+      taken.add(candidate.name)
+      continue
+    }
+    const resolution = resolutions[candidate.name] ?? "keep-mine"
+    if (resolution === "keep-mine") continue
+    if (resolution === "replace") {
+      out.push(candidate)
+      taken.add(candidate.name)
+      continue
+    }
+    const freeName = firstFreeName(candidate.name, taken)
+    out.push({ name: freeName, entry: candidate.entry })
+    taken.add(freeName)
+  }
+  return out
+}
+
 /** Where a candidate was found: a config file, Claude's settings.json or managed-mcp.json, a claude.ai connector, or a Claude plugin. */
 export const McpImportOrigin = Schema.Literal("user", "user-settings", "managed", "claude.ai", "plugin")
 export type McpImportOrigin = Schema.Schema.Type<typeof McpImportOrigin>
@@ -161,9 +209,25 @@ export const McpImportCandidateView = Schema.Struct({
   /** Display summary — the URL or argv. */
   target: Schema.String,
   /** Why this candidate cannot be imported; null when it can. */
-  problem: Schema.NullOr(Schema.String)
+  problem: Schema.NullOr(Schema.String),
+  /** True when the source config already carries an OAuth server; it imports in `needs-auth`. */
+  needsSignIn: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** True when the source entry is missing an env/header value it references (e.g. an unset `{env:VAR}`). */
+  needsSecrets: Schema.optionalWith(Schema.Boolean, { default: () => false })
 })
 export type McpImportCandidateView = Schema.Schema.Type<typeof McpImportCandidateView>
+
+/** Does any header/environment value reference an `{env:VAR}` that `env` doesn't set? Used to flag import candidates that need a secret filled in after import. */
+export const entryNeedsSecrets = (
+  entry: McpConfigEntry,
+  env: Readonly<Record<string, string | undefined>>
+): boolean => {
+  const values = entry.type === "remote" ? Object.values(entry.headers) : Object.values(entry.environment)
+  return values.some((value) => {
+    const matches = [...value.matchAll(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g)]
+    return matches.some(([, name]) => !env[name!])
+  })
+}
 
 const PLACEHOLDER = /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g
 

@@ -1,5 +1,5 @@
 import { Match, Schema } from "effect"
-import { DiffStat } from "./domain.js"
+import { DiffStat, WorkMode } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
 import { FileChangeSet } from "./runtime/file-change.js"
 import { PlannotatorProjection } from "./plannotator-projection.js"
@@ -37,6 +37,12 @@ export const ToolCall = Schema.Struct({
   name: Schema.String,
   /** Primary target — file path or query, or null. */
   target: Schema.NullOr(Schema.String),
+  /**
+   * Agent-written, present-tense summary of this call (≤60 chars), when the
+   * model filled the tool's `intent` argument. Optional for the same decode
+   * compatibility reason as `output`: older transcripts never carried it.
+   */
+  intent: Schema.optional(Schema.String),
   status: ToolStatus,
   /** Trailing meta, e.g. "142 lines" / "0 hits" / "6 commits". */
   meta: Schema.NullOr(Schema.String),
@@ -366,7 +372,9 @@ export type GatePart = Schema.Schema.Type<typeof GatePart>
  */
 export const QuestionPart = Schema.TaggedStruct("Question", {
   request: QuestionRequest,
-  answers: Schema.NullOr(Schema.Array(QuestionAnswer))
+  answers: Schema.NullOr(Schema.Array(QuestionAnswer)),
+  /** True when the operator stopped the run before answering; optional so old transcripts decode. */
+  cancelled: Schema.optional(Schema.Boolean)
 })
 export type QuestionPart = Schema.Schema.Type<typeof QuestionPart>
 
@@ -386,6 +394,14 @@ export const BranchDriftPart = Schema.TaggedStruct("BranchDrift", {
   liveBranch: Schema.NullOr(Schema.String)
 })
 export type BranchDriftPart = Schema.Schema.Type<typeof BranchDriftPart>
+
+/** A persisted PR lifecycle card in the transcript: "Opened #N · stacked on #M" or "PR #N merged". */
+export const PrEventPart = Schema.TaggedStruct("PrEvent", {
+  kind: Schema.Literal("opened", "merged"),
+  number: Schema.Number,
+  stackedOn: Schema.optional(Schema.Number)
+})
+export type PrEventPart = Schema.Schema.Type<typeof PrEventPart>
 
 /**
  * The carried-forward summary of a conversation, produced by a background run
@@ -483,6 +499,7 @@ export const ContentPart = Schema.Union(
   QuestionPart,
   PlanPart,
   BranchDriftPart,
+  PrEventPart,
   ContextPart
 )
 export type ContentPart = Schema.Schema.Type<typeof ContentPart>
@@ -696,6 +713,8 @@ export const StreamEvent = Schema.Union(
     id: Schema.String,
     name: Schema.String,
     target: Schema.NullOr(Schema.String),
+    /** Agent-written present-tense call summary, when the model supplied one. */
+    intent: Schema.optional(Schema.String),
     agentId: AgentId
   }),
   /**
@@ -739,6 +758,8 @@ export const StreamEvent = Schema.Union(
   Schema.TaggedStruct("PlannotatorStateChanged", {
     state: PlannotatorProjection
   }),
+  /** Server-side Plan/Build switch (e.g. plan approval); the renderer follows it. */
+  Schema.TaggedStruct("WorkModeChanged", { workMode: WorkMode }),
   /** The agent proposed a plan (ExitPlanMode) — appends a new interactive Plan part. */
   Schema.TaggedStruct("PlanProposed", { plan: Plan }),
   /** A runner-authoritative update to an existing plan (comment/routed/status sync). */
@@ -964,7 +985,7 @@ export const settleLoaded = (msg: Message): Message => {
   const orphaned = base.parts.some(
     (p) =>
       (p._tag === "Gate" && p.gate.status === "pending") ||
-      (p._tag === "Question" && p.answers === null) ||
+      (p._tag === "Question" && p.answers === null && !p.cancelled) ||
       (p._tag === "Plan" && (p.plan.status === "proposed" || p.plan.status === "revising"))
   )
   if (!orphaned) return base
@@ -974,8 +995,8 @@ export const settleLoaded = (msg: Message): Message => {
       if (p._tag === "Gate" && p.gate.status === "pending") {
         return { ...p, gate: { ...p.gate, status: "rejected" as const } }
       }
-      if (p._tag === "Question" && p.answers === null) {
-        return { ...p, answers: [] }
+      if (p._tag === "Question" && p.answers === null && !p.cancelled) {
+        return { ...p, answers: [], cancelled: true }
       }
       if (p._tag === "Plan" && (p.plan.status === "proposed" || p.plan.status === "revising")) {
         return { ...p, plan: { ...p.plan, status: "stale" as const } }
@@ -1071,6 +1092,7 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
           id: e.id,
           name: e.name,
           target: e.target,
+          intent: e.intent,
           status: "running",
           meta: null,
           diff: null,
@@ -1117,7 +1139,7 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
       )
     })),
 
-    Match.tag("SessionIssueLinksChanged", "PlannotatorStateChanged", "SessionCompletionDeclared", "SessionSettled", () => msg),
+    Match.tag("SessionIssueLinksChanged", "PlannotatorStateChanged", "WorkModeChanged", "SessionCompletionDeclared", "SessionSettled", () => msg),
 
     Match.tag("GateRequested", (e) => {
       const part: GatePart = { _tag: "Gate", gate: e.gate }
@@ -1170,7 +1192,8 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
               liveBranch: e.liveBranch
             }
           : { _tag: "Text", text: e.message }
-      return { ...msg, streaming: false, parts: [...parts, part] }
+      const base = e._tag === "Failed" && e.message === STOPPED_NOTE ? cancelPendingQuestions(msg) : msg
+      return { ...base, streaming: false, parts: [...base.parts, part] }
     }),
 
     // Sub-agent lifecycle events are conversation-level, not part of any single
@@ -1518,11 +1541,19 @@ export const setQuestionAnswers = (
   )
 })
 
+/** Mark every unanswered question in a message cancelled (the operator stopped the run). */
+export const cancelPendingQuestions = (msg: Message): Message => ({
+  ...msg,
+  parts: msg.parts.map((p) =>
+    p._tag === "Question" && p.answers === null && !p.cancelled ? { ...p, cancelled: true } : p
+  )
+})
+
 /** The first unanswered question group across a transcript, or null. */
 export const pendingQuestion = (messages: ReadonlyArray<Message>): QuestionRequest | null => {
   for (let i = messages.length - 1; i >= 0; i--) {
     for (const part of messages[i]!.parts) {
-      if (part._tag === "Question" && part.answers === null) return part.request
+      if (part._tag === "Question" && part.answers === null && !part.cancelled) return part.request
     }
   }
   return null
@@ -1899,7 +1930,14 @@ export const activityLabel = (activity: SessionActivity): string =>
  * yes (Needs Input), paused (Idle), or resolved (Settled). Anything finer is
  * detail they didn't ask for at the price of the thing they did.
  */
-export type SessionDisplayStatus = "thinking" | "running" | "needs-input" | "monitoring" | "idle" | "settled"
+export type SessionDisplayStatus =
+  | "thinking"
+  | "running"
+  | "needs-input"
+  | "monitoring"
+  | "idle"
+  | "settled"
+  | "interrupted"
 
 /**
  * What a session reports in the sidebar, from its live activity (when it has one)
@@ -1918,10 +1956,13 @@ export type SessionDisplayStatus = "thinking" | "running" | "needs-input" | "mon
  *    one thing for the human to do about it.
  *  - **Legacy "done" folds to idle.** Nothing writes it. Settled is reserved for
  *    an explicit, host-admitted declaration that all requested work is resolved.
+ *  - **Interrupted never outranks live work.** `interrupted` is a restart-time
+ *    fact about a stale transcript; any live activity means the run resumed.
  */
 export const displayStatusOf = (
   activity: SessionActivity | null | undefined,
-  status: SessionStatus
+  status: SessionStatus,
+  interrupted?: boolean
 ): SessionDisplayStatus => {
   if (activity) {
     switch (activity.kind) {
@@ -1937,6 +1978,7 @@ export const displayStatusOf = (
         return "running"
     }
   }
+  if (interrupted) return "interrupted"
   switch (status) {
     case "settled":
       return "settled"

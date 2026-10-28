@@ -16,7 +16,9 @@ import {
   ListTodo,
   Loader2,
   Maximize2,
-  MoreHorizontal
+  MoreHorizontal,
+  PauseCircle,
+  XCircle
 } from "lucide-react"
 import { useState } from "react"
 import { Badge } from "../components/badge.js"
@@ -78,14 +80,16 @@ const approvalStages = (plan: Plan, document?: PlanDocument | null): ReadonlyArr
 function StageStatusIcon({ status }: { status: PlanStageExecutionStatus }) {
   switch (status) {
     case "completed":
-      return <CheckCircle2 className="size-3.5 shrink-0 text-green" />
+      return <CheckCircle2 className="size-3.5 shrink-0 text-muted-foreground" />
     case "running":
-      return <Spin className="shrink-0"><Loader2 className="size-3.5 text-blue" /></Spin>
+      return <Spin className="shrink-0"><Loader2 className="size-3.5 text-text-bright" /></Spin>
     case "blocked":
+      return <CircleAlert className="size-3.5 shrink-0 text-muted-foreground" />
     case "failed":
-      return <CircleAlert className="size-3.5 shrink-0 text-yellow" />
-    case "queued":
+      return <XCircle className="size-3.5 shrink-0 text-state-failed" />
     case "interrupted":
+      return <PauseCircle className="size-3.5 shrink-0 text-muted-foreground" />
+    case "queued":
       return <CircleDashed className="size-3.5 shrink-0 text-dim" />
   }
 }
@@ -93,11 +97,11 @@ function StageStatusIcon({ status }: { status: PlanStageExecutionStatus }) {
 function TaskStatusIcon({ status }: { status: PlanTaskStatus }) {
   switch (status) {
     case "completed":
-      return <CheckCircle2 className="size-3 shrink-0 text-green" />
+      return <CheckCircle2 className="size-3 shrink-0 text-muted-foreground" />
     case "in-progress":
-      return <Spin className="shrink-0"><Loader2 className="size-3 text-blue" /></Spin>
+      return <Spin className="shrink-0"><Loader2 className="size-3 text-text-bright" /></Spin>
     case "blocked":
-      return <CircleAlert className="size-3 shrink-0 text-yellow" />
+      return <CircleAlert className="size-3 shrink-0 text-muted-foreground" />
     case "pending":
       return <Circle className="size-3 shrink-0 text-dim" />
   }
@@ -221,7 +225,7 @@ export function PlanApprovalCard({
       <footer className="flex min-h-12 flex-wrap items-center gap-2 bg-sunken/60 px-3.5 py-2.5">
         <span className="flex-1" />
         {onOpenReview && (
-          <Button variant="ghost" size="sm" onClick={onOpenReview}>View Plan</Button>
+          <Button variant="ghost" size="sm" onClick={onOpenReview}>Open plan</Button>
         )}
       </footer>
     </section>

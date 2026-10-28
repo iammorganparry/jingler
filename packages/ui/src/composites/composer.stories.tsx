@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useEffect, useRef, useState } from "react"
-import type { PermissionMode, ReasoningSetting } from "@jingler/core"
+import type { PermissionMode, ReasoningSetting, WorkMode } from "@jingler/core"
 import { Check, ImagePlus, Search, Sparkles } from "lucide-react"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { testProviderCatalog } from "../test-support.js"
@@ -27,6 +27,13 @@ const meta: Meta = {
 }
 export default meta
 type Story = StoryObj
+
+function WorkModeFixture({ initialWorkMode }: { initialWorkMode: WorkMode }) {
+  const [workMode, setWorkMode] = useState<WorkMode>(initialWorkMode)
+  return <Composer mode="auto" onSetMode={() => {}} workMode={workMode} onSetWorkMode={setWorkMode} onSend={() => {}} />
+}
+export const WorkModePlan: Story = { render: () => <WorkModeFixture initialWorkMode="plan" /> }
+export const WorkModeBuild: Story = { render: () => <WorkModeFixture initialWorkMode="build" /> }
 
 function ComposerFixture() {
   const [mode, setMode] = useState<PermissionMode>("accept-edits")
@@ -75,7 +82,6 @@ function ComposerFixture() {
       repo="jingler"
       branch="feat/adopt-beui-component-system"
       diff={{ files: 3, added: 118, removed: 42 }}
-      allowPlan
       onSend={() => {}}
     />
   )
@@ -282,3 +288,37 @@ export const ProductionLayout: Story = {
     </main>
   )
 }
+
+function OpenModelPopoverFixture({ noModel = false }: { noModel?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() =>
+      ref.current?.querySelector<HTMLButtonElement>('button[aria-label="Model settings"], button[aria-label="Select model"]')?.click()
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  return (
+    <main className="flex h-screen min-h-[620px] items-end justify-center bg-editor p-[30px] text-text">
+      <div ref={ref} className="w-full max-w-[760px]">
+        {noModel ? <Composer providerCatalog={catalog} connectionId={null} modelId={null} onSetModel={() => {}} onSend={() => {}} /> : <ComposerFixture />}
+      </div>
+    </main>
+  )
+}
+
+export const ModelPopoverWithReasoningAndEnvironment: Story = { render: () => <OpenModelPopoverFixture /> }
+export const ModelPopoverNoModel: Story = { render: () => <OpenModelPopoverFixture noModel /> }
+
+const voice = (status: "idle" | "recording" | "transcribing" | "error" | "noModel", message?: string) => ({
+  status, message, onToggle: () => {}, onCancel: () => {}, onDismiss: () => {}
+})
+const VoiceFixture = ({ v }: { v: ReturnType<typeof voice> }) => (
+  <main className="flex h-screen items-end justify-center bg-editor p-[30px] text-text">
+    <div className="w-full max-w-[760px]"><Composer voiceInput={v} onSend={() => {}} /></div>
+  </main>
+)
+export const VoiceIdle: Story = { render: () => <VoiceFixture v={voice("idle")} /> }
+export const VoiceRecording: Story = { render: () => <VoiceFixture v={voice("recording")} /> }
+export const VoiceTranscribing: Story = { render: () => <VoiceFixture v={voice("transcribing")} /> }
+export const VoiceError: Story = { render: () => <VoiceFixture v={voice("error", "Microphone access is blocked in system settings")} /> }
+export const VoiceNoModel: Story = { render: () => <VoiceFixture v={voice("noModel")} /> }

@@ -1,16 +1,32 @@
-import type { Environment, ProviderCatalog, ProviderConnectionId, Session } from "@jingler/core"
+import type { Environment, ProviderCatalog, ProviderConnectionId, ProviderId, Session } from "@jingler/core"
 
 export interface ProviderRecovery {
   readonly title: string
   readonly message: string
+  /** `signed-out` cards offer Reconnect in place; the rest open provider settings. */
+  readonly kind?: "signed-out"
+  readonly connectionId?: ProviderConnectionId
+  readonly providerId?: ProviderId
 }
 
+const PROVIDER_NAMES: Record<string, string> = { claude: "Claude Code", "openai-codex": "ChatGPT Codex" }
+
 const connectionStatusRecovery = (
-  status: ProviderCatalog["connections"][number]["connection"]["status"]
+  entry: ProviderCatalog["connections"][number]
 ): ProviderRecovery => {
+  const { status, providerId, id } = entry.connection
   const reauthenticate = ["expired", "revoked", "reauthentication-required"].includes(
     status
   )
+  if (reauthenticate) {
+    return {
+      kind: "signed-out",
+      connectionId: id,
+      providerId,
+      title: `${PROVIDER_NAMES[providerId] ?? providerId} signed out during this run`,
+      message: "Reconnect to continue. A subscription never falls back to an API key."
+    }
+  }
   return {
     title: reauthenticate ? "Provider authentication expired" : "Provider entitlement unavailable",
     message: reauthenticate
@@ -65,7 +81,7 @@ export const providerRecoveryOf = (
     }
   }
   if (connection.connection.status !== "authenticated") {
-    return connectionStatusRecovery(connection.connection.status)
+    return connectionStatusRecovery(connection)
   }
   const model = connection.models.find((candidate) => candidate.id === selection.modelId)
   if (model?.selectable === true) return undefined
@@ -98,17 +114,37 @@ export const providerRebindOf = (
     target?: Environment
   }
 ): ProviderConnectionId | undefined => {
-  if (selection.connectionSelectionRequired || selection.modelSelectionRequired) return
+  const candidates = providerRebindCandidatesOf(catalog, selection)
+  return candidates.length === 1 ? candidates[0]?.id : undefined
+}
+
+/**
+ * "Limited until HH:MM" when the pinned connection reports a usage limit. The
+ * catalog has no structured reset time, so this reads the probe's
+ * `rateLimitLabel` ("Limited until 16:40").
+ */
+export const providerLimitOf = (
+  catalog: ProviderCatalog,
+  connectionId: Session["connectionId"] | null
+): string | undefined =>
+  catalog.connections
+    .find(({ connection }) => connection.id === connectionId)
+    ?.connection.subscription.rateLimitLabel?.match(/^Limited until \S+/u)?.[0]
+
+/** Signed-in accounts that could take over a gone pinned connection; never auto-picked when several. */
+export const providerRebindCandidatesOf = (
+  catalog: ProviderCatalog,
+  selection: Parameters<typeof providerRebindOf>[1]
+): ReadonlyArray<ProviderCatalog["connections"][number]["connection"]> => {
+  if (selection.connectionSelectionRequired || selection.modelSelectionRequired) return []
   if (selection.connectionId == null || selection.providerId == null || selection.modelId == null)
-    return
-  const pinnedExists = catalog.connections.some(
-    (candidate) => candidate.connection.id === selection.connectionId
-  )
-  if (pinnedExists) return
-  const candidates = catalog.connections.filter(
-    ({ connection }) =>
-      connection.providerId === selection.providerId &&
-      providerRecoveryOf(catalog, { ...selection, connectionId: connection.id }) === undefined
-  )
-  return candidates.length === 1 ? candidates[0]?.connection.id : undefined
+    return []
+  if (catalog.connections.some(({ connection }) => connection.id === selection.connectionId)) return []
+  return catalog.connections
+    .filter(
+      ({ connection }) =>
+        connection.providerId === selection.providerId &&
+        providerRecoveryOf(catalog, { ...selection, connectionId: connection.id }) === undefined
+    )
+    .map(({ connection }) => connection)
 }

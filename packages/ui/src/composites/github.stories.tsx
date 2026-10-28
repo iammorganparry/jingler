@@ -7,7 +7,10 @@ import type {
   ReviewSeverity
 } from "@jingler/core"
 import { PullRequestView } from "./pull-request-view.js"
-import { ReviewFindingRow } from "./review-findings.js"
+import { PrReviewGroup } from "./pr-review-group.js"
+import { PrTimelineEntry } from "./pr-timeline-entry.js"
+import { ReadinessChecklist } from "./readiness-checklist.js"
+import { FindingsList, ReviewFindingRow } from "./review-findings.js"
 import { SettingsView } from "./settings-view.js"
 
 const meta: Meta = { title: "GitHub", parameters: { layout: "fullscreen" } }
@@ -139,11 +142,134 @@ const pr: PullRequestData = {
   mergeBlockers: ["1 failing check (lint)", "1 change requested"]
 }
 
+/** Readiness checklist: blocked PR (failing lint, conflicts, unresolved thread) vs a clean one. */
+export const ReadinessChecklistStates: Story = {
+  render: () => (
+    <div className="flex max-w-[760px] flex-col gap-4 bg-editor p-6">
+      <ReadinessChecklist pr={pr} />
+      <ReadinessChecklist
+        pr={{
+          ...pr,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+          checks: pr.checks.filter((c) => c.status === "pass"),
+          reviewThreads: pr.reviewThreads.map((t) => ({ ...t, isResolved: true }))
+        }}
+      />
+    </div>
+  )
+}
+
+/** Timeline entries of every kind: neutral icon and label, no kind-coded colour. */
+export const TimelineEntries: Story = {
+  render: () => (
+    <div className="flex max-w-[760px] flex-col gap-4 bg-editor p-6">
+      {(["commented", "approved", "changes_requested"] as const).map((kind) => (
+        <PrTimelineEntry
+          key={kind}
+          item={{ id: kind, author: "dan", kind, body: `A ${kind} entry.`, createdAt: "2026-07-11T09:00:00.000Z", path: null, line: null }}
+        />
+      ))}
+    </div>
+  )
+}
+
+/** Review threads grouped under one review: open + outdated, and resolved (collapsed), neutral chrome. */
+export const ReviewThreads: Story = {
+  render: () => (
+    <div className="max-w-[760px] bg-editor p-6">
+      <PrReviewGroup threads={pr.reviewThreads} prAuthor="claude-agent" onResolve={() => {}} onReply={() => {}} />
+    </div>
+  )
+}
+
+/** Loading (skeleton at real row height) and load-error (Retry) states of the Checks view. */
+export const ChecksLoadingAndError: Story = {
+  render: () => (
+    <div className="flex h-screen flex-col bg-editor">
+      <PullRequestView pr={null} connected busy />
+      <PullRequestView pr={null} connected loadError="Couldn't reach GitHub." onRetryLoad={() => {}} />
+    </div>
+  )
+}
+
+/** Loading skeleton while the PR read is in flight. */
+export const PullRequestLoading: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={null} connected busy />
+    </div>
+  )
+}
+
+/** The read failed — error with Retry. */
+export const PullRequestLoadError: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={null} connected loadError="Couldn't reach GitHub." onRetryLoad={() => {}} />
+    </div>
+  )
+}
+
+/** Repository not connected — connection message + Connect GitHub. */
+export const PullRequestNotConnected: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={null} connected={false} connectionMessage="Install the GitHub App on this repository to create and review pull requests." onConnectGithub={() => {}} />
+    </div>
+  )
+}
+
+/** Read-only team PR from the inbox — no merge or review controls. */
+export const PullRequestReadOnly: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={pr} connected readOnly onOpenSession={() => {}} sessionActionLabel="Start session from this PR" onOpenOnGithub={() => {}} />
+    </div>
+  )
+}
+
+/** Merged header state. */
+export const PullRequestMerged: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={{ ...pr, state: "merged" }} connected />
+    </div>
+  )
+}
+
+/** Closed header state. */
+export const PullRequestClosed: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={{ ...pr, state: "closed" }} connected />
+    </div>
+  )
+}
+
 /** The Pull Request tab — open PR with checks, reviewers, and a blocked merge. */
 export const PullRequestOpen: Story = {
   render: () => (
     <div className="flex h-screen bg-editor">
       <PullRequestView pr={pr} connected sessionTitle="Refactor auth flow" />
+    </div>
+  )
+}
+
+/** PR header at a 600px tab width: title + #number, one-line meta, actions. */
+export const PullRequestHeader600: Story = {
+  render: () => (
+    <div className="flex h-[480px] w-[600px] bg-editor">
+      <PullRequestView pr={pr} connected onOpenSession={() => {}} onOpenOnGithub={() => {}} sessionActionLabel="Open session" />
+    </div>
+  )
+}
+
+/** Draft PR with no commit/file counts or head branch: those fields are omitted. */
+export const PullRequestHeaderSparse: Story = {
+  render: () => (
+    <div className="flex h-[480px] w-[600px] bg-editor">
+      <PullRequestView pr={{ ...pr, state: "draft", commits: 0, changedFiles: 0, additions: 0, deletions: 0, headRefName: "" }} connected />
     </div>
   )
 }
@@ -295,6 +421,21 @@ export const ReviewFindingCards: Story = {
   }
 }
 
+/** Dismissed findings collapse into a "Dismissed (N) · Show" row; Show reveals them with Restore. */
+export const ReviewFindingsDismissed: Story = {
+  render: () => (
+    <div className="w-[420px] bg-editor p-6">
+      <FindingsList
+        findings={adversarialReview.findings}
+        review={adversarialReview}
+        canRoute
+        dismissedFindingIds={new Set(adversarialReview.findings.slice(0, 2).map((f) => f.id))}
+        onDismissFinding={() => {}}
+      />
+    </div>
+  )
+}
+
 /** A clean review — the reviewer argued and found nothing. */
 export const PullRequestReviewClean: Story = {
   render: () => (
@@ -349,7 +490,7 @@ export const PullRequestReviewRunning: Story = {
   )
 }
 
-/** Draft PR — the side panel offers "Ready for review" instead of merge. */
+/** Draft PR — the side panel offers "Mark ready for review" instead of merge. */
 export const PullRequestDraft: Story = {
   render: () => (
     <div className="flex h-screen bg-editor">
@@ -399,6 +540,35 @@ export const Settings: Story = {
         github={{ enabled: true, autoCreatePr: false, autoDetectPr: true }}
         onSaveGithub={() => {}}
         onClose={() => {}}
+      />
+    </div>
+  )
+}
+
+/** Merge box with a behind-the-base blocker: row with `Update branch`, disabled split button. */
+export const PullRequestMergeBlocked: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView
+        pr={{ ...pr, mergeStateStatus: "BEHIND", mergeBlockers: ["Branch is out of date with the base"] }}
+        connected
+        onUpdateBranch={() => {}}
+        onMerge={() => {}}
+      />
+    </div>
+  )
+}
+
+/** Merge box blocked by conflicts: "Ask agent to resolve conflicts" replaces the old dead end (#436). */
+export const PullRequestConflicted: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView
+        pr={{ ...pr, mergeable: "CONFLICTING", mergeStateStatus: "DIRTY", mergeBlockers: ["Merge conflicts"] }}
+        connected
+        conflictedFiles={["src/auth/session.ts", "src/auth/token-store.ts"]}
+        onResolveConflicts={() => {}}
+        onMerge={() => {}}
       />
     </div>
   )

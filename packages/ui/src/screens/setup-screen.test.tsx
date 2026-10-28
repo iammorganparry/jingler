@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   AgentEndpointCatalog,
   ProviderCatalog,
-  ResourceDetectionResult,
   type GitHubConnection,
   type ProviderConnectionId,
 } from "@jingler/core";
@@ -115,38 +114,6 @@ const unconfirmedCatalog = Schema.decodeSync(ProviderCatalog)({
   stale: false,
 });
 
-const detectedResources = Schema.decodeSync(ResourceDetectionResult)({
-  candidates: [
-    {
-      id: "deploy",
-      kind: "skill",
-      name: "Deploy",
-      description: "Deploy the application.",
-      byteLength: 42,
-      provenance: {
-        origin: "shared",
-        sourceRoot: "/resources",
-        sourcePath: "/resources/deploy/SKILL.md",
-        importedAt: null,
-      },
-    },
-    {
-      id: "review",
-      kind: "prompt",
-      name: "Review",
-      description: "Review current changes.",
-      byteLength: 37,
-      provenance: {
-        origin: "claude",
-        sourceRoot: "/prompts",
-        sourcePath: "/prompts/review.md",
-        importedAt: null,
-      },
-    },
-  ],
-  skipped: [],
-});
-
 const props = (
   overrides: Partial<SetupScreenProps> = {},
 ): SetupScreenProps => ({
@@ -154,6 +121,10 @@ const props = (
   github,
   onChooseDir: vi.fn(),
   onContinue: vi.fn(),
+  onToggleRepo: vi.fn(),
+  onToggleAllRepos: vi.fn(),
+  onAddProjects: vi.fn(),
+  onCloneRepository: vi.fn(),
   onConnectGithub: vi.fn(),
   onSkipGithub: vi.fn(),
   onConnectClaude: vi.fn(),
@@ -163,14 +134,106 @@ const props = (
   onSkipProvider: vi.fn(),
   onCancelAuth: vi.fn(),
   onRetryProvider: vi.fn(),
-  onImportResources: vi.fn(),
-  onSkipResources: vi.fn(),
-  onCancelResourceImport: vi.fn(),
-  onRetryResources: vi.fn(),
+    onSkipImportSessions: vi.fn(),
+    onContinueImportSessions: vi.fn(),
   ...overrides,
 });
 
 describe("SetupScreen", () => {
+  it("shows a failed folder scan and lets the user choose another folder", () => {
+    const onChooseDir = vi.fn();
+    render(<SetupScreen {...props({ error: "EACCES: permission denied, scandir '/Users/me/code'", onChooseDir })} />);
+    expect(screen.getByText(/permission denied/u)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Choose another folder" }));
+    expect(onChooseDir).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Try again and Skip for now when GitHub errors", () => {
+    const onRetryGithub = vi.fn();
+    const onSkipGithub = vi.fn();
+    render(
+      <SetupScreen
+        {...props({
+          step: "github",
+          github: { ...github, mode: "error", error: "timeout" },
+          onRetryGithub,
+          onSkipGithub,
+        })}
+      />,
+    );
+    expect(screen.getByText("GitHub didn't respond")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(onRetryGithub).toHaveBeenCalledTimes(1);
+    expect(onSkipGithub).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows login and installation count when connected", () => {
+    render(
+      <SetupScreen
+        {...props({
+          step: "github",
+          github: {
+            ...github,
+            mode: "connected",
+            connected: true,
+            user: { id: "1", login: "octocat", name: null, avatarUrl: null },
+            installations: [
+              {
+                id: "9",
+                account: { id: "2", login: "acme", type: "Organization", avatarUrl: null },
+                repositorySelection: "all",
+                permissions: {},
+                status: "active",
+                suspendedAt: null,
+              },
+            ],
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("Connected as @octocat")).toBeTruthy();
+    expect(screen.getByText(/1 installation · @acme/u)).toBeTruthy();
+  });
+
+  it("shows the 3-step stepper on step 1 and 2", () => {
+    const { rerender } = render(<SetupScreen {...props()} />);
+    const current = () => screen.getByRole("list", { name: "Progress" }).querySelector("[aria-current=step]")?.textContent;
+    expect(current()).toContain("Projects folder");
+    expect(screen.getByText("Agent")).toBeTruthy();
+    rerender(<SetupScreen {...props({ step: "github" })} />);
+    expect(current()).toContain("GitHub");
+  });
+
+  it("lists repositories with checkboxes and adds exactly the ticked ones", () => {
+    const onToggleRepo = vi.fn();
+    const onAddProjects = vi.fn();
+    const repo = (name: string) => ({ name, path: `/code/${name}`, defaultBranch: "main", currentBranch: "main", remoteUrl: null, githubSlug: null });
+    render(
+      <SetupScreen
+        {...props({
+          reposDir: "/code",
+          repos: [repo("a"), repo("b")],
+          selectedRepoPaths: ["/code/a", "/code/b"],
+          onToggleRepo,
+          onAddProjects,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "a" }));
+    expect(onToggleRepo).toHaveBeenCalledWith("/code/a");
+    fireEvent.click(screen.getByRole("button", { name: /Add 2 projects/u }));
+    expect(onAddProjects).toHaveBeenCalledOnce();
+  });
+
+  it("shows the empty state with Clone a repository", () => {
+    const onCloneRepository = vi.fn();
+    render(<SetupScreen {...props({ reposDir: "~/code", repos: [], onCloneRepository })} />);
+    expect(screen.getByText("No git repositories in ~/code")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clone a repository" }));
+    expect(onCloneRepository).toHaveBeenCalledOnce();
+  });
+
   it("does not present a provider harness picker", () => {
     render(<SetupScreen {...props()} />);
     expect(screen.queryByText("HARNESSES")).toBeNull();
@@ -179,8 +242,8 @@ describe("SetupScreen", () => {
 
   it("distinguishes PI connections from the native Claude CLI", () => {
     render(<SetupScreen {...props({ step: "provider", agentEndpointCatalog: endpointCatalog })} />)
-    expect(screen.getByText("PI · Claude Max · ready")).toBeTruthy()
-    expect(screen.getByText("Claude Code · signed-out")).toBeTruthy()
+    expect(screen.getByText("PI · Claude Max, ready")).toBeTruthy()
+    expect(screen.getByText("Claude Code, signed-out")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Connect Claude through PI" })).toBeTruthy()
   })
 
@@ -331,42 +394,17 @@ describe("SetupScreen", () => {
     expect(screen.getByText("https://example.test/device")).toBeTruthy();
   });
 
-  it("imports every detected resource with one action", () => {
-    const onImportResources = vi.fn();
+  it("renders the import-sessions step and skips it with its own handler", () => {
+    const onSkipImportSessions = vi.fn();
     render(
       <SetupScreen
-        {...props({
-          step: "resources",
-          resourceDetection: detectedResources,
-          onImportResources,
-        })}
+        {...props({ step: "importSessions", onSkipImportSessions })}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Import all" }));
-    expect(onImportResources).toHaveBeenCalledWith(
-      detectedResources.candidates,
-    );
+    expect(screen.getByRole("heading", { name: "Import existing sessions?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(onSkipImportSessions).toHaveBeenCalledOnce();
   });
 
-  it("searches resources without discarding hidden selections", () => {
-    const onImportResources = vi.fn();
-    render(
-      <SetupScreen
-        {...props({
-          step: "resources",
-          resourceDetection: detectedResources,
-          onImportResources,
-        })}
-      />,
-    );
-
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search agent resources" }), {
-      target: { value: "review" },
-    });
-    expect(screen.queryByText("Deploy", { exact: true })).toBeNull();
-    expect(screen.getByText("Review", { exact: true })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Import selected" }));
-    expect(onImportResources).toHaveBeenCalledWith(detectedResources.candidates);
-  });
 });

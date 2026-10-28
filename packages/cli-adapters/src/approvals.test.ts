@@ -49,9 +49,10 @@ describe("verdict", () => {
     expect(verdict("accept-edits", allow, cmd("npm test -- --watch"))).toBe("allow")
   })
 
-  it("runs everything in plan mode", () => {
-    expect(verdict("plan", none, cmd("git commit -am done"))).toBe("allow")
-    expect(verdict("plan", none, edit)).toBe("allow")
+  it("denies every mutating request in plan mode", () => {
+    expect(verdict("plan", none, cmd("git commit -am done"))).toBe("deny")
+    expect(verdict("plan", new Set(["git commit"]), cmd("git commit -am done"))).toBe("deny")
+    expect(verdict("plan", none, edit)).toBe("deny")
   })
 })
 

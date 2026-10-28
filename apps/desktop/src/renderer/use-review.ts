@@ -60,12 +60,16 @@ export interface ReviewState {
    */
   readonly reviewThreads: ReadonlyArray<PrReviewThread>
   readonly busy: boolean
+  /** The effective source's first load is in flight. */
+  readonly loading: boolean
+  /** The effective source failed to load, or null. */
+  readonly error: string | null
+  readonly retry: () => void
   readonly selectFile: (path: string) => void
   readonly toggleViewed: (path: string, viewed: boolean) => void
   readonly addDraft: (d: { path: string; line: number; endLine: number | null; body: string; routeToAgent: boolean }) => void
   readonly removeDraft: (id: string) => void
   readonly finishReview: (mode: "comment_only" | "send_to_agent") => void
-  readonly revertLines: (range: { path: string; startLine: number; endLine: number }) => void
   readonly revertFile: (path: string) => void
 }
 
@@ -112,6 +116,19 @@ const reviewThreadsFor = (
   threads: ReadonlyArray<PrReviewThread> | undefined
 ): ReadonlyArray<PrReviewThread> => source === "pr" ? (threads ?? []) : []
 
+const checkoutKeyPart = (checkoutId: string | undefined): ReadonlyArray<string> =>
+  checkoutId === undefined ? [] : [checkoutId]
+
+const loadStateOf = (query: {
+  readonly isLoading: boolean
+  readonly error: Error | null
+  readonly refetch: () => unknown
+}): Pick<ReviewState, "loading" | "error" | "retry"> => ({
+  loading: query.isLoading,
+  error: query.error?.message ?? null,
+  retry: () => void query.refetch()
+})
+
 /** `checkoutId` reads one checkout of a multi-repo session; absent means the active one. */
 export function useReview(session: Session, checkoutId?: string): ReviewState {
   const qc = useQueryClient()
@@ -135,7 +152,7 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   const reviewing = filter !== "all" || drafts.length > 0
 
   const prQuery = useQuery({
-    queryKey: ["github", "review", session.id, session.prNumber, ...(checkoutId === undefined ? [] : [checkoutId])],
+    queryKey: ["github", "review", session.id, session.prNumber, shared.prLayer, ...checkoutKeyPart(checkoutId)],
     enabled: reviewing && session.prNumber != null,
     queryFn: async () => {
       // Settle independently: the file list and the diff are separate fetches
@@ -143,8 +160,8 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
       // otherwise-complete review. (A single Promise.all rejection here showed
       // "No changes to review" even when 25 files had loaded.)
       const [filesResult, diffResult] = await Promise.allSettled([
-        rpc.githubFiles(session.id, checkoutId),
-        rpc.githubDiff(session.id, checkoutId)
+        rpc.githubFiles(session.id, shared.prLayer ?? undefined, checkoutId),
+        rpc.githubDiff(session.id, shared.prLayer ?? undefined, checkoutId)
       ])
       if (filesResult.status === "rejected") throw filesResult.reason
       return {
@@ -163,7 +180,7 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   // old PR after a new one was opened.
   const threadsQuery = useQuery({
     queryKey: threadsKey(session.id, session.prNumber),
-    queryFn: () => rpc.githubPr(session.id, checkoutId),
+    queryFn: () => rpc.githubPr(session.id, undefined, checkoutId),
     enabled: reviewing && filter === "pr" && session.prNumber != null
   })
   const localQuery = useQuery({
@@ -286,16 +303,6 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   )
 
   const refetchLocal = () => qc.invalidateQueries({ queryKey: localKey(session.id) })
-  const revertLines = useCallback(
-    (range: { path: string; startLine: number; endLine: number }) => {
-      void rpc
-        .workspaceRevertLines(session.id, range.path, range.startLine, range.endLine)
-        .then(refetchLocal)
-        .catch(() => {})
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.id]
-  )
   const revertFile = useCallback(
     (path: string) => {
       void rpc.workspaceRevertFile(session.id, path).then(refetchLocal).catch(() => {})
@@ -303,6 +310,8 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [session.id]
   )
+
+  const activeQuery = effective === "pr" ? prQuery : localQuery
 
   return {
     filter,
@@ -321,12 +330,12 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
     // lines that don't correspond, so the source decides whether they exist.
     reviewThreads: reviewThreadsFor(effective, threadsQuery.data?.reviewThreads),
     busy: prQuery.isPending || localQuery.isPending,
+    ...loadStateOf(activeQuery),
     selectFile: setSelectedPath,
     toggleViewed,
     addDraft,
     removeDraft,
     finishReview,
-    revertLines,
     revertFile
   }
 }

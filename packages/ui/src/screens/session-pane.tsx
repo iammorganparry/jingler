@@ -1,3 +1,4 @@
+import type { SubagentFleetNode } from "@jingler/core"
 import {
   type ReactNode,
   memo,
@@ -14,7 +15,8 @@ import type {
   IssueIdentity,
   IssueReference,
   Session,
-  SessionActivity
+  SessionActivity,
+  SessionPrStatus
 } from "@jingler/core"
 import {
   issueReferenceOf,
@@ -34,7 +36,11 @@ import {
 import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
-import { ViewRail, type ViewRailMenu } from "../app/view-rail.js"
+import { SessionPrsChip } from "../app/session-prs-chip.js"
+import { sessionPrRows } from "../lib/session-prs.js"
+import { SessionHeaderIdentity } from "../app/session-header-identity.js"
+import { HeaderViewButtons, type HeaderLinkChip, type HeaderViewItem } from "../app/header-view-buttons.js"
+import { ViewOverflowMenu } from "../app/view-overflow-menu.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
   sessionSurfaceKey,
@@ -46,6 +52,7 @@ import {
   applyEditorCommand,
   activeSurface,
   allTabs,
+  chatLaneOnly,
   closeSurfaceEverywhere,
   closeTab,
   dropTab,
@@ -53,9 +60,12 @@ import {
   focusedGroup,
   groupsOf,
   loadEditorLayout,
+  replaceLegacyTerminalView,
   openTab,
   pruneEditorLayout,
   resizeSplit,
+  withoutChatLane,
+  wouldCollapseChatLane,
   type EditorLayout
 } from "../app/editor-layout.js"
 import {
@@ -65,8 +75,16 @@ import {
   useEditorLayout
 } from "../app/editor-layout-machine.js"
 import { EditorGroups, type EditorTabMeta } from "../app/editor-groups.js"
+import { useChatLane } from "../app/use-chat-lane.js"
+import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchChecksChord, matchHeaderViewChord } from "../app/app-shortcuts.js"
+import { AskPill } from "../components/ask-pill.js"
+import { ChatDrawer } from "../app/chat-drawer.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
-import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
+import { CircleDot, File, GitPullRequest, MessageSquarePlus, MessagesSquare, SquareTerminal } from "lucide-react"
+import { TerminalPanel, terminalTabLabel, type SessionTerminals, type TerminalTab, type UseSessionTerminals } from "../app/terminal-panel.js"
+import { DiscardCommentsDialog } from "../composites/discard-comments-dialog.js"
+import { planDraftCount, planDraftKey } from "../composites/plan-comment-drafts.js"
+import { LinkedIssueSelector, type LinkedIssueSelectorItem } from "../composites/linked-issue-selector.js"
 
 const issueMenuValue = (issue: IssueReference): string =>
   `${issue.providerId}:${issue.providerAccountId ?? ""}:${issue.id}`
@@ -83,12 +101,13 @@ export interface ConversationPaneCtx {
   onOpenPlanReview: (stepId?: string) => void
   /** Open a repository path in its own editor tab. */
   onOpenFile: (path: string) => void
-  /** Present the Files workspace without requiring a path to be selected. */
-  onSelectFiles: () => void
+
   /** Reveal and focus the session browser for an operator-requested preview. */
   onSelectBrowser?: () => void
   /** Present canonical worktree changes for mutation recovery inspection. */
   onSelectChanges: () => void
+  /** Open the session's pull request view (a subagent's PR chip). */
+  onOpenPullRequest: () => void
   /** Open provider settings for authentication or certification recovery. */
   onOpenProviderSettings: () => void
   /** Present the first renderable streamed draft using this pane's width. */
@@ -160,8 +179,8 @@ export interface SessionPaneProps {
   ) => ReactNode
   /** Render this session's embedded browser inside its pane. */
   renderBrowser?: (session: Session, visible: boolean) => ReactNode
-  /** Render the session terminal as a normal closable/splittable view. */
-  renderTerminal?: (session: Session, visible: boolean) => ReactNode
+  /** Hook supplying the session's shells; each one is its own editor tab. */
+  useSessionTerminals?: UseSessionTerminals
   /**
    * List a path among the session's open files WITHOUT selecting it. A file
    * pane owns its own document; selecting its path in the shared actor would
@@ -175,7 +194,11 @@ export interface SessionPaneProps {
    * `renderConversation` is wired. Falls back again to the seeded transcript.
    */
   conversationPane?: ReactNode
-  /** Render children of the selected top-level agent in a second tab row. */
+  /** Fleet nodes per session id; any with a PR join the header PRs chip. */
+  /** Open a session PR (main or subagent) in the PR view. */
+  onOpenSessionPr?: (sessionId: string, prNumber: number) => void
+  subagentPrNodes?: Readonly<Record<string, ReadonlyArray<SubagentFleetNode>>>
+  /** Render the subagent chip for one chat in the lane header. */
   renderSubagentTabs?: (
     session: Session,
     ctx: {
@@ -199,6 +222,8 @@ export interface SessionPaneProps {
   liveActivity?: Record<string, SessionActivity>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
+  /** Polled PR status per session, for the Checks `a/b` badge. */
+  prStates?: Record<string, SessionPrStatus>
   /** Opens Files once when this session first stops in the debugger. */
   debugStopSequence?: number
   /** Open the Settings view — the "connect GitHub" escape hatch on empty states. */
@@ -246,10 +271,18 @@ export interface SessionPaneProps {
   onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for this session (the "+" menu's File entry). */
   onOpenFilePicker?: (sessionId: string) => void
-  /** Persist selection of a provider-scoped issue from the right view rail. */
+  /** Persist selection of a provider-scoped issue from the header issue picker. */
   onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
-  /** Optional pickers anchored to right-rail view icons, keyed by tab id. */
-  viewRailMenus?: Readonly<Record<TabKey, ViewRailMenu | undefined>>
+  /** Plugin-supplied linked-issue pickers shown in the header, keyed by tab id; overrides the derived ones. */
+  issueMenus?: Readonly<Record<TabKey, IssueMenu | undefined>>
+  /** Pinned header view ids in order (`Config.headerViews`). Absent hides the header buttons. */
+  headerViews?: ReadonlyArray<string>
+  /** Persist a new pinned set, from the overflow menu's "Pin to header". */
+  onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
+  /** Whether the file browser follows this chat's agent edits. */
+  followAgent?: boolean
+  /** Toggle the shared agent-follow mode. */
+  onToggleFollowAgent?: (enabled: boolean) => void
 }
 
 /**
@@ -279,6 +312,18 @@ export interface SessionPaneProps {
  * context it is itself installing, and `SessionPaneBody` has to know its own
  * width to decide whether the plan split will fit.
  */
+/** ⌘⇧D → Changes, ⌘⇧P → Checks (when present), ⌥1–⌥9 → pinned header view at that position. */
+const viewChordTarget = (
+  e: KeyboardEvent,
+  hasChecks: boolean,
+  pinned: ReadonlyArray<{ readonly id: string }>
+): string | undefined => {
+  if (matchChangesChord(e)) return BUILTIN_TAB.changes
+  if (matchChecksChord(e)) return hasChecks ? BUILTIN_TAB.checks : undefined
+  const position = matchHeaderViewChord(e)
+  return position === null ? undefined : pinned[position]?.id
+}
+
 export function SessionPane(props: SessionPaneProps) {
   return (
     <WidthTierProvider className="flex-col">
@@ -293,6 +338,7 @@ function resolveVisibleTab(tabs: ReadonlyArray<TabContribution>, tab: TabKey): T
 }
 
 const noop = () => {}
+const NO_SHELLS: ReadonlyArray<TerminalTab> = []
 
 const discardUntouchedChat = (
   surface: SessionSurface,
@@ -301,6 +347,10 @@ const discardUntouchedChat = (
   discard: SessionPaneProps["onCloseUntouchedChat"]
 ): void => {
   if (surface.kind === "chat" && copies <= 1) discard?.(sessionId, surface.id)
+}
+
+const killShell = (surface: SessionSurface, copies: number, terminals: SessionTerminals | undefined): void => {
+  if (surface.kind === "terminal" && copies <= 1) void terminals?.close(surface.id)
 }
 
 const SurfaceContent = memo(function SurfaceContent({
@@ -331,46 +381,43 @@ const surfaceOwner = (surface: SessionSurface): string | undefined =>
 const tabOf = (surface: SessionSurface): TabKey =>
   surface.kind === "view"
     ? surface.id
-    : surface.kind === "file"
-      ? BUILTIN_TAB.files
+    : surface.kind === "terminal"
+      ? BUILTIN_TAB.terminal
       : BUILTIN_TAB.conversation
 
-function buildProviderMenus(
+/** A linked-issue picker for one issue-provider tab: derived from the session's linked issues, or supplied by a plugin. */
+export interface IssueMenu {
+  readonly value: string
+  readonly ariaLabel: string
+  readonly items: ReadonlyArray<LinkedIssueSelectorItem>
+  readonly onSelect: (value: string) => void
+}
+
+function buildIssueMenu(
   session: Session,
-  tabs: ReadonlyArray<TabContribution>,
+  contribution: TabContribution | undefined,
   onSelectIssue: SessionPaneProps["onSelectIssue"]
-): Record<TabKey, ViewRailMenu | undefined> {
-  const providerMenus: Record<TabKey, ViewRailMenu | undefined> = {}
-  if (!onSelectIssue) return providerMenus
+): IssueMenu | undefined {
+  const providerId = contribution?.issueProviderId
+  if (!providerId || !onSelectIssue) return undefined
+  const issues = issueReferencesOf(session).filter((issue) => issue.providerId === providerId)
+  if (issues.length < 2) return undefined
   const selectedIssue = issueReferenceOf(session)
-  for (const contribution of tabs) {
-    const providerId = contribution.issueProviderId
-    if (!providerId) continue
-    const issues = issueReferencesOf(session).filter((issue) => issue.providerId === providerId)
-    if (issues.length < 2) continue
-    const selected = selectedIssue?.providerId === providerId ? selectedIssue : issues[0]!
-    providerMenus[contribution.id] = {
-      value: issueMenuValue(selected),
-      ariaLabel: `Select linked ${providerId[0]?.toUpperCase() ?? ""}${providerId.slice(1)} issue`,
-      options: issues.map((issue) => ({
-        value: issueMenuValue(issue),
-        label: issue.identifier,
-        description: issue.title,
-        ariaLabel: `${issue.identifier} ${issue.title}`,
-        searchText: `${issue.identifier} ${issue.title}`
-      })),
-      onSelect: (value) => {
-        const issue = issues.find((candidate) => issueMenuValue(candidate) === value)
-        if (!issue) return
-        onSelectIssue(session.id, {
-          providerId: issue.providerId,
-          ...(issue.providerAccountId ? { providerAccountId: issue.providerAccountId } : {}),
-          id: issue.id
-        })
-      }
+  const selected = selectedIssue?.providerId === providerId ? selectedIssue : issues[0]!
+  return {
+    value: issueMenuValue(selected),
+    ariaLabel: `Select linked ${providerId[0]?.toUpperCase() ?? ""}${providerId.slice(1)} issue`,
+    items: issues.map((issue) => ({ value: issueMenuValue(issue), identifier: issue.identifier, title: issue.title })),
+    onSelect: (value) => {
+      const issue = issues.find((candidate) => issueMenuValue(candidate) === value)
+      if (!issue) return
+      onSelectIssue(session.id, {
+        providerId: issue.providerId,
+        ...(issue.providerAccountId ? { providerAccountId: issue.providerAccountId } : {}),
+        id: issue.id
+      })
     }
   }
-  return providerMenus
 }
 
 const chatTitleOf = (session: Session, chatId: string): string => {
@@ -384,15 +431,20 @@ function describeEditorSurface(
   surface: SessionSurface,
   session: Session,
   contributions: ReadonlyArray<TabContribution>,
-  tabCtx: TabContext
+  tabCtx: TabContext,
+  shells: ReadonlyArray<TerminalTab>
 ): EditorTabMeta {
   const sessionLabel = session.title || UNTITLED_SESSION
+  if (surface.kind === "terminal") {
+    const label = terminalTabLabel(shells, surface.id)
+    return { label, icon: SquareTerminal, crumbs: [sessionLabel, label] }
+  }
   if (surface.kind === "chat") {
     const label = chatTitleOf(session, surface.id)
-    return { label, icon: MessagesSquare, crumbs: [sessionLabel, label] }
+    return { label, icon: MessagesSquare }
   }
   if (surface.kind === "file") {
-    return { label: surface.id.split("/").at(-1) ?? surface.id, crumbs: [sessionLabel, session.branch, surface.id] }
+    return { label: surface.id.split("/").at(-1) ?? surface.id, crumbs: surface.id.split("/") }
   }
   const contribution = contributions.find((candidate) => candidate.id === surface.id)
   const label = contribution?.label ?? surface.id
@@ -404,6 +456,24 @@ function describeEditorSurface(
     crumbs: owner ? [sessionLabel, owner, label] : [sessionLabel, label],
     ...(badge ? { badge } : {})
   }
+}
+
+function renderShell(
+  terminals: SessionTerminals | undefined,
+  id: string,
+  visible: boolean,
+  onRestart: (id: string) => void
+): ReactNode {
+  const tab = terminals?.tabs.find((candidate) => candidate.id === id)
+  if (!(terminals && tab)) return null
+  return (
+    <TerminalPanel
+      tab={tab}
+      cwdLabel={terminals.cwdLabel}
+      onRestart={onRestart}
+      renderTerminal={(shellId) => terminals.renderTerminal(shellId, visible)}
+    />
+  )
 }
 
 function renderEditorBody(
@@ -433,11 +503,6 @@ function renderEditorBody(
     surface.kind === "chat" ? conversationContribution : contributions.find((candidate) => candidate.id === surface.id)
   return (
     <>
-      {surface.kind === "chat" &&
-        props.renderSubagentTabs?.(paneSession, {
-          activeTabId: BUILTIN_TAB.conversation,
-          onSelectConversation: () => openSurface(surface)
-        })}
       <SurfaceContent
         session={active}
         chatId={chatId}
@@ -459,8 +524,8 @@ function allowedViewKeysOf(
   return tabs.flatMap((contribution) => {
     if (
       contribution.id === BUILTIN_TAB.conversation ||
-      contribution.id === BUILTIN_TAB.files ||
-      contribution.id === BUILTIN_TAB.changes
+      contribution.id === BUILTIN_TAB.changes ||
+      contribution.id === BUILTIN_TAB.terminal
     ) return []
     if (contribution.id === BUILTIN_TAB.browser) {
       return session.chats.map((chat) => sessionSurfaceKey({ kind: "view", id: contribution.id, chatId: chat.id }))
@@ -529,14 +594,22 @@ const handleSurfaceCommand = (
 // oxlint-disable eslint/complexity
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: splitting the coordinator would duplicate those effects.
 function SessionPaneBody(props: SessionPaneProps) {
+
   const active = props.session
   const sessionId = active.id
+  // The host's hook is a fixed prop for the app's lifetime, so the call order is stable.
+  const terminals = props.useSessionTerminals?.(active)
+  const terminalsRef = useRef(terminals)
+  terminalsRef.current = terminals
+  const shells = terminals?.tabs ?? NO_SHELLS
   const mainChatId = active.chats[0]?.id
   const fallbackChatSurface: SessionSurface = { kind: "chat", id: active.activeChatId }
-  const [viewRailTarget, setViewRailTarget] = useState<HTMLElement | null>(null)
+  const [headerViewsTarget, setHeaderViewsTarget] = useState<HTMLElement | null>(null)
+  const [headerIdentityTarget, setHeaderIdentityTarget] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
     if (typeof document === "undefined") return
-    setViewRailTarget(document.getElementById("session-view-rail-portal"))
+    setHeaderViewsTarget(document.getElementById("session-header-views-portal"))
+    setHeaderIdentityTarget(document.getElementById("session-header-identity-portal"))
   }, [])
 
   // The layout lives in the app-wide store so the sidebar tree reads the same
@@ -549,6 +622,9 @@ function SessionPaneBody(props: SessionPaneProps) {
   )
   useLayoutEffect(() => initEditorLayout(sessionId, initialLayout), [sessionId, initialLayout])
   const layout = useEditorLayout(sessionId) ?? initialLayout
+  // Chat lane mode: collapsed shows the Ask pill; Focus hides (but keeps mounted) the content tabs.
+  const [laneHost, setLaneHost] = useState<HTMLDivElement | null>(null)
+  const chatLane = useChatLane(allTabs(layout).some((tab) => tab.kind !== "chat"))
   const update = useCallback(
     (fn: (current: EditorLayout) => EditorLayout) => updateEditorLayout(sessionId, fn),
     [sessionId]
@@ -567,6 +643,28 @@ function SessionPaneBody(props: SessionPaneProps) {
     },
     [mainChatId, syncChat, update]
   )
+  const shellsHydrated = terminals?.hydrated ?? true
+  /** Spawns a shell and opens its tab. */
+  const openNewShell = useCallback(async () => {
+    const id = await terminalsRef.current?.create()
+    if (id) openSurface({ kind: "terminal", id })
+  }, [openSurface])
+  /** ⌃`, the palette and "Open in terminal": the newest shell, or a fresh one if none. */
+  const [shellWanted, setShellWanted] = useState(false)
+  const openLatestShell = useCallback(() => {
+    const latest = terminalsRef.current?.tabs.at(-1)
+    if (latest) openSurface({ kind: "terminal", id: latest.id })
+    else void openNewShell()
+  }, [openNewShell, openSurface])
+  useEffect(() => {
+    if (!shellWanted || !shellsHydrated) return
+    setShellWanted(false)
+    openLatestShell()
+  }, [shellWanted, shellsHydrated, openLatestShell])
+  const restartShell = useCallback(async (id: string) => {
+    const next = await terminalsRef.current?.restart(id)
+    if (next) openSurface({ kind: "terminal", id: next })
+  }, [openSurface])
 
   const filePaths = allTabs(layout)
     .flatMap((surface) => (surface.kind === "file" ? [surface.id] : []))
@@ -576,14 +674,6 @@ function SessionPaneBody(props: SessionPaneProps) {
     for (const path of filePaths.split("\n")) props.onTrackFile?.(sessionId, path)
   }, [filePaths, props.onTrackFile, sessionId])
 
-  const lastDebugStop = useRef(0)
-  useEffect(() => {
-    const sequence = props.debugStopSequence ?? 0
-    if (sequence > 0 && sequence !== lastDebugStop.current) {
-      openSurface({ kind: "view", id: BUILTIN_TAB.files })
-    }
-    lastDebugStop.current = sequence
-  }, [openSurface, props.debugStopSequence])
 
   // A pending deep link into Plan Review. One-shot: Plan Review reports its own
   // selection back and we drop it. Tagged with its session because step ids
@@ -637,29 +727,6 @@ function SessionPaneBody(props: SessionPaneProps) {
     openSurface({ kind: "view", id: BUILTIN_TAB.plan, chatId: pending })
   }, [openSurface, props.planSessions])
 
-  // An outside request to switch tabs (the command palette). The nonce is the
-  // trigger, and reporting it handled stops a remount replaying it.
-  const tabRequestNonce = props.selectTabRequest?.nonce
-  const tabRequestId = props.selectTabRequest?.tabId
-  const onTabRequestHandled = props.onTabRequestHandled
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the nonce is the one-shot trigger; see the prop contract.
-  useEffect(() => {
-    if (tabRequestId === undefined) return
-    if (tabRequestId === BUILTIN_TAB.plan) openPlanReview()
-    else if (tabRequestId === BUILTIN_TAB.conversation) openSurface({ kind: "chat", id: active.activeChatId })
-    else {
-      if (tabRequestId === BUILTIN_TAB.browser && !props.isBrowserActive?.(sessionId, active.activeChatId)) {
-        props.onToggleBrowser?.(sessionId, active.activeChatId)
-      }
-      openSurface({
-        kind: "view",
-        id: tabRequestId,
-        ...(tabRequestId === BUILTIN_TAB.browser ? { chatId: active.activeChatId } : {})
-      })
-    }
-    onTabRequestHandled?.()
-  }, [tabRequestNonce])
-
   const browserActive = props.isBrowserActive?.(sessionId, active.activeChatId) ?? false
   const previousBrowser = useRef({ chatId: active.activeChatId, active: browserActive })
   useEffect(() => {
@@ -687,7 +754,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   // Changes (and the retired Code Review tab) are reviewed in the Explorer, so
   // selecting them is an action on the host rather than a surface to open.
   const onRevealChanges = props.onRevealChanges
-  const selectTab = useCallback(
+  const selectView = useCallback(
     (nextTab: TabKey) => {
       if (nextTab === BUILTIN_TAB.changes || nextTab === BUILTIN_TAB.review) {
         onRevealChanges?.(active.id)
@@ -705,11 +772,31 @@ function SessionPaneBody(props: SessionPaneProps) {
     },
     [active, browserActive, onRevealChanges, openPlanReview, openSurface, props.onToggleBrowser, props.tabContributions]
   )
+  const selectTab = useCallback(
+    (nextTab: TabKey) =>
+      nextTab === BUILTIN_TAB.terminal
+        ? shellsHydrated ? openLatestShell() : setShellWanted(true)
+        : selectView(nextTab),
+    [openLatestShell, selectView, shellsHydrated]
+  )
+  // An outside request to switch tabs (the command palette). The nonce is the
+  // trigger, and reporting it handled stops a remount replaying it. It goes
+  // through selectTab, exactly like the header buttons.
+  const tabRequestNonce = props.selectTabRequest?.nonce
+  const tabRequestId = props.selectTabRequest?.tabId
+  const onTabRequestHandled = props.onTabRequestHandled
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the nonce is the one-shot trigger; see the prop contract.
+  useEffect(() => {
+    if (tabRequestId === undefined) return
+    selectTab(tabRequestId)
+    onTabRequestHandled?.()
+  }, [tabRequestNonce])
   const tabCtx: TabContext = {
     session: active,
     hasPlan,
     hasExplanation,
-    diff: props.liveDiff?.[active.id] ?? null
+    diff: props.liveDiff?.[active.id] ?? null,
+    checkCounts: props.prStates?.[active.id]?.checkCounts ?? null
   }
   const connectGithub = props.onOpenSettings ?? noop
 
@@ -722,9 +809,10 @@ function SessionPaneBody(props: SessionPaneProps) {
             props.onTrackFile?.(session.id, path)
             openSurface({ kind: "file", id: path })
           },
-          onSelectFiles: () => ctx.onSelectTab(BUILTIN_TAB.files),
+
           onSelectBrowser: () => ctx.onSelectTab(BUILTIN_TAB.browser),
           onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),
+          onOpenPullRequest: () => ctx.onSelectTab(BUILTIN_TAB.checks),
           onOpenProviderSettings: props.onOpenProviderSettings ?? connectGithub,
           onPlanDraftAvailable: () => presentPlanDraftFor(session.activeChatId),
           onPlanDraftUnavailable: () => dismissPlanDraftFor(session.activeChatId),
@@ -750,13 +838,8 @@ function SessionPaneBody(props: SessionPaneProps) {
           onConnectGithub: ctx.onConnectGithub,
           onSelectReview: () => ctx.onSelectTab(BUILTIN_TAB.changes)
         }),
-      files: (session, ctx) =>
-        props.renderFiles?.(session, {
-          onSelectConversation: () => ctx.onSelectTab(BUILTIN_TAB.conversation),
-          onOpenPath: (path) => openSurface({ kind: "file", id: path })
-        }),
       browser: (session, ctx) => props.renderBrowser?.(session, ctx.paneVisible ?? true),
-      terminal: (session, ctx) => props.renderTerminal?.(session, ctx.paneVisible ?? true),
+      terminal: () => null,
       stub: (id) => <BuiltinStubScreen tab={id} />
     }),
     ...(props.tabContributions ?? [])
@@ -771,11 +854,22 @@ function SessionPaneBody(props: SessionPaneProps) {
   const allowedViewKeys = allowedViewKeysOf(tabs, active, planChatIds)
   const allowedSurfaceKeys = new Set<string>([
     ...active.chats.map((chat) => sessionSurfaceKey({ kind: "chat", id: chat.id })),
-    ...(active.worktreePath ? [sessionSurfaceKey({ kind: "view", id: BUILTIN_TAB.files })] : []),
     ...allTabs(layout).filter((surface) => surface.kind === "file").map(sessionSurfaceKey),
-    ...allowedViewKeys
+    ...allowedViewKeys,
+    // Until the shell list loads, keep restored shell tabs and the old Terminal view for migration.
+    ...(shellsHydrated
+      ? shells.map((shell) => sessionSurfaceKey({ kind: "terminal", id: shell.id }))
+      : [
+          sessionSurfaceKey({ kind: "view", id: BUILTIN_TAB.terminal }),
+          ...allTabs(layout).filter((surface) => surface.kind === "terminal").map(sessionSurfaceKey)
+        ])
   ])
   const allowedSurfaceSignature = [...allowedSurfaceKeys].sort().join("\n")
+  // A persisted Terminal view tab becomes the session's shell tabs once they are known.
+  useEffect(() => {
+    if (!shellsHydrated) return
+    update((current) => replaceLegacyTerminalView(current, shells.map((shell) => ({ kind: "terminal", id: shell.id }))))
+  }, [shellsHydrated, shells, update])
   useEffect(() => {
     update((current) => pruneEditorLayout(current, allowedSurfaceKeys))
   }, [allowedSurfaceSignature, update])
@@ -796,7 +890,8 @@ function SessionPaneBody(props: SessionPaneProps) {
         contribution.id !== BUILTIN_TAB.conversation
     )
     .map((contribution) => describeTab(contribution, tabCtx))
-  const viewRailMenus = { ...buildProviderMenus(active, tabs, props.onSelectIssue), ...props.viewRailMenus }
+
+  
 
   const closeTabIn = useCallback(
     (groupId: string, surface: SessionSurface) => {
@@ -814,6 +909,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         return
       }
       discardUntouchedChat(surface, copies, active.id, props.onCloseUntouchedChat)
+      killShell(surface, copies, terminalsRef.current)
       if (surface.kind === "view" && surface.id === BUILTIN_TAB.browser && copies <= 1) {
         const chatId = surface.chatId ?? active.activeChatId
         if (props.isBrowserActive?.(active.id, chatId)) props.onToggleBrowser?.(active.id, chatId)
@@ -824,6 +920,18 @@ function SessionPaneBody(props: SessionPaneProps) {
       if (nextGroup) syncChat(activeSurface(nextGroup))
     },
     [active.activeChatId, active.id, layout, props.isBrowserActive, props.onCloseUntouchedChat, props.onRequestCloseFile, props.onToggleBrowser, sessionId, syncChat, update]
+  )
+
+  const [pendingPlanClose, setPendingPlanClose] = useState<{ groupId: string; surface: SessionSurface; count: number } | null>(null)
+  const requestCloseTab = useCallback(
+    (groupId: string, surface: SessionSurface) => {
+      const count = surface.kind === "view" && surface.id === BUILTIN_TAB.plan
+        ? planDraftCount(planDraftKey(active.id, surface.chatId ?? active.activeChatId))
+        : 0
+      if (count > 0) setPendingPlanClose({ groupId, surface, count })
+      else closeTabIn(groupId, surface)
+    },
+    [active.activeChatId, active.id, closeTabIn]
   )
 
   const launcherTabs = tabs.some((contribution) => contribution.id === BUILTIN_TAB.plan)
@@ -845,7 +953,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       label: descriptor.label,
       icon: descriptor.icon,
       ...(descriptor.id === BUILTIN_TAB.terminal ? { detail: "Open a shell in this worktree" } : {}),
-      onSelect: () => selectTab(descriptor.id)
+      onSelect: () => (descriptor.id === BUILTIN_TAB.terminal ? void openNewShell() : selectTab(descriptor.id))
     }))
   const launcherItems: ReadonlyArray<TabLauncherItem> = [
     ...(props.onCreateChat
@@ -857,10 +965,12 @@ function SessionPaneBody(props: SessionPaneProps) {
     ...viewLauncherItems
   ]
 
-  const describeSurface = (surface: SessionSurface) => describeEditorSurface(surface, active, contributions, tabCtx)
+  const describeSurface = (surface: SessionSurface) => describeEditorSurface(surface, active, contributions, tabCtx, shells)
 
   const renderBody = (surface: SessionSurface, ctx: { readonly focused: boolean; readonly visible: boolean }) =>
-    renderEditorBody(
+    surface.kind === "terminal"
+      ? renderShell(terminals, surface.id, ctx.visible, restartShell)
+      : renderEditorBody(
       props,
       active,
       surface,
@@ -874,8 +984,23 @@ function SessionPaneBody(props: SessionPaneProps) {
       connectGithub
     )
 
-  const renderRevision = useMemo(() => ({}), [active, contributions])
+  const renderRevision = useMemo(() => ({}), [active, contributions, shells])
   const paneFocused = props.pane === undefined || props.pane.focused
+  // Keyboard shortcuts for chat lane collapse (⌘L) and Focus mode (⌘⇧L)
+  useEffect(() => {
+    if (!paneFocused) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (matchCollapseChatChord(e)) {
+        e.preventDefault()
+        chatLane.toggleCollapse()
+      } else if (matchFocusChatChord(e)) {
+        e.preventDefault()
+        chatLane.toggleFocus()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [paneFocused, chatLane])
   useEffect(() => {
     if (!paneFocused) return
     const onCommand = (event: Event) => handleSurfaceCommand(
@@ -883,37 +1008,132 @@ function SessionPaneBody(props: SessionPaneProps) {
       sessionId,
       update,
       syncChat,
-      closeTabIn
+      requestCloseTab
     )
     window.addEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
     return () => window.removeEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
-  }, [closeTabIn, paneFocused, sessionId, syncChat, update])
+  }, [requestCloseTab, paneFocused, sessionId, syncChat, update])
 
   const surfaceInGroup = (groupId: string): SessionSurface | undefined => {
     const group = groupsOf((editorLayoutOf(sessionId) ?? layout).root).find((g) => g.id === groupId)
     return group && activeSurface(group)
   }
 
-  const viewRail = <ViewRail tabs={railTabs} active={activeTab} onChange={selectTab} menus={viewRailMenus} />
+  const headerItems: ReadonlyArray<HeaderViewItem> = railTabs.map((tab) => ({
+    id: tab.id,
+    label: tab.label,
+    icon: tab.icon,
+    ...(tab.id === BUILTIN_TAB.checks ? { shortcut: "mod+shift+p" } : tab.id === BUILTIN_TAB.changes ? { shortcut: "mod+shift+d" } : tab.id === BUILTIN_TAB.browser ? { shortcut: "mod+shift+b" } : {}),
+    ...(tab.badge?.kind === "count" ? { count: tab.badge.text } : {}),
+    ...(tab.badge?.kind === "diff" ? { count: `+${tab.badge.added} −${tab.badge.removed}` } : {}),
+    ...(props.tabContributions?.some((contribution) => contribution.id === tab.id) ? { plugin: true } : {})
+  }))
+  const pinnedViews = props.headerViews ?? []
+  const pinnedHeaderItems = pinnedViews.flatMap((id) => headerItems.filter((item) => item.id === id))
+  // ⌘⇧D opens Changes; ⌘⇧P opens Checks; ⌥1–⌥9 open the header button at that position. Both go through
+  // selectTab, exactly like clicking the button. ⌃` and ⌘⇧B are routed by JinglerApp.
+  const hasChecks = tabs.some((tab) => tab.id === BUILTIN_TAB.checks)
+  useEffect(() => {
+    if (!paneFocused) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = viewChordTarget(e, hasChecks, pinnedHeaderItems)
+      if (target === undefined) return
+      e.preventDefault()
+      selectTab(target)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [paneFocused, hasChecks, pinnedHeaderItems, selectTab])
+  // Context links (spec §3c): the PR and the linked issue open their view through selectTab.
+  const linkChips: HeaderLinkChip[] = []
+  if (active.prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.checks)) {
+    linkChips.push({
+      id: "pr",
+      label: `PR #${active.prNumber}`,
+      title: "Open pull request",
+      icon: GitPullRequest,
+      onOpen: () => selectTab(BUILTIN_TAB.checks)
+    })
+  }
+  const prRows = sessionPrRows(
+    active.prs?.length ? active.prs.map((pr) => pr.number) : active.prNumber == null ? [] : [active.prNumber],
+    props.subagentPrNodes?.[active.id] ?? [],
+    new Map((active.prs ?? []).flatMap((pr) => (pr.repo === undefined ? [] : [[pr.number, pr.repo] as const])))
+  )
+  const linkedIssue = issueReferenceOf(active)
+  const issueTab = tabs.find((tab) => linkedIssue !== undefined && tab.issueProviderId === linkedIssue.providerId)
+  if (linkedIssue && issueTab) {
+    linkChips.push({
+      id: "issue",
+      label: linkedIssue.identifier,
+      title: `Open ${linkedIssue.identifier}`,
+      icon: CircleDot,
+      onOpen: () => selectTab(issueTab.id)
+    })
+  }
+  const issueMenu =
+    props.issueMenus?.[activeTab] ?? buildIssueMenu(active, tabs.find((c) => c.id === activeTab), props.onSelectIssue)
+  const issuePicker = issueMenu ? (
+    <LinkedIssueSelector
+      items={issueMenu.items}
+      value={issueMenu.value}
+      onValueChange={issueMenu.onSelect}
+      variant="compact"
+      ariaLabel={issueMenu.ariaLabel}
+      className="max-w-[160px]"
+    />
+  ) : null
+  const viewButtons =
+    props.headerViews !== undefined && props.onHeaderViewsChange ? (
+      <>
+        <HeaderViewButtons
+          views={pinnedHeaderItems}
+          activeId={activeTab}
+          onOpen={selectTab}
+        />
+        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
+      </>
+    ) : null
+  const headerViewControls =
+    issuePicker || viewButtons ? (
+      <div className="flex items-center gap-0.5">
+        {issuePicker}
+        {viewButtons}
+      </div>
+    ) : null
+  const headerIdentity = (
+    <SessionHeaderIdentity
+      title={active.title || UNTITLED_SESSION}
+      branch={active.branch}
+      chips={prRows.length > 1 ? linkChips.filter((chip) => chip.id !== "pr") : linkChips}
+    >
+      {prRows.length > 1 && (
+        <SessionPrsChip
+          rows={prRows}
+          onSelect={(row) => {
+            props.onOpenSessionPr?.(active.id, row.number)
+            selectTab(BUILTIN_TAB.checks)
+          }}
+        />
+      )}
+    </SessionHeaderIdentity>
+  )
 
-  return (
-    <>
-      {viewRailTarget !== null && paneFocused ? createPortal(viewRail, viewRailTarget) : null}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-row">
+  const renderGroups = (groupLayout: EditorLayout) => (
         <EditorGroups
           onOpenCheckpoints={props.onOpenCheckpoints ? (trigger) => props.onOpenCheckpoints?.(sessionId, trigger) : undefined}
           sessionId={sessionId}
-          layout={layout}
+          layout={groupLayout}
           // Layout-only updates keep this token, while render dependencies replace it.
           revision={renderRevision}
           describe={describeSurface}
-          renderBody={renderBody}
+          renderBody={(surface, ctx) => renderBody(surface, { ...ctx, visible: ctx.visible && !chatLane.contentHidden })}
           onActivate={(groupId, surface) => {
             update((current) => activateTab(current, groupId, sessionSurfaceKey(surface)))
             if (surface.kind === "chat") props.onFocusChat?.(sessionId, surface.id)
             else syncChat(surface)
           }}
-          onClose={closeTabIn}
+          onClose={requestCloseTab}
           onDrop={(drag, groupId, edge, copy) => {
             update((current) => dropTab(current, drag, groupId, edge, copy, mainChatId))
             syncChat(drag.surface)
@@ -923,12 +1143,49 @@ function SessionPaneBody(props: SessionPaneProps) {
             const surface = surfaceInGroup(groupId)
             if (surface) syncChat(surface)
           }}
-          onResize={(splitId, index, delta) => update((current) => resizeSplit(current, splitId, index, delta))}
+          onResize={(splitId, index, delta, containerWidth) => {
+            if (wouldCollapseChatLane(layout, splitId, index, delta, containerWidth)) chatLane.toggleCollapse()
+            else update((current) => resizeSplit(current, splitId, index, delta, containerWidth))
+          }}
           launcherItems={launcherItems}
+          onCreateChat={props.onCreateChat}
+          followAgent={props.followAgent}
+          onToggleFollowAgent={props.onToggleFollowAgent}
+          renderSubagentChip={(chatId) =>
+            props.renderSubagentTabs?.(chatId === active.activeChatId ? active : { ...active, activeChatId: chatId }, {
+              activeTabId: BUILTIN_TAB.conversation,
+              onSelectConversation: () => openSurface({ kind: "chat", id: chatId })
+            })}
         />
+  )
+  const drawerLane = chatLane.mode === "drawer" ? chatLaneOnly(layout) : null
+  const contentLayout = chatLane.showAskPill || chatLane.mode === "drawer" ? withoutChatLane(layout) : layout
+
+  return (
+    <>
+      {headerIdentityTarget !== null && paneFocused ? createPortal(headerIdentity, headerIdentityTarget) : null}
+      {headerViewsTarget !== null && paneFocused && headerViewControls ? createPortal(headerViewControls, headerViewsTarget) : null}
+      <div ref={setLaneHost} className="flex min-h-0 min-w-0 flex-1 flex-row relative">
+        {(chatLane.showAskPill || drawerLane) && (
+          <AskPill
+            onClick={() => chatLane.toggleCollapse()}
+            className="absolute bottom-4 left-4 z-10"
+          />
+        )}
+        {renderGroups(contentLayout)}
+        {drawerLane && laneHost && (
+          <ChatDrawer open={chatLane.drawerOpen} onOpenChange={(open) => open !== chatLane.drawerOpen && chatLane.toggleCollapse()} container={laneHost}>
+            {renderGroups(drawerLane)}
+          </ChatDrawer>
+        )}
         {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
-        {viewRailTarget === null ? viewRail : null}
       </div>
+      <DiscardCommentsDialog
+        open={pendingPlanClose !== null}
+        count={pendingPlanClose?.count ?? 0}
+        onOpenChange={(open) => { if (!open) setPendingPlanClose(null) }}
+        onDiscard={() => { if (pendingPlanClose) closeTabIn(pendingPlanClose.groupId, pendingPlanClose.surface) }}
+      />
     </>
   )
 }

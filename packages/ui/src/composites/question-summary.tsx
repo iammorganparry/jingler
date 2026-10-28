@@ -1,5 +1,5 @@
 import type { QuestionAnswer, QuestionRequest } from "@jingler/core"
-import { CircleCheck } from "lucide-react"
+import { CircleCheck, CircleSlash } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"
 
@@ -11,18 +11,27 @@ import { Badge } from "../components/badge.js"
 export function QuestionSummary({
   request,
   answers,
+  cancelled,
   className
 }: {
   request: QuestionRequest
   answers: ReadonlyArray<QuestionAnswer>
+  cancelled?: boolean | undefined
   className?: string
 }) {
   return (
     <div className={cn("flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel px-3.5 py-3", className)}>
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.4px] text-green">
-        <CircleCheck className="size-3.5" />
-        Your answer
-      </div>
+      {cancelled ? (
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-dim">
+          <CircleSlash className="size-3.5" />
+          Stopped before answering
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-green">
+          <CircleCheck className="size-3.5" />
+          Your answer
+        </div>
+      )}
       <div className="flex flex-col gap-2.5">
         {request.questions.map((q, i) => {
           const a = answers[i]
@@ -38,7 +47,7 @@ export function QuestionSummary({
                 {q.question}
               </span>
               <div className="flex flex-wrap gap-1.5">
-                {picks.length > 0 ? (
+                {cancelled ? null : picks.length > 0 ? (
                   picks.map((p) => (
                     <span
                       key={p}

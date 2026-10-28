@@ -2,6 +2,7 @@ import { createActor } from "xstate"
 import { describe, expect, it } from "vitest"
 import type { Subagent, SubagentFleetNode } from "@jingler/core"
 import {
+  newlyFinishedNodes,
   projectLegacySubagents,
   settleStoppedFleet,
   subagentFleetMachine
@@ -40,7 +41,9 @@ const node: SubagentFleetNode = {
     toolCalls: 0
   },
   artifacts: [],
-  attention: null
+  attention: null,
+  workspace: null,
+  prNumber: null
 }
 
 describe("subagentFleetMachine", () => {
@@ -63,6 +66,12 @@ describe("subagentFleetMachine", () => {
       updatedAt: 20,
       completedAt: 20
     })
+  })
+
+  it("keeps detached background children alive when a turn ends on its own", () => {
+    const events = [{ _tag: "Upsert" as const, version: 2 as const, eventId: "start-1", occurredAt: 10, node: { ...node, background: true } }]
+    expect(settleStoppedFleet(events, 20, true)).toBe(events)
+    expect(settleStoppedFleet(events, 20)).toHaveLength(2)
   })
 
   it("projects lifecycle events and falls back to Main when a selected child disappears", () => {
@@ -197,4 +206,61 @@ describe("subagentFleetMachine", () => {
   })
 
 
+  it("keeps an open child selected when SYNC reports it finished", () => {
+    const actor = createActor(subagentFleetMachine, {
+      input: { parentRuntimeSessionId: "parent" }
+    }).start()
+    actor.send({
+      type: "SYNC",
+      events: [{ _tag: "Upsert", version: 2, eventId: "start-1", occurredAt: 10, node }]
+    })
+    actor.send({ type: "SELECT", id: node.id })
+    actor.send({
+      type: "SYNC",
+      events: [
+        { _tag: "Upsert", version: 2, eventId: "start-1", occurredAt: 10, node },
+        {
+          _tag: "Upsert",
+          version: 2,
+          eventId: "done-1",
+          occurredAt: 20,
+          node: {
+            ...node,
+            registryRevision: 11,
+            status: "completed",
+            updatedAt: 20,
+            completedAt: 20,
+            terminal: { reason: "completed", summary: "Done", at: 20, retryable: false }
+          }
+        }
+      ]
+    })
+    const { selectedId, tree } = actor.getSnapshot().context
+    expect(selectedId).toBe(node.id)
+    expect(tree.nodes.find((n) => n.id === node.id)?.status).toBe("completed")
+    actor.stop()
+  })
+
+
+
+  describe("newlyFinishedNodes", () => {
+    const done = { ...node, status: "completed" as const }
+    const failed = { ...node, status: "failed" as const }
+
+    it("reports an active child that completed or failed", () => {
+      expect(newlyFinishedNodes([node], [done], "main")).toEqual([done])
+      expect(newlyFinishedNodes([node], [failed], "main")).toEqual([failed])
+    })
+
+    it("skips the child the user has open", () => {
+      expect(newlyFinishedNodes([node], [done], node.id)).toEqual([])
+    })
+
+    it("skips history seen already finished, stops, and still-active children", () => {
+      expect(newlyFinishedNodes([], [done], "main")).toEqual([])
+      expect(newlyFinishedNodes([done], [done], "main")).toEqual([])
+      expect(newlyFinishedNodes([node], [{ ...node, status: "stopped" }], "main")).toEqual([])
+      expect(newlyFinishedNodes([node], [node], "main")).toEqual([])
+    })
+  })
 })

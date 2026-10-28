@@ -117,6 +117,16 @@ export const CloseFailed: Story = {
   render: () => <InboxMock width={1440} closeError="Resource not accessible by integration (HTTP 403)." />,
 }
 
+export const WithLinkedPrs: Story = {
+  render: () => <InboxMock width={1440} detail={{
+    ...detailFor(ISSUES[0]!),
+    linkedPrs: [
+      { number: 741, state: "open", url: "https://github.com/jingler/jingler/pull/741" },
+      { number: 736, state: "merged", url: "https://github.com/jingler/jingler/pull/736" },
+    ],
+  }} />,
+}
+
 export const DetailLoading: Story = {
   render: () => <InboxMock width={1440} detail={null} detailLoading />,
 }
@@ -138,5 +148,5 @@ export const Empty: Story = {
 }
 
 export const ListError: Story = {
-  render: () => <InboxMock width={1440} issues={[]} selected={null} detail={null} error="GitHub CLI is not authenticated. Run gh auth login, then refresh." />,
+  render: () => <InboxMock width={1440} issues={[]} selected={null} detail={null} error="GitHub CLI is not authenticated. Run gh auth login, then refresh." onRetry={() => {}} />,
 }

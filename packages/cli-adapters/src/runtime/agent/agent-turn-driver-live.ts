@@ -37,7 +37,8 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
     context.publishExplanation?.(explanation) ?? Effect.void,
   listPeerAgents: context.listPeerAgents,
   messagePeerAgent: context.messagePeerAgent,
-  ...(context.checkouts === undefined ? {} : { checkouts: context.checkouts })
+  ...(context.checkouts === undefined ? {} : { checkouts: context.checkouts }),
+  ...(context.workModeHost === undefined ? {} : { workModeHost: context.workModeHost })
 })
 
 const piSpec = (runId: string, spec: AgentTurnSpec) => {

@@ -70,6 +70,7 @@ export type {
   IssueActor,
   IssueComment,
   IssueDetail,
+  IssueLinkedPr,
   IssueLabel,
   IssueReference,
   IssueSummary,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { matchSplitEditorChord } from "./app-shortcuts.js"
+import { matchBrowserChord, matchChangesChord, matchChecksChord, matchHeaderViewChord, matchSplitEditorChord, matchTerminalChord, tabShortcutHint } from "./app-shortcuts.js"
 
 const chord = (over: Partial<Parameters<typeof matchSplitEditorChord>[0]>) => ({
   key: "\\",
@@ -22,5 +22,51 @@ describe("matchSplitEditorChord", () => {
     expect(matchSplitEditorChord(chord({ metaKey: false }))).toBeNull()
     expect(matchSplitEditorChord(chord({ altKey: true }))).toBeNull()
     expect(matchSplitEditorChord(chord({ key: "a", code: "KeyA" }))).toBeNull()
+  })
+})
+
+describe("header view chords", () => {
+  const key = (over: Partial<Parameters<typeof matchSplitEditorChord>[0]>) => chord({ metaKey: false, ...over })
+
+  it("opens Changes on ⌘⇧D and Browser on ⌘⇧B, by physical key", () => {
+    expect(matchChangesChord(key({ metaKey: true, shiftKey: true, key: "D", code: "KeyD" }))).toBe(true)
+    expect(matchBrowserChord(key({ metaKey: true, shiftKey: true, key: "B", code: "KeyB" }))).toBe(true)
+    expect(matchBrowserChord(key({ ctrlKey: true, shiftKey: true, key: "B", code: "KeyB" }))).toBe(true)
+    expect(matchChangesChord(key({ metaKey: true, key: "d", code: "KeyD" }))).toBe(false)
+  })
+
+  it("keeps ⌘⇧E, ⌘⇧L, ⌘L and ⌘P off the new chords", () => {
+    for (const [k, c] of [["E", "KeyE"], ["L", "KeyL"], ["P", "KeyP"]] as const) {
+      const e = key({ metaKey: true, shiftKey: true, key: k, code: c })
+      expect(matchChangesChord(e) || matchBrowserChord(e)).toBe(false)
+    }
+    expect(matchChangesChord(key({ metaKey: true, key: "l", code: "KeyL" }))).toBe(false)
+  })
+
+  it("opens Checks on ⌘⇧P (⌃⇧P off macOS) and not on bare ⌘P or with Alt", () => {
+    expect(matchChecksChord(key({ metaKey: true, shiftKey: true, key: "P", code: "KeyP" }))).toBe(true)
+    expect(matchChecksChord(key({ ctrlKey: true, shiftKey: true, key: "P", code: "KeyP" }))).toBe(true)
+    expect(matchChecksChord(key({ metaKey: true, key: "p", code: "KeyP" }))).toBe(false)
+    expect(matchChecksChord(key({ metaKey: true, shiftKey: true, altKey: true, key: "P", code: "KeyP" }))).toBe(false)
+    expect(matchChecksChord(key({ metaKey: true, shiftKey: true, key: "D", code: "KeyD" }))).toBe(false)
+  })
+
+  it("shows ⌘⇧D beside Changes only, since Code Review merged into it", () => {
+    expect(tabShortcutHint("changes")).toBe("⌘⇧D")
+    expect(tabShortcutHint("review")).toBeUndefined()
+    expect(tabShortcutHint("checks")).toBe("⌘⇧P")
+  })
+
+  it("opens Terminal on ⌃`", () => {
+    expect(matchTerminalChord(key({ ctrlKey: true, key: "`", code: "Backquote" }))).toBe(true)
+  })
+
+  it("maps ⌥1–⌥9 to a zero-based pin position, even when macOS rewrites key", () => {
+    expect(matchHeaderViewChord(key({ altKey: true, key: "¡", code: "Digit1" }))).toBe(0)
+    expect(matchHeaderViewChord(key({ altKey: true, key: "9", code: "Digit9" }))).toBe(8)
+    expect(matchHeaderViewChord(key({ altKey: true, key: "0", code: "Digit0" }))).toBeNull()
+    expect(matchHeaderViewChord(key({ key: "1", code: "Digit1" }))).toBeNull()
+    expect(matchHeaderViewChord(key({ altKey: true, shiftKey: true, key: "1", code: "Digit1" }))).toBeNull()
+    expect(matchHeaderViewChord(key({ altKey: true, metaKey: true, key: "1", code: "Digit1" }))).toBeNull()
   })
 })

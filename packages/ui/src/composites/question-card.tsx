@@ -20,6 +20,7 @@ export function QuestionCard({
   request,
   onSubmit,
   onCancel,
+  onSwitchToAuto,
   submitting = false
 }: {
   request: QuestionRequest
@@ -27,6 +28,8 @@ export function QuestionCard({
   onSubmit: (answers: readonly QuestionAnswer[]) => void
   /** Skip / dismiss the whole question group. */
   onCancel?: () => void
+  /** Offered as a tertiary link; omit (e.g. already in Auto) to hide it. */
+  onSwitchToAuto?: () => void
   /** Show a spinner on the submit button while the answers are in flight. */
   submitting?: boolean
 }) {
@@ -46,7 +49,9 @@ if (/^[1-9]$/.test(e.key)) {
       const onButton = active instanceof HTMLButtonElement
 
       // Let a focused button fire its own click instead of double-advancing.
-      if (e.key === "Enter" && onButton) return
+      // Option 1 holds focus on arrival, so once something is answered Enter on an option advances.
+      const onOption = onButton && active.hasAttribute("data-option")
+      if (e.key === "Enter" && onButton && !(onOption && answered)) return
       if (e.key === "Enter") {
         e.preventDefault()
         goNext()
@@ -90,6 +95,7 @@ default: selectNumberedOption(e)
   // Free-text "Other" answer per question.
   const [other, setOther] = React.useState<Record<number, string>>({})
   const otherRef = React.useRef<HTMLInputElement>(null)
+  const firstOptionRef = React.useRef<HTMLButtonElement>(null)
 
   const q = questions[qi]!
   const sel = selected[qi] ?? []
@@ -144,13 +150,23 @@ default: selectNumberedOption(e)
     // Re-subscribe when the question or its selections change so the closure is fresh.
   }, [qi, selected, other, submitting])
 
+  // Focus lands on option 1 whenever a question appears.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refocus only when the question index changes
+  // Deferred a frame, as the composer's autofocus is: a Jump lands here in the same
+  // pass that scrolls the transcript and dismisses the toast, which drops a sync focus.
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => firstOptionRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [qi])
+
   const hint = `1–9 ${q.multiSelect ? "toggle" : "pick"} · O other · ↵ next`
 
   return (
     <div className="animate-slide-in overflow-hidden rounded-lg border border-line bg-panel">
       {/* Header: icon · eyebrow · question count · progress dots */}
       <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-2.5">
-        <CircleHelp size={14} className="flex-none text-blue" />
+        <CircleHelp size={14} className="flex-none text-muted-foreground" />
+        <span data-testid="needs-you-tick" aria-hidden="true" className="size-1.5 flex-none rounded-full bg-state-needs" />
         <Eyebrow className="flex-1 text-muted-foreground">Agent needs your input</Eyebrow>
         <span className="font-mono text-[10.5px] tabular-nums text-dim">
           Question {qi + 1} of {n}
@@ -161,7 +177,7 @@ default: selectNumberedOption(e)
               key={i}
               className={cn(
                 "size-1.5 rounded-full transition-colors",
-                i === qi ? "bg-blue" : i < qi ? "bg-blue/40" : "bg-line"
+                i === qi ? "bg-text-bright" : i < qi ? "bg-text-bright/40" : "bg-line"
               )}
             />
           ))}
@@ -173,7 +189,7 @@ default: selectNumberedOption(e)
         <div className="flex items-center gap-2">
           <span className="text-pretty text-[15.5px] font-semibold text-text-bright">{q.question}</span>
           {q.multiSelect && (
-            <Badge tone="purple" size="xs">
+            <Badge tone="neutral" size="xs">
               select all that apply
             </Badge>
           )}
@@ -185,11 +201,13 @@ default: selectNumberedOption(e)
             return (
               <button
                 key={opt.label}
+                ref={i === 0 ? firstOptionRef : undefined}
+                data-option=""
                 type="button"
                 onClick={() => pickOption(opt.label)}
                 className={cn(
                   "flex w-full items-start gap-[11px] rounded-[7px] border px-3 py-[11px] text-left transition-colors",
-                  on ? "border-blue/55 bg-blue/10" : "border-line bg-sunken hover:border-line-strong"
+                  on ? "border-line-strong bg-surface" : "border-line bg-sunken hover:border-line-strong"
                 )}
               >
                 <KeyBadge active={on}>{i + 1}</KeyBadge>
@@ -214,7 +232,7 @@ default: selectNumberedOption(e)
             onClick={() => otherRef.current?.focus()}
             className={cn(
               "flex cursor-text items-center gap-[11px] rounded-[7px] border px-3 py-2.5 transition-colors",
-              otherActive ? "border-blue/55 bg-blue/10" : "border-line bg-sunken"
+              otherActive ? "border-line-strong bg-surface" : "border-line bg-sunken"
             )}
           >
             <KeyBadge active={otherActive}>O</KeyBadge>
@@ -239,6 +257,11 @@ default: selectNumberedOption(e)
         {onCancel && (
           <Button variant="ghost" size="sm" onClick={onCancel}>
             Skip
+          </Button>
+        )}
+        {onSwitchToAuto && (
+          <Button variant="ghost" size="sm" onClick={onSwitchToAuto}>
+            Switch session to Auto
           </Button>
         )}
         <div className="flex-1" />
@@ -267,7 +290,7 @@ function KeyBadge({ active, children }: { active: boolean; children: React.React
     <span
       className={cn(
         "flex size-[22px] flex-none items-center justify-center rounded-[5px] border font-mono text-[11px] font-semibold",
-        active ? "border-blue bg-blue text-editor" : "border-line bg-transparent text-muted-foreground"
+        active ? "border-primary-fill bg-primary-fill text-primary-fg" : "border-line bg-transparent text-muted-foreground"
       )}
     >
       {children}
@@ -282,7 +305,7 @@ function Indicator({ selected, multi }: { selected: boolean; multi: boolean }) {
       className={cn(
         "flex size-[18px] flex-none items-center justify-center border-[1.5px] transition-colors",
         multi ? "rounded-[5px]" : "rounded-full",
-        selected ? "border-blue bg-blue text-editor" : "border-line bg-transparent"
+        selected ? "border-primary-fill bg-primary-fill text-primary-fg" : "border-line bg-transparent"
       )}
     >
       {selected && <Check size={12} strokeWidth={3} />}

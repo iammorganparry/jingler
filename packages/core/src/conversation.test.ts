@@ -34,6 +34,8 @@ import {
   setPlanStepStatus,
   setQuestionAnswers,
   settleLoaded,
+  STOPPED_NOTE,
+  cancelPendingQuestions,
   settleStreaming,
   userMessage
 } from "./conversation.js"
@@ -360,6 +362,31 @@ describe("AskUserQuestion flow", () => {
     expect(part).toMatchObject({ answers: [{ selected: ["Rotating"], other: null }] })
     // No longer pending.
     expect(pendingQuestion([answered])).toBeNull()
+  })
+})
+
+describe("cancelPendingQuestions", () => {
+  const now = "2026-07-11T10:00:00.000Z"
+  const req = (id: string): QuestionRequest => ({
+    id,
+    questions: [{ question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "a" }] }]
+  })
+
+  it("cancels unanswered questions so pendingQuestion skips them, and leaves answered ones", () => {
+    let msg = applyStreamEvent(assistantMessage("a0", now), { _tag: "QuestionRequested", request: req("q1") })
+    msg = applyStreamEvent(msg, { _tag: "QuestionRequested", request: req("q2") })
+    msg = setQuestionAnswers(msg, "q1", [{ selected: ["A"], other: null }])
+    const cancelled = cancelPendingQuestions(msg)
+    expect(pendingQuestion([cancelled])).toBeNull()
+    expect(cancelled.parts[0]).toMatchObject({ answers: [{ selected: ["A"], other: null }] })
+    expect(cancelled.parts[0]).not.toHaveProperty("cancelled")
+    expect(cancelled.parts[1]).toMatchObject({ answers: null, cancelled: true })
+  })
+
+  it("is applied by the stopped-note terminal event", () => {
+    const asked = applyStreamEvent(assistantMessage("a0", now), { _tag: "QuestionRequested", request: req("q1") })
+    const stopped = applyStreamEvent(asked, { _tag: "Failed", message: STOPPED_NOTE })
+    expect(pendingQuestion([stopped])).toBeNull()
   })
 })
 
@@ -1317,6 +1344,14 @@ describe("displayStatusOf", () => {
     for (const kind of ALL_KINDS) {
       expect(FIVE, `${kind} must map into the five`).toContain(displayStatusOf(act(kind), "idle"))
     }
+  })
+
+  it("reports interrupted only when there is no live activity", () => {
+    expect(displayStatusOf(null, "idle", true)).toBe("interrupted")
+    expect(displayStatusOf(undefined, "running", true)).toBe("interrupted")
+    expect(displayStatusOf(act("editing"), "idle", true)).toBe("running")
+    expect(displayStatusOf(null, "idle", false)).toBe("idle")
+    expect(displayStatusOf(null, "idle")).toBe("idle")
   })
 
   it("maps every session status onto one of the five", () => {

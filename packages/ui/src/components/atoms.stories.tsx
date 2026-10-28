@@ -7,6 +7,8 @@ import { Toggle } from "./toggle.js"
 import { Spinner, Skeleton } from "./loading.js"
 import { Avatar } from "./avatar.js"
 import { Kbd } from "./kbd.js"
+import { CodeChip } from "./code-chip.js"
+import { FileChip } from "./file-chip.js"
 import { AttachmentThumb } from "./attachment-thumb.js"
 
 const meta: Meta = { title: "Atoms/Overview" }
@@ -107,6 +109,20 @@ export const Kbds: Story = {
       <Kbd>↵</Kbd>
       <Kbd>esc</Kbd>
       <Kbd onFill>⌥↵</Kbd>
+    </div>
+  )
+}
+
+/** Spec §6.4: every badge, pill, chip and kbd stays on one line; the neighbouring text truncates. */
+export const OneLineInNarrowRow: Story = {
+  render: () => (
+    <div className="flex w-[120px] items-center gap-1.5 border border-line p-1">
+      <span className="min-w-0 truncate text-[12px] text-text">A very long neighbouring label</span>
+      <Badge tone="count" size="xs">Subscription</Badge>
+      <Pill tone="green">Connected</Pill>
+      <Kbd>⌘⇧K</Kbd>
+      <CodeChip path="packages/ui/src/components/very-long-file-name.tsx" line={12} />
+      <FileChip path="packages/ui/src/components/very-long-file-name.tsx" added={4} removed={2} />
     </div>
   )
 }

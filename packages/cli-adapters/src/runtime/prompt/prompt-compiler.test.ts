@@ -222,7 +222,7 @@ describe("PromptCompiler", () => {
       tools: [tool],
       // Enough for every required layer (incl. the voice), tight enough that
       // the 4,000-char optional turn context MUST be cut to fit.
-      tokenBudget: 1_300
+      tokenBudget: 1_400
     })
     expect(result.manifest.sections.find((section) => section.id === "turn.large")?.truncated).toBe(true)
     expect(result.manifest.sections.map((section) => section.kind)).toEqual(expect.arrayContaining(["safety", "role", "tools"]))

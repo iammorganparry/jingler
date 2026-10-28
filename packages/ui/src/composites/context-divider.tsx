@@ -2,6 +2,7 @@ import { useState } from "react"
 import { ChevronRight, Layers } from "lucide-react"
 import type { ContextDigest } from "@jingler/core"
 import { cn } from "../lib/cn.js"
+import { Button } from "../components/button.js"
 
 const fmtTokens = (n: number): string =>
   n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n)
@@ -69,14 +70,14 @@ export function ContextDivider({
 
   return (
     <div className={cn("my-3", className)}>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="group flex w-full items-center gap-2 text-left"
+        className="group h-auto w-full gap-2 rounded-none px-0 py-0 text-left font-normal hover:bg-transparent"
       >
-        <span className="h-px flex-1 bg-border" />
-        <span className="flex items-center gap-1.5 rounded-full border border-border bg-bg px-2 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors group-hover:text-fg">
+        <span className="h-px flex-1 bg-line" />
+        <span className="flex items-center gap-1.5 px-1 font-mono text-[10px] text-muted-foreground transition-colors group-hover:text-text-bright">
           <Layers className="size-3 text-dim" />
           Context compacted
           {quotable(tokensBefore) && (
@@ -86,14 +87,14 @@ export function ContextDivider({
             className={cn("size-3 text-dim transition-transform", open && "rotate-90")}
           />
         </span>
-        <span className="h-px flex-1 bg-border" />
-      </button>
+        <span className="h-px flex-1 bg-line" />
+      </Button>
 
       {open && (
-        <div className="mt-2 space-y-3 rounded-md border border-border bg-fg/[0.02] p-3">
+        <div className="mt-2 space-y-3 rounded-md border border-line bg-surface p-3">
           <p className="text-[11px] leading-relaxed text-dim">
             Your full history above is unchanged. This is what the agent carried
-            forward into a fresh conversation — {kept} item{kept === 1 ? "" : "s"} kept.
+            forward into a fresh conversation, {kept} item{kept === 1 ? "" : "s"} kept.
           </p>
           <Section title="Goal" items={[digest.goal]} />
           <Section title="Decisions" items={digest.decisions} />

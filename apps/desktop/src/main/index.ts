@@ -29,6 +29,7 @@ import type { AuthCallback, GitHubCallback } from "./deep-link.js"
 import {
   AUTH_COMPLETE_CHANNEL,
   GITHUB_COMPLETE_CHANNEL,
+  classifyAuthCallbackError,
   findDeepLinkInArgv,
   parseAuthCallback,
   parseGitHubCallback,
@@ -58,7 +59,7 @@ app.setName("Jingler")
 registerAppVersionChannel()
 
 /** The single renderer window (kept so deep-link callbacks can reach + focus it). */
-let mainWindow: BrowserWindow | null = null
+export let mainWindow: BrowserWindow | null = null
 let quitPending = false
 let readyToQuit = false
 
@@ -137,7 +138,7 @@ if (!gotPrimaryLock) {
     const notify = (ok: boolean, error: string | null = null) =>
       mainWindow?.webContents.send(AUTH_COMPLETE_CHANNEL, { ok, error })
     if (!cb.token) {
-      notify(false, cb.error)
+      notify(false, classifyAuthCallbackError(cb.error))
       return
     }
     const token = cb.token
@@ -212,7 +213,7 @@ if (!gotPrimaryLock) {
    * Must stay equal to `--sb-canvas` in globals.css — they are the same frame
    * of the same launch, painted by two different processes.
    */
-  let themeBackgroundColor = "#141414"
+  let themeBackgroundColor = "#0b0b0c"
 
   /**
    * The window icon, on the one platform that reads it.
@@ -289,7 +290,7 @@ if (!gotPrimaryLock) {
       // canvas here meant a light theme flashed dark on every single launch,
       // before the document had a chance to say otherwise.
       backgroundColor: themeBackgroundColor,
-      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
       webPreferences: {
         preload: join(import.meta.dirname, "../preload/index.mjs"),
         contextIsolation: true,
@@ -401,6 +402,16 @@ if (!gotPrimaryLock) {
       if (mainWindow === window) mainWindow = null
     })
 
+    // Notify renderer of window state changes (Windows/Linux custom controls)
+    if (process.platform !== "darwin") {
+      window.on("maximize", () => {
+        window.webContents.send("jingler:window-maximized")
+      })
+      window.on("unmaximize", () => {
+        window.webContents.send("jingler:window-unmaximized")
+      })
+    }
+
     // Cold-start deep link (Windows/Linux): the URL is in our own argv. Deliver it
     // once the renderer has loaded so the auth-complete event isn't dropped.
     const coldLink = findDeepLinkInArgv(process.argv)
@@ -423,6 +434,11 @@ if (!gotPrimaryLock) {
   // in the log to say why.
   registerPluginScheme()
 
+  // e2e: Chromium's fake mic (synthetic tone) with no permission prompt.
+  if (process.env.JINGLER_E2E === "1") {
+    app.commandLine.appendSwitch("use-fake-device-for-media-stream")
+    app.commandLine.appendSwitch("use-fake-ui-for-media-stream")
+  }
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
     const packagedSubagentRoot = join(process.resourcesPath, "subagent-runtime")

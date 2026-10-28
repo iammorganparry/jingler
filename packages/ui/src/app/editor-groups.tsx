@@ -16,8 +16,10 @@
  */
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -27,7 +29,9 @@ import {
   type ReactNode
 } from "react"
 import { createPortal } from "react-dom"
-import { ChevronRight, Ellipsis, Plus, X, type LucideIcon } from "lucide-react"
+import { Ellipsis, MessageSquarePlus, Plus, X, type LucideIcon } from "lucide-react"
+import { Button } from "../components/button.js"
+import { Breadcrumb } from "../components/breadcrumb.js"
 import { cn } from "../lib/cn.js"
 import { FileIcon } from "../components/file-icon.js"
 import { WidthTierProvider } from "../hooks/width-tier.js"
@@ -35,6 +39,7 @@ import {
   activeSurface,
   groupsOf,
   resizedPair,
+  MIN_GROUP_PX,
   type DropEdge,
   type EditorLayout,
   type EditorNode,
@@ -46,8 +51,16 @@ import { isSurface, sessionSurfaceKey, type SessionSurface } from "./session-sur
 import type { TabLauncherItem } from "./chat-tab-bar.js"
 import type { TabBadge } from "./tab-contributions.js"
 import { matchNewTabChord } from "./app-shortcuts.js"
+import { DropZoneOverlay, resolveDropEdge } from "./drop-zone-overlay.js"
 import { CommandPalette } from "./command-palette.js"
 import type { PaletteItem } from "./command-palette-model.js"
+import { ChatLaneHeader, SubagentLaneViewContext, type ChatLaneHeaderChat } from "./chat-lane-header.js"
+
+/** Host-provided marker (`● N agent edits`) shown at the right of a file tab's breadcrumb. */
+export const AgentEditsMarkerContext = createContext<(sessionId: string, path: string) => ReactNode>(() => null)
+
+/** The visible file tab's slot in the breadcrumb row; its body portals Diff/Edit, Follow, Focus controls there. */
+export const FileHeaderSlotContext = createContext<HTMLElement | null>(null)
 
 export interface EditorTabMeta {
   readonly label: string
@@ -71,13 +84,18 @@ export interface EditorGroupsProps {
   readonly onClose: (groupId: string, surface: SessionSurface) => void
   readonly onDrop: (drag: TabDrag, groupId: string | null, edge: DropEdge, copy: boolean) => void
   readonly onFocusGroup: (groupId: string) => void
-  readonly onResize: (splitId: string, index: number, delta: number) => void
+  readonly onResize: (splitId: string, index: number, delta: number, containerWidth?: number) => void
   /** The "+" menu at the end of each tab strip. */
   readonly launcherItems?: ReadonlyArray<TabLauncherItem>
   readonly emptyState?: ReactNode
+  readonly onCreateChat?: (sessionId: string) => void
+  readonly followAgent?: boolean
+  readonly onToggleFollowAgent?: (enabled: boolean) => void
+  /** Subagent chip for one chat, rendered in that chat group's lane header. */
+  readonly renderSubagentChip?: (chatId: string) => ReactNode
 }
 
-type Api = Omit<EditorGroupsProps, "sessionId" | "layout" | "revision" | "emptyState">
+type Api = Omit<EditorGroupsProps, "layout" | "revision" | "emptyState"> & { readonly sessionId: string }
 
 /** A drag only drops into the session it came from: the MIME type carries the session. */
 export const editorTabMime = (sessionId: string): string =>
@@ -95,43 +113,29 @@ const readDrag = (e: DragEvent, mime: string): TabDrag | null => {
   }
 }
 
-/** The nearest edge within the outer fifth, else the middle. */
-const edgeAt = (e: DragEvent<HTMLElement>): DropEdge => {
-  const rect = e.currentTarget.getBoundingClientRect()
-  if (rect.width === 0 || rect.height === 0) return "center"
-  const x = (e.clientX - rect.left) / rect.width
-  const y = (e.clientY - rect.top) / rect.height
-  const edges: ReadonlyArray<[DropEdge, number]> = [["left", x], ["right", 1 - x], ["top", y], ["bottom", 1 - y]]
-  const [edge, distance] = edges.reduce((best, next) => (next[1] < best[1] ? next : best))
-  return distance < 0.2 ? edge : "center"
-}
-
-const OVERLAY: Record<DropEdge, string> = {
-  left: "inset-y-0 left-0 w-1/2",
-  right: "inset-y-0 right-0 w-1/2",
-  top: "inset-x-0 top-0 h-1/2",
-  bottom: "inset-x-0 bottom-0 h-1/2",
-  center: "inset-0"
-}
-
 export function EditorGroups(props: EditorGroupsProps) {
   const latest = useRef<Api>(props)
   latest.current = props
   const api = useMemo<Api>(
     () => ({
+      sessionId: props.sessionId,
       describe: (s) => latest.current.describe(s),
       renderBody: (s, ctx) => latest.current.renderBody(s, ctx),
       onActivate: (g, s) => latest.current.onActivate(g, s),
       onClose: (g, s) => latest.current.onClose(g, s),
       onDrop: (d, g, e, c) => latest.current.onDrop(d, g, e, c),
       onFocusGroup: (g) => latest.current.onFocusGroup(g),
-      onResize: (s, i, d) => latest.current.onResize(s, i, d),
+      onResize: (s, i, d, w) => latest.current.onResize(s, i, d, w),
       get onOpenCheckpoints() { return latest.current.onOpenCheckpoints },
       get launcherItems() {
         return latest.current.launcherItems
-      }
+      },
+      get followAgent() { return latest.current.followAgent },
+      get onToggleFollowAgent() { return latest.current.onToggleFollowAgent },
+      get onCreateChat() { return latest.current.onCreateChat },
+      get renderSubagentChip() { return latest.current.renderSubagentChip }
     }),
-    []
+    [props.sessionId]
   )
   const [commandOpen, setCommandOpen] = useState(false)
   const launchers = props.launcherItems ?? []
@@ -273,7 +277,7 @@ const SplitNode = memo(function SplitNode({ split, ...rest }: NodeProps & { read
       controller.abort()
       dragController.current = null
       if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId)
-      if (delta !== 0) rest.api.onResize(split.id, index, delta)
+      if (delta !== 0) rest.api.onResize(split.id, index, delta, size)
     }
     const options = { signal: controller.signal }
     window.addEventListener("pointermove", move, options)
@@ -322,7 +326,7 @@ function SplitChild({
           onPointerDown={onDividerDown}
           className={cn(
             "relative z-10 flex-none touch-none bg-hairline hover:bg-blue/50",
-            row ? "-mx-px w-[3px] cursor-col-resize" : "-my-px h-[3px] cursor-row-resize"
+            row ? "-mx-1 w-px cursor-col-resize box-content px-1" : "-my-1 h-px cursor-row-resize box-content py-1"
           )}
         />
       )}
@@ -340,7 +344,7 @@ function useDropZone(
   const [edge, setEdge] = useState<DropEdge | null>(null)
   const [rejected, setRejected] = useState(false)
   const edgeFor = (event: DragEvent<HTMLElement>): DropEdge =>
-    fixedEdge ?? (groupId === null ? "center" : edgeAt(event))
+    fixedEdge ?? (groupId === null ? "center" : resolveDropEdge(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY))
   const clear = useCallback(() => {
     setEdge(null)
     setRejected(false)
@@ -382,19 +386,7 @@ function useDropZone(
       api.onDrop(drag, groupId, next, fixedEdge ? false : event.altKey)
     }
   }
-  const overlay = edge ? (
-    <div
-      data-testid="editor-drop-overlay"
-      data-edge={edge}
-      data-rejected={rejected || undefined}
-      aria-hidden
-      className={cn(
-        "pointer-events-none absolute z-20 ring-2 ring-inset",
-        rejected ? "bg-red/15 ring-red" : "bg-blue/15 ring-blue",
-        OVERLAY[edge]
-      )}
-    />
-  ) : null
+  const overlay = edge ? <DropZoneOverlay edge={edge} rejected={rejected} zones={!fixedEdge && groupId !== null} /> : null
   return { handlers, overlay, clear }
 }
 
@@ -421,6 +413,26 @@ const EditorGroup = memo(function EditorGroup({
   api: Api
   revision: unknown
 }) {
+  const [width, setWidth] = useState(0)
+  const sectionRef = useRef<HTMLElement>(null)
+  const resolveSubagentView = useContext(SubagentLaneViewContext)
+  const renderAgentEdits = useContext(AgentEditsMarkerContext)
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null)
+  
+  useEffect(() => {
+    const section = sectionRef.current
+    if (!section || typeof ResizeObserver === "undefined") return
+    
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) setWidth(entry.contentRect.width)
+    })
+    
+    observer.observe(section)
+    return () => observer.disconnect()
+  }, [])
+  
+  const collapsed = width > 0 && width < MIN_GROUP_PX
   const active = activeSurface(group)
   const groupDrop = useDropZone(mime, group.id, api, undefined, active.kind === "chat")
   const tabStripDrop = useDropZone(mime, group.id, api, "center")
@@ -436,8 +448,17 @@ const EditorGroup = memo(function EditorGroup({
     }
   }
   const crumbs = api.describe(active).crumbs ?? []
+  
+  // Check if all tabs are chats
+  const allChats = group.tabs.every(tab => tab.kind === "chat")
+  const chatTabs = useMemo(() => 
+    allChats ? group.tabs.filter((tab): tab is Extract<SessionSurface, { kind: "chat" }> => tab.kind === "chat") : [],
+    [allChats, group.tabs]
+  )
+  
   return (
     <section
+      ref={sectionRef}
       data-testid="editor-group"
       data-focused={focused || undefined}
       aria-label={`Editor group: ${api.describe(active).label}`}
@@ -450,12 +471,55 @@ const EditorGroup = memo(function EditorGroup({
       {...groupDrop.handlers}
       className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-editor"
     >
+      {allChats ? (
+        <div className="relative flex h-10 flex-none items-stretch border-b border-hairline bg-sunken" {...tabStripHandlers}>
+          <ChatLaneHeader
+            chats={chatTabs.map((chat): ChatLaneHeaderChat => ({
+              id: chat.id,
+              title: api.describe(chat).label,
+              running: false
+            }))}
+            activeChatId={(active as Extract<SessionSurface, { kind: "chat" }>).id}
+            onSelectChat={(id) => {
+              const chat = chatTabs.find(c => c.id === id)
+              if (chat) api.onActivate(group.id, chat)
+            }}
+            onCloseChat={(id) => {
+              const chat = chatTabs.find((c) => c.id === id)
+              if (chat) api.onClose(group.id, chat)
+            }}
+            onCreateChat={api.onCreateChat ? () => api.onCreateChat?.(api.sessionId) : undefined}
+            followAgent={api.followAgent}
+            onToggleFollowAgent={api.onToggleFollowAgent}
+            subagentSlot={api.renderSubagentChip?.((active as Extract<SessionSurface, { kind: "chat" }>).id)}
+            subagentView={resolveSubagentView((active as Extract<SessionSurface, { kind: "chat" }>).id)}
+          />
+          <Launcher api={api} />
+          {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
+          {/* Hidden draggable elements for all chats to enable drag-to-split and programmatic close */}
+          {chatTabs.map((chat) => (
+            <div
+              key={chat.id}
+              data-testid={`editor-tab-chat-${chat.id}`}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(mime, JSON.stringify({ surface: chat, from: group.id } satisfies TabDrag))
+                e.dataTransfer.effectAllowed = "copyMove"
+              }}
+              className="pointer-events-none absolute inset-0"
+              aria-hidden
+            >
+            </div>
+          ))}
+          {tabStripDrop.overlay}
+        </div>
+      ) : (
       <div
         data-testid="editor-tab-strip"
         {...tabStripHandlers}
-        className="relative flex h-9 flex-none items-stretch border-b border-hairline bg-sunken"
+        className="relative flex h-8 flex-none items-stretch border-b border-hairline bg-sunken"
       >
-        <div role="tablist" className="sb-no-scrollbar -mb-px flex min-w-0 flex-1 items-stretch overflow-x-auto">
+        <div role="tablist" className="sb-no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto">
           {group.tabs.map((surface) => (
             <EditorTab
               key={sessionSurfaceKey(surface)}
@@ -473,22 +537,25 @@ const EditorGroup = memo(function EditorGroup({
         {active.kind === "chat" && api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
         {tabStripDrop.overlay}
       </div>
-      {crumbs.length > 0 && (
-        <nav aria-label="Breadcrumb" className="flex h-6 flex-none items-center gap-1 px-3 text-[11px] text-dim">
-          {crumbs.map((crumb, index) => (
-            <span key={`${index}-${crumb}`} className="flex min-w-0 items-center gap-1">
-              {index > 0 && <ChevronRight className="size-3 flex-none" />}
-              <span className={cn("truncate", index === crumbs.length - 1 && "text-muted-foreground")}>{crumb}</span>
-            </span>
-          ))}
-        </nav>
       )}
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        {group.tabs.map((surface) => {
-          const key = sessionSurfaceKey(surface)
-          return <TabBody key={key} surface={surface} visible={key === group.active} focused={focused} api={api} revision={revision} />
-        })}
-      </div>
+      {!collapsed && crumbs.length > 0 && (
+        <Breadcrumb crumbs={crumbs} className={active.kind === "file" ? "@container h-8" : undefined}>
+          {active.kind === "file" ? (
+            <>
+              {renderAgentEdits(api.sessionId, active.id)}
+              <span ref={setHeaderSlot} className="flex items-center gap-2" />
+            </>
+          ) : null}
+        </Breadcrumb>
+      )}
+      {!collapsed && (
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          {group.tabs.map((surface) => {
+            const key = sessionSurfaceKey(surface)
+            return <TabBody key={key} surface={surface} visible={key === group.active} headerSlot={key === group.active ? headerSlot : null} focused={focused} api={api} revision={revision} />
+          })}
+        </div>
+      )}
       {groupDrop.overlay}
     </section>
   )
@@ -523,10 +590,10 @@ const EditorTab = memo(function EditorTab({
       }}
       onAuxClick={(e) => e.button === 1 && api.onClose(groupId, surface)}
       className={cn(
-        "group flex flex-none items-center border-r border-t-2 border-r-hairline text-xs",
+        "group flex flex-none items-center border-b-2 border-r border-r-hairline text-xs",
         selected
-          ? cn("bg-editor text-text-bright", focused ? "border-t-blue" : "border-t-line")
-          : "border-t-transparent text-muted-foreground hover:text-text"
+          ? cn("bg-editor text-text-bright", focused ? "border-b-text-bright" : "border-b-line-strong")
+          : "border-b-transparent text-muted-foreground hover:text-text"
       )}
     >
       <button
@@ -572,12 +639,14 @@ const EditorTab = memo(function EditorTab({
 const TabBody = memo(function TabBody({
   surface,
   visible,
+  headerSlot,
   focused,
   api,
   revision
 }: {
   surface: SessionSurface
   visible: boolean
+  headerSlot: HTMLElement | null
   focused: boolean
   api: Api
   revision: unknown
@@ -589,13 +658,15 @@ const TabBody = memo(function TabBody({
       hidden={!visible}
       className="absolute inset-0 flex min-h-0 min-w-0 flex-col"
     >
-      <TabContent
-        surface={surface}
-        focused={surface.kind === "file" ? false : focused && visible}
-        visible={visible}
-        api={api}
-        revision={revision}
-      />
+      <FileHeaderSlotContext.Provider value={headerSlot}>
+        <TabContent
+          surface={surface}
+          focused={surface.kind === "file" ? false : focused && visible}
+          visible={visible}
+          api={api}
+          revision={revision}
+        />
+      </FileHeaderSlotContext.Provider>
     </div>
   )
 })
@@ -616,20 +687,16 @@ const TabContent = memo(function TabContent({
   return <WidthTierProvider className="flex-col">{api.renderBody(surface, { focused, visible })}</WidthTierProvider>
 })
 
+/** The group's + menu: the view launcher items. */
 function Launcher({ api }: { api: Api }) {
   const items = api.launcherItems ?? []
   if (items.length === 0) return null
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label="New tab"
-          title="New tab"
-          className="flex flex-none items-center px-2 text-dim outline-none hover:text-text"
-        >
+        <Button variant="ghost" size="sm" aria-label="New tab" title="New chat or tab" className="h-auto flex-none rounded-none px-2">
           <Plus className="size-3.5" />
-        </button>
+        </Button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content

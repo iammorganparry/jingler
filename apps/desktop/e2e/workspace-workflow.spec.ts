@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { addProject, appShell, expect, showSessions, test } from "./fixtures.js"
+import { addProject, appShell, confirmArchive, expect, showSessions, test } from "./fixtures.js"
 
 test("approves setup, copied files, named Run/Stop, and archive cleanup", async ({ launchApp }) => {
   const launched = await launchApp({ configured: true, withRepo: true })
@@ -45,7 +45,7 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
   await window.getByRole("button", { name: "Run Dev" }).click()
   await expect(window.getByRole("button", { name: "Stop Dev" })).toBeVisible()
   // The general browser remains available beside a running project command.
-  await window.getByTestId("view-tab-browser").click()
+  await window.getByTestId("header-view-browser").click()
   await expect(window.getByLabel("Preview URL").filter({ visible: true }).first()).toBeVisible()
   await expect(window.getByTestId("editor-tab-view-browser")).toBeVisible()
   await expect(window.getByRole("button", { name: "Stop Dev" })).toBeVisible()
@@ -76,6 +76,7 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
   const row = window.locator("[data-testid^='session-row-']").first()
   await row.hover()
   await row.getByRole("button", { name: /^Archive / }).click()
+  await confirmArchive(window)
   await expect.poll(() => existsSync(join(session.worktreePath, "cleanup-proof.txt"))).toBe(true)
   await expect.poll(() => JSON.parse(readFileSync(sessionsPath, "utf8")).find((item: { id: string }) => item.id === session.id)?.archived).toBe(true)
 })
@@ -126,6 +127,7 @@ for (const recovery of ["retry", "skip"] as const) {
     await expect(window.getByText("Workflow turn admitted.", { exact: true })).toBeVisible()
     const row = window.getByTestId(`session-row-${session.id}`)
     await row.hover(); await row.getByRole("button", { name: /^Archive / }).click()
+    await confirmArchive(window)
     await expect(window.getByRole("dialog", { name: "Archive failed" })).toContainText("Cleanup exited with code 7.")
     expect(current().workspaceLifecycle.status).toBe("cleanup-failed")
     expect(current().archived).not.toBe(true)
@@ -154,5 +156,40 @@ for (const recovery of ["retry", "skip"] as const) {
       expect(readFileSync(join(cwd, "cleanup-attempts"), "utf8")).toBe(cleanupAttempts)
       return Date.now()
     }).toBeGreaterThan(settledAt)
+  })
+}
+
+for (const recovery of ["retry", "skip"] as const) {
+  test(`${recovery}s failed setup from the collapsible Workflow section in Checks`, async ({ launchApp }) => {
+    const { window, repoPath, home } = await launchApp({ configured: true, withRepo: true })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByTestId("new-session").click(); await addProject(window, repoPath); await window.keyboard.press("Escape")
+    await window.getByRole("button", { name: "Account menu" }).click()
+    await window.getByRole("menuitem", { name: "Settings" }).click()
+    await window.getByRole("button", { name: "Projects", exact: true }).click()
+    // Fails until `allow-setup` exists, so a retry only succeeds once explicitly approved.
+    await window.getByLabel("Setup command").fill("node -e \"if(!require('node:fs').existsSync('allow-setup'))process.exit(7)\"")
+    await window.getByRole("checkbox", { name: /I approve these commands/ }).click()
+    await window.getByRole("button", { name: "Save workflow" }).click()
+    await expect(window.getByText("Saved and approved for this exact content.")).toBeVisible()
+    await window.getByRole("button", { name: "Close settings" }).click()
+    await window.getByTestId("new-session").click()
+    await window.getByRole("button", { name: "Create workspace" }).click()
+    await expect(window.getByTestId("workspace-workflow-bar").getByRole("alert")).toContainText("Setup failed", { timeout: 20000 })
+
+    // Switch to Checks — the same retry/skip actions must be reachable from its
+    // collapsible Workflow section, collapsed by default to a one-row summary.
+    await window.getByTestId("header-view-checks").click()
+    const section = window.getByTestId("pr-workflow-section")
+    await expect(section).toBeVisible()
+    await expect(section.getByRole("button", { name: "Retry setup" })).toHaveCount(0)
+    await section.locator("summary").click()
+    if (recovery === "retry") {
+      const worktreePath = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf8"))[0].worktreePath as string
+      writeFileSync(join(worktreePath, "allow-setup"), "approved retry")
+    }
+    await expect(section.getByRole("button", { name: recovery === "retry" ? "Retry setup" : "Skip setup", exact: true })).toBeVisible()
+    await section.getByRole("button", { name: recovery === "retry" ? "Retry setup" : "Skip setup", exact: true }).click()
+    await expect(window.getByTestId("workspace-workflow-bar").getByRole("alert")).toHaveCount(0, { timeout: 20000 })
   })
 }

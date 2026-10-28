@@ -72,13 +72,13 @@ export const prGlyphOf = (pr: SessionPrStatus | null | undefined): PrGlyph => {
 
   switch (pr.checks) {
     case "fail":
-      return { Icon, tone: "text-red", mark: "fail", label: `${where} — checks failing` }
+      return { Icon, tone: "text-red", mark: "fail", label: `${where}, checks failing` }
     case "pass":
-      return { Icon, tone: "text-green", mark: "pass", label: `${where} — checks passing` }
+      return { Icon, tone: "text-green", mark: "pass", label: `${where}, checks passing` }
     case "running":
-      return { Icon, tone: "text-yellow", mark: null, label: `${where} — checks running` }
+      return { Icon, tone: "text-yellow", mark: null, label: `${where}, checks running` }
     case "pending":
-      return { Icon, tone: "text-yellow/70", mark: null, label: `${where} — checks queued` }
+      return { Icon, tone: "text-yellow/70", mark: null, label: `${where}, checks queued` }
     default:
       // No CI configured on this PR. Purple is the neutral "there is a PR here"
       // colour — deliberately not green, which would claim a passing build that
@@ -86,6 +86,18 @@ export const prGlyphOf = (pr: SessionPrStatus | null | undefined): PrGlyph => {
       return { Icon, tone: "text-purple", mark: null, label: where }
   }
 }
+
+const CHECK_SEVERITY: Record<string, number> = { fail: 0, running: 2, pending: 3, pass: 5 }
+
+const severity = (pr: SessionPrStatus): number => {
+  if (pr.state === "merged") return 6
+  if (pr.state === "closed") return 1
+  return CHECK_SEVERITY[pr.checks ?? ""] ?? 4
+}
+
+/** The PR in a stack that most needs attention: failing CI, then closed, then running/queued CI. */
+export const worstPrOf = (stack: ReadonlyArray<SessionPrStatus>): SessionPrStatus | null =>
+  stack.reduce<SessionPrStatus | null>((worst, pr) => (worst === null || severity(pr) < severity(worst) ? pr : worst), null)
 
 /** A hollow ring for a session with no PR — a placeholder, not a status. */
 function NoPr({ className }: { className?: string }) {
@@ -105,13 +117,38 @@ function NoPr({ className }: { className?: string }) {
  */
 export function PrStatusGlyph({
   pr,
+  stack,
   size = 14,
   className
 }: {
   pr: SessionPrStatus | null | undefined
+  /** A PR stack: renders the worst layer's glyph plus the layer count (`⑂ 3`). Data wiring is 14.1. */
+  stack?: ReadonlyArray<SessionPrStatus>
   size?: number
   className?: string
 }) {
+  if (stack && stack.length > 1) {
+    // A live worst-layer status from the caller beats the persisted layers, which may lack state.
+    const worst = pr ?? worstPrOf(stack)
+    const { label } = prGlyphOf(worst)
+    // Spec §6 rule 3 ("no traffic-light colour lists"): the stack glyph stays
+    // neutral (--sb-dim via `text-dim`) and only earns colour for a failing
+    // layer, which is the one state worth interrupting for.
+    const tone = worst?.checks === "fail" ? "text-red" : "text-dim"
+    return (
+      <span
+        data-testid="pr-glyph-stack"
+        data-state={worst?.state ?? "none"}
+        data-checks={worst?.checks ?? "none"}
+        title={`Stack of ${stack.length} pull requests, ${label}`}
+        className={cn("inline-flex flex-none items-center gap-0.5 whitespace-nowrap", tone, className)}
+      >
+        <PrStatusGlyph pr={worst} size={size} />
+        <span aria-hidden="true">{stack.length}</span>
+        <span className="sr-only">Stack of {stack.length} pull requests</span>
+      </span>
+    )
+  }
   const { Icon, tone, mark, label } = prGlyphOf(pr)
   return (
     <span

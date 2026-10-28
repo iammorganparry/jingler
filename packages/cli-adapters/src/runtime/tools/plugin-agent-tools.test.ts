@@ -68,7 +68,7 @@ describe("plugin agent tools", () => {
     const sources = enabledPluginAgentToolsets([plugin()])
 
     expect(await registerPluginAgentTools(registry, host, sources, context)).toEqual([])
-    expect(registry.providerInputSchemaFor(descriptor.id)).toEqual(descriptor.inputSchema)
+    expect(registry.providerInputSchemaFor(descriptor.id)).toEqual({ ...descriptor.inputSchema, properties: { ...descriptor.inputSchema.properties, intent: expect.objectContaining({ type: "string" }) } })
     const result = await Effect.runPromise(registry.execute({
       id: descriptor.id,
       arguments: { id: "ENG-1" },

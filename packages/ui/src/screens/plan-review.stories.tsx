@@ -148,6 +148,9 @@ type Story = StoryObj<typeof meta>
 
 export const Proposed: Story = {}
 
+/** The agent is rewriting after feedback: Approve is disabled with its reason. */
+export const Revising: Story = { args: { document: { ...document, status: "revising", reviewId: undefined } } }
+
 export const Approved: Story = { args: { document: { ...document, status: "approved" } } }
 
 /** Stage 1 finished (every task done, every criterion passed); stage 2 underway. */
@@ -165,6 +168,33 @@ export const Executing: Story = {
               acceptance: stage.acceptance.map((criterion) => ({ ...criterion, status: "passed" as const }))
             }
           : { ...stage, tasks: [{ id: "r1", text: "Add `signOut` to the contract", status: "in-progress" as const }] })
+      }
+    }
+  }
+}
+
+const message = (id: string, body: string, authorKind: "user" | "agent") => ({
+  id, body, authorKind, authorId: authorKind === "agent" ? "jingler" : "operator",
+  createdAt: "2026-10-08T00:00:00.000Z", mentionedParticipantIds: [], deliveryState: "sent" as const
+})
+
+/** Compare with Paper boards 17a/17b: 20px avatars in the gutter; agent = mono Jingler mark; reply badge; hover opens the 320px card. */
+export const CommentAvatars: Story = {
+  args: {
+    document: {
+      ...document,
+      plan: {
+        ...document.plan,
+        annotations: [
+          {
+            id: "c-user", stageId: "token-store", body: "Keep the v1 reader.", author: "user", createdAt: "2026-10-08T00:00:00.000Z", status: "open",
+            messages: [message("m1", "Keep the v1 reader.", "user"), message("m2", "Agreed, kept.", "agent")]
+          },
+          {
+            id: "c-agent", stageId: "token-store", body: "Migration is idempotent.", author: "agent", createdAt: "2026-10-08T00:00:00.000Z", status: "open",
+            messages: [message("m3", "Migration is idempotent.", "agent")]
+          }
+        ]
       }
     }
   }

@@ -67,6 +67,7 @@ import {
   spawnChild,
   stopChild
 } from "xstate"
+import { queryClient } from "./query-client.js"
 import { rpc } from "./rpc-client.js"
 
 const modelMutations = new Map<string, { generation: number; tail: Promise<void> }>()
@@ -324,6 +325,8 @@ export interface ConversationContext {
   readonly mode: PermissionMode
   /** Last concrete harness permission mode, retained while Plan is selected. */
   readonly executionMode: ExecutionMode
+  /** The agent may switch Plan/Build itself (composer "Auto" segment). */
+  readonly autoSwitch: boolean
   readonly skills: ReadonlyArray<Skill>
   readonly files: ReadonlyArray<string>
   readonly runtimeId: AgentRuntimeId | null
@@ -520,6 +523,7 @@ type ConversationEvent =
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
+  | { type: "SET_WORK_MODE"; workMode: "plan" | "build"; autoSwitch?: boolean }
   | {
       type: "SET_MODEL"
       runtimeId: AgentRuntimeId
@@ -538,6 +542,7 @@ type ConversationEvent =
       diffStat: SessionDiffStat
     }
   | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
+  | { type: "PR_EVENT_RECORDED"; message: Message }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
   | { type: "REVIEW_EVENT"; event: StreamEvent }
   | { type: "REFRESH_DIFF" }
@@ -1024,7 +1029,7 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
   const chat = initialConversationChat(input)
   return {
     session: input.session, chatId: chat.id, messages: [], sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] }, remotePublishProgress: null,
-    mode: chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
+    mode: chat.workMode === "plan" ? "plan" : chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits", autoSwitch: chat.autoSwitch === true,
     skills: [], files: [], runtimeId: chat.runtimeId ?? input.session.runtimeId ?? null, endpointId: chat.endpointId ?? input.session.endpointId ?? null,
     connectionId: chat.connectionId ?? input.session.connectionId ?? null, providerId: chat.providerId ?? input.session.providerId ?? null,
     modelId: chat.modelId ?? input.session.modelId ?? null, modelPending: false, diffStat: { added: 0, removed: 0, files: 0 }, patchAt: 0,
@@ -1035,6 +1040,12 @@ const initialConversationContext = (input: { session: Session; chatId?: string }
     loadingHistory: false, reviewer: null, reviewPhase: "starting", reviewStartedAt: null
   }
 }
+
+// The server switched Plan/Build (plan approval or the agent's own switch); Build lands on the approval level the chat kept.
+const followWorkModeChange = (
+  context: { readonly mode: PermissionMode; readonly executionMode: PermissionMode },
+  workMode: "plan" | "build"
+) => (workMode === "plan" ? { mode: "plan" as const } : context.mode === "plan" ? { mode: context.executionMode } : {})
 
 export const conversationMachine = setup({
   types: {
@@ -1634,11 +1645,11 @@ export const conversationMachine = setup({
         }
       }
       if (e._tag === "PlannotatorStateChanged") {
-        if (e.state.phase === "executing" && context.mode === "plan") {
-          self.send({ type: "SET_MODE", mode: "auto" })
-        }
         return { plannotator: e.state }
       }
+      // The server switched Plan -> Build (plan approval); follow it locally
+      // without echoing an RPC, landing on the approval level the chat kept.
+      if (e._tag === "WorkModeChanged") return followWorkModeChange(context, e.workMode)
       if (e._tag === "PlanProposed") {
         return {
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),
@@ -1789,6 +1800,9 @@ export const conversationMachine = setup({
         e.diff === null &&
         (toolName === null || !isFileMutationTool(toolName))
       ) return
+      // Changes view reads ["local","diff",id,...] (main checkout and every
+      // subagent workspace); invalidating the prefix refreshes them all.
+      void queryClient.invalidateQueries({ queryKey: ["local", "diff", context.session.id] })
       void rpc
         .sessionsDiffStat(context.session.id)
         .then((diffStat) => self.send({ type: "DIFF_STAT_UPDATED", diffStat }))
@@ -1846,8 +1860,13 @@ export const conversationMachine = setup({
       if (event.type !== "SET_MODE") return {}
       void rpc.agentSetMode(context.session.id, context.chatId, event.mode)
       return isExecutionMode(event.mode)
-        ? { mode: event.mode, executionMode: event.mode }
+        ? { mode: context.mode === "plan" ? "plan" : event.mode, executionMode: event.mode }
         : { mode: event.mode }
+    }),
+    persistWorkMode: assign(({ context, event }) => {
+      if (event.type !== "SET_WORK_MODE") return {}
+      void rpc.agentSetWorkMode(context.session.id, context.chatId, event.workMode, event.autoSwitch)
+      return { mode: event.workMode === "plan" ? "plan" : context.executionMode, ...(event.autoSwitch === undefined ? {} : { autoSwitch: event.autoSwitch }) }
     }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}
@@ -1872,6 +1891,11 @@ export const conversationMachine = setup({
       ) return {}
       return reconciledSession(context, event.session, event.type !== "SESSION_UPDATED")
     }),
+    appendPrEvent: assign(({ context, event }) =>
+      event.type !== "PR_EVENT_RECORDED" || context.messages.some((m) => m.id === event.message.id)
+        ? {}
+        : { messages: [...context.messages, event.message] }
+    ),
     applySharedPlan: assign(({ context, event }) => {
       if (event.type !== "SHARED_PLAN_UPDATED") return {}
       const hasPlan = context.messages.some((message) =>
@@ -2115,6 +2139,7 @@ export const conversationMachine = setup({
     MODEL_PERSIST_FAILED: { actions: "reconcileSession" },
     SESSION_UPDATED: { guard: "sessionChanged", actions: "reconcileSession" },
     SHARED_PLAN_UPDATED: { guard: "sharedPlanChanged", actions: "applySharedPlan" },
+    PR_EVENT_RECORDED: { actions: "appendPrEvent" },
     // Root-level for the same reason: a sub-agent's tab outlives the turn that
     // spawned it, so closing one has to work in `idle` — and a stop request
     // races nothing, since the harness answers it on the ordinary stream.
@@ -2157,6 +2182,7 @@ export const conversationMachine = setup({
        */
       on: {
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // The composer is enabled from the first paint, so a prompt can be sent
         // before the transcript lands — and a dropped one is invisible: the box
         // clears and the operator believes they sent it. Hold it and run it the
@@ -2283,6 +2309,7 @@ export const conversationMachine = setup({
           { actions: "settleLateSteer" }
         ],
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // Re-read the worktree diff on demand (e.g. after a revert from the rail).
         REFRESH_DIFF: { target: "refreshingDiff" }
       }
@@ -2381,6 +2408,7 @@ export const conversationMachine = setup({
         DECIDE_GATE: { actions: "optimisticGate" },
         ANSWER_QUESTION: { actions: "optimisticAnswer" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
         // Stopping PARKS the queue rather than clearing it — the operator asked
         // the agent to halt, not to destroy what they typed. The rows stay on
         // screen and inert until acted on (see `queueParked`). Live sub-agent
@@ -2418,6 +2446,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     },
     /**
@@ -2442,9 +2471,10 @@ export const conversationMachine = setup({
         onDone: { target: "refreshingDiff", actions: "settleStoppedFleet" },
         // A failed stop still means we are no longer streaming: the turn was
         // already settled by `settleStoppedRun` on the way in.
-        onError: { target: "refreshingDiff" }
+        // The run is gone either way, so its sub-agents must not keep the row "Running".
+        onError: { target: "refreshingDiff", actions: "settleStoppedFleet" }
       },
-      after: { [STOP_SETTLE_CAP]: { target: "refreshingDiff" } },
+      after: { [STOP_SETTLE_CAP]: { target: "refreshingDiff", actions: "settleStoppedFleet" } },
       on: {
         // Keep accepting sends — they run once the diff settles, as elsewhere.
         SEND: [
@@ -2461,6 +2491,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     },
     // After a turn ends, re-read the worktree diff so the Changes rail reflects
@@ -2525,6 +2556,7 @@ export const conversationMachine = setup({
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
+        SET_WORK_MODE: { actions: "persistWorkMode" },
       }
     }
   }
@@ -2593,6 +2625,10 @@ function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {
       ? { ...s, status: "done" as const, message: settleStreaming(s.message) }
       : s
   )
+  // The sidebar's "N agents" and Running hint read the fleet feed, not the
+  // legacy list above: a run that ends on its own must settle it too, as Stop does
+  // (a child blocked on the operator's answer, or a detached background child, legitimately outlives the turn).
+  const settledFleet = boundedFleetEvents(settleStoppedFleet(context.subagentFleetEvents, Date.now(), true))
   // `Done.tokens` NEVER reaches the context meter. It is the run's
   // cumulative spend (see the `Usage` schema note in conversation.ts) —
   // cache reads counted once per tool call — so on a long session it runs
@@ -2606,6 +2642,7 @@ function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {
       messages,
       foldsSinceCompaction,
       subagents: settled,
+      subagentFleetEvents: settledFleet,
       runStartedAt: null,
       lastOutcome: "done" as const,
       pendingExternalInstruction: null,
@@ -2617,6 +2654,7 @@ function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {
       messages,
       foldsSinceCompaction,
       subagents: settled,
+      subagentFleetEvents: settledFleet,
       runStartedAt: null,
       lastOutcome: "failed" as const,
       pendingExternalInstruction: null,

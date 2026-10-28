@@ -1,4 +1,4 @@
-import type { Message, SubagentFleetNode } from "@jingler/core"
+import type { Message, ProviderId, SubagentFleetNode } from "@jingler/core"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { FleetAgentView } from "./subagent-view.js"
@@ -33,6 +33,8 @@ const fleetNode = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => 
   usage: { inputTokens: 100, outputTokens: 40, totalTokens: 140, costUsd: 0, durationMs: 10_000, toolCalls: 2 },
   artifacts: [],
   attention: null,
+  workspace: null,
+  prNumber: null,
   ...over
 })
 
@@ -139,6 +141,33 @@ describe("FleetAgentView", () => {
     expect(screen.getByTestId("subagent-attention").textContent).toContain(
       "Should I include accessibility behavior?"
     )
+  })
+
+  it("answers a child's attention request through the question card's free-text row", () => {
+    const onReply = vi.fn()
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          status: "needs-attention",
+          attention: {
+            requestId: "request-1",
+            reason: "need_decision",
+            message: "Should I include accessibility behavior?",
+            requestedAt: 30,
+            deadlineAt: null
+          }
+        })}
+        messages={[]}
+        onReply={onReply}
+      />
+    )
+
+    fireEvent.change(screen.getByPlaceholderText("Type a custom answer…"), {
+      target: { value: "Yes, include it." }
+    })
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+
+    expect(onReply).toHaveBeenCalledWith("Yes, include it.")
   })
 
   it("shows final output after a partial transcript", () => {
@@ -264,5 +293,144 @@ describe("FleetAgentView workflow nodes", () => {
       "Workflow completed: Reviewed the PR across 3 step agents."
     )
     expect(screen.getByText(ORCHESTRATES)).toBeDefined()
+  })
+})
+
+describe("SubagentMetaStrip", () => {
+  const full = fleetNode({
+    phase: "scanning",
+    usage: { inputTokens: 12_400, outputTokens: 900, totalTokens: 13_300, costUsd: 0.42, durationMs: 10_000, toolCalls: 7 },
+    artifacts: [{ kind: "report", path: "/tmp/out/report.md", label: "report.md" }]
+  })
+
+  it("renders every field from the node", () => {
+    const onOpen = vi.fn()
+    render(<FleetAgentView node={full} messages={[]} providerId={"anthropic" as ProviderId} onOpenArtifact={onOpen} />)
+    const identity = screen.getByTestId("subagent-meta-identity").textContent
+    expect(identity).toContain("anthropic/claude-test")
+    expect(identity).toContain("running · scanning")
+    const usage = screen.getByTestId("subagent-meta-usage").textContent
+    // The derived label, never the raw tool name.
+    expect(usage).toContain("Read file")
+    expect(usage).not.toContain("workspace_read_file")
+    expect(usage).toContain("12.4k in / 900 out")
+    expect(usage).toContain("7 tool calls")
+    expect(usage).toContain("$0.42")
+    expect(usage).toContain("Background")
+    fireEvent.click(screen.getByRole("button", { name: "report.md" }))
+    expect(onOpen).toHaveBeenCalledWith("/tmp/out/report.md")
+  })
+
+  it("omits null and zero fields instead of showing a dash", () => {
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          model: null,
+          currentTool: null,
+          background: false,
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, durationMs: 0, toolCalls: 0 }
+        })}
+        messages={[]}
+      />
+    )
+    const strip = screen.getByTestId("subagent-meta-strip")
+    expect(screen.queryByTestId("subagent-meta-usage")).toBeNull()
+    expect(screen.queryByTestId("subagent-meta-artifacts")).toBeNull()
+    expect(strip.textContent).not.toContain("—")
+    expect(strip.textContent).not.toContain("$")
+    expect(strip.textContent).not.toContain("Background")
+  })
+
+  it("keeps the cost out of the strip when it is zero", () => {
+    render(<FleetAgentView node={fleetNode()} messages={[]} />)
+    expect(screen.getByTestId("subagent-meta-usage").textContent).not.toContain("$")
+  })
+
+  it("expands Details with run id and started time", () => {
+    render(<FleetAgentView node={full} messages={[]} />)
+    expect(screen.queryByTestId("subagent-meta-details")).toBeNull()
+    fireEvent.click(screen.getByTestId("subagent-meta-details-toggle"))
+    const details = screen.getByTestId("subagent-meta-details").textContent
+    expect(details).toContain("Run")
+    expect(details).toContain("run-1")
+    expect(details).toContain("Started")
+  })
+
+  it("truncates tool text but never the pills", () => {
+    render(<FleetAgentView node={full} messages={[]} />)
+    expect(screen.getByText("Read file").className).toContain("truncate")
+    expect(screen.getByText("Background").closest(".whitespace-nowrap")).not.toBeNull()
+  })
+})
+
+describe("SubagentMetaStrip workspace", () => {
+  const worktree = { path: "/wt/reviewer", branch: "feat/review-retry", baseRef: "main", diff: { added: 42, removed: 8 } }
+
+  it("shows the branch, diff stat and a PR chip that opens the PR view", () => {
+    const onOpenPullRequest = vi.fn()
+    render(<FleetAgentView node={fleetNode({ workspace: worktree, prNumber: 491 })} messages={[]} onOpenPullRequest={onOpenPullRequest} />)
+    const row = screen.getByTestId("subagent-meta-workspace")
+    expect(row.textContent).toContain("feat/review-retry")
+    expect(row.textContent).toContain("+42")
+    expect(row.textContent).toContain("−8")
+    expect(screen.getByText("feat/review-retry").className).toContain("truncate")
+    fireEvent.click(screen.getByRole("button", { name: "Open pull request #491" }))
+    expect(onOpenPullRequest).toHaveBeenCalledWith(491)
+  })
+
+  it("says Shared checkout and omits the PR chip for a child without a worktree or PR", () => {
+    render(<FleetAgentView node={fleetNode()} messages={[]} />)
+    expect(screen.getByTestId("subagent-meta-workspace").textContent).toBe("Shared checkout")
+    expect(screen.queryByTestId("subagent-meta-pr")).toBeNull()
+  })
+})
+
+describe("FleetAgentView task", () => {
+  it("renders the task as the first, quoted item in the transcript", () => {
+    const message: Message = {
+      id: "child-1",
+      role: "assistant",
+      streaming: false,
+      createdAt: "2026-08-16T11:14:28.000Z",
+      parts: [{ _tag: "Text", text: "Reviewing the code." }]
+    }
+    render(<FleetAgentView node={fleetNode({ task: "Map the UI" })} messages={[message]} />)
+    const scroll = screen.getByTestId("fleet-agent-transcript-scroll")
+    const task = screen.getByTestId("subagent-task")
+    expect(task.tagName).toBe("BLOCKQUOTE")
+    expect(task.textContent).toBe("Map the UI")
+    expect(scroll.querySelector("blockquote")).toBe(task)
+    expect(task.compareDocumentPosition(screen.getByText("Reviewing the code.")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("omits the quoted task when there is no fleet node", () => {
+    render(<FleetAgentView messages={[]} />)
+    expect(screen.queryByTestId("subagent-task")).toBeNull()
+  })
+})
+
+describe("FleetAgentView states", () => {
+  it("shows a loading skeleton while the child transcript loads", () => {
+    render(<FleetAgentView node={fleetNode()} messages={[]} loading />)
+    expect(screen.getAllByRole("status", { name: "Loading" }).length).toBe(3)
+    expect(screen.queryByTestId("fleet-agent-live")).toBeNull()
+  })
+
+  it("names an orchestrator as having no transcript", () => {
+    render(<FleetAgentView node={fleetNode({ nodeKind: "workflow", agent: "workflow", currentTool: null })} messages={[]} />)
+    expect(screen.getByText("This agent has no transcript (orchestrator)")).toBeDefined()
+  })
+
+  it("shows the load error with a working Retry", () => {
+    const onRetry = vi.fn()
+    render(<FleetAgentView node={fleetNode()} messages={[]} error="Could not load the child transcript." onRetry={onRetry} />)
+    expect(screen.getByRole("alert").textContent).toContain("Could not load the child transcript.")
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it("omits Retry when no handler is given", () => {
+    render(<FleetAgentView node={fleetNode()} messages={[]} error="boom" />)
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
   })
 })

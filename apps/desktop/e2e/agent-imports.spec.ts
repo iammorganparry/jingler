@@ -103,3 +103,54 @@ test("invokes an imported skill through the real pi runtime", async ({ launchApp
     launched.window.getByText("Managed skill loaded through pi.")
   ).toBeVisible({ timeout: 20_000 })
 })
+
+test("searches and filters 500 imported agents and skills", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: { scenarioId: "managed-resources", authRoute: "api-key" },
+    sessions: seededSession,
+    seed: ({ home }) => {
+      const root = join(home, "jingler", "agent-resources")
+      const entries = Array.from({ length: 500 }, (_, i) => {
+        const kind = i % 5 === 0 ? "prompt" : "skill"
+        const id = `res-${i}`
+        const managedPath = kind === "skill"
+          ? join(root, "skills", id, "SKILL.md")
+          : join(root, "prompts", `${id}.md`)
+        mkdirSync(join(managedPath, ".."), { recursive: true })
+        writeFileSync(managedPath, `Resource ${i}\n`)
+        return {
+          id, kind, name: `Resource ${i}`, description: `Entry ${i}`, enabled: true,
+          trust: "operator-approved",
+          scope: { kind: "portable", allowedTargets: [] },
+          managedPath, byteLength: 12,
+          provenance: {
+            origin: i % 2 === 0 ? "claude" : "codex",
+            sourceRoot: root, sourcePath: managedPath, importedAt: "2026-08-10T00:00:00.000Z"
+          }
+        }
+      })
+      writeFileSync(join(root, "catalog.json"), JSON.stringify(entries))
+    }
+  })
+  const { window } = launched
+  await expect(appShell(window)).toBeVisible()
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: "Agents & skills" }).click()
+
+  await expect(window.getByRole("radio", { name: "All 500" })).toBeVisible()
+  expect(await window.getByRole("option").count()).toBeLessThan(40)
+
+  await window.getByRole("radio", { name: "Agents 100" }).click()
+  await window.getByRole("radio", { name: "Claude 50" }).click()
+  await expect(window.getByRole("radio", { name: "Agents 50" })).toBeVisible()
+  await window.getByRole("textbox", { name: "Search agents & skills…" }).fill("Resource 100")
+  await expect(window.getByText("1 result")).toBeVisible()
+
+  await window.getByRole("switch", { name: "Disable Resource 100" }).click()
+  await expect(window.getByRole("switch", { name: "Enable Resource 100" })).toBeVisible()
+  await window.getByRole("button", { name: "Remove Resource 100" }).click()
+  await expect(window.getByText("No agents or skills match these filters.")).toBeVisible()
+})

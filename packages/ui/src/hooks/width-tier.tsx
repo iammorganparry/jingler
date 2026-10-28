@@ -24,6 +24,24 @@ export const tierFor = (width: number): WidthTier =>
         ? "narrow"
         : "tiny"
 
+/**
+ * Whole-window breakpoints (px), distinct from the per-container tiers above.
+ *
+ * Cascade order as the window narrows: the chat lane turns into the 400px
+ * overlay drawer FIRST (< 1100), then the sidebar collapses to its 52px rail
+ * (< 1000). The drawer overlays the content area only — never the sidebar or
+ * rail — so the two never overlap: between 1000 and 1100 the sidebar is still
+ * docked and the drawer sits beside it.
+ */
+export const SHELL_BREAKPOINTS = { chatDrawerBelow: 1100, sidebarRailBelow: 1000 } as const
+
+export const chatLaneIsDrawer = (windowWidth: number): boolean =>
+  windowWidth < SHELL_BREAKPOINTS.chatDrawerBelow
+
+/** `0` is the pre-measurement frame, not a collapsed shell. */
+export const sidebarIsRail = (shellWidth: number): boolean =>
+  shellWidth !== 0 && shellWidth < SHELL_BREAKPOINTS.sidebarRailBelow
+
 const ORDER: Record<WidthTier, number> = { tiny: 0, narrow: 1, mid: 2, wide: 3 }
 
 /** `atLeast(tier, "mid")` — true when there's at least `min` worth of room. */

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Project } from "@jingler/core"
 import { testSession } from "../test-support.js"
-import { ProjectSidebar } from "./project-sidebar.js"
+import { MissingFolderBanner, ProjectSidebar } from "./project-sidebar.js"
 
 const projects: ReadonlyArray<Project> = [
   { id: "alpha", name: "Alpha", path: "/repos/alpha", availability: "available", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
@@ -78,6 +78,36 @@ describe("ProjectSidebar", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
+  it("shows an amber needs-you count on a tile, clearing when the question is answered", () => {
+    const props = {
+      projects,
+      sessions: [
+        testSession({ id: "blocked", projectId: "beta" }),
+        testSession({ id: "approval", projectId: "beta" }),
+        testSession({ id: "busy", projectId: "beta" }),
+        testSession({ id: "other", projectId: "gamma" })
+      ],
+      activeProjectId: "alpha",
+      onSelect: vi.fn()
+    }
+    const { rerender } = render(<ProjectSidebar {...props} liveActivity={{
+      blocked: { kind: "needs-input", verb: "Asking", target: null, startedAt: 0 },
+      approval: { kind: "needs-approval", verb: "Approving", target: null, startedAt: 0 },
+      busy: { kind: "thinking", verb: "Thinking", target: null, startedAt: 0 }
+    }} />)
+    const badge = screen.getByTestId("project-needs-you-beta")
+    expect(badge.textContent).toBe("2")
+    expect(badge.getAttribute("aria-label")).toBe("Beta: 2 need you")
+    expect(badge.innerHTML).toContain("text-yellow")
+    expect(badge.innerHTML).toContain("whitespace-nowrap")
+    expect(screen.queryByTestId("project-needs-you-gamma")).toBeNull()
+    expect(within(screen.getByRole("button", { name: "Beta" })).getByText("3")).toBeTruthy()
+    rerender(<ProjectSidebar {...props} liveActivity={{
+      busy: { kind: "thinking", verb: "Thinking", target: null, startedAt: 0 }
+    }} />)
+    expect(screen.queryByTestId("project-needs-you-beta")).toBeNull()
+  })
+
   it("shows project details when its avatar receives focus", async () => {
     render(
       <ProjectSidebar
@@ -119,5 +149,122 @@ describe("ProjectSidebar", () => {
     )
     expect(screen.getByTestId("project-sidebar").getAttribute("aria-busy")).toBe("true")
     expect(screen.getAllByTestId("project-skeleton")).toHaveLength(3)
+  })
+
+  it("renders a 56px rail on neutral tokens with a white bar and fill on the active tile", () => {
+    render(
+      <ProjectSidebar
+        projects={projects}
+        sessions={[testSession({ id: "w", projectId: "beta", status: "running" })]}
+        activeProjectId="alpha"
+        liveActivity={{ w: { kind: "thinking", verb: "Thinking", target: null, startedAt: 0 } }}
+        onSelect={() => {}}
+      />
+    )
+    const rail = screen.getByTestId("project-sidebar")
+    expect(rail.className).toContain("w-14")
+    expect(rail.className).toContain("bg-canvas")
+    const active = screen.getByRole("button", { name: "Alpha" })
+    expect(active.className).toContain("bg-surface")
+    expect(active.querySelector(".bg-text-bright")).toBeTruthy()
+    const inactive = screen.getByRole("button", { name: "Beta" })
+    expect(inactive.querySelector(".bg-text-bright")).toBeNull()
+    expect(screen.getByRole("status", { name: "Beta: sessions in progress" }).innerHTML).toContain("bg-state-working")
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.innerHTML).not.toMatch(/bg-(blue|green|yellow|red|brand)\b|text-brand/)
+    }
+  })
+
+  it("opens a tile context menu with Settings and a destructive, confirmed Remove", async () => {
+    const onOpenSettings = vi.fn()
+    const onRemove = vi.fn()
+    render(
+      <ProjectSidebar
+        projects={projects}
+        sessions={sessions}
+        activeProjectId="alpha"
+        onSelect={() => {}}
+        onOpenSettings={onOpenSettings}
+        onRemove={onRemove}
+      />
+    )
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }))
+    expect(onOpenSettings).toHaveBeenCalledWith("beta")
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove project" }))
+    // Nothing is removed until the confirm dialog is accepted.
+    expect(onRemove).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove project" }))
+    expect(onRemove).toHaveBeenCalledWith("beta")
+  })
+
+  it("has no tile menu without handlers", () => {
+    render(<ProjectSidebar projects={projects} sessions={sessions} activeProjectId="alpha" onSelect={() => {}} />)
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    expect(screen.queryByRole("menuitem")).toBeNull()
+  })
+
+  it("shows a neutral Folder not found row with Locate and a confirmed Remove for a missing project", async () => {
+    const onLocate = vi.fn()
+    const onRemove = vi.fn()
+    const missing = [{ ...projects[1]!, availability: "missing" as const }, projects[0]!]
+    render(
+      <ProjectSidebar projects={missing} sessions={sessions} activeProjectId="alpha" onSelect={() => {}} onLocate={onLocate} onRemove={onRemove} />
+    )
+    expect(screen.getByRole("button", { name: "Beta" }).innerHTML).not.toMatch(/state-needs|yellow/)
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    expect((screen.getByRole("menuitem", { name: "Folder not found" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole("menuitem", { name: "Locate folder…" }))
+    expect(onLocate).toHaveBeenCalledWith("beta")
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove project" }))
+    expect(onRemove).not.toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove project" }))
+    expect(onRemove).toHaveBeenCalledWith("beta")
+  })
+
+  it("omits the missing-folder rows for available projects", () => {
+    render(<ProjectSidebar projects={projects} sessions={sessions} activeProjectId="alpha" onSelect={() => {}} onLocate={vi.fn()} onOpenSettings={vi.fn()} />)
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    expect(screen.queryByRole("menuitem", { name: "Folder not found" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Locate folder…" })).toBeNull()
+  })
+})
+
+describe("ProjectSidebar subagent attention", () => {
+  it("counts a session with a pending subagent attention request toward needs-you, even with no live activity", () => {
+    render(
+      <ProjectSidebar
+        projects={projects}
+        sessions={sessions}
+        activeProjectId="alpha"
+        subagentAttentionCounts={{ "alpha-new": 1 }}
+        onSelect={() => {}}
+      />
+    )
+    expect(screen.getByTestId("project-needs-you-alpha").getAttribute("aria-label")).toBe(
+      "Alpha: 1 needs you"
+    )
+  })
+})
+
+describe("MissingFolderBanner", () => {
+  it("renders a neutral BannerShell whose Locate action calls the handler", () => {
+    const onLocate = vi.fn()
+    render(<MissingFolderBanner project={{ id: "beta", name: "Beta", availability: "missing" }} onLocate={onLocate} />)
+    const banner = screen.getByTestId("banner-shell")
+    expect(banner.textContent).toContain("Beta: folder not found")
+    expect(banner.getAttribute("role")).toBe("status")
+    fireEvent.click(within(banner).getByRole("button", { name: "Locate folder…" }))
+    expect(onLocate).toHaveBeenCalledWith("beta")
+  })
+
+  it("renders nothing for an available project", () => {
+    render(<MissingFolderBanner project={{ id: "beta", name: "Beta", availability: "available" }} />)
+    expect(screen.queryByTestId("banner-shell")).toBeNull()
   })
 })

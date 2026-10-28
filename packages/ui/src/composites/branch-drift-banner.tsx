@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { GitBranch, GitFork } from "lucide-react"
-import { cn } from "../lib/cn.js"
-import { StatusDot } from "../components/status-dot.js"
+import { BannerShell } from "../components/banner-shell.js"
 import { Button } from "../components/button.js"
 
 /**
@@ -45,50 +44,39 @@ export function BranchDriftBanner({
   // Adopting a detached HEAD has no named branch to pin to, so that path is
   // fork-only — the fork mints a fresh branch off the current commit.
   const canAdopt = liveBranch !== null
+  const adopt = canAdopt && (
+    <Button
+      key="adopt"
+      variant="secondary"
+      size="sm"
+      disabled={busy !== null || onAdopt === undefined}
+      onClick={run("adopt", onAdopt)}
+    >
+      <GitBranch size={12} />
+      {busy === "adopt" ? "Adopting…" : `Adopt ${liveBranch}`}
+    </Button>
+  )
+  const fork = (
+    <Button
+      key="fork"
+      variant="primary"
+      size="sm"
+      disabled={busy !== null || onFork === undefined}
+      onClick={run("fork", onFork)}
+    >
+      <GitFork size={12} />
+      {busy === "fork" ? "Forking…" : "Fork new session"}
+    </Button>
+  )
   return (
-    <div className={cn("overflow-hidden rounded-xl border border-yellow/50 bg-yellow/[0.05]", className)}>
-      <div className="flex items-center gap-[9px] border-b border-yellow/20 px-3 py-[9px]">
-        <span className="flex size-5 items-center justify-center rounded-md bg-yellow/[0.16] text-yellow">
-          <GitBranch size={11} />
-        </span>
-        <span className="flex-1 text-[12px] font-semibold text-text-bright">
-          Checkout moved off <span className="font-mono">{pinnedBranch}</span>
-        </span>
-        <span className="flex items-center gap-1.5 font-mono text-[10px] text-yellow">
-          <StatusDot tone="bg-yellow" size={6} pulse />
-          paused
-        </span>
-      </div>
-      <div className="flex flex-col gap-[9px] px-3 py-2.5">
-        <span className="text-[12px] leading-[1.5] text-muted-foreground">
-          This session is pinned to <span className="font-mono text-text">{pinnedBranch}</span>, but the
-          repository is now on <span className="font-mono text-text">{live}</span>. Fork the work onto a
-          new worktree session, or adopt the live branch here.
-        </span>
-        <div className="flex items-center gap-2">
-          {canAdopt && (
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={busy !== null || onAdopt === undefined}
-              onClick={run("adopt", onAdopt)}
-            >
-              <GitBranch size={12} />
-              {busy === "adopt" ? "Adopting…" : `Adopt ${liveBranch}`}
-            </Button>
-          )}
-          <div className="flex-1" />
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={busy !== null || onFork === undefined}
-            onClick={run("fork", onFork)}
-          >
-            <GitFork size={12} />
-            {busy === "fork" ? "Forking…" : "Fork new session"}
-          </Button>
-        </div>
-      </div>
-    </div>
+    <BannerShell
+      placement="card"
+      className={className}
+      icon={<GitBranch size={13} />}
+      actions={adopt ? [adopt, fork] : [fork]}
+    >
+      Checkout moved off <span className="font-mono">{pinnedBranch}</span>, the repository is now on{" "}
+      <span className="font-mono">{live}</span>
+    </BannerShell>
   )
 }

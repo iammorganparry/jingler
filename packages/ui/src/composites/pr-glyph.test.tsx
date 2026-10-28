@@ -67,8 +67,8 @@ describe("PrStatusGlyph", () => {
     render(<PrStatusGlyph pr={{ state: "open", checks: "fail" }} />)
     // `title` for the pointer, `sr-only` text for assistive tech — a bare icon
     // would read as "graphic".
-    expect(screen.getByTitle("Pull request open — checks failing")).toBeDefined()
-    expect(screen.getByText("Pull request open — checks failing")).toBeDefined()
+    expect(screen.getByTitle("Pull request open, checks failing")).toBeDefined()
+    expect(screen.getByText("Pull request open, checks failing")).toBeDefined()
   })
 
   it("publishes its state as data attributes, so the e2e suite can assert on it", () => {
@@ -81,5 +81,20 @@ describe("PrStatusGlyph", () => {
   it("renders for a session with no PR rather than collapsing the slot", () => {
     render(<PrStatusGlyph pr={null} />)
     expect(screen.getByTestId("pr-glyph").dataset.state).toBe("none")
+  })
+})
+
+describe("PrStatusGlyph stack variant", () => {
+  it("shows the layer count coloured by the worst layer, with no data model needed", () => {
+    render(<PrStatusGlyph pr={null} stack={[{ state: "open", checks: "pass" }, { state: "open", checks: "fail" }, { state: "merged", checks: "pass" }]} />)
+    const stack = screen.getByTestId("pr-glyph-stack")
+    expect(stack.dataset.checks).toBe("fail")
+    expect(stack.textContent).toContain("3")
+    expect(screen.getByText("Stack of 3 pull requests")).toBeDefined()
+  })
+
+  it("falls back to the single glyph for one PR", () => {
+    render(<PrStatusGlyph pr={{ state: "open", checks: "pass" }} stack={[{ state: "open", checks: "pass" }]} />)
+    expect(screen.queryByTestId("pr-glyph-stack")).toBeNull()
   })
 })

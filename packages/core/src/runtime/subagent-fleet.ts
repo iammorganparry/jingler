@@ -78,6 +78,17 @@ export const SubagentFleetAttention = Schema.Struct({
 })
 export type SubagentFleetAttention = Schema.Schema.Type<typeof SubagentFleetAttention>
 
+/** A child's own git worktree. A child that shares the parent checkout has no workspace (null). */
+export const SubagentFleetWorkspace = Schema.Struct({
+  path: Schema.String,
+  branch: Schema.String,
+  /** Branch the worktree was created from, when the runtime knows it. */
+  baseRef: Schema.NullOr(Schema.String),
+  /** Lines the child changed in its worktree, when the runtime reports them. */
+  diff: Schema.optional(Schema.Struct({ added: Schema.Number, removed: Schema.Number }))
+})
+export type SubagentFleetWorkspace = Schema.Schema.Type<typeof SubagentFleetWorkspace>
+
 export const SubagentFleetNode = Schema.Struct({
   id: Schema.String,
   /** Canonical child identity shared by live, durable, completion, and transcript paths. */
@@ -106,7 +117,11 @@ export const SubagentFleetNode = Schema.Struct({
   completedAt: Schema.NullOr(Schema.Number),
   usage: SubagentFleetUsage,
   artifacts: Schema.Array(SubagentFleetArtifact),
-  attention: Schema.NullOr(SubagentFleetAttention)
+  attention: Schema.NullOr(SubagentFleetAttention),
+  /** Defaults to null so fleet JSON written before worktree roll-up still decodes. */
+  workspace: Schema.optionalWith(Schema.NullOr(SubagentFleetWorkspace), { default: () => null }),
+  /** PR the child opened or linked; null until the runtime reports one. */
+  prNumber: Schema.optionalWith(Schema.NullOr(Schema.Number), { default: () => null })
 })
 export type SubagentFleetNode = Schema.Schema.Type<typeof SubagentFleetNode>
 
@@ -304,3 +319,8 @@ export const SubagentAttentionReply = Schema.Struct({
   createdAt: Schema.Number
 })
 export type SubagentAttentionReply = Schema.Schema.Type<typeof SubagentAttentionReply>
+
+/** Count of fleet nodes with a pending attention request — the Fleet's "needs you" badge count. */
+export const countNodesAwaitingAttention = (
+  nodes: ReadonlyArray<SubagentFleetNode>
+): number => nodes.filter((node) => node.attention !== null).length

@@ -6,6 +6,7 @@ import {
   type FileTreeDensity,
   type FileTreeIcons,
   type FileTreePreparedInput,
+  type FileTreeRowDecorationRenderer,
   type FileTreeSearchMode
 } from "@pierre/trees"
 import {
@@ -82,6 +83,10 @@ export interface PierreFileTreeProps {
   readonly id?: string
   readonly className?: string
   readonly style?: CSSProperties
+  /** Extra per-row text (e.g. +/− counts) beside Pierre's git status letter. */
+  readonly renderRowDecoration?: FileTreeRowDecorationRenderer
+  /** Extra CSS injected into the tree's shadow root (e.g. keyframes the page stylesheet cannot share). */
+  readonly unsafeCSS?: string
   readonly onSelectionChange?: (paths: readonly string[]) => void
   readonly onSearchChange?: (query: string | null) => void
 }
@@ -89,6 +94,7 @@ export interface PierreFileTreeProps {
 interface TreeCallbacks {
   readonly selection: RefObject<PierreFileTreeProps["onSelectionChange"]>
   readonly search: RefObject<PierreFileTreeProps["onSearchChange"]>
+  readonly decoration: RefObject<PierreFileTreeProps["renderRowDecoration"]>
   readonly syncingSelection: RefObject<boolean>
 }
 
@@ -128,6 +134,8 @@ const usePierreFileTreeModel = (
     itemHeight: props.itemHeight,
     overscan: props.overscan ?? 12,
     stickyFolders: props.stickyFolders ?? true,
+    unsafeCSS: props.unsafeCSS,
+    renderRowDecoration: (context) => callbacks.decoration.current?.(context) ?? null,
     onSelectionChange: (next) => {
       if (!callbacks.syncingSelection.current) {
         callbacks.selection.current?.(next)
@@ -191,9 +199,10 @@ const useTreeDataUpdates = (
     model.setIcons(props.icons ?? DEFAULT_ICONS)
   }, [model, props.icons])
 
+  // Re-rendering the root is also how a new decoration renderer (fresh agent marks) reaches mounted rows.
   useLayoutEffect(() => {
     model.setComposition(props.composition)
-  }, [model, props.composition])
+  }, [model, props.composition, props.renderRowDecoration])
 
   useLayoutEffect(() => {
     if (props.searchQuery === undefined) return
@@ -240,13 +249,16 @@ export function PierreFileTree(props: PierreFileTreeProps) {
   const renderer = usePierreRenderer()
   const selectionCallback = useRef(props.onSelectionChange)
   const searchCallback = useRef(props.onSearchChange)
+  const decorationCallback = useRef(props.renderRowDecoration)
   const syncingSelection = useRef(false)
   selectionCallback.current = props.onSelectionChange
   searchCallback.current = props.onSearchChange
+  decorationCallback.current = props.renderRowDecoration
 
   const model = usePierreFileTreeModel(props, {
     selection: selectionCallback,
     search: searchCallback,
+    decoration: decorationCallback,
     syncingSelection
   })
   useTreeDataUpdates(model, props, syncingSelection)

@@ -114,8 +114,8 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   expect(appBackground).toBe(titleBarBackground)
 
   await running.click()
-  await expect(window.getByRole("navigation", { name: "Breadcrumb" }))
-    .toContainText("Liquid glass sidebar")
+  // Chat tabs have no breadcrumb (Paper 04b/04h); the session header names the session.
+  await expect(window.getByTestId("session-header-identity")).toContainText("Liquid glass sidebar")
 
   const sidebarSurface = await window.getByTestId("session-sidebar").evaluate((element) => {
     const style = getComputedStyle(element)
@@ -128,10 +128,8 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   expect(sidebarSurface.radius).toBe(0)
   expect(sidebarSurface.backdrop).toBe("none")
   expect(sidebarSurface.background).toBe(appBackground)
-  await expect(window.getByTestId("project-sidebar")).toHaveCSS(
-    "background-color",
-    sidebarSurface.background
-  )
+  // #390: the project rail sits on --sb-canvas (#0b0b0c), a step darker than the sidebar.
+  await expect(window.getByTestId("project-sidebar")).toHaveCSS("background-color", "rgb(11, 11, 12)")
   await expect(window.getByRole("separator", { name: "Resize sidebar" })).toHaveCSS(
     "background-color",
     "rgba(0, 0, 0, 0)"
@@ -150,4 +148,49 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   expect(railSurface.radius).toBe(0)
   expect(railSurface.backdrop).toBe("none")
   expect(railSurface.background).toBe("rgba(0, 0, 0, 0)")
+})
+
+test("the rail's hover card lists every PR in a stacked session, bottom of the stack first", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [
+      {
+        id: "s_stack",
+        repo: "widget",
+        branch: "stack/ui",
+        title: "Stack session",
+        status: "idle",
+        diff: { added: 0, removed: 0 },
+        prNumber: 482,
+        prs: [
+          { number: 480, branch: "stack/model", base: "main" },
+          { number: 481, branch: "stack/api", base: "stack/model" },
+          { number: 482, branch: "stack/ui", base: "stack/api" }
+        ],
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: at(5),
+        worktreePath: repoPath
+      }
+    ]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  // Below the rail breakpoint, the sidebar collapses to the 52px rail and
+  // each session's detail moves into its hover card.
+  await window.setViewportSize({ width: 900, height: 700 })
+  await window.waitForTimeout(120)
+  await expect(window.getByTestId("session-rail")).toBeVisible()
+
+  await window.locator('[data-session-id="s_stack"]').hover()
+  const card = window.getByRole("tooltip")
+  const stack = card.getByTestId("hover-card-pr-stack")
+  await expect(stack).toBeVisible()
+  await expect(card.getByTestId("hover-card-pr-stack-row-480")).toContainText("#480")
+  await expect(card.getByTestId("hover-card-pr-stack-row-481")).toContainText("#481")
+  await expect(card.getByTestId("hover-card-pr-stack-row-482")).toContainText("#482")
+  await expect(stack.locator("> *")).toHaveCount(3)
 })

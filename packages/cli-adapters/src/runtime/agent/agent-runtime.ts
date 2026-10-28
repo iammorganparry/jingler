@@ -18,6 +18,7 @@ import type {
   UsageFact
 } from "@jingler/core"
 import type { CheckoutHost } from "../tools/checkout-tools.js"
+import type { WorkModeHost } from "./work-mode-tool.js"
 import { piEndpointId } from "@jingler/core"
 import { Context, Data, Effect, Layer, Stream } from "effect"
 import type { ToolRegistry } from "../tools/tool-registry.js"
@@ -57,6 +58,8 @@ export interface AgentRuntimeContext {
     readonly register: (registry: ToolRegistry, context: AgentRuntimeContext) => void
     readonly attachRegistry: (registry: ToolRegistry) => void
     readonly execute: (filePath: string, submit: boolean, signal: AbortSignal) => Promise<unknown>
+    /** True once the operator approved this cycle's plan. */
+    readonly planApproved?: () => boolean
   }
   /** Main-process-only capability attachments for this run. */
   readonly mcp?: JinglerMcpAttachments
@@ -79,6 +82,8 @@ export interface AgentRuntimeContext {
   ) => Effect.Effect<PeerAgentMessageResult>
   /** Multi-repo session state; enables `switch_checkout` and makes tool cwd follow the active checkout. */
   readonly checkouts?: CheckoutHost
+  /** Present only when the chat has Auto switching on; enables `jingler_set_work_mode`. */
+  readonly workModeHost?: WorkModeHost
 }
 
 export interface AgentRuntimeOwner {

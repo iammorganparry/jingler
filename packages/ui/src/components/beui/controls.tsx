@@ -13,11 +13,16 @@ const nextTabIndex = (key: string, current: number, count: number, rtl: boolean)
 }
 
 /** Product compatibility API for the used BeUI Tabs primitive. */
-export function MotionTabs<T extends string>({ items, value, onChange, variant = "pill", className }: {
+export function MotionTabs<T extends string>({ items, value, onChange, variant = "pill", size = "md", fullWidth = false, ariaLabel, className }: {
   items: ReadonlyArray<MotionTabItem<T>>
   value: T
   onChange?: (value: T) => void
   variant?: "pill" | "underline" | "segment"
+  /** Segment: md = 28px (spec §3e), sm = 24px. Underline: sm = 28px tall tabs (PR sub-tabs). */
+  size?: "sm" | "md"
+  /** Segment only: segments share the full width equally. */
+  fullWidth?: boolean
+  ariaLabel?: string
   className?: string
 }) {
   const id = useId()
@@ -68,7 +73,8 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
     aria-selected={active} disabled={item.disabled}
     onClick={() => onChange?.(item.value)}
     className={cn(
-      "relative isolate -mb-px inline-flex min-h-11 shrink-0 items-center whitespace-nowrap px-3 pb-2.5 pt-1 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+      "relative isolate -mb-px inline-flex shrink-0 items-center whitespace-nowrap font-medium transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+      size === "sm" ? "h-7 px-3 text-[12.5px]" : "min-h-11 px-3 pb-2.5 pt-1 text-sm",
       active ? "text-text-bright" : "text-muted-foreground hover:text-text-bright",
       item.disabled && "cursor-not-allowed opacity-50"
     )}
@@ -80,27 +86,34 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
     ? "inline-flex w-max items-center gap-1 rounded-full bg-panel p-1"
     : variant === "underline"
       ? "inline-flex w-max min-w-full items-center gap-1 border-b border-line"
-      : "inline-flex w-max min-w-full items-center gap-0 rounded-lg bg-panel p-0.5"
+      : "inline-flex w-max min-w-full items-center gap-0 rounded-[6px] border border-hairline bg-panel p-0.5"
+
+  const segment = variant === "segment"
+  const radius = segment ? "rounded-md" : "rounded-full"
+  const sizeClass = !segment ? "px-3.5 py-1.5 text-sm" : size === "sm" ? "h-6 px-2.5 text-[11.5px]" : "h-7 px-3 text-[12px]"
+  const activeText = segment ? "text-text-bright" : "text-primary-foreground"
+  const stretch = segment && fullWidth
 
   return <MotionConfig transition={reduce ? { duration: 0 } : TAB_TRANSITION}>
     <m.div layoutRoot className={cn("min-w-0 max-w-full", className)}>
       <m.div ref={viewportRef} layoutScroll className="max-w-full overflow-x-auto overflow-y-hidden"
         onFocusCapture={(event) => reveal(event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[role="tab"]') : null)}>
-        <div role="tablist" className={listClass} onKeyDown={navigate}>
+        <div role="tablist" aria-label={ariaLabel} className={listClass} onKeyDown={navigate}>
           {items.map((item) => {
             const active = item.value === value
             const tabIndex = item.value === tabbableValue ? 0 : -1
             if (variant === "underline") return renderUnderlineTab(item, active, tabIndex)
-            const radius = variant === "pill" ? "rounded-full" : "rounded-md"
-            return <div key={item.value} className="relative shrink-0">
-              {active && <m.span layoutId={id} layout="position" style={{ borderRadius: variant === "pill" ? 9999 : 8 }} className={cn("absolute inset-0 bg-brand", radius)} />}
+            return <div key={item.value} className={cn("relative shrink-0", stretch && "flex-1")}>
+              {active && <m.span layoutId={id} layout="position" style={{ borderRadius: segment ? 6 : 9999 }} className={cn("absolute inset-0", segment ? "bg-surface" : "bg-brand", radius)} />}
               <button
                 type="button" role="tab" tabIndex={tabIndex}
                 aria-selected={active} disabled={item.disabled}
                 onClick={() => onChange?.(item.value)}
                 className={cn(
-                  "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent px-3.5 py-1.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                  active ? "text-primary-foreground" : "text-muted-foreground hover:text-text-bright",
+                  "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  sizeClass,
+                  stretch && "w-full",
+                  active ? activeText : "text-dim hover:text-text-bright",
                   item.disabled && "cursor-not-allowed opacity-50", radius
                 )}
               >{item.label}</button>

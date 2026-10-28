@@ -41,13 +41,13 @@ describe("CheckoutChecks", () => {
   })
 
   it("groups checks under each checkout that has a PR", async () => {
-    vi.mocked(rpc.githubPr).mockImplementation(async (_id, checkoutId) =>
+    vi.mocked(rpc.githubPr).mockImplementation(async (_id, _number, checkoutId) =>
       ({ checks: [{ name: checkoutId === "c2" ? "web-ci" : "api-ci", status: "pass", detailsUrl: null, durationMs: null }] }) as never
     )
     renderChecks(multi)
     await waitFor(() => expect(screen.getByText("web-ci")).toBeDefined())
-    expect(rpc.githubPr).toHaveBeenCalledWith("s1", "primary")
-    expect(rpc.githubPr).toHaveBeenCalledWith("s1", "c2")
+    expect(rpc.githubPr).toHaveBeenCalledWith("s1", undefined, "primary")
+    expect(rpc.githubPr).toHaveBeenCalledWith("s1", undefined, "c2")
     expect(screen.getByTestId("checks-checkout-primary").textContent).toContain("api-ci")
     expect(screen.queryByTestId("checks-checkout-c3")).toBeNull()
   })

@@ -1,6 +1,6 @@
 import { createActor, waitFor } from "xstate"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { authMachine } from "./auth-machine.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { authMachine, OAUTH_TIMEOUT_MS } from "./auth-machine.js"
 
 /**
  * The auth machine's side-effects go through `rpc-client` (mocked) and
@@ -10,6 +10,7 @@ import { authMachine } from "./auth-machine.js"
  * OAuth → deep-link → signed-in path, and sign-out.
  */
 const h = vi.hoisted(() => ({
+  sessionError: null as Error | null,
   session: null as null | { user: { id: string; email: string; name: string; image: string | null }; expiresAt: string },
   magicLinkOk: true,
   sentEmails: [] as Array<string>,
@@ -21,7 +22,10 @@ const h = vi.hoisted(() => ({
 
 vi.mock("./rpc-client.js", () => ({
   rpc: {
-    authGetSession: async () => h.session,
+    authGetSession: async () => {
+      if (h.sessionError) throw h.sessionError
+      return h.session
+    },
     authSendMagicLink: async (email: string) => {
       h.sentEmails.push(email)
       if (!h.magicLinkOk) throw new Error("send failed")
@@ -43,6 +47,7 @@ const SESSION = {
 
 beforeEach(() => {
   h.session = null
+  h.sessionError = null
   h.magicLinkOk = true
   h.sentEmails = []
   h.openedUrls = []
@@ -64,6 +69,34 @@ describe("authMachine", () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches("signedOut"))
     expect(actor.getSnapshot().matches({ signedOut: "idle" })).toBe(true)
+  })
+
+  it("a signed-out launch settles with no session and no pending auth step, so the app never waits on sign-in", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => !s.matches("checking"))
+    const snapshot = actor.getSnapshot()
+    expect(snapshot.matches({ signedOut: "idle" })).toBe(true)
+    expect(snapshot.context.session).toBeNull()
+    expect(snapshot.context.error).toBeNull()
+    expect(h.sentEmails).toEqual([])
+    expect(h.openedUrls).toEqual([])
+  })
+
+  it("reaches unreachable, not the wall, when the auth server can't be reached", async () => {
+    h.sessionError = new Error("Couldn't reach the sign-in service.")
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("unreachable"))
+    expect(actor.getSnapshot().matches("signedOut")).toBe(false)
+  })
+
+  it("RETRY from unreachable re-checks and signs in once the server is back", async () => {
+    h.sessionError = new Error("offline")
+    h.session = SESSION
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("unreachable"))
+    h.sessionError = null
+    actor.send({ type: "RETRY" })
+    await waitFor(actor, (s) => s.matches("signedIn"))
   })
 
   it("goes straight to signedIn when a valid session exists", async () => {
@@ -126,5 +159,68 @@ describe("authMachine", () => {
     await waitFor(actor, (s) => s.matches("signedOut"))
     expect(h.signOutCalls).toBe(1)
     expect(actor.getSnapshot().context.session).toBeNull()
+  })
+
+  it("CANCEL leaves oauthPending for idle", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("signedOut"))
+    actor.send({ type: "OAUTH", provider: "github" })
+    await waitFor(actor, (s) => s.matches({ signedOut: "oauthPending" }))
+    actor.send({ type: "CANCEL" })
+    expect(actor.getSnapshot().matches({ signedOut: "idle" })).toBe(true)
+  })
+
+  it("RESET (closing the dialog) also leaves oauthPending", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("signedOut"))
+    actor.send({ type: "OAUTH", provider: "github" })
+    await waitFor(actor, (s) => s.matches({ signedOut: "oauthPending" }))
+    actor.send({ type: "RESET" })
+    expect(actor.getSnapshot().matches({ signedOut: "idle" })).toBe(true)
+  })
+
+  it("RETRY from an OAuth error re-runs the same provider", async () => {
+    h.signInError = new Error("boom")
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("signedOut"))
+    actor.send({ type: "OAUTH", provider: "google" })
+    await waitFor(actor, (s) => s.matches({ signedOut: "error" }))
+    h.signInError = null
+    actor.send({ type: "RETRY" })
+    await waitFor(actor, (s) => s.matches({ signedOut: "oauthPending" }))
+    expect(actor.getSnapshot().context.error).toBeNull()
+    expect(h.openedUrls).toEqual(["https://provider.example/oauth"])
+  })
+
+  it("RETRY from a magic-link error re-sends to the same address", async () => {
+    h.magicLinkOk = false
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("signedOut"))
+    actor.send({ type: "MAGIC_LINK", email: "hi@team.com" })
+    await waitFor(actor, (s) => s.matches({ signedOut: "error" }))
+    h.magicLinkOk = true
+    actor.send({ type: "RETRY" })
+    await waitFor(actor, (s) => s.matches({ signedOut: "magicLinkSent" }))
+    expect(h.sentEmails).toEqual(["hi@team.com", "hi@team.com"])
+  })
+
+  describe("oauth timeout", () => {
+    afterEach(() => vi.useRealTimers())
+
+    it("falls into error after OAUTH_TIMEOUT_MS, and RETRY restarts the hand-off", async () => {
+      vi.useFakeTimers()
+      const actor = start()
+      await vi.advanceTimersByTimeAsync(0)
+      actor.send({ type: "OAUTH", provider: "github" })
+      await vi.advanceTimersByTimeAsync(OAUTH_TIMEOUT_MS - 1)
+      expect(actor.getSnapshot().matches({ signedOut: "oauthPending" })).toBe(true)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(actor.getSnapshot().matches({ signedOut: "error" })).toBe(true)
+      expect(actor.getSnapshot().context.error).toMatch(/didn't finish/)
+      actor.send({ type: "RETRY" })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(actor.getSnapshot().matches({ signedOut: "oauthPending" })).toBe(true)
+      expect(h.openedUrls).toHaveLength(2)
+    })
   })
 })

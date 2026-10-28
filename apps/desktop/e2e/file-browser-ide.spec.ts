@@ -46,8 +46,6 @@ const seedRepository = ({ repoPath }: { repoPath: string }): void => {
   })
 }
 
-const filesTab = (window: Page) => window.getByTestId("view-tab-files")
-
 const projectRoot = resolve(import.meta.dirname, "../../..")
 
 const showRepositoryTree = explorerTree
@@ -124,25 +122,9 @@ const scrollTree = (tree: Locator, direction: "top" | "down"): Promise<boolean> 
     return scroller.scrollTop !== previous
   }, direction)
 
+// The Files tab is gone (#389): opening a file from the Explorer creates the content group beside chat.
 const splitChatBesideFiles = async (window: Page): Promise<void> => {
-  await window.evaluate(() => {
-    const source = document.querySelector('[data-testid^="editor-tab-chat-"]')
-    const target = document.querySelector('[data-testid="editor-group"]')
-    if (!source || !target) throw new Error("missing chat/file split node")
-    const box = target.getBoundingClientRect()
-    const dataTransfer = new DataTransfer()
-    const init = {
-      dataTransfer,
-      bubbles: true,
-      cancelable: true,
-      clientX: box.left + box.width * 0.04,
-      clientY: box.top + box.height / 2
-    }
-    source.dispatchEvent(new DragEvent("dragstart", init))
-    target.dispatchEvent(new DragEvent("dragover", init))
-    target.dispatchEvent(new DragEvent("drop", init))
-    source.dispatchEvent(new DragEvent("dragend", init))
-  })
+  await selectTreePath(window, "src/other.ts")
   await expect(window.getByTestId("editor-group")).toHaveCount(2)
 }
 
@@ -169,7 +151,6 @@ test("splits the session repository beside chat and edits a file through Pierre"
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
   await showRepositoryTree(window)
   await splitChatBesideFiles(window)
   await expect(window.getByTestId("editor-group").nth(0)).toBeVisible()
@@ -218,7 +199,7 @@ test("splits the session repository beside chat and edits a file through Pierre"
   await window.getByTestId("editor-tab-file-src/config.ts").getByRole("tab").click()
   // Modified files reopen diff-first; switching back to Edit must hydrate the
   // saved draft rather than the pre-save disk payload.
-  const edit = window.getByRole("button", { name: "Edit src/config.ts" })
+  const edit = window.getByRole("tab", { name: "Edit src/config.ts" })
   if ((await edit.count()) > 0) await edit.click()
   await expect(
     window.locator('[data-surface*="src/config.ts"]').getByRole("textbox", { name: "src/config.ts" })
@@ -236,7 +217,7 @@ test("shows a previously existing large worktree without a repository search bar
 
   await expect(appShell(window)).toBeVisible()
   await window.setViewportSize({ width: 1320, height: 860 })
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   const tree = await showRepositoryTree(window)
   await expect.poll(async () => (await tree.boundingBox())?.height ?? 0).toBeGreaterThan(400)
   await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
@@ -244,7 +225,7 @@ test("shows a previously existing large worktree without a repository search bar
   })
   await expect(tree.locator('[data-file-tree-search-input]')).toHaveCount(0)
 
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in File browser IDE…")
     .fill("generate-brand-icons")
   await window.getByTestId("palette-item-file:scripts/generate-brand-icons.py").click()
@@ -302,8 +283,8 @@ test("shows a previously existing large worktree without a repository search bar
     return editorBox.y + editorBox.height - (lineBox.y + lineBox.height)
   }).toBeGreaterThanOrEqual(24)
 
-  await window.getByRole("tab", { name: "Chat 1", exact: true }).click()
-  await filesTab(window).click()
+  await expect(window.getByTestId("chat-lane-header")).toBeVisible()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   const restoredTree = await showRepositoryTree(window)
   await expect(restoredTree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
@@ -326,7 +307,7 @@ test("shows a previously existing large worktree while its agent is running", as
   await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
     timeout: 15_000
   })
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   const tree = await showRepositoryTree(window)
   await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
@@ -345,7 +326,7 @@ test("adds selected code to the active chat from the editor context menu", async
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await selectTreePath(window, "src/config.ts")
   await selectFirstTwoLines(window)
   await fileBody(window, "src/config.ts")
@@ -371,7 +352,7 @@ test("adds selected code to the active chat with the platform J shortcut", async
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await selectTreePath(window, "src/config.ts")
   await selectFirstTwoLines(window)
   await window.getByRole("textbox", { name: "src/config.ts" }).focus()
@@ -398,19 +379,23 @@ test("follows the selected chat agent through edited and newly created files", a
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
-  await composerFollow.click()
   await splitChatBesideFiles(window)
+  await composerFollow.click()
   await expect(window.getByTestId("editor-group")).toHaveCount(2)
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   await expect(composerFollow).toHaveClass(/is-active/)
   await expect(composerFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
+  // Since #901 the file tab's Follow agent sits in the breadcrumb header row.
   const workspaceFollow = window
-    .getByTestId("asset-browser")
+    .getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("button", { name: "Follow agent", exact: true })
+    .filter({ visible: true })
+    .first()
   await expect(workspaceFollow).toHaveAttribute("aria-pressed", "true")
-  await expect(workspaceFollow).toHaveClass(/is-active/)
+  await expect(workspaceFollow).toBeVisible()
   await expect(workspaceFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
 
+  await window.getByRole("tab", { name: "Sessions", exact: true }).click()
   await sessionRow(window, "Other file browser session").click()
   await expect(window.getByText("Other file browser session", { exact: true }).last()).toBeVisible()
   await sessionRow(window, "File browser IDE").click()
@@ -438,13 +423,13 @@ test("follows the selected chat agent through edited and newly created files", a
   await window.getByRole("tab", { name: "Sessions", exact: true }).click()
   await expect(window.getByTestId("session-tree-file-src/created.ts")).toContainText("+1")
 
-  await window.getByRole("button", { name: "Edit src/created.ts" }).filter({ visible: true }).click()
+  await window.getByRole("tab", { name: "Edit src/created.ts" }).filter({ visible: true }).click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "false")
   await composerFollow.click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
   await selectTreePath(window, "src/other.ts")
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await window.getByTestId("composer").getByRole("textbox").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "false")
 })
 
@@ -461,8 +446,8 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
-  await composerFollow.click()
   await splitChatBesideFiles(window)
+  await composerFollow.click()
 
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[subagent-edit-preview]] Delegate this file update.")
@@ -475,7 +460,7 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
     window
       .getByTestId("editor-tab-file-src/delegated.ts").getByRole("tab")
   ).toBeVisible()
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await window.getByTestId("composer").getByRole("textbox").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -494,10 +479,10 @@ test("refreshes the repository tree and follows a moved file to its destination"
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
-  await composerFollow.click()
   await splitChatBesideFiles(window)
+  await composerFollow.click()
   await selectTreePath(window, "src/config.ts")
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await window.getByTestId("composer").getByRole("textbox").click()
   await composerFollow.click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
@@ -515,17 +500,17 @@ test("refreshes the repository tree and follows a moved file to its destination"
     })
   ).toContainText("export const mode = 'modern'")
   await expect(
-    fileBody(window, "src/settings/config.ts").getByRole("button", {
+    window.getByRole("tab", {
       name: "Show diff for src/settings/config.ts"
-    })
-  ).toHaveAttribute("aria-pressed", "true")
+    }).filter({ visible: true })
+  ).toHaveAttribute("aria-selected", "true")
 
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   const tree = await explorerTree(window)
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   await expect(tree.locator('[data-item-path="src/config.ts"]')).toHaveCount(0)
   await expect(tree.locator('[data-item-path="src/settings/"]')).toHaveCount(1)
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await window.getByTestId("composer").getByRole("textbox").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -544,8 +529,8 @@ test("reveals the followed mutation diff and sends selected feedback with contex
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
-  await composerFollow.click()
   await splitChatBesideFiles(window)
+  await composerFollow.click()
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[follow-diff-preview]] Update the configuration mode.")
   await composer.press("Enter")
@@ -595,20 +580,71 @@ test("reveals the followed mutation diff and sends selected feedback with contex
     window.getByRole("button", { name: "Remove src/config.ts:L1", exact: true })
   ).toBeVisible()
 
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await expect(followed).toBeVisible()
   await followedLine.click({ position: { x: 6, y: 6 } })
   const comment = followed.getByPlaceholder("Ask the agent to fix this…")
   await comment.fill("[[expect-code-context]] Keep the new mode but document it.")
   await followed.getByRole("button", { name: "Send to agent" }).click()
 
+  await window.getByRole("tab", { name: "Sessions", exact: true }).click()
   await sessionRow(window, "Other file browser session").click()
   await sessionRow(window, "File browser IDE").click()
-  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+  // Explorer mode is active (files tab removed in redesign 3.6)
   await expect(followed).toBeVisible()
   await expect(window.getByText("Received selected diff context.", { exact: true })).toBeVisible({
     timeout: 20_000
   })
+})
+
+test("decorates agent edits with a turn label and counts them in the file breadcrumb", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    seed: seedRepository,
+    sessions: ({ repoPath }) => [session(repoPath), otherSession(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await splitChatBesideFiles(window)
+  await window
+    .getByTestId("composer")
+    .getByRole("button", { name: "Follow agent", exact: true })
+    .click()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[follow-diff-preview]] Update the configuration mode.")
+  await composer.press("Enter")
+
+  const followed = window.locator('[data-follow-agent-change="follow-diff-1"]').filter({ visible: true })
+  await expect(followed).toBeVisible({ timeout: 20_000 })
+  const label = followed.getByRole("button", { name: "Agent edit · Turn 1" })
+  await expect(label).toBeVisible()
+  await expect(followed.getByRole("button", { name: /Keep|Revert/ })).toHaveCount(0)
+  await expect(
+    window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "config.ts" }).getByText(/\b1 agent edit$/)
+  ).toBeVisible()
+
+  // One header row: breadcrumb, Diff/Edit and Follow agent share a y, with no second toolbar bar.
+  const body = window.locator('[data-surface*="src/config.ts"]').filter({ visible: true })
+  const crumb = window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "config.ts" })
+  const [crumbBox, modeBox, followBox] = await Promise.all([
+    crumb.boundingBox(),
+    crumb.getByRole("tab", { name: "Edit src/config.ts" }).boundingBox(),
+    crumb.getByRole("button", { name: "Follow agent", exact: true }).boundingBox()
+  ])
+  expect(crumbBox).not.toBeNull()
+  for (const box of [modeBox, followBox]) {
+    expect(box).not.toBeNull()
+    expect(box!.y).toBeGreaterThanOrEqual(crumbBox!.y - 1)
+    expect(box!.y + box!.height).toBeLessThanOrEqual(crumbBox!.y + crumbBox!.height + 1)
+  }
+  await expect(body.getByRole("button", { name: "Follow agent", exact: true })).toHaveCount(0)
+
+  await label.click()
+  await expect(window.getByText("Updated the configuration mode.", { exact: true }).first()).toBeInViewport()
 })
 
 async function selectVisibleTreeItem(target: import("@playwright/test").Locator) {
@@ -678,8 +714,8 @@ test("following a settled operation keeps its rendered file mounted while Pi str
     piFixture: { scenarioId: "follow-stability", authRoute: "api-key" }
   })
   await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("composer").getByRole("button", { name: "Follow agent", exact: true }).click()
   await splitChatBesideFiles(window)
+  await window.getByTestId("composer").getByRole("button", { name: "Follow agent", exact: true }).click()
   const composer = window.getByPlaceholder("Message the agent…")
   const operations: readonly [string, string, string][] = [
     ["first", "stability-first", "export const mode = 'modern'"],

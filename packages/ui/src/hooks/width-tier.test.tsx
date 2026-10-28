@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
-import { atLeast, tierFor, useWidthTier, WIDTH_TIER_BREAKPOINTS, WidthTierValue } from "./width-tier.js"
+import { atLeast, chatLaneIsDrawer, sidebarIsRail, tierFor, useWidthTier, WIDTH_TIER_BREAKPOINTS, WidthTierValue } from "./width-tier.js"
 
 afterEach(cleanup)
 
@@ -63,5 +63,22 @@ describe("useWidthTier", () => {
       </WidthTierValue>
     )
     expect(screen.getByTestId("tier").textContent).toBe("narrow")
+  })
+})
+
+describe("shell breakpoints (chat drawer first at 1100, sidebar rail second at 1000)", () => {
+  it("turns the chat lane into the drawer below 1100px", () => {
+    expect(chatLaneIsDrawer(1100)).toBe(false)
+    expect(chatLaneIsDrawer(1099)).toBe(true)
+  })
+
+  it("collapses the sidebar to the rail below 1000px, and not on the unmeasured frame", () => {
+    expect(sidebarIsRail(1000)).toBe(false)
+    expect(sidebarIsRail(999)).toBe(true)
+    expect(sidebarIsRail(0)).toBe(false)
+  })
+
+  it("drawer always comes first as the window narrows", () => {
+    for (let w = 1; w < 2000; w++) if (sidebarIsRail(w)) expect(chatLaneIsDrawer(w)).toBe(true)
   })
 })

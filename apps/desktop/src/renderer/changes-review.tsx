@@ -5,14 +5,27 @@
  * review diff, and the review tray beside the panes.
  */
 import { useCallback, useMemo } from "react"
-import type { Session } from "@jingler/core"
-import { checkoutsOf, workspaceModeOf } from "@jingler/core"
-import { ChangedFilesExplorer, ReviewSidebar, checkoutLabel } from "@jingler/ui"
+import { useSelector } from "@xstate/react"
+import type { Session, SubagentFleetNode } from "@jingler/core"
+import { activeCheckoutOf, checkoutsOf, hasNoRepo, workspaceModeOf } from "@jingler/core"
+import type { AgentTreeChanges } from "@jingler/ui"
+import { ChangedFilesExplorer, EmptyState, SubagentScopeBar, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
-import { setReviewFilter, setReviewFocused, useReviewFocused } from "./review-store.js"
+import {
+  setReviewFilter,
+  setReviewFocused,
+  setReviewPrLayer,
+  setReviewTurn,
+  useReviewFocused,
+  useSessionReviewState
+} from "./review-store.js"
 import { reviewCommentsContext } from "./review-references.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
+import { useAgentTrees } from "./use-agent-trees.js"
 import { useReview } from "./use-review.js"
+import { useViewedChild } from "./subagent-tab-store.js"
+import { scopeBarState } from "./subagent-scope.js"
+import { useSubagentView } from "./use-subagent-view.js"
 
 /** The instruction handed to the session's agent to clean up one file. */
 const deslopPrompt = (path: string): string =>
@@ -65,7 +78,6 @@ export function useChangesReview(session: Session, connected: boolean, checkoutI
     sendComment,
     focused,
     toggleFocus,
-    revertLines: worktree ? review.revertLines : undefined,
     revertFile: worktree ? review.revertFile : undefined
   }
 }
@@ -73,6 +85,43 @@ export function useChangesReview(session: Session, connected: boolean, checkoutI
 /** What the Changes rail button does: show this session's changes in the Explorer. */
 export const revealSessionChanges = (session: Session): void =>
   setReviewFilter(session.id, session.prNumber, session.prNumber != null ? "pr" : "local")
+
+/** The agent turns that changed files, and which one the Changes list is narrowed to. */
+export function useReviewTurns(session: Session) {
+  // Memoised: getConversationActor pushes the session into the actor on every call.
+  const actor = useMemo(() => getConversationActor(session), [session.id, session.activeChatId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const messages = useSelector(actor, (snapshot) => snapshot.context.messages)
+  const turns = useMemo(() => reviewTurnsOf(messages), [messages])
+  const { turnId } = useSessionReviewState(session.id, session.prNumber)
+  const turn = turns.find((candidate) => candidate.id === turnId) ?? null
+  const setTurn = useCallback(
+    (next: string | null) => setReviewTurn(session.id, session.prNumber, next),
+    [session.id, session.prNumber]
+  )
+  return { turns, turn, setTurn }
+}
+
+function ViewedChildScopeBar({
+  viewed,
+  agentTrees,
+  onShowAll
+}: {
+  readonly viewed: SubagentFleetNode
+  readonly agentTrees: ReadonlyArray<AgentTreeChanges>
+  readonly onShowAll: () => void
+}) {
+  const fileCount = agentTrees.find((tree) => tree.agentId === viewed.subagentId)?.files.length ?? 0
+  return (
+    <SubagentScopeBar
+      agent={viewed.agent}
+      branch={viewed.workspace?.branch ?? null}
+      prNumber={viewed.prNumber}
+      state={scopeBarState(viewed, fileCount)}
+      baseRef={viewed.workspace?.baseRef ?? null}
+      onShowAll={onShowAll}
+    />
+  )
+}
 
 function CheckoutChangesList({
   session,
@@ -87,10 +136,36 @@ function CheckoutChangesList({
   readonly activePath: string | null
   readonly onOpenPath: (path: string) => void
 }) {
-  const { review, adversarial } = useChangesReview(session, connected, checkoutId)
+  const { review, adversarial, revertFile } = useChangesReview(session, connected, checkoutId)
+  const { turns, turn, setTurn } = useReviewTurns(session)
+  const { prLayer } = useSessionReviewState(session.id, session.prNumber)
+  const selectLayer = useCallback(
+    (next: number) => {
+      setReviewPrLayer(session.id, session.prNumber, next)
+      setReviewFilter(session.id, session.prNumber, "pr")
+    },
+    [session.id, session.prNumber]
+  )
+  // The turn filter and Discard belong to the active checkout only.
+  const active = checkoutId === undefined
+  const agentTrees = useAgentTrees(session, review.files, active && review.source === "local")
+  const { changesScope, setChangesScope } = useSubagentView(session.activeChatId)
+  const viewed = useViewedChild(session.id, session.activeChatId)
+  const scoped = active && viewed !== null && changesScope === viewed.subagentId
   return (
+    <>
+    {scoped && <ViewedChildScopeBar viewed={viewed} agentTrees={agentTrees} onShowAll={() => setChangesScope("all")} />}
     <ChangedFilesExplorer
+      turns={active ? turns : []}
+      turnId={active ? (turn?.id ?? null) : null}
+      onTurnChange={setTurn}
+      prLayers={active ? (session.prs ?? []) : []}
+      prNumber={prLayer ?? session.prNumber}
+      onPrNumberChange={selectLayer}
       files={review.files}
+      agentTrees={agentTrees}
+      agentScope={changesScope}
+      onAgentScopeChange={setChangesScope}
       fileDiffs={review.fileDiffs}
       omittedFiles={review.omittedFiles}
       diffLineLimit={review.diffLineLimit}
@@ -100,7 +175,12 @@ function CheckoutChangesList({
       review={review.source === "pr" && checkoutId === undefined ? adversarial.review : null}
       activePath={activePath}
       onSelectFile={onOpenPath}
+      onDiscardFile={active && review.source === "local" ? revertFile : undefined}
+      loading={review.loading}
+      error={review.error}
+      onRetry={review.retry}
     />
+    </>
   )
 }
 
@@ -117,6 +197,10 @@ export function ChangesExplorerPanel({
   readonly onOpenPath: (path: string) => void
 }) {
   const checkouts = checkoutsOf(session)
+  // An Auto session with nothing attached yet has no repo to diff against.
+  if (checkouts.length < 2 && hasNoRepo(activeCheckoutOf(session))) {
+    return <EmptyState className="py-6" title={<span data-testid="changes-no-repo">No repo</span>} description="The agent hasn't attached a repo yet." />
+  }
   if (checkouts.length < 2) {
     return (
       <CheckoutChangesList
@@ -178,6 +262,8 @@ export function ReviewTrayDock({
       connectionActionLabel={connectionActionLabel}
       review={reviewing ? adversarial.review : null}
       sentFindingIds={adversarial.sentFindingIds}
+      dismissedFindingIds={adversarial.dismissedFindingIds}
+      onDismissFinding={adversarial.dismissFinding}
       routeTargetSession={session.title}
       paths={paths}
       onConnectGithub={onConnectGithub}

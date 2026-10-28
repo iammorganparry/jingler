@@ -16,7 +16,7 @@ import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
 import { showElectronWindow } from "./electron-window.js";
-import { appShell, sessionRow } from "./fixtures.js";
+import { appShell, sessionRow, openModelSettings } from "./fixtures.js";
 import { MAIN_ENTRY } from "./global-setup.js";
 import {
   RealProviderRoute,
@@ -299,8 +299,9 @@ const authenticateProvider = async (
     ).toBeVisible({ timeout: 5 * 60_000 });
   }
   await window.getByRole("button", { name: "Continue" }).click();
+  // #487 removed the standalone resources onboarding step.
   await expect(
-    window.getByRole("heading", { name: "Import agent resources" }),
+    window.getByRole("heading", { name: "Import existing sessions?" }),
   ).toBeVisible({ timeout: 90_000 });
   await window.getByRole("button", { name: "Skip for now" }).click();
   await expect(appShell(window)).toBeVisible({ timeout: 30_000 });
@@ -331,6 +332,7 @@ const openNewSession = async (
   await expect(
     window.getByRole("button", { name: `Model: ${model.label}` }),
   ).toBeVisible();
+  await openModelSettings(window)
   await window.getByRole("button", { name: "Execution environment" }).click();
   await window.getByRole("option", { name: environment }).click();
 };
@@ -425,6 +427,7 @@ const startLocalHandoff = async (
 };
 
 const finishCloudHandoff = async (window: Page): Promise<void> => {
+  await openModelSettings(window)
   await window.getByRole("button", { name: "Execution environment" }).click();
   await window.getByRole("option", { name: "Cloud" }).click();
   await expect(window.getByRole("alert")).toContainText("Stop the active turn");

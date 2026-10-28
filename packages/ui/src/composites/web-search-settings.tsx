@@ -9,6 +9,7 @@ import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Input } from "../components/input.js"
 import { SegmentedControl } from "../components/segmented-control.js"
+import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 
 export interface WebSearchSettingsProps {
   readonly status: WebSearchSettingsStatus | null
@@ -48,108 +49,107 @@ export function WebSearchSettings({
     (candidate) => candidate.provider === provider
   )
   const configured = credential?.configured === true
+  const skipped = status?.config.setup === "skipped"
 
   return (
-    <section aria-label="Web search" className="mt-6">
-      <div className="mb-3 flex items-start justify-between gap-4 border-b border-hairline pb-2.5">
-        <div>
-          <h3 className="text-[13px] font-semibold text-text-bright">Web search</h3>
-          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-            Research uses your provider first, then verified model-native search.
-            Browser fallback is desktop-only and appears only while a client is attached.
-          </p>
-        </div>
-        {status?.config.setup === "skipped" ? (
-          <span className="rounded bg-hover px-2 py-1 text-[10px] text-muted-foreground">Skipped</span>
-        ) : null}
-      </div>
-
+    <SettingsCard title="Web search" className="mt-6">
       {error ? <Callout tone="red">{error}</Callout> : null}
 
-      <div className="mt-3 flex flex-col gap-3 rounded-lg border border-line bg-panel p-4">
-        <SegmentedControl
-          value={provider}
-          items={[
-            {
-              value: "exa",
-              label: (
-                <span className="inline-flex items-center gap-1.5">
-                  <img
-                    src={exaLogo}
-                    alt=""
-                    width={16}
-                    height={16}
-                    data-provider-logo="exa"
-                    className="size-4 rounded-[3px] object-contain"
-                  />
-                  EXA
-                </span>
-              )
-            },
-            {
-              value: "firecrawl",
-              label: (
-                <span className="inline-flex items-center gap-1.5">
-                  <img
-                    src={firecrawlLogo}
-                    alt=""
-                    width={16}
-                    height={16}
-                    data-provider-logo="firecrawl"
-                    className="size-4 rounded-[3px] object-contain"
-                  />
-                  Firecrawl
-                </span>
-              )
-            }
-          ]}
-          onChange={(value) => {
-            setProvider(value as WebSearchProvider)
-            setApiKey("")
-          }}
-        />
-
-        <div className="flex gap-2">
-          <Input
-            type="password"
-            value={apiKey}
-            disabled={loading || busy}
-            aria-label={`${label(provider)} API key`}
-            placeholder={configured ? `${label(provider)} key configured — enter a replacement` : `${label(provider)} API key`}
-            autoComplete="off"
-            onChange={(event) => setApiKey(event.target.value)}
-          />
-          <Button
-            disabled={busy || apiKey.trim().length < 8}
-            onClick={async () => {
-              await onSave(provider, apiKey.trim())
+      <SettingsRow
+        label="Provider"
+        help="Research uses your provider first, then verified model-native search. Browser fallback is desktop-only and appears only while a client is attached."
+        control={
+          <SegmentedControl
+            value={provider}
+            items={[
+              {
+                value: "exa",
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <img
+                      src={exaLogo}
+                      alt=""
+                      width={16}
+                      height={16}
+                      data-provider-logo="exa"
+                      className="size-4 rounded-[3px] object-contain"
+                    />
+                    EXA
+                  </span>
+                )
+              },
+              {
+                value: "firecrawl",
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <img
+                      src={firecrawlLogo}
+                      alt=""
+                      width={16}
+                      height={16}
+                      data-provider-logo="firecrawl"
+                      className="size-4 rounded-[3px] object-contain"
+                    />
+                    Firecrawl
+                  </span>
+                )
+              }
+            ]}
+            onChange={(value) => {
+              setProvider(value as WebSearchProvider)
               setApiKey("")
             }}
-          >
-            {busy ? "Saving…" : configured ? "Replace" : "Save"}
-          </Button>
-        </div>
+          />
+        }
+      />
 
-        <div className="flex items-center justify-between gap-3 text-[10.5px] text-muted-foreground">
-          <span>
-            {configured
-              ? credential.cloudSynced
-                ? "Encrypted locally · synced for Cloud"
-                : "Encrypted locally · Cloud sync unavailable"
-              : "No saved key"}
-          </span>
-          <div className="flex gap-2">
+      <SettingsRow
+        label={`${label(provider)} API key`}
+        help={
+          configured
+            ? credential.cloudSynced
+              ? "Encrypted locally · synced for Cloud"
+              : "Encrypted locally · Cloud sync unavailable"
+            : "No saved key"
+        }
+        control={
+          <div className="flex items-center gap-2">
+            <Input
+              type="password"
+              value={apiKey}
+              disabled={loading || busy}
+              aria-label={`${label(provider)} API key`}
+              placeholder={configured ? `${label(provider)} key configured, enter a replacement` : `${label(provider)} API key`}
+              autoComplete="off"
+              onChange={(event) => setApiKey(event.target.value)}
+            />
+            <Button
+              disabled={busy || apiKey.trim().length < 8}
+              onClick={async () => {
+                await onSave(provider, apiKey.trim())
+                setApiKey("")
+              }}
+            >
+              {busy ? "Saving…" : configured ? "Replace" : "Save"}
+            </Button>
             {configured ? (
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => onClear(provider)}>
                 Clear
               </Button>
             ) : null}
-            <Button variant="ghost" size="sm" disabled={busy} onClick={onSkip}>
-              Skip setup
-            </Button>
           </div>
-        </div>
-      </div>
-    </section>
+        }
+      />
+
+      <SettingsRow
+        label="Skip setup"
+        help={skipped ? "Web search is skipped; the model's native search is used instead." : "Use web search without configuring a provider."}
+        control={
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onSkip}>
+            {skipped ? "Skipped" : "Skip setup"}
+          </Button>
+        }
+      />
+    </SettingsCard>
   )
 }

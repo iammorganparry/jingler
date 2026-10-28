@@ -7,11 +7,18 @@ import { TitleBar } from "./title-bar.js"
 export function AppShell({
   title,
   actions,
+  platform,
+  windowControls,
+  banner,
   children
 }: {
   title?: string
   /** App-level controls pinned to the title bar's right edge. */
   actions?: ReactNode
+  platform?: string
+  windowControls?: Parameters<typeof TitleBar>[0]["windowControls"]
+  /** Full-width notice under the title bar (e.g. offline). */
+  banner?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -26,7 +33,8 @@ export function AppShell({
         data-testid="app-background"
         className="flex h-full flex-col overflow-hidden bg-panel text-text"
       >
-        <TitleBar title={title} actions={actions} />
+        <TitleBar title={title} actions={actions} platform={platform} windowControls={windowControls} />
+        {banner}
         {/*
           The outermost width boundary: this row is the whole content area, so
           `usePaneWidth()` beneath it reports how much room the SHELL has. The

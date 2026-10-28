@@ -1,12 +1,87 @@
 import type { ReactNode } from "react"
-import { ChevronDown, ChevronRight, CircleStop } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, CircleStop, LoaderCircle, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
-import { StatusDot } from "../components/status-dot.js"
+import { Spin } from "../components/spin.js"
 import { FileIcon } from "../components/file-icon.js"
+import { Button } from "../components/button.js"
 import { useOpenPath } from "../asset/open-asset-context.js"
 import { ToolResultSurface } from "./beui/work.js"
 
 export type ToolCallStatus = "success" | "running" | "error"
+
+export interface ToolCallLabelInput {
+  readonly toolName: string
+  readonly args?: Record<string, unknown> | null
+  readonly intent?: string | null
+  readonly cwd?: string | null
+}
+
+export interface ToolCallLabelResult {
+  readonly title: string
+  readonly detail: string | null
+}
+
+/** The session's own cwd prefix on a Bash command is noise, not information. */
+const stripCwdPrefix = (text: string, cwd?: string | null): string => {
+  if (!cwd) return text
+  const prefix = `cd ${cwd} && `
+  return text.startsWith(prefix) ? text.slice(prefix.length) : text
+}
+
+const TRAILING_SLASHES = /\/+$/
+const WHITESPACE = /\s+/u
+
+const baseName = (path: string): string => {
+  const cut = path.replace(TRAILING_SLASHES, "").lastIndexOf("/")
+  return cut < 0 ? path : path.slice(cut + 1)
+}
+
+const toolCallDetail = (
+  args: Record<string, unknown> | null | undefined,
+  cwd?: string | null
+): string | null => {
+  const raw = typeof args?.command === "string"
+    ? args.command
+    : typeof args?.path === "string"
+      ? args.path
+      : null
+  return raw === null ? null : stripCwdPrefix(raw, cwd)
+}
+
+const workModeTitle = (args: Record<string, unknown> | null | undefined): string => {
+  const mode = args?.mode === "build" ? "Build" : "Plan"
+  return typeof args?.reason === "string" && args.reason ? `Switched to ${mode}, ${args.reason}` : `Switched to ${mode}`
+}
+
+/**
+ * A tool call's title and secondary line. `intent` (agent-written, present
+ * tense) always wins the title when present; otherwise derive a label from
+ * the tool name and its arguments so the row never shows a bare `cd … && …`.
+ */
+export function toolCallLabel({ toolName, args, intent, cwd }: ToolCallLabelInput): ToolCallLabelResult {
+  const detail = toolCallDetail(args, cwd)
+  if (intent) return { title: intent, detail }
+  switch (toolName) {
+    case "command_execute": {
+      const command = typeof args?.command === "string" ? stripCwdPrefix(args.command, cwd) : ""
+      const firstWord = command.trim().split(WHITESPACE)[0] ?? ""
+      return { title: firstWord ? `Ran \`${firstWord}\`` : "Ran command", detail }
+    }
+    case "workspace_read_file": {
+      const path = typeof args?.path === "string" ? args.path : ""
+      return { title: path ? `Read \`${baseName(path)}\`` : "Read file", detail }
+    }
+    case "workspace_edit":
+    case "workspace_write": {
+      const path = typeof args?.path === "string" ? args.path : ""
+      return { title: path ? `Edited \`${baseName(path)}\`` : "Edited file", detail }
+    }
+    case "jingler_set_work_mode":
+      return { title: workModeTitle(args), detail: null }
+    default:
+      return { title: toolName, detail }
+  }
+}
 
 export interface ToolCallProps {
   status: ToolCallStatus
@@ -32,6 +107,14 @@ export interface ToolCallProps {
    * as a stop button on the header only while `status` is "running".
    */
   onStop?: () => void
+  /**
+   * Second line under the header — the raw command/path once `target` is an
+   * agent-written intent. Mono, dim, truncated; the full text still lives in
+   * the expanded body below.
+   */
+  detail?: ReactNode
+  /** A failed MCP call that needs auth: shows a sign-in action on the row. */
+  signIn?: { readonly label: string; readonly onClick: () => void }
   className?: string
 }
 
@@ -95,7 +178,7 @@ function PathTarget({ path }: { path: string }) {
           }}
           className={cn(
             nameClass,
-            "cursor-pointer rounded-[3px] underline-offset-2 outline-none hover:text-blue hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            "cursor-pointer rounded-[3px] underline-offset-2 outline-none hover:text-text-bright hover:underline focus-visible:ring-2 focus-visible:ring-ring"
           )}
         >
           {base}
@@ -119,13 +202,19 @@ export function ToolCall({
   expanded = false,
   onToggle,
   onStop,
+  detail,
+  signIn,
   className
 }: ToolCallProps) {
          function renderToolHeading() {
            return (<>
-      {status === "success" && <span className="text-green">✓</span>}
-      {status === "error" && <span className="text-red">✗</span>}
-      {status === "running" && <StatusDot tone="bg-yellow" size={8} pulse />}
+      {status === "success" && <Check className="size-3 flex-none text-dim" />}
+      {status === "error" && <X className="size-3 flex-none text-state-failed" />}
+      {status === "running" && (
+        <Spin active className="flex-none">
+          <LoaderCircle className="size-3 text-muted-foreground" />
+        </Spin>
+      )}
       <span className="text-muted-foreground">{name}</span>
       {icon}
       {filePath && <FileIcon path={filePath} />}
@@ -135,7 +224,7 @@ export function ToolCall({
         <span className="flex-1 truncate text-left text-text-bright">{target}</span>
       )}
       {meta && (
-        <span className={cn("shrink-0", status === "error" ? "text-red" : "text-dim")}>{meta}</span>
+        <span className="shrink-0 text-dim">{meta}</span>
       )}
       {onToggle &&
         (expanded ? (
@@ -147,47 +236,55 @@ export function ToolCall({
          }
 
   const header = (
-    renderToolHeading()
+    <>
+      <div className={cn("flex items-center gap-[9px]", detail ? "font-sans text-text-bright" : "font-mono")}>
+        {renderToolHeading()}
+      </div>
+      {detail && (
+        <div className="truncate pl-[21px] font-mono text-[11px] text-dim">{detail}</div>
+      )}
+    </>
   )
   const headerClass = cn(
-    "flex w-full items-center gap-[9px] px-2.5 py-1.5 font-mono text-[11.5px]",
-    status === "running" && "bg-yellow/[0.08]",
-    status === "success" && "bg-surface",
-    onToggle && "cursor-pointer text-left transition-colors hover:bg-line/20"
+    "flex w-full flex-col gap-0.5 px-2.5 py-1 text-left text-[12px]",
+    onToggle && "cursor-pointer transition-colors hover:bg-hover"
   )
   return (
     <ToolResultSurface
       className={cn(
-        "rounded-md",
-        status === "running" && "border-yellow/30",
-        status === "error" && "border-red/35 bg-red/[0.05]",
-        status === "success" && "border-line",
+        "rounded-[6px] border-hairline bg-transparent",
         className
       )}
+      data-tool-status={status}
     >
       <div className="flex items-stretch">
         {onToggle ? (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={onToggle}
             aria-expanded={expanded}
-            className={cn(headerClass, "min-w-0 flex-1 outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+            className={cn(headerClass, "h-auto min-w-0 flex-1 rounded-none outline-none focus-visible:ring-2 focus-visible:ring-ring")}
           >
             {header}
-          </button>
+          </Button>
         ) : (
           <div className={cn(headerClass, "min-w-0 flex-1")}>{header}</div>
         )}
+        {signIn && status === "error" && (
+          <Button variant="ghost" size="sm" onClick={signIn.onClick} className="my-auto mr-2 flex-none">
+            {signIn.label}
+          </Button>
+        )}
         {onStop && status === "running" && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={onStop}
             aria-label="Stop tool"
             title="Stop"
-            className="flex-none px-2.5 text-red outline-none transition-colors hover:bg-red/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            className="h-auto flex-none rounded-none px-2.5 text-state-failed outline-none hover:bg-state-failed/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <CircleStop className="size-3.5" />
-          </button>
+          </Button>
         )}
       </div>
       {/* While running with no peek yet, a shimmer bar signals live work. */}

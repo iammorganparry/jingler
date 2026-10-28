@@ -120,6 +120,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
@@ -130,13 +132,13 @@ describe("ProviderConnectionsSettings", () => {
     expect(screen.queryByRole("button", { name: "Sign in to Codex CLI" })).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Codex CLI: Sign in required" }))
-    expect(screen.getAllByText("Codex CLI · signed-out · desktop")).toHaveLength(2)
+    expect(screen.getAllByText("Codex CLI, signed-out, desktop")).toHaveLength(2)
     expect(screen.getAllByRole("button", { name: "Sign in to Codex CLI" })).toHaveLength(1)
     expect(screen.queryByRole("button", { name: "Open browser" })).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Claude Code: 1/2 ready" }))
     expect(screen.getByText("claude auth login")).toBeTruthy()
-    expect(screen.getAllByText(/Claude Code · .* · device/u).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Claude Code, .*, device/u).length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole("button", { name: "PI: Needs provider" }))
     expect(screen.getByRole("button", { name: "Open browser" })).toBeTruthy()
@@ -158,6 +160,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={onStartCodex}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
@@ -189,6 +193,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={onStartCodex}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
@@ -211,7 +217,9 @@ describe("ProviderConnectionsSettings", () => {
       onLogout: vi.fn(),
       onConnectClaude: vi.fn(),
       onStartCodex: vi.fn(),
-      onSetApiKey: vi.fn()
+      onSetApiKey: vi.fn(),
+      onCancelLogin: vi.fn(),
+      onSaveApiKey: vi.fn()
     }
     const view = render(
       <ProviderConnectionsSettings catalog={empty} {...props} />
@@ -242,6 +250,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={onConnectClaude}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 
@@ -249,6 +259,51 @@ describe("ProviderConnectionsSettings", () => {
 
     expect(onConnectClaude).toHaveBeenCalledWith("claude-max", "claude-cli")
     expect(screen.queryByPlaceholderText("Claude setup-token")).toBeNull()
+  })
+
+  it("shows the real provider brand logo on each account row, not a letter tile", () => {
+    render(
+      <ProviderConnectionsSettings
+        catalog={catalog}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={vi.fn()}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
+      />
+    )
+    const row = screen.getAllByRole("button", { name: /Claude CLI subscription/u })[0]!
+    expect(row.querySelector("[data-provider-icon='claude']")).toBeTruthy()
+    expect(row.querySelector("[data-provider-fallback]")).toBeNull()
+  })
+
+  it("marks the default connection's row with a star and lets it sign out", () => {
+    const onLogout = vi.fn()
+    render(
+      <ProviderConnectionsSettings
+        catalog={catalog}
+        defaultConnectionId={"claude-max" as ProviderConnectionId}
+        defaultModelId={"anthropic/claude-test" as ProviderModelId}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={onLogout}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
+      />
+    )
+    expect(screen.getByLabelText("Default connection")).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sign out Claude CLI subscription connection" })
+    )
+    expect(onLogout).toHaveBeenCalledWith("claude-max")
   })
 
   it("shows the pinned account, target, plan, and billing route", () => {
@@ -262,6 +317,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
     expect(screen.getAllByText("Claude CLI subscription").length).toBeGreaterThan(0)
@@ -285,6 +342,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
     expect(screen.queryByRole("button", { name: "Verify" })).toBeNull()
@@ -312,11 +371,13 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Remove Claude CLI subscription connection"
+        name: "Sign out Claude CLI subscription connection"
       })
     )
     expect(onRemove).toHaveBeenCalledWith("claude-max")
@@ -335,6 +396,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
     expect(screen.queryByRole("button", { name: "Make default" })).toBeNull()
@@ -376,6 +439,8 @@ describe("ProviderConnectionsSettings", () => {
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
         onSetApiKey={vi.fn()}
+        onCancelLogin={vi.fn()}
+        onSaveApiKey={vi.fn()}
       />
     )
 

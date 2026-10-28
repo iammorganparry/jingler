@@ -1,7 +1,12 @@
 import type { NotificationsConfig } from "@jingler/core"
 import { NOTIFICATIONS_DEFAULT } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { shouldNotify } from "./notifications.js"
+import {
+  notificationClickPayload,
+  notificationPermission,
+  openNotificationSystemSettings,
+  shouldNotify
+} from "./notifications.js"
 
 /**
  * The suppression rules. These are the difference between a channel the operator
@@ -99,5 +104,61 @@ describe("shouldNotify", () => {
         config: undefined
       })
     ).toBe(true)
+  })
+})
+
+describe("notificationPermission", () => {
+  it("reports unsupported when the platform cannot show notifications", () => {
+    expect(notificationPermission(() => false)).toBe("unsupported")
+  })
+
+  it("reports unknown, not granted, on a supported platform", () => {
+    // Electron has no permission query: the operator may have blocked Jingler in
+    // System Settings and we cannot see it.
+    expect(notificationPermission(() => true)).toBe("unknown")
+  })
+
+  it("reports unknown when the support probe throws", () => {
+    expect(
+      notificationPermission(() => {
+        throw new Error("no display")
+      })
+    ).toBe("unknown")
+  })
+})
+
+describe("openNotificationSystemSettings", () => {
+  it("opens System Settings → Notifications on macOS", async () => {
+    const calls: string[] = []
+    openNotificationSystemSettings((url) => {
+      calls.push(url)
+      return Promise.resolve()
+    }, "darwin")
+    expect(calls).toEqual(["x-apple.systempreferences:com.apple.Notifications-Settings.extension"])
+  })
+
+  it("is a no-op on platforms other than macOS", () => {
+    const calls: string[] = []
+    openNotificationSystemSettings((url) => {
+      calls.push(url)
+      return Promise.resolve()
+    }, "win32")
+    expect(calls).toEqual([])
+  })
+})
+
+describe("notificationClickPayload", () => {
+  it("carries the turn a needs-input notification was about", () => {
+    expect(
+      notificationClickPayload({ sessionId: "s1", kind: "needs-input", turnId: "msg-1" })
+    ).toEqual({ sessionId: "s1", kind: "needs-input", turnId: "msg-1" })
+  })
+
+  it("is null for a kind with no single turn to point at", () => {
+    expect(notificationClickPayload({ sessionId: "s1", kind: "pr", turnId: null })).toEqual({
+      sessionId: "s1",
+      kind: "pr",
+      turnId: null
+    })
   })
 })

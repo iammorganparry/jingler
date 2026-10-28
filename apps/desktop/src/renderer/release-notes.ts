@@ -43,18 +43,24 @@ export const compareVersions = (a: string, b: string): number => {
 }
 
 /**
- * Every change shipped after `previous` up to and including `current` — an
- * update can skip versions, and the operator should hear about all of them.
+ * Every CHANGELOG section shipped after `previous` up to and including
+ * `current` — an update can skip versions, and the operator should hear about
+ * all of them.
  */
+export const entriesBetween = (
+  entries: readonly ChangelogEntry[],
+  previous: string,
+  current: string
+): ChangelogEntry[] =>
+  entries.filter(
+    (entry) =>
+      compareVersions(entry.version, previous) > 0 &&
+      compareVersions(entry.version, current) <= 0
+  )
+
+/** The changes of {@link entriesBetween}, flattened into one list. */
 export const notesBetween = (
   entries: readonly ChangelogEntry[],
   previous: string,
   current: string
-): string[] =>
-  entries
-    .filter(
-      (entry) =>
-        compareVersions(entry.version, previous) > 0 &&
-        compareVersions(entry.version, current) <= 0
-    )
-    .flatMap((entry) => entry.notes)
+): string[] => entriesBetween(entries, previous, current).flatMap((entry) => entry.notes)

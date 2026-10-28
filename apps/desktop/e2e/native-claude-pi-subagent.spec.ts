@@ -1,5 +1,5 @@
 import { resolve } from "node:path"
-import { appShell, expect, test } from "./fixtures.js"
+import { appShell, expect, test, openModelSettings } from "./fixtures.js"
 
 const fixtureDir = resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/agent/fixtures")
 const binary = resolve(fixtureDir, "claude-subagent.mjs")
@@ -23,6 +23,7 @@ test("native Claude delegates through bundled PI without a PI provider credentia
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
+  await openModelSettings(window)
   await window.getByRole("button", { name: /^Model:/ }).click()
   await expect(window.getByText("Claude Code", { exact: true })).toBeVisible()
   await window.getByRole("option", { name: /^Haiku \(latest\)/ }).click()

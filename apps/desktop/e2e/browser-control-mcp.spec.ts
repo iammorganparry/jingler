@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http"
 import { appShell, expect, test, type SeedSession } from "./fixtures.js"
+import { openView } from "./views.js"
 
 const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
   id: "s_browser_mcp",
@@ -64,7 +65,7 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
     })
 
     await expect(appShell(window)).toBeVisible()
-    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    await openView(window, "browser")
     if (process.env.JINGLER_E2E_HEADED !== "1") {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.emit("focus"))
     }
@@ -76,7 +77,7 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
         BrowserWindow.getAllWindows()[0]?.isFocused() ?? false)).toBe(true)
     }
 
-    await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+    await window.getByRole("region", { name: /^Editor group: Chat/ }).getByPlaceholder(/message/i).click()
     const composer = window.getByPlaceholder(/message/i)
     await composer.fill(`Navigate the operator's Preview. [[browser-url=${targetUrl}]]`)
     await composer.press("Enter")

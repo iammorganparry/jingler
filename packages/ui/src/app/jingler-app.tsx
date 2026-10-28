@@ -1,5 +1,8 @@
+import type { HomeStart } from "../screens/empty-conversation.js"
+import type { SubagentFleetNode } from "@jingler/core"
+import type { UseSessionTerminals } from "./terminal-panel.js"
 import { defaultProps } from "../lib/default-props.js"
-import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, matchSplitEditorChord, surfaceCommandForShortcut } from "./app-shortcuts.js"
+import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, matchSplitEditorChord, surfaceCommandForShortcut, tabShortcutHint } from "./app-shortcuts.js"
 import {
   type ReactNode,
   useCallback,
@@ -10,6 +13,7 @@ import {
 import type {
   AgentEndpointCatalog,
   ContextConfig,
+  PlanTemplateConfig,
   ContextSnapshot,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -19,6 +23,7 @@ import type {
   GitHubConnection,
   GitConfig,
   GithubConfig,
+  NotificationPermission,
   NotificationsConfig,
   ObsidianExplanationsConfig,
   OffloadComputeSettings,
@@ -41,19 +46,23 @@ import type {
   UsageReport,
   User,
 } from "@jingler/core"
-import { UNTITLED_SESSION } from "@jingler/core"
+import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
+import { displayStatusLabel } from "../tokens.js"
 import type { SessionCreationPhase } from "@jingler/contracts"
 import { useMachine } from "@xstate/react"
 import { AppShell } from "./app-shell.js"
 import type { SidebarReleaseNotes, SidebarUpdate } from "./session-sidebar.js"
+import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
 import { AddProjectDialog } from "../composites/add-project-dialog.js"
 import { NewWorkspaceView } from "../composites/new-workspace-view.js"
 import { UsageModal } from "../composites/usage-modal.js"
+import type { HeaderViewItem } from "./header-view-buttons.js"
 import {
   SettingsView,
   type SettingsViewProps
 } from "../composites/settings-view.js"
 import type { McpSettingsProps } from "../composites/mcp-settings.js"
+import type { VoiceSettingsProps } from "../composites/voice-settings.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
 import type { PaneContribution } from "./pane-contributions.js"
@@ -63,7 +72,7 @@ import {
 } from "../screens/session-conversation.js"
 import type { SessionChatActions } from "./session-tree.js"
 import { openTab } from "./editor-layout.js"
-import { updateEditorLayout } from "./editor-layout-machine.js"
+import { forgetEditorLayout, updateEditorLayout, useEditorLayout } from "./editor-layout-machine.js"
 import { useSplitLayout } from "./use-split-layout.js"
 import { matchSplitShortcut } from "./split-shortcuts.js"
 import {
@@ -82,13 +91,21 @@ import { CommandPalette } from "./command-palette.js"
 import { TitleSearch } from "./title-search.js"
 import {
   matchPaletteChord,
+  matchSettingsChord,
   matchFileQuickOpenChord,
+  matchNeedsYouChord,
+  needsYouPaletteItems,
+  nextNeedsYouSession,
   PALETTE_GROUP,
   type PaletteItem,
   pluginGroupName,
-  type PluginPaletteCommand
+  type PluginPaletteCommand,
+  subagentPaletteItems,
+  viewPaletteItems
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
+/** Live activity kinds that mean a workspace is blocked on the operator — same set `project-sidebar.tsx` badges. */
+const NEEDS_YOU_ACTIVITY_KINDS: ReadonlySet<string> = new Set(["needs-input", "needs-approval"])
 import { environmentSessionStartupMachine } from "./environment-session-startup-machine.js"
 import {
   BUILTIN_TAB,
@@ -150,19 +167,31 @@ export interface JinglerAppProps {
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
+  /** The platform (darwin, win32, linux) for conditional UI (window controls). */
+  platform?: string
+  /** Window control handlers for non-macOS platforms. */
+  windowControls?: Parameters<typeof import("./title-bar.js").TitleBar>[0]["windowControls"]
   /** Available packaged-app update shown in the sidebar. */
   update?: SidebarUpdate
   /** "Updated to vX" notes, shown once after relaunching on a new version. */
   releaseNotes?: SidebarReleaseNotes
+  /** Every version's notes behind the account menu's "What's new" item. */
+  whatsNew?: readonly WhatsNewEntry[]
   /** Sign out of the app (from the account menu). */
   onSignOut?: () => void
   /** Open the optional sign-in dialog. Offered only while signed out. */
   onSignIn?: () => void
+  /** Full-width notice under the title bar (e.g. the auth server is unreachable). */
+  banner?: ReactNode
   /** Repos discovered under the workspace, for the New Session picker. */
   repos?: ReadonlyArray<Repo>
   /** Durable registered repositories, independent of workspaces. */
   projects?: ReadonlyArray<Project>
   projectsLoading?: boolean
+  /** Opens the "Import sessions…" dialog (Claude/Codex sessions found on disk). */
+  onImportSessions?: () => void
+  /** Unregister a project from the rail tile's context menu. */
+  onRemoveProject?: (projectId: string) => void | Promise<void>
   onBrowseProject?: () => Promise<string | null>
   onBrowseCloneDestination?: (repositoryName: string) => Promise<string | null>
   onListProjectDirectories?: (path?: string) => Promise<ProjectDirectoryListing>
@@ -204,10 +233,28 @@ export interface JinglerAppProps {
   onGithubDisconnect?: () => void
   /** What each session's agent is doing right now ("Running npm test"), keyed by id. */
   liveActivity?: Record<string, SessionActivity>
+  /** Home › Allow action for a session blocked on an approval gate. */
+  allowFor?: (sessionId: string) => (() => void) | undefined
+  /** Home › the MCP import card element. */
+  importCard?: ReactNode
+  /** Sessions whose last run was cut off by a restart. */
+  interruptedSessions?: ReadonlySet<string>
   /** Live activity by session, then chat, for the sidebar tree. */
   chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
   prStates?: Record<string, SessionPrStatus>
+  /** Running subagent count per session id, shown as `· N agents` on sidebar rows. */
+  subagentCounts?: Readonly<Record<string, number>>
+  /** Count of a session's subagent fleet nodes with a pending attention request (e.g. a child's question). */
+  subagentAttentionCounts?: Readonly<Record<string, number>>
+  /** Each session's active-chat subagents, listed under ⌘K "Go to subagent…". */
+  /** Fleet nodes per session id; any with a PR join the header PRs chip. */
+  /** Open a session PR (main or subagent) in the PR view. */
+  onOpenSessionPr?: (sessionId: string, prNumber: number) => void
+  subagentPrNodes?: Readonly<Record<string, ReadonlyArray<SubagentFleetNode>>>
+  subagentEntries?: Readonly<Record<string, ReadonlyArray<{ readonly id: string; readonly agent: string; readonly task: string }>>>
+  /** Open one subagent's transcript; the same path the lane-header chip rows use. */
+  onOpenSubagent?: (sessionId: string, nodeId: string) => void
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
   /** Loaded per-file worktree diff counts, keyed by session and path. */
@@ -247,10 +294,15 @@ export interface JinglerAppProps {
   onSaveNotificationsConfig?: (
     config: NotificationsConfig
   ) => Promise<void> | void
+  /** Can the OS show Jingler's notifications? See `SettingsViewProps`. */
+  notificationPermission?: NotificationPermission | null
+  onOpenNotificationSystemSettings?: () => void | Promise<void>
   /** Automatic read-only cloud routing for eligible agent commands. */
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => Promise<void> | void
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
+  /** Re-run Offload Compute priming after a failed save. */
+  onRetryOffload?: () => void
   /** Redacted WebSearch settings plus write-only credential actions. */
   webSearch?: SettingsViewProps["webSearch"]
   /** Permission mode used for new chats across every provider model. */
@@ -259,6 +311,9 @@ export interface JinglerAppProps {
   /** Whether plan mode runs its read-only commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => Promise<void> | void
+  /** Custom starting plan structure; absent or empty means the built-in draft. */
+  planTemplate?: PlanTemplateConfig | null
+  onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
   /** Whether final completion summaries are shaped for an ADHD reader. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => Promise<void> | void
@@ -280,6 +335,8 @@ export interface JinglerAppProps {
   runtimeInspector?: SettingsViewProps["runtimeInspector"]
   /** MCP servers from ~/jingler/mcp.json (Settings › MCP servers). */
   mcp?: McpSettingsProps
+  /** Settings › Voice (models, language, hold-to-talk key). */
+  voice?: VoiceSettingsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (
     session: Session,
@@ -308,16 +365,24 @@ export interface JinglerAppProps {
    * and every "inspect changes" route do now that changes live in the Explorer.
    */
   onRevealChanges?: (sessionId: string) => void
+  /** Pinned header view ids in order; absent hides the header view buttons. */
+  headerViews?: ReadonlyArray<string>
+  /** Persist a new pinned header view set. */
+  onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
   /** Review Focus: hold the workspace sidebar collapsed. */
   sidebarCollapsed?: boolean
+  /** Which sidebar view mounts first; stories and restored layouts can start on Explorer. */
+  initialWorkspaceView?: "sessions" | "explorer"
+  /** Callback when the workspace view (Sessions/Explorer) changes. */
+  onWorkspaceViewChange?: (view: "sessions" | "explorer") => void
   /** The review tray beside a session's panes; null until drafts exist. */
   renderReviewTray?: (
     session: Session,
     ctx: { onConnectGithub: () => void }
   ) => ReactNode
   /** Render the Issue tab — the rich linked-issue view. */
-  /** Render the per-session Terminal view. */
-  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
+  /** Hook supplying the session's shells (each is an editor tab). */
+  useSessionTerminals?: UseSessionTerminals
   /** Render the embedded browser inside its owning session pane. */
   renderBrowser?: (session: Session, visible: boolean) => ReactNode
   /** Make a nested chat-owned surface the session's canonical active chat. */
@@ -343,6 +408,10 @@ export interface JinglerAppProps {
     readonly projectId: string
     readonly pr?: PrSummary
     readonly issue?: IssueSummary
+    readonly draft?: string
+    readonly source?: "pr" | "github"
+    readonly baseBranch?: string
+    readonly isolation?: "worktree" | "direct"
     readonly githubCliAccountId?: string
     readonly githubSlug?: string
     readonly tabId?: TabKey
@@ -473,7 +542,11 @@ export function JinglerApp(props:  JinglerAppProps) {
   function workspaceNavigationProps() {
     return {
 onNewSession: onCreateSession ? openNewSession : undefined,
+onStartWithPrompt: onCreateSession ? startWithPrompt : undefined,
+loadBranches,
 onOpenUsage: onLoadUsage ? openUsage : undefined,
+usage,
+onLoadUsage,
 onOpenSettings: providerConnections
             ? () => openSettings("providers")
             : undefined,
@@ -485,6 +558,8 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
          function renderSessionWorkspace() {
            return (<SessionConversation
         onOpenCheckpoints={props.onOpenCheckpoints}
+        initialWorkspaceView={props.initialWorkspaceView}
+        onWorkspaceViewChange={props.onWorkspaceViewChange}
         search={
           <TitleSearch
             onOpen={() => setPaletteOpen(true)}
@@ -498,6 +573,8 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         projectsLoading={props.projectsLoading}
         projectOwners={projectOwners}
         onAddProject={getAddProjectAction()}
+        onImportSessions={props.onImportSessions}
+        {...getProjectMenuProps()}
         onNewSessionForProject={onCreateSession ? openNewSessionForProject : undefined}
         renderExplorer={renderExplorer}
         environments={environments}
@@ -529,13 +606,19 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         }}
         onRequestCloseFile={onRequestCloseFile}
         renderSubagentTabs={renderSubagentTabs}
+        subagentPrNodes={subagentPrNodes}
+        onOpenSessionPr={onOpenSessionPr}
         planSessions={planSessions}
         explanationSessions={explanationSessions}
         showEmpty={showEmpty}
         patch={patch}
         liveActivity={liveActivity}
+        allowFor={props.allowFor}
+        importCard={props.importCard}
+        interruptedSessions={props.interruptedSessions}
         chatActivities={chatActivities}
         prStates={prStates}
+        subagentCounts={subagentCounts}
         repoOwners={repoOwners}
         liveDiff={liveDiff}
         fileDiffs={props.fileDiffs}
@@ -544,6 +627,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         user={user}
         update={update}
         releaseNotes={releaseNotes}
+        whatsNew={whatsNew}
         onSignOut={onSignOut}
         onSignIn={onSignIn}
 
@@ -581,14 +665,43 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         onSelectIssue={onSelectIssue}
         paneContributions={paneContributions}
         onRevealChanges={onRevealChanges}
+        headerViews={headerViews}
+        onHeaderViewsChange={onHeaderViewsChange}
         sidebarCollapsed={sidebarCollapsed}
         renderReviewTray={renderReviewTray}
-        renderTerminalDock={renderTerminalDock}
+        useSessionTerminals={useSessionTerminals}
         selectTabRequest={tabRequest}
         onTabRequestHandled={clearTabRequest}
         version={version}
       />)
          }
+
+async function locateProject(projectId: string) {
+    const project = projects.find((candidate) => candidate.id === projectId)
+    const path = await onBrowseProject?.()
+    if (!project || !path) return
+    const located = await onRegisterProject?.({ path, name: project.name })
+    // Project ids derive from the path, so a different folder registers a new project; drop the stale one.
+    if (located && located.id !== projectId) {
+      await props.onRemoveProject?.(projectId)
+      setSelectedProjectId(located.id)
+    }
+  }
+
+function getProjectMenuProps() {
+    const remove = props.onRemoveProject
+    return {
+      onOpenProjectSettings: onSaveProjectWorkflow ? () => openSettings("projects") : undefined,
+      onRemoveProject: remove
+        ? async (projectId: string) => {
+            await remove(projectId)
+            if (selectedProjectId === projectId) setSelectedProjectId(null)
+          }
+        : undefined,
+      onLocateProject: onBrowseProject && onRegisterProject ? locateProject : undefined,
+      onOpenSessionTerminal: useSessionTerminals ? openSessionTerminal : undefined
+    }
+  }
 
 function getAddProjectAction() {
     return (onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProject && onCloneProjectFromGitHub
@@ -625,17 +738,26 @@ function getActiveTabContext(active: Session) {
       ))
          }
 
+  /** Every view the header can pin, regardless of the active session (conversation is never a header view). */
+  function settingsHeaderViews(): ReadonlyArray<HeaderViewItem> {
+    return [...TAB_SHAPES, ...(tabContributions ?? [])]
+      .filter((tab) => tab.id !== BUILTIN_TAB.conversation)
+      .map((tab) => ({ id: tab.id, label: tab.label, icon: tab.icon, ...(tabContributions?.some((c) => c.id === tab.id) ? { plugin: true } : {}) }))
+  }
+
   function renderSettings() {
+    const menu = getProjectMenuProps()
     return (settingsOpen && providerConnections ? (
             <SettingsView
               key={settingsSection}
               initialSection={settingsSection}
               routines={routines}
-              projectWorkflows={onSaveProjectWorkflow ? { projects, loading: props.projectsLoading, onSave: onSaveProjectWorkflow, onReadConfig: props.onReadProjectConfig } : undefined}
+              projectWorkflows={onSaveProjectWorkflow ? { projects, loading: props.projectsLoading, onSave: onSaveProjectWorkflow, onReadConfig: props.onReadProjectConfig, onLocateProject: menu.onLocateProject, onRemoveProject: menu.onRemoveProject } : undefined}
               providerConnections={providerConnections}
               agents={agents}
               runtimeInspector={runtimeInspector}
               mcp={mcp}
+              voice={voice}
               githubConnection={githubConnection}
               githubBusy={githubBusy}
               onGithubConnect={onGithubConnect}
@@ -655,19 +777,26 @@ function getActiveTabContext(active: Session) {
               obsidianVaultConfigured={obsidianVaultConfigured}
               notifications={notificationsConfig}
               onSaveNotifications={onSaveNotificationsConfig}
+              notificationPermission={notificationPermission}
+              onOpenNotificationSystemSettings={onOpenNotificationSystemSettings}
               offloadCompute={offloadCompute}
               onSaveOffloadCompute={onSaveOffloadCompute}
               offloadStatus={offloadStatus}
+              onRetryOffload={onRetryOffload}
               webSearch={webSearch}
               defaultMode={defaultMode}
               onSaveDefaultMode={onSaveDefaultMode}
               planAutoRun={planAutoRun}
               onSavePlanAutoRun={onSavePlanAutoRun}
+              planTemplate={planTemplate}
+              onSavePlanTemplate={onSavePlanTemplate}
               adhdMode={adhdMode}
               onSaveAdhdMode={onSaveAdhdMode}
               fontScale={fontScale}
               onSaveFontScale={onSaveFontScale}
               themes={themes}
+              headerViews={headerViews && onHeaderViewsChange ? { views: settingsHeaderViews(), pinned: headerViews, onChange: onHeaderViewsChange } : undefined}
+              usage={onLoadUsage ? { usage, report: usageReport, loading: usageLoading, onExport: onExportUsage, onOpen: refreshUsage } : undefined}
               plugins={plugins}
               devices={devices}
               onClose={() => setSettingsOpen(false)}
@@ -703,13 +832,21 @@ function getActiveTabContext(active: Session) {
               onAddProject={
                 getAddProjectAction()
               }
+              onImportSessions={props.onImportSessions}
               projects={projects}
               environments={environments}
+              sessions={sessions}
+              onConnectIssueProvider={() => openSettings("plugins")}
+              onOpenSession={selectSession}
               environmentStartup={pendingEnvironmentSession}
               defaultProjectId={selectedProjectId ?? projects.find((project) => project.path === defaultRepoPath)?.id}
               requestedProjectId={requestedNewSession?.projectId}
               requestedPr={requestedNewSession?.pr}
               requestedIssue={requestedNewSession?.issue}
+              requestedDraft={requestedNewSession?.draft}
+              requestedSource={requestedNewSession?.source}
+              requestedBaseBranch={requestedNewSession?.baseBranch}
+              requestedIsolation={requestedNewSession?.isolation}
               providerCatalog={providerConnections?.catalog}
               agentEndpointCatalog={agentEndpointCatalog}
               defaultConnectionId={providerConnections?.defaultConnectionId}
@@ -734,7 +871,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, obsidianExplanations, onSaveObsidianExplanations, obsidianVaultConfigured, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView } = defaultProps(props, {
+const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, subagentCounts, subagentAttentionCounts, subagentEntries, onOpenSubagent, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, notificationPermission, onOpenNotificationSystemSettings, offloadCompute, onSaveOffloadCompute, offloadStatus, onRetryOffload, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, planTemplate, onSavePlanTemplate, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, voice, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, useSessionTerminals, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, subagentPrNodes, onOpenSessionPr, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView, obsidianExplanations, onSaveObsidianExplanations, obsidianVaultConfigured } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -777,8 +914,26 @@ function getActiveTabContext(active: Session) {
         return true
   }
 
+  // "Go to next workspace that needs you" — the palette action's global
+  // binding. Provisional chord (#507): see `matchNeedsYouChord`'s doc.
+  function handleNeedsYouChord(e: KeyboardEvent) {
+      if (!matchNeedsYouChord(e)) return false
+      const next = nextNeedsYouSession(needsYouSessions, active?.id ?? null)
+      if (!next) return false
+      e.preventDefault()
+      selectSession(next)
+      return true
+  }
+
+  function handleSettingsChord(e: KeyboardEvent) {
+      if (!matchSettingsChord(e) || !providerConnections) return false
+      e.preventDefault()
+      openSettings()
+      return true
+  }
+
   const onKey = (e: KeyboardEvent) => {
-      if (handleFileQuickOpen(e)) return
+      if ([handleFileQuickOpen, handleNeedsYouChord, handleSettingsChord].some((handle) => handle(e))) return
       // The palette goes FIRST, and in this listener rather than one of its own.
       // Three window-level keydown handlers racing for the same event is how a
       // chord ends up meaning two things depending on mount order.
@@ -792,7 +947,7 @@ function getActiveTabContext(active: Session) {
       if (
         matchTerminalChord(e) &&
         active &&
-        renderTerminalDock
+        useSessionTerminals
       ) {
         e.preventDefault()
         setTabRequest((previous) => ({
@@ -869,12 +1024,21 @@ function getActiveTabContext(active: Session) {
     [setSelected]
   )
   const group = split.group
+  // Closing the last tab (⌃⇧W) leaves the session pane with nothing to draw. Drop
+  // the pane and its empty layout so the workspace returns to Home and the next
+  // sidebar click re-seeds the session's chat.
+  const activeLayout = useEditorLayout(selected ?? "")
+  useEffect(() => {
+    if (!selected || !group || activeLayout?.root !== null) return
+    forgetEditorLayout(selected)
+    split.closePane(group.id, group.focused)
+  }, [activeLayout, group, selected, split])
   const [addProjectOpen, setAddProjectOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<
-    "providers" | "github" | "agents" | "runtime"
+    "providers" | "github" | "agents" | "runtime" | "projects" | "plugins"
   >("providers")
   const openSettings = useCallback(
     (section: typeof settingsSection = settingsSection) => {
@@ -905,10 +1069,25 @@ function getActiveTabContext(active: Session) {
     nonce: number
   } | null>(null)
   const clearTabRequest = useCallback(() => setTabRequest(null), [])
+  // Row context menu "Open in terminal": select the session, then ask its pane for the Terminal tab.
+  const openSessionTerminal = useCallback(
+    (id: string) => {
+      selectSession(id)
+      setTabRequest((previous) => ({ tabId: BUILTIN_TAB.terminal, nonce: (previous?.nonce ?? 0) + 1 }))
+    },
+    [selectSession]
+  )
   const openNewSession = useCallback(() => {
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
+    setNewOpen(true)
+  }, [])
+  const startWithPrompt = useCallback(({ projectId, ...prefill }: HomeStart) => {
+    setPullRequestsOpen(false)
+    setSettingsOpen(false)
+    if (projectId) setSelectedProjectId(projectId)
+    setRequestedNewSession(projectId ? { projectId, ...prefill, nonce: Date.now() } : null)
     setNewOpen(true)
   }, [])
   const openNewSessionForProject = useCallback((projectId: string) => {
@@ -975,14 +1154,17 @@ function getActiveTabContext(active: Session) {
     onVisibleSessionsChange?.(split.visibleSessionIds)
   }, [split.visibleSessionIds, onVisibleSessionsChange])
 
-  const openUsage = useCallback(() => {
-    setUsageOpen(true)
+  const refreshUsage = useCallback(() => {
     const result = onLoadUsage?.()
     if (result && typeof (result as Promise<void>).then === "function") {
       setUsageLoading(true)
       void (result as Promise<void>).finally(() => setUsageLoading(false))
     }
   }, [onLoadUsage])
+  const openUsage = useCallback(() => {
+    setUsageOpen(true)
+    refreshUsage()
+  }, [refreshUsage])
 
   const ghConnected =
     githubConnection.connected &&
@@ -1072,8 +1254,10 @@ function getActiveTabContext(active: Session) {
     split,
     active,
     renderFileQuickOpen,
-    renderTerminalDock,
-    openNewSession
+    useSessionTerminals,
+    openNewSession,
+    openSettings,
+    providerConnections
   ])
 
   /**
@@ -1121,12 +1305,6 @@ function getActiveTabContext(active: Session) {
 
   }
 
-  function tabShortcutHint(tabId: TabKey) {
-    if (tabId === BUILTIN_TAB.browser) return "⌃⇧B"
-    if (tabId === BUILTIN_TAB.terminal) return "⌃`"
-    return undefined
-  }
-
   function appendTabActions(items: PaletteItem[]) {
 
 
@@ -1137,12 +1315,13 @@ function getActiveTabContext(active: Session) {
         ...(tabContributions ?? [])
       ])) {
         if (tab.id === BUILTIN_TAB.browser && !renderBrowser) continue
-        if (tab.id === BUILTIN_TAB.terminal && !renderTerminalDock) continue
+        if (tab.id === BUILTIN_TAB.terminal && !useSessionTerminals) continue
         items.push({
           id: `tab:${tab.id}`,
           kind: "tab",
           label: `Go to ${tab.label}`,
           group: PALETTE_GROUP.tabs,
+          scope: "chat",
           icon: tab.icon,
           hint: tabShortcutHint(tab.id),
           run: () =>
@@ -1153,6 +1332,33 @@ function getActiveTabContext(active: Session) {
         })
       }
 
+  }
+
+  // ⌘K "Open view…": the same views the header buttons open, through the same selectTabRequest path.
+  function appendViewActions(items: PaletteItem[]) {
+    if (!active) return
+    const views = visibleTabs(getActiveTabContext(active), [...TAB_SHAPES, ...(tabContributions ?? [])]).filter(
+      (tab) =>
+        tab.id !== BUILTIN_TAB.conversation &&
+        tab.id !== BUILTIN_TAB.files &&
+        !(tab.id === BUILTIN_TAB.browser && !renderBrowser) &&
+        !(tab.id === BUILTIN_TAB.terminal && !useSessionTerminals)
+    )
+    items.push(
+      ...viewPaletteItems(views, (viewId) =>
+        setTabRequest((prev) => ({ tabId: viewId, nonce: (prev?.nonce ?? 0) + 1 }))
+      )
+    )
+  }
+
+  function appendSubagentActions(items: PaletteItem[]) {
+    if (!active || !onOpenSubagent) return
+    items.push(
+      ...subagentPaletteItems(subagentEntries?.[active.id] ?? [], (nodeId) => {
+        setTabRequest((prev) => ({ tabId: BUILTIN_TAB.conversation, nonce: (prev?.nonce ?? 0) + 1 }))
+        onOpenSubagent(active.id, nodeId)
+      })
+    )
   }
 
   function appendPluginCommands(items: PaletteItem[]) {
@@ -1171,6 +1377,17 @@ function getActiveTabContext(active: Session) {
 
   }
 
+  // Open workspaces blocked on the operator (question or approval), in
+  // session-list order — the same order the "Needs you (N)" rows render in,
+  // and what `nextNeedsYouSession` cycles through.
+  const needsYouSessions = useMemo(
+    () =>
+      sessions.filter(
+        (s) => !s.archived && NEEDS_YOU_ACTIVITY_KINDS.has(liveActivity?.[s.id]?.kind ?? "")
+      ),
+    [sessions, liveActivity]
+  )
+
   const paletteItems = useMemo<ReadonlyArray<PaletteItem>>(() => {
     const items: PaletteItem[] = []
 
@@ -1179,9 +1396,20 @@ function getActiveTabContext(active: Session) {
       kind: "session",
       label: s.title || UNTITLED_SESSION,
       detail: `${s.repo} · ${s.branch}`,
+      status: displayStatusLabel[displayStatusOf(null, s.status)],
       group: s.archived ? PALETTE_GROUP.archived : PALETTE_GROUP.sessions,
       run: () => selectSession(s.id)
     })
+
+    // Pinned first: `groupPaletteItems` keeps first-seen order, and this is
+    // the one group a person opens the palette FOR.
+    items.push(
+      ...needsYouPaletteItems(
+        needsYouSessions.map((s) => ({ id: s.id, title: s.title || UNTITLED_SESSION })),
+        active?.id ?? null,
+        selectSession
+      )
+    )
 
     items.push(...sessions.filter((session) => !session.archived).map(sessionItem))
 
@@ -1248,6 +1476,8 @@ function getActiveTabContext(active: Session) {
      * would close, nothing would change, and there is no error to read.
      */
     appendTabActions(items)
+    appendViewActions(items)
+    appendSubagentActions(items)
 
     // Grouped by the manifest's `category`, falling back to the plugin's name —
     // a heading of "Commands" over two plugins' rows would hide which one is
@@ -1261,9 +1491,10 @@ function getActiveTabContext(active: Session) {
   }, [
     sessions,
     active,
+    needsYouSessions,
     selectSession,
     onCreateSession,
-    renderTerminalDock,
+    useSessionTerminals,
     renderBrowser,
     onArchiveSession,
     onRestoreSession,
@@ -1276,6 +1507,8 @@ function getActiveTabContext(active: Session) {
     tabContributions,
     pluginCommands,
     onRunPluginCommand,
+    subagentEntries,
+    onOpenSubagent,
     openNewSession
   ])
 
@@ -1292,7 +1525,8 @@ function getActiveTabContext(active: Session) {
         type: "START",
         id: "pending-environment-session",
         title: cloudCreationTitle(input),
-        repo: input.repoName,
+        // Auto (no repo chosen yet) never targets a remote environment in this PR.
+        repo: input.repoName ?? "",
         environmentId: environment.id,
         environmentName: environment.name,
         environmentKind: environment.kind
@@ -1353,7 +1587,7 @@ function getActiveTabContext(active: Session) {
   return (
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
-    <AppShell title="Jingler">
+    <AppShell title="Jingler" platform={props.platform} windowControls={props.windowControls} banner={props.banner}>
       {renderSessionWorkspace()}
       {renderAddProjectDialog()}
       {onLoadUsage && (

@@ -71,9 +71,9 @@ test("keeps a large repository and source file windowed while navigating the per
 
   await expect(appShell(window)).toBeVisible()
   await window.getByTitle("Open src/huge.ts").click()
-  await expect(window.getByRole("button", { name: "Files", exact: true })).toHaveAttribute(
-    "aria-current",
-    "page"
+  await expect(window.getByTestId("editor-tab-file-src/huge.ts").getByRole("tab")).toHaveAttribute(
+    "aria-selected",
+    "true"
   )
   await expect(window.getByText("export const value_0000 = 0", { exact: true })).toBeVisible({
     timeout: 30_000

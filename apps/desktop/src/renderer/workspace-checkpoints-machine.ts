@@ -7,12 +7,13 @@ export interface CheckpointApi {
   preview(id: string, checkpoint: string): Promise<WorkspaceCheckpointPreview>
   restore(id: string, checkpoint: string, token: string): Promise<WorkspaceCheckpoint>
 }
+const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 interface Input { session: Session; api: CheckpointApi; onSession(session: Session): void }
 export const workspaceCheckpointsMachine = setup({
   types: {
     context: {} as Input & { items: ReadonlyArray<WorkspaceCheckpoint>; preview: WorkspaceCheckpointPreview | null; selected: string; action: "list" | "capture" | "enable" | "disable" | "preview" | "restore"; error: string | null },
     input: {} as Input,
-    events: {} as { type: "OPEN" | "CANCEL" | "ENABLE" | "DISABLE" | "CAPTURE" | "CONFIRM" | "RETRY" } | { type: "PREVIEW"; id: string }
+    events: {} as { type: "OPEN"; id?: string } | { type: "CANCEL" | "ENABLE" | "DISABLE" | "CAPTURE" | "CONFIRM" | "RETRY" } | { type: "PREVIEW"; id: string }
   },
   actors: {
     operation: fromPromise(async ({ input }: { input: Input & { action: string; selected: string; preview: WorkspaceCheckpointPreview | null } }) => {
@@ -34,7 +35,8 @@ export const workspaceCheckpointsMachine = setup({
   initial: "closed",
   context: ({ input }) => ({ ...input, items: [], preview: null, selected: "", action: "list", error: null }),
   states: {
-    closed: { on: { OPEN: { target: "working", actions: assign({ action: "list" }) } } },
+    // OPEN with an id goes straight to that checkpoint's revert preview (the timeline rail's "Revert to here").
+    closed: { on: { OPEN: { target: "working", actions: assign({ action: ({ event }) => event.id ? "preview" : "list", selected: ({ event }) => event.id ?? "" }) } } },
     ready: { on: {
       ENABLE: "consent",
       DISABLE: { target: "working", actions: assign({ action: "disable" }) },
@@ -51,10 +53,15 @@ export const workspaceCheckpointsMachine = setup({
           { guard: ({ event }) => event.output.preview !== null, target: "confirming", actions: assign(({ event }) => event.output) },
           { target: "ready", actions: assign(({ event }) => event.output) }
         ],
-        onError: { target: "failed", actions: assign({ error: ({ event }) => event.error instanceof Error ? event.error.message : String(event.error) }) }
+        onError: [
+          { guard: ({ context }) => context.action === "restore", target: "restoreFailed", actions: assign({ error: ({ event }) => message(event.error) }) },
+          { target: "failed", actions: assign({ error: ({ event }) => message(event.error) }) }
+        ]
       }
     },
     confirming: { on: { CONFIRM: { target: "working", actions: assign({ action: "restore" }) }, CANCEL: { target: "ready", actions: assign({ preview: null }) } } },
+    // A failed restore keeps its preview, so the revert dialog stays on the same file list and RETRY re-runs restore with the same token.
+    restoreFailed: { on: { RETRY: "working", CANCEL: { target: "ready", actions: assign({ preview: null }) } } },
     failed: { on: { RETRY: "working", CANCEL: "ready" } }
   }
 })

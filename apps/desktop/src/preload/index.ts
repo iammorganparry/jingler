@@ -4,6 +4,7 @@
  * process's `RpcServer`. No business logic lives here — see `src/main/rpc.ts`.
  */
 import { contextBridge, ipcRenderer } from "electron"
+import type { NotificationKind } from "@jingler/core"
 import type { UpdateState } from "../shared/update.js"
 
 const RPC_CHANNEL = "jingler/rpc"
@@ -17,6 +18,7 @@ const APP_VERSION_CHANNEL = "jingler/app-version"
 const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 const PREVIEW_CLOSE_TAB_CHANNEL = "jingler/preview/close-tab"
+const PREVIEW_NAV_CHANNEL = "jingler/preview/nav"
 const PLAN_FLUSH_REQUEST_CHANNEL = "jingler/plan-flush-request"
 const PLAN_FLUSH_COMPLETE_CHANNEL = "jingler/plan-flush-complete"
 const UPDATE_STATE_CHANNEL = "jingler/update-state"
@@ -61,17 +63,43 @@ interface AuthCompletePayload {
   readonly error: string | null
 }
 
+/** What main sends on a notification click — see `main/notifications.ts`. */
+interface NotificationActivatedPayload {
+  readonly sessionId: string
+  readonly kind: NotificationKind
+  readonly turnId: string | null
+}
+
 interface PreviewEventPayload {
   readonly sessionId: string
   readonly chatId: string
   readonly url: string
 }
 
+interface PreviewNavPayload {
+  readonly sessionId: string
+  readonly chatId: string
+  readonly canGoBack: boolean
+  readonly canGoForward: boolean
+  readonly loading: boolean
+  readonly error: string | null
+}
+
+/** True when running under e2e; gates test-only renderer hooks. */
+
+/** The platform (darwin, win32, linux) for conditional UI (window controls). */
+const platform = process.platform
+const isE2E = process.env.JINGLER_E2E === "1"
+
 contextBridge.exposeInMainWorld("jingler", {
   /** The packaged application's runtime version from Electron. */
   appVersion,
   /** The active theme's `:root` block, for `main.tsx` to inject pre-paint. */
   initialThemeCss,
+  /** True when running under e2e; gates test-only renderer hooks. */
+  isE2E,
+  /** The platform (darwin, win32, linux) for conditional UI (window controls). */
+  platform,
   /** Ship one client→server RPC frame to main. */
   send: (data: unknown) => ipcRenderer.send(RPC_CHANNEL, data),
   /** Subscribe to server→client RPC frames; returns an unsubscribe fn. */
@@ -105,8 +133,8 @@ contextBridge.exposeInMainWorld("jingler", {
    * payload names the session the operator was told about, so the renderer can
    * select it. Returns an unsubscribe fn.
    */
-  onNotificationActivated: (cb: (payload: { readonly sessionId: string }) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, payload: { readonly sessionId: string }) =>
+  onNotificationActivated: (cb: (payload: NotificationActivatedPayload) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: NotificationActivatedPayload) =>
       cb(payload)
     ipcRenderer.on(NOTIFICATION_ACTIVATED_CHANNEL, listener)
     return () => ipcRenderer.removeListener(NOTIFICATION_ACTIVATED_CHANNEL, listener)
@@ -131,6 +159,11 @@ contextBridge.exposeInMainWorld("jingler", {
     ipcRenderer.on(PREVIEW_URL_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PREVIEW_URL_CHANNEL, listener)
   },
+  onPreviewNavState: (cb: (payload: PreviewNavPayload) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: PreviewNavPayload) => cb(payload)
+    ipcRenderer.on(PREVIEW_NAV_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(PREVIEW_NAV_CHANNEL, listener)
+  },
   onPreviewCloseTab: (cb: (payload: { readonly sessionId: string; readonly chatId: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { readonly sessionId: string; readonly chatId: string }) => cb(payload)
     ipcRenderer.on(PREVIEW_CLOSE_TAB_CHANNEL, listener)
@@ -151,3 +184,13 @@ contextBridge.exposeInMainWorld("jingler", {
   downloadUpdate: (): Promise<void> => ipcRenderer.invoke(UPDATE_DOWNLOAD_CHANNEL),
   installUpdate: (): Promise<void> => ipcRenderer.invoke(UPDATE_INSTALL_CHANNEL)
 })
+
+// Forward maximize/unmaximize events from main to renderer (Windows/Linux custom controls)
+if (process.platform !== "darwin") {
+  ipcRenderer.on("jingler:window-maximized", () => {
+    window.dispatchEvent(new CustomEvent("jingler:window-maximized"))
+  })
+  ipcRenderer.on("jingler:window-unmaximized", () => {
+    window.dispatchEvent(new CustomEvent("jingler:window-unmaximized"))
+  })
+}

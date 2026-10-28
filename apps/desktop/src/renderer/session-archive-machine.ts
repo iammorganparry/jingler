@@ -7,7 +7,7 @@ type Input = {
 }
 export const sessionArchiveMachine = setup({
   types: {
-    context: {} as Input & { session: Session | null; acknowledged: boolean; error: string | null },
+    context: {} as Input & { session: Session | null; acknowledged: boolean; retrying: boolean; error: string | null },
     input: {} as Input,
     events: {} as { type: "ARCHIVE"; session: Session } | { type: "CONFIRM" | "CANCEL" }
   },
@@ -17,20 +17,22 @@ export const sessionArchiveMachine = setup({
   }
 }).createMachine({
   id: "session-archive", initial: "idle",
-  context: ({ input }) => ({ ...input, session: null, acknowledged: false, error: null }),
+  context: ({ input }) => ({ ...input, session: null, acknowledged: false, retrying: false, error: null }),
   states: {
     idle: { on: { ARCHIVE: { target: "loading", actions: assign({ session: ({ event }) => event.session, acknowledged: false, error: null }) } } },
     loading: {
       invoke: { src: "load", input: ({ context }) => ({ id: context.session!.id, load: context.load }),
         onDone: [
-          { guard: ({ event }) => Boolean(event.output.checkpointPtyHistory), target: "confirming", actions: assign({ session: ({ event }) => event.output }) },
+          // Every first archive asks. Retry after a failure re-sends the confirmed request, unless the
+          // reload shows terminal history that now needs the explicit metadata-only consent.
+          { guard: ({ context, event }) => !context.retrying || Boolean(event.output.checkpointPtyHistory), target: "confirming", actions: assign({ session: ({ event }) => event.output }) },
           { target: "archiving", actions: assign({ session: ({ event }) => event.output }) }
         ],
         onError: { target: "failed", actions: assign({ error: ({ event }) => String(event.error) }) }
       },
       on: { CANCEL: "idle" }
     },
-    confirming: { on: { CONFIRM: { target: "archiving", actions: assign({ acknowledged: true }) }, CANCEL: "idle" } },
+    confirming: { on: { CONFIRM: { target: "archiving", actions: assign({ acknowledged: ({ context }) => Boolean(context.session?.checkpointPtyHistory) }) }, CANCEL: "idle" } },
     archiving: { invoke: { src: "archive", input: ({ context }) => ({ id: context.session!.id, acknowledged: context.acknowledged, archive: context.archive }), onDone: { target: "idle", actions: [({ context, event }) => context.onSession(event.output), assign({ session: null })] }, onError: { target: "recovering", actions: assign({ error: ({ event }) => String(event.error) }) } } },
     recovering: {
       invoke: { src: "load", input: ({ context }) => ({ id: context.session!.id, load: context.load }),
@@ -38,6 +40,6 @@ export const sessionArchiveMachine = setup({
         onError: { target: "failed" }
       }
     },
-    failed: { on: { CONFIRM: { target: "loading", actions: assign({ acknowledged: false, error: null }) }, CANCEL: "idle" } }
+    failed: { on: { CONFIRM: { target: "loading", actions: assign({ acknowledged: false, retrying: true, error: null }) }, CANCEL: "idle" } }
   }
 })

@@ -7,7 +7,8 @@ const API_KEY = "lin_api_e2e_linear_plugin"
 const LINKED_LINEAR_ISSUE = /Linked issue ENG-/
 const LINEAR_IDENTIFIER = /^ENG-/
 const LINEAR_SOURCE_NAME = /^Linear issue/
-const NEW_SESSION_SOURCES = ["New task", "Existing branch", "Pull request", "GitHub issue", "Linear issue"] as const
+const NEW_SESSION_TABS = ["Branch", "Pull request", "Issue"] as const
+const ISSUE_SOURCES = ["GitHub issue", "Linear issue"] as const
 
 test("shows every new-session source and starts from a Linear issue", async ({
   launchApp
@@ -23,9 +24,15 @@ test("shows every new-session source and starts from a Linear issue", async ({
     await launched.window.getByTestId("new-session").click()
     await addProject(launched.window, launched.repoPath)
 
-    await launched.window.getByRole("button", { name: "Session source" }).click()
+    // Sources live in the "Start from" chip: Branch / Pull request / Issue tabs, issue providers listed under Issue.
+    await launched.window.getByRole("button", { name: "Start from", exact: true }).click()
+    const sourceTabs = launched.window.getByRole("tablist", { name: "Start from source" })
     await Promise.all(
-      NEW_SESSION_SOURCES.map((label) =>
+      NEW_SESSION_TABS.map((label) => expect(sourceTabs.getByRole("tab", { name: label, exact: true })).toBeVisible())
+    )
+    await sourceTabs.getByRole("tab", { name: "Issue", exact: true }).click()
+    await Promise.all(
+      ISSUE_SOURCES.map((label) =>
         expect(launched.window.getByRole("option", { name: new RegExp(label) })).toBeVisible()
       )
     )
@@ -88,7 +95,7 @@ const openLinearIssueTab = async (window: Page): Promise<void> => {
   await expect(window.getByTestId("linear-issue-body")).toBeVisible({ timeout: 15_000 })
 }
 
-test("selects and removes one of several linked Linear issues from the right rail", async ({
+test("selects and removes one of several linked Linear issues from the header", async ({
   launchApp
 }) => {
   const linear = await startFakeLinearServer()
@@ -96,6 +103,7 @@ test("selects and removes one of several linked Linear issues from the right rai
     const launched = await launchApp({
       configured: true,
       withRepo: true,
+      config: { headerViews: ["linear.issue"] },
       sessions: ({ repoPath }) => [{
         id: "linear-multi",
         repo: "widget",
@@ -133,14 +141,15 @@ test("selects and removes one of several linked Linear issues from the right rai
     })
     await configureLinear(launched.window)
 
+    await openLinearIssueTab(launched.window)
     await launched.window.getByRole("button", { name: "Select linked Linear issue" }).click()
     await launched.window.getByRole("option", { name: /ENG-124 Document retry policy/ }).click()
-    await expect(launched.window.getByRole("heading", { name: "Document retry policy" })).toBeVisible({
+    await expect(launched.window.getByRole("heading", { name: /Document retry policy/ })).toBeVisible({
       timeout: 20_000
     })
 
     await launched.window.getByRole("button", { name: "Unlink", exact: true }).click()
-    await expect(launched.window.getByRole("heading", { name: "Retry failed payments" })).toBeVisible({
+    await expect(launched.window.getByRole("heading", { name: /Retry failed payments/ })).toBeVisible({
       timeout: 20_000
     })
 
@@ -168,6 +177,7 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
     const launched = await launchApp({
       configured: true,
       withRepo: true,
+      config: { headerViews: ["linear.issue"] },
       e2eEnv: { JINGLER_LINEAR_API_URL: linear.url }
     })
 
@@ -185,7 +195,11 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
     await expect(launched.window.getByText("Document retry policy", { exact: true })).toBeVisible()
     await launched.window.getByRole("button", { name: "Link ENG-124" }).click()
     await expect(linkRow.getByLabel("Linked issue ENG-124")).toBeVisible()
-    await expect(launched.window.getByRole("heading", { name: "Document retry policy" })).toBeVisible()
+    const linked = launched.window.getByRole("heading", { name: /Document retry policy/ })
+    await expect(linked).toBeVisible()
+    await expect(linked).toContainText("ENG-124")
+    await expect(launched.window.getByTestId("reading-shell")).toBeVisible()
+    await expect(launched.window.getByTestId("comment-composer")).toBeVisible()
 
     await launched.window.getByRole("button", { name: "Unlink", exact: true }).click()
     await expect(linkRow.getByLabel("Linked issue ENG-124")).toHaveCount(0)
@@ -199,7 +213,7 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
       .fill("Reconcile duplicate payment charges without losing the audit trail.")
     await launched.window.getByRole("button", { name: "Create and link" }).click()
 
-    await expect(launched.window.getByRole("heading", { name: "Reconcile duplicate charges" })).toBeVisible({
+    await expect(launched.window.getByRole("heading", { name: /Reconcile duplicate charges/ })).toBeVisible({
       timeout: 20_000
     })
     await expect(linkRow.getByLabel(LINKED_LINEAR_ISSUE)).toBeVisible()

@@ -61,7 +61,8 @@ describe("McpServer", () => {
       "target",
       "envKeys",
       "headerKeys",
-      "enabled"
+      "enabled",
+      "disabledTools"
     ])
     expect(fields).not.toContain("env")
     expect(fields).not.toContain("headers")

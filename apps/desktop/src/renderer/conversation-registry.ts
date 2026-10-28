@@ -52,14 +52,14 @@ import {
   projectSubagentFleetEvents
 } from "./subagent-fleet-machine.js"
 import { setSessionActivity } from "./session-activity.js"
-import { setPlanPresent } from "./plan-presence.js"
+import { setPlanDisconnected, setPlanPresent } from "./plan-presence.js"
 import { clearSessionDiff, setSessionDiff } from "./diff-presence.js"
 import { isSessionVisible } from "./active-session.js"
 import type { ActorCandidate } from "./actor-eviction.js"
 import { keysToEvict, MAX_LIVE_ACTORS } from "./actor-eviction.js"
 import { createCoalescer } from "./coalesce.js"
 import type { NotifiableState } from "./notifier.js"
-import { notificationFor } from "./notifier.js"
+import { blockedPromptOf, notificationFor } from "./notifier.js"
 import { rpc } from "./rpc-client.js"
 import {
   clearSubagentTabs,
@@ -116,6 +116,20 @@ const activityListeners = new Set<() => void>()
  * subscription closure, because the observation is now made in the flush.
  */
 const notifyBaselines = new Map<string, NotifiableState>()
+export interface BlockedEvent {
+  readonly sessionId: string
+  readonly title: string
+  readonly body: string
+}
+const blockedListeners = new Set<(event: BlockedEvent) => void>()
+/** Subscribe to runs entering a blocked state (question/approval). */
+export const onSessionBlocked = (listener: (event: BlockedEvent) => void): (() => void) => {
+  blockedListeners.add(listener)
+  return () => blockedListeners.delete(listener)
+}
+const emitBlocked = (event: BlockedEvent): void => {
+  for (const listener of blockedListeners) listener(event)
+}
 /**
  * File completions are interaction edges, not human-speed status furniture.
  * Keep the newest edge alongside the trailing snapshot so ToolEnd + Done inside
@@ -547,7 +561,11 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   // null → needs-input edge on observation #2, and announced "Waiting for your
   // input" for state that predates the operator opening the app — precisely the
   // stale-replay noise the rule exists to prevent.
-  const observed: NotifiableState = { activity, outcome: snap.context.lastOutcome }
+  const observed: NotifiableState = {
+    activity,
+    outcome: snap.context.lastOutcome,
+    prompt: activity?.kind === "needs-input" ? blockedPromptOf(snap.context.messages) : null
+  }
   const announce = snap.context.loaded
     ? notificationFor(session.title, notifyBaselines.get(key) ?? null, observed)
     : null
@@ -569,6 +587,7 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   // Fire-and-forget, and deliberately last: a notification that fails must never
   // take the status stores down with it. Main decides whether this actually
   // surfaces (window focus + the operator's prefs).
+  if (announce?.kind === "needs-input") emitBlocked({ sessionId: session.id, title: announce.title, body: announce.body })
   if (announce !== null) {
     void rpc
       .notifyShow({
@@ -754,6 +773,7 @@ export const disposeConversationActor = (sessionId: string): void => {
   for (const key of [...registry.keys()]) {
     if (!key.startsWith(`${sessionId}:`)) continue
     setPlanPresent(key.slice(sessionId.length + 1), false)
+    setPlanDisconnected(key.slice(sessionId.length + 1), false)
     forget(key)
   }
   delete chatActivities[sessionId]
@@ -765,8 +785,21 @@ export const disposeConversationActor = (sessionId: string): void => {
 export const disposeChatActor = (sessionId: string, chatId: string): void => {
   const key = registryKey(sessionId, chatId)
   setPlanPresent(chatId, false)
+  setPlanDisconnected(chatId, false)
   forget(key)
   clearAgentFileActivityChat(sessionId, chatId)
   publishChatActivity(sessionId, chatId, null)
   recomputeSession(sessionId)
+}
+
+/** Home › Allow for a session blocked on an approval gate: reuses the conversation machine's DECIDE_GATE; undefined when no gate is pending. */
+export const allowPendingGate = (sessionId: string): (() => void) | undefined => {
+  for (const [key, snap] of snapshots) {
+    if (!key.startsWith(`${sessionId}:`)) continue
+    const last = snap.context.messages.at(-1)
+    const gate = last?.role === "assistant" ? last.parts.find((p) => p._tag === "Gate" && p.gate.status === "pending") : undefined
+    const actor = registry.get(key)
+    if (gate?._tag === "Gate" && actor) return () => actor.send({ type: "DECIDE_GATE", gateId: gate.gate.id, decision: "allow" })
+  }
+  return undefined
 }

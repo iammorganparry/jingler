@@ -145,14 +145,21 @@ export const clearAgentFileActivitySession = (sessionId: string): void => {
   if (changed) notify()
 }
 
+/** The viewed agent's activity: the selected Fleet agent's wins over the main chat's. */
+export const currentAgentFileActivity = (
+  sessionId: string,
+  chatId: string
+): PublishedAgentFileActivity | null =>
+  getFleetAgentFileActivity(sessionId) ?? getAgentFileActivity(sessionId, chatId)
+
 export const useAgentFileActivity = (
   sessionId: string,
   chatId: string
 ): PublishedAgentFileActivity | null =>
   useSyncExternalStore(
     subscribeAgentFileActivity,
-    () => getFleetAgentFileActivity(sessionId) ?? getAgentFileActivity(sessionId, chatId),
-    () => getFleetAgentFileActivity(sessionId) ?? getAgentFileActivity(sessionId, chatId)
+    () => currentAgentFileActivity(sessionId, chatId),
+    () => currentAgentFileActivity(sessionId, chatId)
   )
 
 const WINDOWS_ABSOLUTE = /^[A-Za-z]:\//

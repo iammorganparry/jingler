@@ -71,7 +71,6 @@ const startPlanReview = async (launched: LaunchedApp, prompt = "[[plan]] replace
   const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
   await composer.click()
   await launched.window.keyboard.press("Shift+Tab")
-  await launched.window.keyboard.press("Shift+Tab")
   await expect(launched.window.locator("[data-mode='plan']")).toContainText("Plan")
   await composer.fill(prompt)
   await composer.press("Enter")
@@ -125,7 +124,6 @@ test("projects explicit deliverable stages without treating overview headings as
   await approveReview(launched)
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
 
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   const transcriptCard = launched.window.getByTestId("plannotator-transcript-card")
   await expect(transcriptCard).toBeVisible()
   await expect(transcriptCard.locator('[data-testid^="plan-approval-stage-"]')).toHaveCount(2)
@@ -137,7 +135,7 @@ test("projects explicit deliverable stages without treating overview headings as
   await expect(completion).toBeVisible({ timeout: 30_000 })
   // The composer is back in Auto. Asserted on its mode attribute: split beside
   // the plan, the chat pane is narrow and the mode chip drops its word label.
-  await expect(launched.window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "auto")
+  await expect(launched.window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "accept-edits")
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
 
   const planRow = transcriptCard.locator("xpath=ancestor::*[@data-index][1]")
@@ -195,8 +193,16 @@ test("selection comments reach the agent and the revision diff shows what change
   await review(launched).getByRole("button", { name: "Add comment" }).click()
   await review(launched).getByRole("textbox", { name: "Comment" }).fill("Keep the existing token format.")
   await review(launched).getByRole("button", { name: "Save comment" }).click()
-  await expect(review(launched).getByRole("complementary", { name: "Plan comments" }))
-    .toContainText("Keep the existing token format.")
+  // The thread is a floating avatar: hover shows the card, Esc closes it, click pins it.
+  const avatar = review(launched).getByRole("button", { name: "Comment by You" })
+  await avatar.hover()
+  const thread = review(launched).getByRole("complementary", { name: "Plan comments" })
+  await expect(thread).toContainText("Keep the existing token format.")
+  await expect(thread.locator("[data-comment-thread]")).toHaveCSS("width", "320px")
+  await launched.window.keyboard.press("Escape")
+  await expect(thread).not.toContainText("Keep the existing token format.")
+  await avatar.click()
+  await expect(thread).toContainText("Keep the existing token format.")
   await review(launched).getByRole("button", { name: "Request changes" }).click()
 
   // The fixture agent echoes every quoted anchor it received into the rewrite.
@@ -213,9 +219,29 @@ test("selection comments reach the agent and the revision diff shows what change
   await expect(changes).toHaveCount(0)
 
   await approveReview(launched)
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("button", { name: /\[\[plan\]\] replace auth$/ }).first().click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
+})
+
+test("approving with an unsaved comment asks before discarding it", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+
+  const intent = review(launched)
+    .getByRole("region", { name: "Implement auth", exact: true })
+    .getByText("Auth tokens use the new format through the existing entry point.", { exact: true })
+  await intent.click({ clickCount: 3 })
+  await review(launched).getByRole("button", { name: "Add comment" }).click()
+  await review(launched).getByRole("textbox", { name: "Comment" }).fill("Unsaved thought.")
+  await review(launched).getByRole("button", { name: "Approve", exact: true }).click()
+
+  const dialog = launched.window.getByRole("dialog", { name: "Discard 1 unsaved comment?" })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole("button", { name: "Keep editing" }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(review(launched).getByRole("textbox", { name: "Comment" })).toHaveValue("Unsaved thought.")
 })
 
 test("plan review reads as a document: real heading scale, inline detail, file rows open Files", async ({ launchApp }) => {
@@ -239,7 +265,8 @@ test("plan review reads as a document: real heading scale, inline detail, file r
   // Untracked paths stay plain text; tracked ones open in Files.
   await expect(files.getByRole("button", { name: "Open src/auth.test.ts" })).toHaveCount(0)
   await files.getByRole("button", { name: "Open README.md" }).click()
-  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+  // File opens in editor (files tab removed in redesign 3.6)
+  await expect(launched.window.getByTestId("editor-tab-file-README.md")).toBeVisible()
 })
 
 test("diff and diagram file links open Files; diagrams pan, zoom and go fullscreen", async ({ launchApp }) => {
@@ -252,7 +279,8 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   // src/auth.ts is not tracked in the fixture repo, so it must not render as a link.
   await expect(review(launched).getByRole("button", { name: "Open src/auth.ts" })).toHaveCount(0)
   await review(launched).locator('[data-plan-change="README.md"]').getByRole("button", { name: "Open README.md" }).click()
-  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+  // File opens in editor (files tab removed in redesign 3.6)
+  await expect(launched.window.getByTestId("editor-tab-file-README.md")).toBeVisible()
 
   await openPlanTab(launched)
   const stage = review(launched).getByRole("region", { name: "Implement auth", exact: true })
@@ -287,7 +315,8 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   await expect(dialog).toBeVisible()
   await dialog.getByRole("link", { name: "Open file README.md" }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+  // File opens in editor (files tab removed in redesign 3.6)
+  await expect(launched.window.getByTestId("editor-tab-file-README.md")).toBeVisible()
 })
 
 test("submission rejects a plan with an unsafe diff path and no test strategy", async ({ launchApp }) => {
@@ -307,6 +336,17 @@ test("submission rejects a plan with an unsafe diff path and no test strategy", 
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
 })
 
+test("submission rejects a flat checklist plan with the staged-shape error", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched, "[[plan]] [[flat-plan]] replace auth")
+
+  await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
+  expect(planFile(launched)).toContain("Plan has no staged deliverables")
+
+  await openPlanTab(launched)
+  await approveReview(launched)
+})
+
 test("a new review in the same chat is presented and can be approved", async ({
   launchApp
 }) => {
@@ -322,7 +362,6 @@ test("a new review in the same chat is presented and can be approved", async ({
   await planTab.click()
   await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
   await approveReview(launched)
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 
@@ -338,7 +377,6 @@ test("a new review in the same chat is presented and can be approved", async ({
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true }))
     .toBeVisible({ timeout: 20_000 })
   await approveReview(launched)
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect.poll(() =>
     launched.window.getByText("Implemented and verified the approved plan.").count(),
   { timeout: 30_000 }).toBeGreaterThan(1)
@@ -369,7 +407,6 @@ test("closing the Plan tab keeps a pending review approvable", async ({
   await launched.window.getByTestId("new-tab-option-plan").click()
   await expect(review(launched)).toBeVisible()
   await approveReview(launched)
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
@@ -391,7 +428,6 @@ test("missing PLAN.md during execution fails closed without rejecting progress",
   await expect(review(launched)).toBeVisible()
   await approveReview(launched)
 
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByRole("tab", { name: "Plan 1/2" })).toBeVisible({
     timeout: 20_000
   })
@@ -438,7 +474,6 @@ test("revises one stage approach through native review feedback", async ({
     .toContain("The implementation preserves compatibility")
   await approveReview(launched)
 
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
@@ -456,7 +491,6 @@ test("main-chat feedback revises a pending Plannotator review", async ({ launchA
 
   await openPlanTab(launched)
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeVisible()
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   const composer = launched.window.getByPlaceholder("Queue a message while the agent works…")
   await composer.fill("Keep the existing token format")
   await composer.press("Enter")
@@ -464,6 +498,33 @@ test("main-chat feedback revises a pending Plannotator review", async ({ launchA
   await expect.poll(() =>
     readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"), { timeout: 30_000 }
   ).toContain("keeping the existing token format")
+})
+
+test("a plan revised while open shows the stale banner and Reload fetches the new version", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeEnabled()
+
+  // Feedback from the main chat replaces the review the reviewer has open.
+  const composer = launched.window.getByPlaceholder("Queue a message while the agent works…")
+  await composer.fill("Keep the existing token format")
+  await composer.press("Enter")
+  await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("keeping the existing token format")
+
+  await openPlanTab(launched)
+  await expect(review(launched).getByText("Plan changed since you opened it")).toBeVisible({ timeout: 30_000 })
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeDisabled()
+  await review(launched).getByRole("button", { name: "Reload" }).click()
+  await expect(review(launched).getByText("Plan changed since you opened it")).toHaveCount(0)
+  await expect(review(launched).getByText("keeping the existing token format").first()).toBeVisible()
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeEnabled()
 })
 
 test("a pending Plannotator review reopens natively after an Electron restart", async ({
@@ -496,10 +557,13 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   const planTab = planEditorTab(reopened)
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
+  // The interrupted review is offered back, not resumed behind the operator's back.
+  await expect(reopened.window.getByText("Plan reviewer disconnected")).toBeVisible({ timeout: 20_000 })
+  await reopened.window.getByRole("button", { name: "Reopen", exact: true }).click()
+  await expect(reopened.window.getByText("Plan reviewer disconnected")).toHaveCount(0)
   await expect(review(reopened)).toBeVisible({ timeout: 30_000 })
   await expect.poll(() => reviewText(reopened)).toContain("Implement the auth change")
 
-  await reopened.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(reopened.window.getByText("0/2")).toBeVisible({ timeout: 20_000 })
   const transcriptCard = reopened.window.getByTestId("plannotator-transcript-card")
   await expect(transcriptCard).toContainText("Implement the auth change")
@@ -511,7 +575,6 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   // The resumed review must still be decidable over the native channel.
   await planTab.click()
   await approveReview(reopened)
-  await reopened.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(reopened.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
@@ -570,6 +633,8 @@ for (const recoveryCase of [
       githubRelay: first.githubRelay
     })
     await expect(appShell(reopened.window)).toBeVisible()
+    await planEditorTab(reopened).click({ timeout: 20_000 })
+    await reopened.window.getByRole("button", { name: "Reopen", exact: true }).click()
     await expect(reopened.window.getByText(recoveryCase.message)).toBeVisible({ timeout: 20_000 })
     await expect(reopened.window.getByText("Implemented and verified the approved plan."))
       .toHaveCount(0)
@@ -578,3 +643,140 @@ for (const recoveryCase of [
     await expect(review(reopened)).toHaveCount(0)
   })
 }
+
+test("plan settings persist auto-run and the plan template", async ({ launchApp }) => {
+  const { window } = await launchPlanMode(launchApp)
+  const openPlanSettings = async () => {
+    await window.getByRole("button", { name: "Account menu" }).click()
+    await window.getByRole("menuitem", { name: "Settings" }).click()
+    await window.getByRole("button", { name: /^Plan/ }).click()
+  }
+  await openPlanSettings()
+
+  // Auto-run + template live on cataloged SettingsRows.
+  await expect(window.getByTestId("settings-row")).toHaveCount(2)
+  const autoRun = window.getByRole("switch", { name: "Plan auto-run" })
+  await expect(autoRun).toBeChecked()
+  await autoRun.click()
+  await expect(autoRun).not.toBeChecked()
+
+  await window.getByRole("textbox", { name: "Plan template" }).fill("")
+  await window.getByRole("button", { name: "Save template" }).click()
+  await expect(window.getByRole("button", { name: "Saved" })).toBeVisible()
+
+  // Both survive closing and reopening Settings (read back from persisted config).
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await openPlanSettings()
+  await expect(window.getByRole("switch", { name: "Plan auto-run" })).not.toBeChecked()
+})
+
+test("plan mode blocks a write outside the plan file but lets the plan file through", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  const agentsPath = join(launched.repoPath, "AGENTS.md")
+  const before = existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null
+  await startPlanReview(launched, "[[plan]] [[escape]] replace auth")
+
+  // The scripted agent retries after the blocked write and the plan file lands.
+  await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("## Test strategy")
+  expect(existsSync(agentsPath) ? readFileSync(agentsPath, "utf8") : null).toBe(before)
+})
+
+test("toggle switches plan and build", async ({ launchApp }) => {
+  // Plan (toggled in): the scripted agent's write outside the plan file is blocked.
+  const planned = await launchPlanMode(launchApp)
+  const plannedAgents = join(planned.repoPath, "AGENTS.md")
+  await startPlanReview(planned, "[[plan]] [[escape]] replace auth")
+  await expect.poll(() => planFile(planned), { timeout: 30_000 }).toContain("## Test strategy")
+  expect(existsSync(plannedAgents)).toBe(false)
+  await planned.app.close()
+
+  // Plan then Build (toggled back): the same write goes through.
+  const built = await launchPlanMode(launchApp)
+  const skipImport = built.window.getByRole("button", { name: "Skip import" })
+  if (await skipImport.isVisible()) await skipImport.click()
+  const composer = built.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.click()
+  await built.window.keyboard.press("Shift+Tab")
+  await expect(built.window.locator("[data-mode='plan']")).toBeVisible()
+  await built.window.getByRole("tab", { name: "Build" }).click()
+  await expect(built.window.locator("[data-mode='accept-edits']")).toBeVisible()
+  await composer.fill("[[escape]] write directly")
+  await composer.press("Enter")
+  await expect.poll(() => existsSync(join(built.repoPath, "AGENTS.md")), { timeout: 30_000 }).toBe(true)
+})
+
+const savedChat = (launched: LaunchedApp) => {
+  const all = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")) as ReadonlyArray<{
+    readonly id: string
+    readonly chats: ReadonlyArray<{ readonly workMode?: string; readonly mode?: string }>
+  }>
+  return all.find((session) => session.id === "s_plannotator")?.chats[0]
+}
+
+test("approving a plan switches the chat to build and keeps its approval level", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await (await ensurePlanTab(launched)).click()
+  await expect(review(launched)).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => savedChat(launched)?.workMode).toBe("plan")
+  await approveReview(launched)
+  await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("build")
+  expect(savedChat(launched)?.mode).toBe("accept-edits") // the Plan/Build toggle leaves the approval level alone
+})
+
+test("a plan chat comes back in plan after an app restart", async ({ launchApp }) => {
+  const first = await launchPlanMode(launchApp)
+  await startPlanReview(first)
+  await (await ensurePlanTab(first)).click()
+  await expect(review(first)).toBeVisible({ timeout: 30_000 })
+  await first.app.close()
+
+  const reopened = await launchApp({
+    configured: true,
+    withRepo: true,
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    authServer: first.authServer,
+    githubServer: first.githubServer,
+    githubRelay: first.githubRelay
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  await expect(reopened.window.locator("[data-mode='plan']")).toBeVisible({ timeout: 20_000 })
+  expect(savedChat(reopened)?.mode).toBe("accept-edits") // the Plan/Build toggle leaves the approval level alone
+})
+
+test("agent enters plan via tool", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  const { window } = launched
+  const skipImport = window.getByRole("button", { name: "Skip import" })
+  if (await skipImport.isVisible()) await skipImport.click()
+  await window.getByRole("tab", { name: "Auto" }).click()
+  const composer = window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.click()
+  await composer.fill("[[switch-plan]] refactor auth")
+  await composer.press("Enter")
+  await expect(window.getByText("Switched to Plan, large refactor")).toBeVisible({ timeout: 30_000 })
+  await expect(window.locator("[data-mode='plan']")).toBeVisible()
+  await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("plan")
+  expect(existsSync(join(launched.repoPath, "AGENTS.md"))).toBe(false)
+})
+
+test("agent cannot leave plan without an approved plan", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  const { window } = launched
+  const skipImport = window.getByRole("button", { name: "Skip import" })
+  if (await skipImport.isVisible()) await skipImport.click()
+  await window.getByRole("tab", { name: "Auto" }).click()
+  const composer = window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.click()
+  await composer.fill("[[switch-build]] start coding")
+  await composer.press("Enter")
+  const buildCard = window.getByRole("button", { name: "Work mode Switched to Build, start coding" })
+  await expect(buildCard).toBeVisible({ timeout: 30_000 })
+  // The refusal sits in the collapsed card body.
+  await buildCard.click()
+  await expect(window.getByText("Cannot switch to build", { exact: false })).toBeVisible()
+  await expect(window.locator("[data-mode='plan']")).toBeVisible()
+  await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("plan")
+})

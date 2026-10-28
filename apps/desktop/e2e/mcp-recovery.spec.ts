@@ -46,11 +46,122 @@ test("an MCP reconnect card is labelled as MCP and can be dismissed", async ({ l
   await expect(card.getByText("Reconnect runpod")).toBeVisible()
   await expect(card.getByRole("button", { name: "Authorize" })).toBeVisible()
 
-  await card.getByRole("button", { name: "Dismiss: Reconnect runpod" }).click()
+  await card.getByRole("button", { name: "Dismiss", exact: true }).click()
   await expect(card).toHaveCount(0)
 
   // Stays dismissed when the conversation pane remounts for another session.
   await openSessionByTitle(window, "Second session")
   await openSessionByTitle(window, "First session")
   await expect(window.getByRole("region", { name: "MCP server recovery" })).toHaveCount(0)
+})
+
+test("a dismissed MCP reconnect card stays hidden after the window reloads", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [session("s_mcp_1", "First session")],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.example/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await openSessionByTitle(window, "First session")
+  const card = window.getByRole("region", { name: "MCP server recovery" })
+  await expect(card).toBeVisible()
+  await card.getByRole("button", { name: "Dismiss", exact: true }).click()
+  await expect(card).toHaveCount(0)
+
+  await window.reload()
+  await openSessionByTitle(window, "First session")
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
+  await expect(window.getByRole("region", { name: "MCP server recovery" })).toHaveCount(0)
+})
+
+test("a server's detail dialog shows the log tail and tool count, and refreshes on reopen", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [session("s_mcp_detail", "Detail session")],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.example/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: "MCP servers", exact: true }).click()
+  await window.getByRole("button", { name: "Test connections" }).click()
+
+  await window.getByRole("button", { name: "Details" }).click()
+  const dialog = window.getByRole("dialog")
+  await expect(dialog.getByRole("log", { name: "Server log" })).toBeVisible()
+
+  await expect(dialog.getByText(/tools? available|Run Test connections/)).toBeVisible()
+
+  await window.keyboard.press("Escape")
+  await expect(window.getByRole("dialog")).toHaveCount(0)
+  await window.getByRole("button", { name: "Details" }).click()
+  await expect(window.getByRole("dialog").getByRole("log", { name: "Server log" })).toBeVisible()
+})
+
+test("MCP sign-in waits for the browser and Cancel returns to Needs sign-in", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [session("s_mcp_signin", "Sign-in session")],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.invalid/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await openSessionByTitle(window, "Sign-in session")
+  const card = window.getByRole("region", { name: "MCP server recovery" })
+  await expect(card.getByText(/^Needs sign-in\./)).toBeVisible()
+  await card.getByRole("button", { name: "Authorize", exact: true }).click()
+  await expect(card.getByText(/^Waiting for browser/)).toBeVisible()
+  await card.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(card.getByText(/^Needs sign-in\./)).toBeVisible()
+  await expect(card.getByRole("button", { name: "Authorize", exact: true })).toBeVisible()
+})
+
+test("an MCP tool failing with needs-auth shows a sign-in action", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: { scenarioId: "mcp-needs-auth", authRoute: "api-key" },
+    sessions: ({ repoPath }) => [{ ...session("s_mcp_tool", "Tool sign-in session"), worktreePath: repoPath, mode: "auto" }],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.invalid/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await openSessionByTitle(window, "Tool sign-in session")
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("List my pods")
+  await composer.press("Enter")
+  await expect(window.getByRole("button", { name: "Sign in to runpod", exact: true })).toBeVisible({ timeout: 20_000 })
 })

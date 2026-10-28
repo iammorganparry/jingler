@@ -4,6 +4,7 @@ import { AnimatePresence, m } from "motion/react"
 import { Brain, ChevronRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { SPRING } from "../lib/motion.js"
+import { Button } from "../components/button.js"
 
 const secondsLabel = (seconds: number): string =>
   seconds === 1 ? "Thought for 1 second" : `Thought for ${seconds} seconds`
@@ -44,12 +45,13 @@ export function ThoughtBlock({
       {/* A plain left-aligned molecule — no pill, no rules. The reasoning
           record reads as a quiet line in the transcript's flow, not as a
           boundary marker. */}
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
         disabled={!collapsible}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="group flex items-center gap-1.5 text-left"
+        className="group h-auto gap-1.5 px-0 py-0 text-left font-normal hover:bg-transparent"
       >
         <Spin animation="pulse-dot" active={streaming} className="flex-none">
           <Brain className="size-3.5 text-dim" />
@@ -65,12 +67,12 @@ export function ThoughtBlock({
             )}
           />
         )}
-      </button>
+      </Button>
 
       <AnimatePresence initial={false}>
         {collapsible && open && (
-          // Deliberately frameless: the reasoning reads as marginalia — small,
-          // dim, italic — not as a card competing with the answer.
+          // Deliberately frameless: the reasoning reads as marginalia behind a
+          // hairline rule — not as a card competing with the answer.
           <m.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
@@ -78,7 +80,7 @@ export function ThoughtBlock({
             transition={SPRING}
             className="overflow-hidden"
           >
-            <div className="mt-1.5 pl-5 italic text-[calc(11px*var(--sb-font-scale,1))] leading-[1.6] text-dim">
+            <div className="mt-1.5 ml-[7px] border-l border-line pl-3 text-[calc(11.5px*var(--sb-font-scale,1))] leading-[1.6] text-muted-foreground">
               {children}
             </div>
           </m.div>

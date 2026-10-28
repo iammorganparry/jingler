@@ -4,6 +4,10 @@ import {
   applyEditorCommand,
   activeSurface,
   allTabs,
+  chatLaneRatio,
+  CHAT_LANE_COLLAPSE_PX,
+  CHAT_LANE_MAX_PX,
+  CHAT_LANE_MIN_PX,
   closeSurfaceEverywhere,
   closeTab,
   createEditorLayout,
@@ -16,8 +20,10 @@ import {
   loadEditorLayout,
   openTab,
   pruneEditorLayout,
+  resizeChatLane,
   resizedPair,
   resizeSplit,
+  replaceLegacyTerminalView,
   saveEditorLayout
 } from "./editor-layout.js"
 import { SESSION_SURFACE_STORAGE_PREFIX, sessionSurfaceKey, type SessionSurface } from "./session-surface-layout.js"
@@ -204,16 +210,162 @@ describe("editor layout persistence", () => {
     expect(shape(loadEditorLayout("s", file("a.ts"), "main"))).toEqual([["file:a.ts"]])
   })
 
+  it("reseeds the chat when the persisted layout has every tab closed (Q16)", () => {
+    saveEditorLayout("s", closeSurfaceEverywhere(createEditorLayout([chat("main")], "main"), chat("main")))
+    expect(shape(loadEditorLayout("s", chat("main"), "main"))).toEqual([["chat:main"]])
+  })
+
   it("falls back safely for invalid storage", () => {
     localStorage.setItem(`${EDITOR_LAYOUT_STORAGE_PREFIX}bad`, "{not json")
     expect(shape(loadEditorLayout("bad", chat("main"), "main"))).toEqual([["chat:main"]])
   })
 })
 
+  it("filters out deprecated files view tabs on restore", () => {
+    const layout = createEditorLayout([
+      chat("main"),
+      file("a.ts"),
+      view("files"),
+      view("terminal")
+    ], "main")
+    saveEditorLayout("s", layout)
+    const loaded = loadEditorLayout("s", chat("main"), "main")
+    expect(shape(loaded)).toEqual([["chat:main"], ["file:a.ts", "view:terminal"]])
+    const viewIds = allTabs(loaded).filter(t => t.kind === "view").map(t => t.id)
+    expect(viewIds).not.toContain("files")
+  })
+
+describe("chat lane pixel sizing", () => {
+  it("clamps initial ratio to 360-560px", () => {
+    expect(chatLaneRatio(900)).toBeCloseTo(360 / 900) // 360px at 900px window
+    expect(chatLaneRatio(1200)).toBeCloseTo(400 / 1200) // 400px at 1200px
+    expect(chatLaneRatio(2000)).toBeCloseTo(560 / 2000) // clamped to 560px
+    expect(chatLaneRatio(0)).toBe(1 / 3) // fallback when unknown
+  })
+
+  it("snaps to 1/3 and 1/2 within 16px tolerance", () => {
+    const width = 1200
+    const oneThird = 1 / 3
+    const delta = 10 / width // move 10px right (within snap tolerance from 400px = 1/3 of 1200)
+    const result = resizeChatLane(oneThird, delta, width)
+    expect(result).toBeCloseTo(oneThird) // snaps back to 1/3
+    
+    const bigDelta = 200 / width // move 200px right (far from 1/3, near 1/2)
+    const result2 = resizeChatLane(oneThird, bigDelta, width)
+    expect(result2).toBeCloseTo(1 / 2) // snaps to 1/2
+  })
+
+  it("clamps between 360-560px when not near snap points", () => {
+    const width = 1200
+    const delta = 50 / width // move 50px from 1/3 (outside snap tolerance)
+    const result = resizeChatLane(1 / 3, delta, width)!
+    const resultPx = result * width
+    expect(resultPx).toBeGreaterThanOrEqual(CHAT_LANE_MIN_PX)
+    expect(resultPx).toBeLessThanOrEqual(CHAT_LANE_MAX_PX)
+    expect(resultPx).toBeCloseTo(450) // 400 + 50
+  })
+
+  it("returns null when dragged below collapse threshold", () => {
+    const width = 1200
+    const currentRatio = 1 / 3
+    const collapseDelta = (CHAT_LANE_COLLAPSE_PX - currentRatio * width - 10) / width
+    expect(resizeChatLane(currentRatio, collapseDelta, width)).toBeNull()
+  })
+
+  it("applies pixel logic to chat/content splits in resizeSplit", () => {
+    const layout = createEditorLayout([chat("main"), file("a.ts")])
+    const splitId = (layout.root as EditorSplit).id
+    const containerWidth = 1200
+    
+    // Resize by 50px (outside snap tolerance)
+    const resized = resizeSplit(layout, splitId, 0, 50 / containerWidth, containerWidth)
+    const newRatio = (resized.root as EditorSplit).ratios[0]!
+    expect(newRatio * containerWidth).toBeCloseTo(450) // 400 + 50
+    
+    // Resize to snap point (within tolerance of 1/2)
+    const snapDelta = (600 - 400 - 10) / containerWidth // 10px shy of 1/2
+    const snapped = resizeSplit(layout, splitId, 0, snapDelta, containerWidth)
+    expect((snapped.root as EditorSplit).ratios[0]).toBeCloseTo(1 / 2)
+  })
+
+  it("does not apply pixel logic to non-chat/content splits", () => {
+    // Two file groups side by side - generic split logic
+    let layout = createEditorLayout([file("a.ts"), file("b.ts")])
+    const content = groupsOf(layout.root)[0]!
+    layout = dropTab(layout, { surface: file("b.ts"), from: content.id }, content.id, "right")
+    const splitId = (layout.root as EditorSplit).id
+    
+    const resized = resizeSplit(layout, splitId, 0, 0.1, 1200)
+    expect((resized.root as EditorSplit).ratios[0]).toBeCloseTo(0.6) // generic pair resize
+  })
+})
+
+
 describe("editor layout helpers", () => {
   it("keeps starved divider pairs non-negative", () => {
     const pair = resizedPair(0.02, 0.03, 1)!
     expect(pair[0]).toBeCloseTo(0.025)
     expect(pair[1]).toBeCloseTo(0.025)
+  })
+})
+
+describe("max groups cap", () => {
+  it("openTab at the cap adds a tab instead of a 4th group", () => {
+    let layout = createEditorLayout([chat("main"), file("a.ts")])
+    layout = dropTab(layout, { surface: file("b.ts") }, groupsOf(layout.root)[1]!.id, "right")
+    layout = dropTab(layout, { surface: file("c.ts") }, groupsOf(layout.root)[2]!.id, "right")
+    expect(shape(layout)).toEqual([["chat:main"], ["file:a.ts"], ["file:b.ts"], ["file:c.ts"]])
+    
+    // At the cap openTab joins an existing content group instead of splitting.
+    const opened = openTab(layout, file("d.ts"))
+    expect(groupsOf(opened.root).filter((g) => g.tabs.some((t) => t.kind !== "chat"))).toHaveLength(3)
+    expect(shape(opened).flat()).toContain("file:d.ts")
+  })
+
+  it("refuses to create a 4th content group via edge drop", () => {
+    let layout = createEditorLayout([chat("main"), file("a.ts"), file("b.ts"), file("c.ts")])
+    layout = dropTab(layout, { surface: file("b.ts"), from: groupsOf(layout.root)[1]!.id }, groupsOf(layout.root)[1]!.id, "right")
+    layout = dropTab(layout, { surface: file("c.ts"), from: groupsOf(layout.root)[1]!.id }, groupsOf(layout.root)[2]!.id, "right")
+    expect(groupsOf(layout.root).filter(g => g.tabs.some(t => t.kind !== "chat"))).toHaveLength(3)
+    
+    const contentGroup = groupsOf(layout.root)[3]!
+    const refused = dropTab(layout, { surface: file("d.ts") }, contentGroup.id, "right")
+    expect(groupsOf(refused.root).filter(g => g.tabs.some(t => t.kind !== "chat"))).toHaveLength(3)
+  })
+
+  it("allows center drops even at cap", () => {
+    let layout = createEditorLayout([chat("main"), file("a.ts"), file("b.ts"), file("c.ts")])
+    layout = dropTab(layout, { surface: file("b.ts"), from: groupsOf(layout.root)[1]!.id }, groupsOf(layout.root)[1]!.id, "right")
+    layout = dropTab(layout, { surface: file("c.ts"), from: groupsOf(layout.root)[1]!.id }, groupsOf(layout.root)[2]!.id, "right")
+    
+    const target = groupsOf(layout.root)[1]!
+    const dropped = dropTab(layout, { surface: file("d.ts") }, target.id, "center")
+    expect(shape(dropped)[1]).toContain("file:d.ts")
+  })
+})
+
+describe("terminal surfaces", () => {
+  const chat: SessionSurface = { kind: "chat", id: "c" }
+  const shell = (id: string): SessionSurface => ({ kind: "terminal", id })
+
+  it("opens, focuses and closes a shell tab", () => {
+    let layout = openTab(createEditorLayout([chat]), shell("t1"))
+    layout = openTab(layout, shell("t2"))
+    expect(allTabs(layout).map(sessionSurfaceKey)).toContain(sessionSurfaceKey(shell("t2")))
+    layout = closeSurfaceEverywhere(layout, shell("t1"))
+    expect(allTabs(layout).filter((tab) => tab.kind === "terminal")).toEqual([shell("t2")])
+  })
+
+  it("migrates a persisted Terminal view tab into the live shells", () => {
+    const legacy = openTab(createEditorLayout([chat]), { kind: "view", id: "terminal" })
+    const migrated = replaceLegacyTerminalView(legacy, [shell("t1"), shell("t2")])
+    expect(allTabs(migrated).filter((tab) => tab.kind === "view")).toEqual([])
+    expect(allTabs(migrated).filter((tab) => tab.kind === "terminal")).toEqual([shell("t1"), shell("t2")])
+    expect(replaceLegacyTerminalView(migrated, [shell("t3")])).toBe(migrated)
+  })
+
+  it("round-trips a shell tab through storage", () => {
+    saveEditorLayout("s", openTab(createEditorLayout([chat]), shell("t1")))
+    expect(allTabs(loadEditorLayout("s", chat)).some((tab) => tab.kind === "terminal")).toBe(true)
   })
 })

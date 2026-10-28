@@ -47,7 +47,11 @@ const E2ePiFixture = Schema.Struct({
   staleCertification: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   modelCount: Schema.optionalWith(Schema.Int.pipe(Schema.between(1, 100)), {
     default: () => 1
-  })
+  }),
+  /** Codex OAuth login waits on cancellation instead of resolving, for Cancel-flow e2e coverage. */
+  codexLoginHangs: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** When set, Provider.setApiKey/verifyModel fails with this message instead of succeeding. */
+  rejectApiKey: Schema.optional(Schema.String)
 })
 
 export type E2ePiFixture = Schema.Schema.Type<typeof E2ePiFixture>
@@ -265,6 +269,57 @@ const backgroundResponse = (
   )
 }
 
+/** Waits (~400ms each) before a [[held-settles]] fixture finishes its children. */
+const HELD_SETTLE_AFTER_WAITS = 10
+
+/** [[held-settles]] finishes the children on their own after a few waits, so a spec can
+ * watch a child settle while its view is open (the composer is gone there, no steer possible). */
+const heldUnsteeredResponse = (
+  prompt: string,
+  resultsAfterLatestPrompt: number,
+  direct: boolean
+): ReturnType<typeof fauxAssistantMessage> => {
+  const settles = prompt.includes("[[held-settles]]")
+  // [[held-abandons]]: the turn ends on its own WITHOUT the children ever reporting terminal.
+  const abandons = prompt.includes("[[held-abandons]]")
+  if ((settles || abandons) && resultsAfterLatestPrompt > HELD_SETTLE_AFTER_WAITS) {
+    return fauxAssistantMessage("Both agents reported back.")
+  }
+  const waitPhase = settles && resultsAfterLatestPrompt === HELD_SETTLE_AFTER_WAITS ? "settle" : "wait"
+  const toolCall = fauxToolCall(
+    E2E_HELD_SUBAGENTS_TOOL,
+    { phase: resultsAfterLatestPrompt === 0 ? (direct ? "direct-start" : "start") : waitPhase },
+    { id: `${direct ? "direct-subagent" : "held-subagents"}-${resultsAfterLatestPrompt}` }
+  )
+  return fauxAssistantMessage(
+    resultsAfterLatestPrompt === 0
+      ? [fauxText(direct ? "Delegated to one direct child." : "Delegated to two agents."), toolCall]
+      : toolCall,
+    { stopReason: "toolUse" }
+  )
+}
+
+/** [[held-subagent-asks]]: one held child sends a SubagentAttentionRequest (the real
+ * contact_supervisor/interview_request path) and sits in `needs-attention` — feeds the
+ * sidebar needs-you count, the latest turn's amber rail tick, and the subagent QuestionCard. */
+const heldSubagentAskResponse = (
+  context: PiContext
+): ReturnType<typeof fauxAssistantMessage> | null => {
+  const prompts = operatorText(context)
+  if (!prompts.some((prompt) => prompt.includes("[[held-subagent-asks]]"))) return null
+  const resultsAfterLatestPrompt = recentToolResultCount(context, E2E_HELD_SUBAGENTS_TOOL)
+  if (resultsAfterLatestPrompt === 0) {
+    return fauxAssistantMessage(
+      [
+        fauxText("Delegated to two agents."),
+        fauxToolCall(E2E_HELD_SUBAGENTS_TOOL, { phase: "ask" }, { id: "held-subagent-asks-0" })
+      ],
+      { stopReason: "toolUse" }
+    )
+  }
+  return fauxAssistantMessage("One agent is waiting for your input.")
+}
+
 const heldSubagentsResponse = (
   context: PiContext
 ): ReturnType<typeof fauxAssistantMessage> | null => {
@@ -276,24 +331,7 @@ const heldSubagentsResponse = (
   const prompt = latestOperatorText(context)
   const steered = !prompt.includes(marker)
   const resultsAfterLatestPrompt = recentToolResultCount(context, E2E_HELD_SUBAGENTS_TOOL)
-  const startPhase = direct ? "direct-start" : "start"
-  if (!steered) {
-    const toolCall = fauxToolCall(
-      E2E_HELD_SUBAGENTS_TOOL,
-      {
-        phase: resultsAfterLatestPrompt === 0
-          ? startPhase
-          : "wait"
-      },
-      { id: `${direct ? "direct-subagent" : "held-subagents"}-${resultsAfterLatestPrompt}` }
-    )
-    return fauxAssistantMessage(
-      resultsAfterLatestPrompt === 0
-        ? [fauxText(direct ? "Delegated to one direct child." : "Delegated to two agents."), toolCall]
-        : toolCall,
-      { stopReason: "toolUse" }
-    )
-  }
+  if (!steered) return heldUnsteeredResponse(prompt, resultsAfterLatestPrompt, direct)
   return steeredSubagentResponse(context, resultsAfterLatestPrompt, direct)
 }
 
@@ -544,6 +582,9 @@ const INVALID_REVIEW_PLAN = STRUCTURED_REVIEW_PLAN
   .replace("```diff path=src/auth.ts", "```diff path=../outside.ts")
   .replace("## Test strategy\nUnit tests cover the token format; the e2e flow covers sign-in.\n\n", "")
 
+// A flat checklist: submit must reject it as having no staged deliverables.
+const FLAT_REVIEW_PLAN = "# Auth replacement\n\n- [ ] Replace the token format\n- [ ] Verify sign-in\n"
+
 const PLAN_ANCHOR = "Replace the auth flow with a deterministic test implementation."
 /** The review plan with one prefixed note per line appended under its anchor. */
 const planWithNotes = (prefix: string, lines: ReadonlyArray<string>): string =>
@@ -591,6 +632,8 @@ const submitResultResponse = (context: PiContext, result: string, submitCount: n
 }
 
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  const switched = switchPlanResponse(context) ?? switchBuildResponse(context)
+  if (switched !== null) return switched
   const lastMessage = context.messages.at(-1)
   const planMessages = operatorText(context)
   const planStart = planMessages.findLastIndex((text) => text.includes("[[plan]]"))
@@ -607,11 +650,18 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === SUBMIT_PLAN_TOOL) {
     return submitResultResponse(context, toolResultText(lastMessage), submitCount)
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL && lastMessage.toolCallId !== "plannotator-escape") {
     return callTool(SUBMIT_PLAN_TOOL, { filePath: "PLAN.md" }, `plannotator-submit-${submitCount + 1}`)
   }
+  // [[escape]]: first attempt a write outside the plan file; plan mode must block it.
+  const lastUser = context.messages.findLastIndex((message) => message.role === "user")
+  const escaped = context.messages.slice(lastUser).some((message) => message.role === "toolResult" && message.toolCallId === "plannotator-escape")
+  if (!escaped && currentPlanMessages.some((text) => text.includes("[[escape]]"))) {
+    return callTool(WRITE_TOOL, { path: "AGENTS.md", content: "pwned\n" }, "plannotator-escape")
+  }
   const invalid = currentPlanMessages.some((text) => text.includes("[[invalid-plan]]"))
-  return callTool(WRITE_TOOL, { path: "PLAN.md", content: invalid ? INVALID_REVIEW_PLAN : STRUCTURED_REVIEW_PLAN }, "plannotator-write")
+  const flat = currentPlanMessages.some((text) => text.includes("[[flat-plan]]"))
+  return callTool(WRITE_TOOL, { path: "PLAN.md", content: flat ? FLAT_REVIEW_PLAN : invalid ? INVALID_REVIEW_PLAN : STRUCTURED_REVIEW_PLAN }, "plannotator-write")
 }
 
 const UPDATE_PLAN_TOOL = "plannotator_update_plan"
@@ -626,7 +676,7 @@ const planScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssis
       "Adopted the plan scratchpad and finished the first step. [DONE:1]"
     )
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL && lastMessage.toolCallId !== "plannotator-escape") {
     return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-update")
   }
   // Normal sessions carry Jingler's workspace tools, not pi's plan-mode
@@ -678,7 +728,7 @@ const richScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssis
       "Adopted the structured plan. TokenStore implemented. [DONE:1]"
     )
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL && lastMessage.toolCallId !== "plannotator-escape") {
     return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-rich-update")
   }
   return callTool(
@@ -716,7 +766,7 @@ const architectureFigureResponse = (context: PiContext): ReturnType<typeof fauxA
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === UPDATE_PLAN_TOOL) {
     return fauxAssistantMessage("Architecture figure published.")
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL && lastMessage.toolCallId !== "plannotator-escape") {
     return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "architecture-plan-update")
   }
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === "jingler_publish_explanation") {
@@ -883,6 +933,11 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
         }),
         fauxAssistantMessage("Browser workflow completed through pi.")
       ]
+    case "mcp-needs-auth":
+      return [
+        fauxAssistantMessage(fauxToolCall("mcp__runpod__list_pods", {}), { stopReason: "toolUse" }),
+        fauxAssistantMessage("RunPod needs sign-in.")
+      ]
     case "context-compaction":
       return Array.from({ length: 20 }, () => contextCompactionResponse)
     default:
@@ -1008,15 +1063,87 @@ const switchRepoResponse = (context: PiContext): ReturnType<typeof fauxAssistant
   return fauxAssistantMessage("Edited the second repository.")
 }
 
+// `[[checkout-branch=name]]`: switch to the repo named by `[[switch-repo=…]]`, then move that checkout onto a new branch.
+const checkoutBranchResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  const branch = /\[\[checkout-branch=([^\]]+)\]\]/u.exec(latestOperatorText(context))?.[1]
+  if (branch === undefined) return null
+  const switched = switchRepoSwitchOnly(context)
+  if (switched !== null) return switched
+  if (recentToolResultCount(context, COMMAND_TOOL) === 0) {
+    return callTool(COMMAND_TOOL, { command: `git checkout -b ${branch}`, intent: "Branching" }, "checkout-branch-1")
+  }
+  return fauxAssistantMessage("Moved the checkout.")
+}
+
+const switchRepoSwitchOnly = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  const target = /\[\[switch-repo=([^\]]+)\]\]/u.exec(latestOperatorText(context))?.[1]
+  if (target === undefined || recentToolResultCount(context, SWITCH_CHECKOUT_TOOL) > 0) return null
+  return callTool(SWITCH_CHECKOUT_TOOL, { repoPath: target }, "checkout-branch-switch-1")
+}
+
+// `[[intent-tool]]`: run one command with an agent-written `intent`, then finish.
+const intentToolResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  if (!latestOperatorText(context).includes("[[intent-tool]]")) return null
+  if (recentToolResultCount(context, COMMAND_TOOL) === 0) {
+    return callTool(COMMAND_TOOL, { command: "echo tests passed", intent: "Running tests" }, "intent-tool-1")
+  }
+  return fauxAssistantMessage("Ran the tests.")
+}
+
+// `[[switch-plan]]`: enter Plan through the tool, then try a write outside the plan file.
+const switchPlanResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  if (!latestOperatorText(context).includes("[[switch-plan]]")) return null
+  if (recentToolResultCount(context, "jingler_set_work_mode") === 0) {
+    return callTool("jingler_set_work_mode", { mode: "plan", reason: "large refactor" }, "switch-plan-1")
+  }
+  if (recentToolResultCount(context, WRITE_TOOL) === 0) {
+    return callTool(WRITE_TOOL, { path: "AGENTS.md", content: "pwned\n" }, "switch-plan-write-1")
+  }
+  return fauxAssistantMessage("Stayed in plan.")
+}
+
+// `[[switch-build]]`: enter Plan through the tool, then try to leave it with no approved plan.
+const switchBuildResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  if (!latestOperatorText(context).includes("[[switch-build]]")) return null
+  const switches = recentToolResultCount(context, "jingler_set_work_mode")
+  if (switches === 0) return callTool("jingler_set_work_mode", { mode: "plan", reason: "large refactor" }, "switch-build-plan-1")
+  if (switches === 1) return callTool("jingler_set_work_mode", { mode: "build", reason: "start coding" }, "switch-build-1")
+  return fauxAssistantMessage("Still in plan.")
+}
+
+// `[[isolated-subagent]]`: the real subagent tool with isolation:"worktree"; the
+// child itself is a fake process worker (e2e/isolated-subagent-process-worker.mjs) that writes src/isolated.ts.
+const isolatedSubagentResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  const prompt = latestOperatorText(context)
+  if (!prompt.includes("[[isolated-subagent]]")) return null
+  return recentToolResultCount(context, SUBAGENT_TOOL) === 0
+    ? callTool(
+      SUBAGENT_TOOL,
+      { agent: "reviewer", task: "Write src/isolated.ts.", isolation: "worktree" },
+      "isolated-subagent-1"
+    )
+    : fauxAssistantMessage("Isolated child finished.")
+}
+
+// Marker scenarios, tried in order; the first that claims the turn answers it.
+const markerResponders = [
+  isolatedSubagentResponse,
+  intentToolResponse,
+  switchPlanResponse,
+  switchBuildResponse,
+  checkoutBranchResponse,
+  switchRepoResponse,
+  fileBrowserResponse,
+  supervisorSubagentResponse,
+  heldSubagentAskResponse,
+  heldSubagentsResponse
+] as const
+
 function scenarioFixtureResponse(context: PiContext) {
-  const switchRepo = switchRepoResponse(context)
-  if (switchRepo !== null) return switchRepo
-  const fileBrowser = fileBrowserResponse(context)
-  if (fileBrowser !== null) return fileBrowser
-  const supervisorSubagent = supervisorSubagentResponse(context)
-  if (supervisorSubagent !== null) return supervisorSubagent
-  const heldSubagents = heldSubagentsResponse(context)
-  if (heldSubagents !== null) return heldSubagents
+  for (const responder of markerResponders) {
+    const response = responder(context)
+    if (response !== null) return response
+  }
   if (operatorText(context).some((text) => text.includes("adversarial code reviewer"))) {
     return reviewResponse(context)
   }
@@ -1028,6 +1155,17 @@ function scenarioFixtureResponse(context: PiContext) {
   }
   const backgroundKind = backgroundKindFrom(context)
   if (backgroundKind !== null) return backgroundResponse(context, backgroundKind)
+  // Simulates a provider request that failed outright — the runner settles the
+  // turn with `pi prompt failed: …` (see `promptFailureMessage`), which the
+  // transcript renders as an InlineError row.
+  if (latestOperatorText(context).includes("[[fail]]")) {
+    // The runner settles a provider error as a `Failed` stream event carrying
+    // this message verbatim (see `piProviderFailure`/`EventSink.terminalEvent`
+    // in `pi-agent-runtime.ts`) — prefixed the same way a genuinely thrown
+    // prompt is (`promptFailureMessage`), so the transcript's InlineError
+    // detection (`isPromptFailureText`) recognizes it exactly like production.
+    return fauxAssistantMessage("", { stopReason: "error", errorMessage: "pi prompt failed: Simulated provider failure" })
+  }
   if (latestOperatorText(context).includes("[[ask]]")) return questionResponse(context)
   if (latestOperatorText(context).includes("[[storm]]")) return stormResponse(context)
   if (latestOperatorText(context).includes("GitHub feedback from")) {

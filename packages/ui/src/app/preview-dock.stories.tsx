@@ -15,6 +15,11 @@ const meta = {
     url: "http://localhost:3000",
     onNavigate: () => {},
     onReload: () => {},
+    canGoBack: false,
+    canGoForward: false,
+    onBack: () => {},
+    onForward: () => {},
+    onOpenExternal: () => {},
     renderBrowser: () => null
   }
 } satisfies Meta<typeof PreviewDock>
@@ -28,6 +33,7 @@ type Story = StoryObj<typeof meta>
  * chrome (address bar and dock side) is exercised here.
  */
 export const Browser: Story = {
+  args: {},
   render: () => {
     const [side, setSide] = useState<DockSide>("right")
     const [url, setUrl] = useState("http://localhost:3000")
@@ -41,6 +47,11 @@ export const Browser: Story = {
           url={url}
           onNavigate={setUrl}
           onReload={() => {}}
+          canGoBack
+          canGoForward={false}
+          onBack={() => {}}
+          onForward={() => {}}
+          onOpenExternal={() => {}}
           renderBrowser={() => (
             <div className="absolute inset-0 flex items-center justify-center text-[12px] text-dim">
               Native browser view renders here — loading {url}
@@ -56,6 +67,7 @@ export const Browser: Story = {
  * The same internet-only browser dock attached below the session workspace.
  */
 export const BottomDocked: Story = {
+  args: {},
   render: () => {
     const [side, setSide] = useState<DockSide>("bottom")
     return (
@@ -68,6 +80,11 @@ export const BottomDocked: Story = {
           url="http://localhost:3000"
           onNavigate={() => {}}
           onReload={() => {}}
+          canGoBack
+          canGoForward={false}
+          onBack={() => {}}
+          onForward={() => {}}
+          onOpenExternal={() => {}}
           renderBrowser={() => (
             <div className="absolute inset-0 flex items-center justify-center font-mono text-[12px] text-dim">
               Native browser view
@@ -78,6 +95,12 @@ export const BottomDocked: Story = {
     )
   }
 }
+
+/** Board 21 loading state: the reload icon spins while the page loads. */
+export const Loading: Story = { args: { loading: true, canGoBack: true } }
+
+/** Board 21 error state: main-frame load failure with a Retry that reloads. */
+export const LoadError: Story = { args: { error: "ERR_CONNECTION_REFUSED", canGoBack: true } }
 
 /**
  * Mirrors `session-split.tsx`'s layout rule, which the dock's own borders assume:

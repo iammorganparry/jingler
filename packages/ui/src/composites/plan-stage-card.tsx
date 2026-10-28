@@ -22,9 +22,9 @@ const complexityTone = { low: "blue", medium: "yellow", high: "red" } as const s
 
 /** VS Code's SCM letters: one coloured glyph says the change kind without a pill. */
 const change = {
-  A: { label: "New file", className: "text-green" },
-  M: { label: "Modified", className: "text-yellow" },
-  D: { label: "Deleted", className: "text-red" }
+  A: { label: "New file", className: "text-state-ready" },
+  M: { label: "Modified", className: "text-state-needs" },
+  D: { label: "Deleted", className: "text-state-failed" }
 } as const satisfies Record<PlanFile["change"], { label: string; className: string }>
 
 const acceptanceIcon = {
@@ -57,7 +57,7 @@ function PathLink({ path }: { readonly path: string }) {
   const open = useOpenPath(path)
   if (open === null) return path
   return (
-    <button type="button" onClick={open} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:text-blue">
+    <button type="button" onClick={open} className="cursor-pointer underline decoration-dotted underline-offset-2 hover:text-text-bright">
       {path}
     </button>
   )
@@ -128,7 +128,7 @@ function StageHeader({ stage, number, stages = [], onComment }: StageProps) {
         </span>
         {stage.complexity && <Badge tone={complexityTone[stage.complexity]} size="xs">{stage.complexity} complexity</Badge>}
         {status === "completed" ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-green/15 px-2 py-px font-medium text-green">
+          <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-px font-medium text-text-bright whitespace-nowrap">
             <Check className="size-3" strokeWidth={3} /> Done
           </span>
         ) : status !== "queued" && <Badge tone={statusTone[status]} size="xs">{status}</Badge>}
@@ -176,7 +176,7 @@ function Tasks({ stage }: { readonly stage: PlanPrdStage }) {
         {tasks.map((task) => (
           <li key={task.id} className="flex items-start gap-2.5" data-task-status={task.status}>
             {task.status === "completed"
-              ? <Check className="mt-[5px] size-4 flex-none text-green" />
+              ? <Check className="mt-[5px] size-4 flex-none text-state-ready" />
               : <Circle className="mt-[5px] size-4 flex-none text-dim" />}
             <div className="min-w-0">
               <Markdown className={task.status === "completed" ? "text-muted-foreground" : "text-text-bright"}>{task.text}</Markdown>
@@ -236,7 +236,7 @@ export function PlanStageCard({ stage, number, stages = [], onComment }: StagePr
       data-toc={`stage:${stage.id}`}
       data-status={completed ? "completed" : undefined}
       aria-labelledby={`stage-${stage.id}`}
-      className="mt-14 scroll-mt-8 border-t border-line pt-10 data-[status=completed]:border-green/40"
+      className="mt-14 scroll-mt-8 border-t border-line pt-10 data-[status=completed]:border-line-strong"
     >
       <StageHeader stage={stage} number={number} stages={stages} onComment={onComment} />
 
@@ -257,7 +257,7 @@ export function PlanStageCard({ stage, number, stages = [], onComment }: StagePr
       {stage.userStory !== undefined && (
         <section
           aria-label={`${stage.title} user story`}
-          className="mt-6 rounded-md border-l-2 border-blue bg-surface/40 px-4 py-3 text-[14px]"
+          className="mt-6 rounded-[12px] border border-line bg-surface/40 px-4 py-3 text-[14px]"
         >
           <span className="font-semibold text-text-bright">As {stage.userStory.article ?? "a"}</span> {stage.userStory.role},{" "}
           <span className="font-semibold text-text-bright">I want</span> {stage.userStory.capability},{" "}

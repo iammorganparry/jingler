@@ -61,7 +61,7 @@ export function IssuePickerList({
             )}
           >
             <div className="flex min-w-0 items-center gap-2">
-              <CircleDot size={14} className="flex-none text-green" />
+              <CircleDot size={14} className="flex-none text-muted-foreground" />
               <span
                 className={cn(
                   "min-w-0 flex-1 truncate text-[13px] font-semibold",
@@ -129,23 +129,10 @@ export function IssueLabelChip({
       </Badge>
     )
   }
-  const r = parseInt(color.slice(0, 2), 16)
-  const g = parseInt(color.slice(2, 4), 16)
-  const b = parseInt(color.slice(4, 6), 16)
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-[4px] border px-2 py-px text-[10.5px] font-medium"
-      style={{
-        color: `rgb(${r} ${g} ${b})`,
-        backgroundColor: `rgb(${r} ${g} ${b} / 0.12)`,
-        borderColor: `rgb(${r} ${g} ${b} / 0.3)`
-      }}
-    >
-      <span
-        className="size-1.5 rounded-full"
-        style={{ backgroundColor: `rgb(${r} ${g} ${b})` }}
-      />
+    <Badge tone="neutral" size="xs">
+      <span aria-hidden className="size-1.5 flex-none rounded-full" style={{ backgroundColor: `#${color}` }} />
       {name}
-    </span>
+    </Badge>
   )
 }

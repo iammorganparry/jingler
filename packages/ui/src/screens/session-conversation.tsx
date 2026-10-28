@@ -1,5 +1,8 @@
+import type { SubagentFleetNode } from "@jingler/core"
+import type { UseSessionTerminals } from "../app/terminal-panel.js"
 import type { SessionChatActions } from "../app/session-tree.js"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { matchExplorerToggleChord } from "../app/app-shortcuts.js"
 import type {
   DiffStat,
   Environment,
@@ -8,15 +11,17 @@ import type {
   SessionPrStatus,
   Session,
   SessionActivity,
+  Usage,
   User
 } from "@jingler/core"
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
+import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
 import { SessionSidebar, type SidebarReleaseNotes, type SidebarUpdate } from "../app/session-sidebar.js"
-import { ProjectSidebar } from "../app/project-sidebar.js"
+import { MissingFolderBanner, ProjectSidebar } from "../app/project-sidebar.js"
 import { projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
-import { EmptyConversation } from "./empty-conversation.js"
+import { EmptyConversation, type HomeStart } from "./empty-conversation.js"
 import type { ConversationPaneCtx } from "./session-pane.js"
 import { BUILTIN_TAB, type TabContribution, type TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
@@ -38,7 +43,16 @@ export interface SessionConversationProps {
   projectsLoading?: boolean
   projectOwners?: Readonly<Record<string, string>>
   onAddProject?: () => void
+  onImportSessions?: () => void
   onNewSessionForProject?: (projectId: string) => void
+  /** Open a project's settings (rail tile context menu). */
+  onOpenProjectSettings?: (projectId: string) => void
+  /** Unregister a project (rail tile context menu; the caller's promise settles the confirm dialog). */
+  onRemoveProject?: (projectId: string) => void | Promise<void>
+  /** Re-point a project whose folder is missing (rail tile menu and sidebar banner). */
+  onLocateProject?: (projectId: string) => void | Promise<void>
+  /** Open a session's terminal (row context menu). */
+  onOpenSessionTerminal?: (sessionId: string) => void
   renderExplorer?: (session: Session, onOpenPath: (path: string) => void) => ReactNode
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
@@ -108,6 +122,10 @@ export interface SessionConversationProps {
   /** Open a file selected from the workspace Explorer and reveal its Files surface. */
   onOpenExplorerFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
+  /** Fleet nodes per session id; any with a PR join the header PRs chip. */
+  /** Open a session PR (main or subagent) in the PR view. */
+  onOpenSessionPr?: (sessionId: string, prNumber: number) => void
+  subagentPrNodes?: Readonly<Record<string, ReadonlyArray<SubagentFleetNode>>>
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -131,10 +149,20 @@ export interface SessionConversationProps {
   patch?: string
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
+  /** Home › Allow action for a session blocked on an approval gate. */
+  allowFor?: (sessionId: string) => (() => void) | undefined
+  /** Home › the MCP import card element. */
+  importCard?: ReactNode
+  /** Sessions whose last run was cut off by a restart. */
+  interruptedSessions?: ReadonlySet<string>
   /** Live activity by session, then chat, for the sidebar tree. */
   chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
   prStates?: Record<string, SessionPrStatus>
+  /** Running subagent count per session id, shown on sidebar rows. */
+  subagentCounts?: Readonly<Record<string, number>>
+  /** Count of a session's subagent fleet nodes with a pending attention request (e.g. a child's question). */
+  subagentAttentionCounts?: Readonly<Record<string, number>>
   /** GitHub owner login per session, used for repository avatars in the sidebar. */
   repoOwners?: Readonly<Record<string, string>>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
@@ -144,10 +172,17 @@ export interface SessionConversationProps {
   debugStopSequences?: Readonly<Record<string, number>>
   /** Open the New Session view. */
   onNewSession?: () => void
+  /** Home composer submit: open New workspace with this prompt and project. */
+  onStartWithPrompt?: (start: HomeStart) => void
+  /** Branch list for the Home from-chip. */
+  loadBranches?: (repoPath: string) => Promise<ReadonlyArray<string>>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
   /** Open the Usage & limits modal (from the sidebar account menu). */
   onOpenUsage?: () => void
+  /** Usage snapshot and refresh for the account menu's limits summary. */
+  usage?: Usage | null
+  onLoadUsage?: () => Promise<void> | void
   /** Open the Settings view (from the sidebar account menu). */
   onOpenSettings?: () => void
   /** Open Settings directly on provider connections from runtime recovery. */
@@ -200,20 +235,27 @@ export interface SessionConversationProps {
    * the Explorer itself; the host owns which diff (PR or uncommitted) it shows.
    */
   onRevealChanges?: (sessionId: string) => void
+  /** Pinned header view ids in order; absent hides the header view buttons. */
+  headerViews?: ReadonlyArray<string>
+  /** Persist a new pinned header view set. */
+  onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
   /** Review Focus: hold the sidebar collapsed so only the diff has the width. */
   sidebarCollapsed?: boolean
   /** Which sidebar view mounts first; stories and restored layouts can start on Explorer. */
   initialWorkspaceView?: "sessions" | "explorer"
+  /** Called when the sidebar switches between Sessions and Explorer (the host persists it). */
+  onWorkspaceViewChange?: (view: "sessions" | "explorer") => void
   /** The review tray beside a session's panes; null until drafts exist. */
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
-  /** Render the per-session Terminal view. */
-  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
+  /** Hook supplying the session's shells (each is an editor tab). */
+  useSessionTerminals?: UseSessionTerminals
   /** App version, shown in the sidebar footer. */
   version?: string
   /** Available packaged-app update shown in the sidebar. */
   update?: SidebarUpdate
   releaseNotes?: SidebarReleaseNotes
+  whatsNew?: readonly WhatsNewEntry[]
   /**
    * A command-palette request to switch tabs. Passed straight through to the
    * split, which hands it to the focused pane only.
@@ -240,10 +282,29 @@ export function SessionConversation(props: SessionConversationProps) {
     () => activeSessionProjectId ?? projects[0]?.id ?? UNASSIGNED_PROJECT_ID
   )
   const selectedProjectId = props.selectedProjectId ?? localProjectId
+  const selectedProject = projects.find((project) => project.id === selectedProjectId)
   const setSelectedProjectId = props.onSelectProject ?? setLocalProjectId
-  const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">(
+  const [workspaceView, setWorkspaceViewState] = useState<"sessions" | "explorer">(
     props.initialWorkspaceView ?? "sessions"
   )
+  const onWorkspaceViewChangeProp = props.onWorkspaceViewChange
+  const setWorkspaceView = useCallback(
+    (view: "sessions" | "explorer") => {
+      setWorkspaceViewState(view)
+      onWorkspaceViewChangeProp?.(view)
+    },
+    [onWorkspaceViewChangeProp]
+  )
+  // ⌘⇧E toggles the sidebar between Sessions and Explorer.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!matchExplorerToggleChord(event)) return
+      event.preventDefault()
+      setWorkspaceView(workspaceView === "explorer" ? "sessions" : "explorer")
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [workspaceView, setWorkspaceView])
   const onRevealChangesProp = props.onRevealChanges
   const [sidebarExpandRequest, setSidebarExpandRequest] = useState(0)
   const revealChanges = useCallback(
@@ -292,13 +353,28 @@ export function SessionConversation(props: SessionConversationProps) {
            if (props.showEmpty || activeSessionProjectId !== selectedProjectId) return (<EmptyConversation
             version={props.version}
             onNewSession={openNewSession}
+            onStartWithPrompt={props.onStartWithPrompt}
+            loadBranches={props.loadBranches}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+            userName={props.user?.name}
+            sessions={props.sessions}
+            liveActivity={props.liveActivity}
+            allowFor={props.allowFor}
+            importCard={props.importCard}
+            onOpenSession={(sessionId) => {
+              // The session may already be active while another project is selected: switch the project too.
+              const session = props.sessions.find((candidate) => candidate.id === sessionId)
+              if (session) setSelectedProjectId(projectIdForSession(session, projects))
+              props.onSelectSession(sessionId)
+            }}
           />)
            return (<SessionSplit
             onOpenCheckpoints={props.onOpenCheckpoints}
             group={group}
             sessions={props.sessions}
             emptyState={
-              <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
+              <span className="text-[12px] text-dim">Nothing on screen, pick a session</span>
             }
             renderConversation={props.renderConversation}
             renderExplanation={props.renderExplanation}
@@ -308,6 +384,8 @@ export function SessionConversation(props: SessionConversationProps) {
             onRequestCloseFile={props.onRequestCloseFile}
             conversationPane={props.conversationPane}
             renderSubagentTabs={props.renderSubagentTabs}
+            subagentPrNodes={props.subagentPrNodes}
+            onOpenSessionPr={props.onOpenSessionPr}
             onRenameSession={props.onRenameSession}
             onCreateChat={props.onCreateChat}
             onCloseUntouchedChat={props.onCloseUntouchedChat}
@@ -319,6 +397,7 @@ export function SessionConversation(props: SessionConversationProps) {
             explanationSessions={props.explanationSessions}
             liveActivity={props.liveActivity}
             liveDiff={props.liveDiff}
+            prStates={props.prStates}
             debugStopSequences={props.debugStopSequences}
             onOpenSettings={props.onOpenGithubSettings ?? props.onOpenSettings}
             onOpenProviderSettings={props.onOpenProviderSettings ?? props.onOpenSettings}
@@ -327,8 +406,10 @@ export function SessionConversation(props: SessionConversationProps) {
             onSelectIssue={props.onSelectIssue}
             paneContributions={props.paneContributions}
             onRevealChanges={revealChanges}
+            headerViews={props.headerViews}
+            onHeaderViewsChange={props.onHeaderViewsChange}
             renderReviewTray={props.renderReviewTray}
-            renderTerminalDock={props.renderTerminalDock}
+            useSessionTerminals={props.useSessionTerminals}
             selectTabRequest={props.selectTabRequest}
             onTabRequestHandled={props.onTabRequestHandled}
           />)
@@ -357,10 +438,15 @@ export function SessionConversation(props: SessionConversationProps) {
           sessions={props.sessions}
           activeProjectId={selectedProjectId}
           liveActivity={props.liveActivity}
+          subagentAttentionCounts={props.subagentAttentionCounts}
           projectOwners={props.projectOwners}
           loading={props.projectsLoading}
           onSelect={selectProject}
           onAddProject={props.onAddProject}
+          onImportSessions={props.onImportSessions}
+          onOpenSettings={props.onOpenProjectSettings}
+          onRemove={props.onRemoveProject}
+          onLocate={props.onLocateProject}
         />
       ) : null}
       <SessionSidebar
@@ -377,6 +463,9 @@ export function SessionConversation(props: SessionConversationProps) {
             : <div className="p-4 text-[12px] text-dim">Select a session to explore its worktree.</div>
         }
         sessions={projectSessions}
+        projectId={selectedProjectId}
+        notice={<MissingFolderBanner project={selectedProject} onLocate={props.onLocateProject} />}
+        onOpenInTerminal={props.onOpenSessionTerminal}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
         onSelect={props.onSelectSession}
@@ -395,11 +484,15 @@ export function SessionConversation(props: SessionConversationProps) {
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}
         liveActivity={props.liveActivity}
+        interruptedSessions={props.interruptedSessions}
         prStates={props.prStates}
+        subagentCounts={props.subagentCounts}
         repoOwners={props.repoOwners}
         onNewSession={openNewSession}
         user={props.user}
         onOpenUsage={props.onOpenUsage}
+        usage={props.usage}
+        onLoadUsage={props.onLoadUsage}
         onOpenSettings={props.onOpenSettings}
         onSignOut={props.onSignOut}
         onSignIn={props.onSignIn}
@@ -411,6 +504,7 @@ export function SessionConversation(props: SessionConversationProps) {
         version={props.version}
         update={props.update}
         releaseNotes={props.releaseNotes}
+        whatsNew={props.whatsNew}
         pullRequestsActive={props.pullRequestsActive}
         onOpenPullRequests={props.onOpenPullRequests}
         issuesActive={props.issuesActive}
@@ -428,7 +522,6 @@ export function SessionConversation(props: SessionConversationProps) {
         )}
         {!props.newSessionViewActive && (getProps())}
       </div>
-      <div id="session-view-rail-portal" className="flex min-h-0 flex-none" />
     </div>
   )
 }

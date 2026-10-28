@@ -172,6 +172,11 @@ export function Tooltip({
     setOpen(false);
   }, [open]);
 
+  // A pending show must not fire setState after unmount.
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
   // A finger never hovers, and Safari does not focus a button on tap either, so
   // the label is only reachable if the tap itself opens the tooltip. A click
   // carries no pointerType, so the pointerdown that preceded it is what says
@@ -265,7 +270,6 @@ export function Tooltip({
             <AnimatePresence>
               {open && coords ? (
                 <span
-                  aria-hidden
                   className="pointer-events-none fixed z-[9999]"
                   style={{
                     top: coords.top,

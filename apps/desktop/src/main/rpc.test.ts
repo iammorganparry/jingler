@@ -84,6 +84,8 @@ import {
   createTerminal,
   githubConnectionRefresh,
   githubDetectPr,
+  githubDiff,
+  githubFiles,
   githubSubmitReview,
   githubPr,
   mismatchedIssueProviderId,
@@ -106,7 +108,6 @@ import {
   githubAckEvent,
   workspaceRevertFile,
   withoutAttachmentData,
-  workspaceRevertLines,
 } from "./rpc.js";
 
 describe("session creation defaults", () => {
@@ -947,6 +948,79 @@ describe("RPC handlers", () => {
       expect(patch).toEqual(EMPTY_REVIEW_DIFF);
     });
 
+    it("refuses a workspacePath git does not list as one of the session's worktrees", async () => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "scoped",
+            repo: "widget",
+            branch: "feature",
+            title: "Scoped",
+            status: "idle",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: "2026-08-08T10:00:00.000Z",
+            worktreePath: dir,
+            chats: [],
+            activeChatId: null,
+          },
+        ]),
+      );
+      const patch = await Effect.runPromise(
+        sessionDiff("scoped", undefined, "/etc").pipe(
+          Effect.provide(Layer.mergeAll(base, SessionStore.Default, WorkspaceService.Default)),
+        ),
+      );
+      expect(patch).toEqual(EMPTY_REVIEW_DIFF);
+    });
+
+    it("scopes a subagent workspace diff to the session's branch merge-base, keeping committed work", async () => {
+      const repo = join(dir, "subagent-base");
+      mkdirSync(repo, { recursive: true });
+      const git = (...args: string[]) =>
+        execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo, stdio: "ignore" });
+      git("init", "-b", "main");
+      writeFileSync(join(repo, "a.txt"), "a\n");
+      git("add", ".");
+      git("commit", "-m", "base");
+      git("checkout", "-b", "feature");
+      writeFileSync(join(repo, "committed.txt"), "c\n");
+      git("add", ".");
+      git("commit", "-m", "branch work");
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "based",
+            repo: "widget",
+            branch: "feature",
+            baseBranch: "main",
+            title: "Based",
+            status: "idle",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: "2026-08-08T10:00:00.000Z",
+            worktreePath: repo,
+            chats: [],
+            activeChatId: null,
+          },
+        ]),
+      );
+      const review = await Effect.runPromise(
+        sessionDiff("based", undefined, repo).pipe(
+          Effect.provide(Layer.mergeAll(base, SessionStore.Default, WorkspaceService.Default)),
+        ),
+      );
+      expect(review.files.map((f) => f.path)).toEqual(["committed.txt"]);
+    });
+
     it("surfaces git failures instead of reporting no changes", async () => {
       mkdirSync(root, { recursive: true });
       writeFileSync(
@@ -1137,7 +1211,7 @@ describe("RPC handlers", () => {
     });
   });
 
-  describe("Workspace.revert*", () => {
+  describe("Workspace.revertFile", () => {
     // Revert on an unknown / worktree-less session must be a safe no-op.
     it("no-ops for an unknown session (no worktree to touch)", async () => {
       const ws = Layer.mergeAll(
@@ -1150,16 +1224,6 @@ describe("RPC handlers", () => {
           workspaceRevertFile({ sessionId: "nope", path: "a.ts" }).pipe(
             Effect.provide(ws),
           ),
-        ),
-      ).resolves.toBeUndefined();
-      await expect(
-        Effect.runPromise(
-          workspaceRevertLines({
-            sessionId: "nope",
-            path: "a.ts",
-            startLine: 1,
-            endLine: 2,
-          }).pipe(Effect.provide(ws)),
         ),
       ).resolves.toBeUndefined();
     });
@@ -1208,16 +1272,6 @@ describe("RPC handlers", () => {
           workspaceRevertFile({
             sessionId: "direct-session",
             path: "developer-edit.ts",
-          }).pipe(Effect.provide(ws)),
-        ),
-      ).rejects.toThrow(/disabled for direct sessions/i);
-      await expect(
-        Effect.runPromise(
-          workspaceRevertLines({
-            sessionId: "direct-session",
-            path: "developer-edit.ts",
-            startLine: 1,
-            endLine: 2,
           }).pipe(Effect.provide(ws)),
         ),
       ).rejects.toThrow(/disabled for direct sessions/i);
@@ -1299,6 +1353,60 @@ describe("RPC handlers", () => {
     });
   });
 
+  describe("Github.diff / Github.files layer selection", () => {
+    const stackSession = () => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "stack",
+            repo: "widget",
+            branch: "feat/c",
+            title: "Stack",
+            status: "idle",
+            diff: { added: 0, removed: 0 },
+            prNumber: 482,
+            prs: [{ number: 480 }, { number: 481 }, { number: 482 }],
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: "2026-07-16T10:00:00.000Z",
+            worktreePath: join(root, "worktrees", "stack"),
+            baseBranch: "main",
+          },
+        ]),
+      );
+      return Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        fakeGithubApi({
+          prDiff: (_cwd: string, number: number) => Effect.succeed(`diff for #${number}`),
+          prFiles: (_cwd: string, number: number) => Effect.succeed([{ path: `layer-${number}.ts` }]),
+        }),
+      );
+    };
+
+    it("reads the top layer by default and the requested layer when given", async () => {
+      const layer = stackSession();
+      const read = (n?: number) => Effect.runPromise(githubDiff("stack", n).pipe(Effect.provide(layer)));
+      await expect(read()).resolves.toBe("diff for #482");
+      await expect(read(480)).resolves.toBe("diff for #480");
+      await expect(read(481)).resolves.toBe("diff for #481");
+    });
+
+    it("returns nothing for a PR that is not in the stack", async () => {
+      const layer = stackSession();
+      await expect(Effect.runPromise(githubDiff("stack", 999).pipe(Effect.provide(layer)))).resolves.toBe("");
+      await expect(Effect.runPromise(githubFiles("stack", 999).pipe(Effect.provide(layer)))).resolves.toStrictEqual([]);
+    });
+
+    it("lists a chosen layer's files", async () => {
+      const layer = stackSession();
+      const files = await Effect.runPromise(githubFiles("stack", 481).pipe(Effect.provide(layer)));
+      expect(files).toStrictEqual([{ path: "layer-481.ts" }]);
+    });
+  });
+
   describe("Github.pr / Github.detectPr", () => {
     // A PR-less / unknown session must be a no-op (null), never an error, so the
     // renderer shows the empty "Create pull request" state.
@@ -1362,6 +1470,42 @@ describe("RPC handlers", () => {
       expect(linked.githubInstallationId).toBeUndefined();
       expect(linked.githubRepositoryId).toBeUndefined();
       expect(upsertSessionRoute).not.toHaveBeenCalled();
+    });
+
+    it("detects a PR per checkout and stores each on its own checkout", async () => {
+      const now = "2026-08-11T06:00:00.000Z";
+      const webPath = join(dir, "qa-web-worktree");
+      const apiPath = join(dir, "qa-api-worktree");
+      mkdirSync(root, { recursive: true });
+      mkdirSync(webPath, { recursive: true });
+      mkdirSync(apiPath, { recursive: true });
+      const co = (id: string, repo: string, worktreePath: string) => ({
+        id, repo, repoPath: worktreePath, worktreePath, branch: "fix/x", prNumber: null,
+      });
+      writeFileSync(join(root, "sessions.json"), JSON.stringify([{
+        id: "two-repos", repo: "qa-web", branch: "fix/x", baseBranch: "main",
+        title: "Two repos", status: "idle", cli: "claude", diff: { added: 0, removed: 0 },
+        prNumber: null, costUsd: 0, tokens: 0, updatedAt: now, worktreePath: webPath,
+        repoPath: webPath, workspaceMode: "worktree", semanticBranchPending: false,
+        checkouts: [co("web", "qa-web", webPath), co("api", "qa-api", apiPath)],
+        activeCheckoutId: "web",
+        chats: [{ id: "c", title: null, createdAt: now, updatedAt: now }], activeChatId: "c",
+      }]));
+      const github = Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        fakeGithubApi({
+          prForWorktree: (cwd: string) => Effect.succeed(cwd === webPath ? 1 : 2),
+          repository: () => Effect.fail(new GitHubApiError({ reason: "repository-access", message: "no app" })),
+        }),
+        Layer.succeed(GitService, { branchAt: () => Effect.succeed("fix/x") } as never),
+        Layer.succeed(GitHubAuth, { upsertSessionRoute: vi.fn() } as never),
+      );
+      await Effect.runPromise(githubDetectPr("two-repos").pipe(Effect.provide(github)));
+      const linked = await Effect.runPromise(SessionStore.get("two-repos").pipe(Effect.provide(github)));
+      expect(linked.checkouts?.map((c) => [c.id, c.prNumber])).toEqual([["web", 1], ["api", 2]]);
+      expect(linked.prNumber).toBe(1);
+      expect(linked.prs).toEqual([{ number: 2, repo: "qa-api" }, { number: 1, repo: "qa-web" }]);
     });
 
     it("synchronizes the live branch and replacement PR route before returning", async () => {
@@ -1548,6 +1692,49 @@ describe("RPC handlers", () => {
       // The stale one keeps its words instead of 422-ing the whole review.
       expect(posted!.body).toContain("moved off the diff");
       expect(posted!.body).toContain("a.ts:99");
+    });
+  });
+
+  describe("Github.submitReview without a session", () => {
+    it("posts inline comments by repository slug", async () => {
+      let posted: { commitSha: string; body: string; comments: ReadonlyArray<unknown> } | null = null;
+      let slug = "";
+      const github = Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        fakeGithubApi({
+          prHeadShaBySlug: () => Effect.succeed("headsha"),
+          prDiffBySlug: () =>
+            Effect.succeed(
+              ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,1 +1,2 @@", " const x = 1", "+const y = 2"].join("\n"),
+            ),
+          prReviewCommentsBySlug: (s: string, _n: number, input: unknown) =>
+            Effect.sync(() => {
+              slug = s;
+              posted = input as typeof posted;
+            }),
+        }),
+      );
+      const unanchored = await Effect.runPromise(
+        githubSubmitReview({
+          repository: "acme/widget",
+          number: 42,
+          body: "overall",
+          comments: [{ path: "a.ts", line: 2, startLine: null, body: "inline" }],
+        }).pipe(Effect.provide(github)),
+      );
+      expect(unanchored).toBe(0);
+      expect(slug).toBe("acme/widget");
+      expect(posted!.commitSha).toBe("headsha");
+      expect(posted!.body).toContain("overall");
+      expect(posted!.comments).toStrictEqual([{ path: "a.ts", line: 2, startLine: null, body: "inline" }]);
+    });
+
+    it("fails when neither a session nor a repository is given", async () => {
+      const exit = await Effect.runPromiseExit(
+        githubSubmitReview({ comments: [] }).pipe(Effect.provide(Layer.mergeAll(base, SessionStore.Default, fakeGithubApi()))),
+      );
+      expect(exit._tag).toBe("Failure");
     });
   });
 
@@ -2358,7 +2545,7 @@ describe("Auth.getSession routine sign-in fence", () => {
     const store = new RoutineStore(join(root, "routines.json"))
     const scheduler = new RoutineScheduler(store, { execute, sessionExists: async () => false }, { now: () => now, setTimer: callback => { due = callback; return callback }, clearTimer: () => { due = undefined } })
     let session: AuthSession | null = { user: { id: "operator", email: "operator@example.test", name: "Operator", image: null }, expiresAt: "2026-10-07T00:00:00.000Z" }
-    const layer = Layer.mergeAll(Layer.succeed(AuthService, { getSession: () => Effect.sync(() => session) } as AuthService), Layer.succeed(RoutinesService, RoutinesService.make({
+    const layer = Layer.mergeAll(Layer.succeed(AuthService, { checkSession: () => Effect.sync(() => session) } as unknown as AuthService), Layer.succeed(RoutinesService, RoutinesService.make({
       scheduler, start: Effect.promise(() => scheduler.start()), stop: Effect.promise(() => scheduler.stop()),
       resume: Effect.die("unused resume"), list: Effect.die("unused list"),
       save: () => Effect.die("unused save"), enable: () => Effect.die("unused enable"),

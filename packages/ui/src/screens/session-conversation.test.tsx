@@ -74,7 +74,7 @@ it("shows an empty project instead of the previous project's conversation", () =
   expect(screen.getByLabelText("Selected project").textContent).toBe("empty")
   expect(screen.getByLabelText("Active session").textContent).toBe("a1")
   expect(screen.queryByTestId("session-content")).toBeNull()
-  expect(screen.getByRole("heading", { name: "Start your first session" })).toBeTruthy()
+  expect(screen.getByRole("textbox", { name: "What should we build?" })).toBeTruthy()
 })
 
 it("routes Explorer files through the reveal callback", () => {

@@ -44,6 +44,6 @@ describe("CheckoutHeader", () => {
     expect(screen.getByText("api · feat/x")).toBeDefined()
     expect(screen.getByTestId("checkout-pr-primary").textContent).toContain("#12")
     expect(screen.getByTestId("checkout-pr-c2").textContent).toContain("#31")
-    await waitFor(() => expect(rpc.githubPrState).toHaveBeenCalledWith("s1", "c2"))
+    await waitFor(() => expect(rpc.githubPrState).toHaveBeenCalledWith("s1", undefined, "c2"))
   })
 })

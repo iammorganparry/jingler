@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, createWorkspace, expect, sessionRow, test } from "./fixtures.js"
+import { showPullRequestDetails } from "./pull-request.js"
 
 const git = (cwd: string, args: ReadonlyArray<string>, home?: string): string =>
   execFileSync("git", [...args], {
@@ -60,9 +61,11 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   // A fresh task is detached until the first understanding/retitle pass. The
   // real RPC must persist an actionable failure without staging or touching
   // GitHub, even if the user asks to publish immediately.
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await window.getByRole("button", { name: "Publish pull request" }).click()
   await expect(window.getByText("Publishing stopped")).toBeVisible()
+  const stepper = window.getByRole("list", { name: "Progress" })
+  for (const step of ["Commit", "Push", "Open PR"]) await expect(stepper.getByText(step, { exact: true })).toBeVisible()
   await expect(window.getByText(/Finish creating the semantic task branch/)).toBeVisible()
   expect(githubServer.operations).toEqual([])
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step).toBe("failed")
@@ -71,7 +74,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
     resumeFrom: "verifying-branch"
   })
 
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await expect(window.getByTestId("chat-lane-header")).toBeVisible()
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Implement deterministic publishing")
   await composer.press("Enter")
@@ -93,11 +96,11 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   // the awkward partial-success boundary: a restart must discover PR #900 and
   // continue without manufacturing another commit or PR.
   githubServer.failNext("update-pr")
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await expect(window.getByText(`Branch: ${session.branch}`)).toBeVisible()
   await window.getByRole("button", { name: /publishing again/i }).dblclick()
   await expect(window.getByText("Publishing stopped")).toBeVisible({ timeout: 25_000 })
-  await expect(window.getByText("Update pull request description")).toBeVisible()
+  await expect(window.getByRole("list", { name: "Progress" }).locator("[aria-current='step']")).toHaveText(/Open PR/)
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step).toBe("failed")
   expect(sessionsAt(home)[0]?.publish).toMatchObject({
     resumeFrom: "updating-pr",
@@ -136,13 +139,13 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
 
   await expect(appShell(restarted.window)).toBeVisible()
   await sessionRow(restarted.window, "Implement deterministic publishing").click()
-  await restarted.window.getByTestId("view-tab-pr").click()
+  await restarted.window.getByTestId("header-view-checks").click()
   await expect(restarted.window.getByText("Publishing stopped")).toBeVisible()
   await restarted.window.getByRole("button", { name: /Retry from updating-pr/ }).click()
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step, { timeout: 25_000 }).toBe("complete")
   await expect(restarted.window.getByRole("heading", { name: "Implement deterministic publishing" })).toBeVisible()
   await expect(
-    restarted.window.getByRole("button", { name: "Open on GitHub ↗" })
+    restarted.window.getByRole("button", { name: "Open on GitHub", exact: true })
   ).toBeVisible()
 
   const recovered = sessionsAt(home)[0]!
@@ -197,6 +200,9 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
   expect(
     githubServer.credentialRequests.some(({ permissions }) => permissions.includes("workflows:write"))
   ).toBe(false)
+  // Publish completion leaves exactly one persisted transcript card.
+  await expect(window.getByText(/^Opened #900/)).toHaveCount(1)
+  await expect(window.getByRole("button", { name: "View PRs", exact: true })).toBeVisible()
 })
 
 test("publishes a migration-era established jingler branch without renaming it", async ({
@@ -237,7 +243,7 @@ test("publishes a migration-era established jingler branch without renaming it",
 
   await expect(appShell(window)).toBeVisible()
   await sessionRow(window, "Publish historical session").click()
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await window.getByRole("button", { name: "Publish pull request" }).click()
   await expect.poll(
     () => sessionsAt(home)[0]?.publish?.step,
@@ -257,4 +263,98 @@ test("publishes a migration-era established jingler branch without renaming it",
     base: "main",
     title: "Publish historical session"
   })
+})
+
+test("a draft PR shows the Draft pill and Mark ready for review removes it", async ({ launchApp }) => {
+  const { window, githubServer } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [{
+      id: "s_draft",
+      repo: "widget",
+      branch: "chore/draft",
+      title: "Draft work",
+      status: "idle",
+      diff: { added: 1, removed: 0 },
+      prNumber: 483,
+      githubInstallationId: "101",
+      githubRepositoryId: "301",
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-07-11T00:00:00.000Z",
+      worktreePath: repoPath,
+      mode: "accept-edits"
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [{
+        number: 483,
+        title: "Draft work",
+        headRefName: "chore/draft",
+        baseRefName: "main",
+        author: { login: "e2e-user" },
+        isDraft: true
+      }]
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("header-view-checks").click()
+  // Mark ready lives in the PR header itself, no need to open the details drawer.
+  const header = window.getByTestId("reading-header")
+  const pill = header.getByText("Draft", { exact: true })
+  await expect(pill).toBeVisible({ timeout: 20_000 })
+  await header.getByRole("button", { name: "Mark ready for review" }).click()
+  await expect.poll(() => githubServer.operations, { timeout: 15_000 }).toContain("pr ready")
+  await expect(pill).toHaveCount(0, { timeout: 15_000 })
+  await expect(header.getByRole("button", { name: "Mark ready for review" })).toHaveCount(0)
+})
+
+test("a behind PR lists its blocker with Update branch and disables Merge with the reason", async ({ launchApp }) => {
+  const { window, githubServer } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [{
+      id: "s_behind",
+      repo: "widget",
+      branch: "chore/behind",
+      title: "Behind work",
+      status: "idle",
+      diff: { added: 1, removed: 0 },
+      prNumber: 484,
+      githubInstallationId: "101",
+      githubRepositoryId: "301",
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-07-11T00:00:00.000Z",
+      worktreePath: repoPath,
+      mode: "accept-edits"
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [{
+        number: 484,
+        title: "Behind work",
+        headRefName: "chore/behind",
+        baseRefName: "main",
+        author: { login: "e2e-user" },
+        mergeStateStatus: "BEHIND"
+      }]
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("header-view-checks").click()
+  await showPullRequestDetails(window)
+
+  const blocker = window.getByText("Branch is out of date with the base")
+  await expect(blocker).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole("button", { name: "Merge pull request" })).toBeDisabled()
+  await window.getByTestId("merge-split-button").hover()
+  await expect(window.getByRole("tooltip")).toHaveText("Branch is out of date with the base")
+  await window.mouse.move(0, 0)
+  await window.getByTestId("merge-split-button").locator("xpath=..").focus()
+  await expect(window.getByRole("tooltip")).toHaveText("Branch is out of date with the base")
+  await window.getByRole("button", { name: "Update branch" }).click()
+  await expect.poll(() => githubServer.operations.join("\n"), { timeout: 15_000 }).toContain("update-branch")
 })

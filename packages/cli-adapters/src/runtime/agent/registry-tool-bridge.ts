@@ -89,7 +89,9 @@ const execute = async (
     const denied = await Effect.runPromise(registry.deny(request))
     return { content: [{ type: "text", text: renderResult(denied) }], details: denied }
   }
-  const requiresPermission = risk !== null && risk !== "read"
+  // Plan mode is enforced by the registry itself (see `allowed`), which
+  // admits only reads and the path-checked plan writes; a gate would only prompt.
+  const requiresPermission = risk !== null && risk !== "read" && spec.mode !== "plan"
   const permitted = requiresPermission
     ? await Effect.runPromise(
         context.canUseTool({ toolId: id, risk }),

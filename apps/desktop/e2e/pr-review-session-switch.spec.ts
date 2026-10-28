@@ -23,13 +23,19 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
   await window.evaluate(() => localStorage.setItem("jingler:mcp-import-prompt:v1", "done"))
   await window.reload()
   await sessionRow(window, "review session").click()
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByTestId("header-view-checks").click()
   await showPullRequestDetails(window)
   await window.getByRole("button", { name: /Adversarial review/ }).click()
   const running = window.getByRole("button", { name: /Reading the code…|Thinking…|Writing findings…/ })
   await expect(running).toBeVisible({ timeout: 20_000 })
-  await window.getByRole("button", { name: /Reviewer/ }).click()
-  await expect(window.getByRole("textbox", { name: "Inline agents are watch-only — steer them through the main chat." })).toBeVisible()
+  // The reviewer is a child agent now: it opens from the lane header's subagent chip.
+  // The narrow-group details drawer is modal (scrim over the header): dismiss it, the run continues.
+  await window.keyboard.press("Escape")
+  await expect(window.getByTestId("drawer-scrim")).toBeHidden()
+  await window.getByTestId("subagent-chip").first().click()
+  await window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ }).click()
+  await expect(window.getByTestId("subagent-readonly-bar")).toBeVisible()
+  await showPullRequestDetails(window)
   await expect(running).toBeVisible()
 
   const cdp = await window.context().newCDPSession(window)
@@ -42,12 +48,12 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
       const start = Date.now()
       switchLatencies.push(await measureSessionSwitch(window, "s_other", 'textarea[placeholder="Message the agent…"]'))
       await expect(window.locator('[data-session="s_other"]:visible')).toHaveCount(1, { timeout: 5_000 })
-      switchLatencies.push(await measureSessionSwitch(window, "s_review", 'textarea[disabled]'))
+      switchLatencies.push(await measureSessionSwitch(window, "s_review", '[data-testid="subagent-readonly-bar"]'))
       // The PR pane is narrow beside the chat, so its details are a floating
       // sheet that starts closed when the session is shown again.
       await showPullRequestDetails(window)
       await expect(running).toBeVisible({ timeout: 5_000 })
-      await expect(window.getByRole("textbox", { name: "Inline agents are watch-only — steer them through the main chat." })).toBeVisible({ timeout: 5_000 })
+      await expect(window.getByTestId("subagent-readonly-bar")).toBeVisible({ timeout: 5_000 })
       durations.push(Date.now() - start)
     }
   } finally {

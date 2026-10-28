@@ -1,13 +1,17 @@
 import { planStageExecutionStatus, type PlanAnnotation, type PlanAnnotationAnchor, type PlanDocument, type PlanPrd } from "@jingler/core"
-import { Check, MessageSquarePlus } from "lucide-react"
+import { Check, MessageSquarePlus, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState, type RefObject } from "react"
+import { BannerShell } from "../components/banner-shell.js"
 import { Button } from "../components/button.js"
 import { PlanRevisionDiff } from "../composites/plan-change-block.js"
+import { DiscardCommentsDialog } from "../composites/discard-comments-dialog.js"
+import { countUnsavedDrafts, planDraftKey, setPlanDraftCount } from "../composites/plan-comment-drafts.js"
 import { PlanCommentLayer } from "../composites/plan-comment-layer.js"
 import { loadPlanComments, savePlanComments } from "../composites/plan-comment-store.js"
 import { buildAnchorFromRange } from "../composites/plan-doc/plan-anchor-dom.js"
 import { PlanStageCard } from "../composites/plan-stage-card.js"
 import { VisualBlocks } from "../composites/visual-blocks.js"
+import { usePlanVersion } from "./plan-review-version.js"
 
 export interface PlanReviewComment {
   readonly stageId?: string
@@ -117,7 +121,7 @@ function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<Conte
       ?.scrollIntoView({ behavior: "smooth", block: "start" })
   return (
     <nav aria-label="Plan contents" className="sticky top-10 hidden max-h-[calc(100vh-120px)] w-52 flex-none self-start overflow-y-auto @min-[1000px]:block">
-      <p className="m-0 mb-2 px-2 font-mono text-[11px] uppercase tracking-wide text-dim">Contents</p>
+      <p className="m-0 mb-2 px-2 font-mono text-[11px] text-dim">Contents</p>
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {items.map((item) => (
           <li key={item.id}>
@@ -128,7 +132,7 @@ function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<Conte
               className="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-[13px] leading-snug text-muted-foreground hover:bg-surface hover:text-text-bright aria-[current]:bg-surface aria-[current]:text-text-bright"
             >
               {item.done
-                ? <Check aria-label="Done" className="size-3 flex-none self-center text-green" strokeWidth={3} />
+                ? <Check aria-label="Done" className="size-3 flex-none self-center text-state-ready" strokeWidth={3} />
                 : item.number !== undefined && <span className="flex-none font-mono text-[11px] text-dim">{item.number}</span>}
               <span className="min-w-0">{item.label}</span>
             </button>
@@ -139,7 +143,50 @@ function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<Conte
   )
 }
 
-export function PlanReview({ document, canApprove = true, onApprove, onRevise }: PlanReviewProps) {
+const APPROVE_REASON_ID = "plan-approve-reason"
+
+function PlanDecisionFooter({ error, general, onGeneralChange, busy, blockedReason, onDecide }: {
+  readonly error: string | null
+  readonly general: string
+  readonly onGeneralChange: (value: string) => void
+  readonly busy: boolean
+  readonly blockedReason: string | undefined
+  readonly onDecide: (approved: boolean) => void
+}) {
+  const blocked = busy || blockedReason !== undefined
+  return (
+    <footer className="flex flex-col gap-2 border-t border-hairline bg-editor px-4 py-3">
+      {error !== null && <p role="alert" className="text-[12px] text-state-failed">{error}</p>}
+      <div className="flex items-end gap-2">
+        <textarea
+          aria-label="General feedback"
+          placeholder="General feedback (optional)"
+          value={general}
+          onChange={(event) => onGeneralChange(event.target.value)}
+          rows={1}
+          className="h-8 min-w-0 flex-1 resize-none rounded-[8px] border border-line bg-panel px-2 py-[5px] text-[13px] leading-5 outline-none"
+        />
+        {blockedReason !== undefined && (
+          <p id={APPROVE_REASON_ID} className="m-0 self-center text-[12px] text-muted-foreground">{blockedReason}</p>
+        )}
+        <Button variant="danger" size="sm" disabled={blocked} onClick={() => onDecide(false)}>
+          Request changes
+        </Button>
+        <Button
+          size="sm"
+          disabled={blocked}
+          aria-describedby={blockedReason === undefined ? undefined : APPROVE_REASON_ID}
+          onClick={() => onDecide(true)}
+        >
+          Approve
+        </Button>
+      </div>
+    </footer>
+  )
+}
+
+export function PlanReview({ document: latest, canApprove = true, onApprove, onRevise }: PlanReviewProps) {
+  const { document, stale, blockedReason, reload, markDecided } = usePlanVersion(latest)
   const container = useRef<HTMLDivElement | null>(null)
   const content = useRef<HTMLElement | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -151,15 +198,22 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     const saved = loadPlanComments(commentIdentity)
     return saved.length > 0 ? saved : document.plan.annotations
   })
+  const [replyDrafts, setReplyDrafts] = useState<Readonly<Record<string, string>>>({})
+  const [pendingDecision, setPendingDecision] = useState<boolean | null>(null)
   const [general, setGeneral] = useState("")
   const [busy, setBusy] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [showChanges, setShowChanges] = useState(false)
-  const canDecide =
-    canApprove &&
-    document.reviewId !== undefined &&
-    (document.status === "proposed" || document.status === "revising")
+  const canDecide = canApprove && document.reviewId !== undefined && document.status === "proposed"
+  const showFooter = canApprove && (canDecide || latest.status === "revising")
   const { plan } = document
+  const draftCount = countUnsavedDrafts(draft === null ? "" : draftBody, replyDrafts)
+  const draftKey = planDraftKey(document.sessionId, document.producingChatId)
+
+  useEffect(() => {
+    setPlanDraftCount(draftKey, draftCount)
+    return () => setPlanDraftCount(draftKey, 0)
+  }, [draftKey, draftCount])
 
   useEffect(() => {
     if (commentIdentityRef.current !== commentIdentity) {
@@ -182,6 +236,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
   const decide = async (approved: boolean) => {
     setBusy(true)
     setDecisionError(null)
+    markDecided()
     try {
       if (approved) await onApprove?.()
       else await onRevise?.(planFeedbackMarkdown(
@@ -198,6 +253,18 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     } finally {
       setBusy(false)
     }
+  }
+
+  const requestDecision = (approved: boolean) => {
+    if (draftCount > 0) setPendingDecision(approved)
+    else void decide(approved)
+  }
+
+  const discardDraftsAndDecide = (approved: boolean) => {
+    setDraft(null)
+    setDraftBody("")
+    setReplyDrafts({})
+    return decide(approved)
   }
 
   const saveDraft = () => {
@@ -252,22 +319,31 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
 
   return (
     <section aria-label="Plan review" data-testid="plan-review" className="flex min-h-0 min-w-0 flex-1 flex-col bg-editor">
+      {stale && (
+        <BannerShell
+          placement="top"
+          icon={<RefreshCw size={12} />}
+          actions={[<Button key="reload" variant="ghost" size="sm" onClick={reload}>Reload</Button>]}
+        >
+          Plan changed since you opened it
+        </BannerShell>
+      )}
       <div ref={container} className="@container relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[1120px] gap-10 px-8 py-10">
           <PlanContents items={contents} scroller={container} />
         <article ref={content} className="sb-plan flex min-w-0 max-w-[760px] flex-1 flex-col">
-          <header className="border-b border-line pb-8">
-            <p className="m-0 font-mono text-[12px] uppercase tracking-wide text-dim">
-              Plan · revision {document.revision} · {document.status}
+          <header className="flex flex-col gap-2 border-b border-hairline pb-4">
+            <p className="m-0 font-mono text-[12px] text-dim">
+              Plan revision {document.revision} ({document.status})
             </p>
-            <h1 className="sb-plan-doc-title mt-2">{plan.title}</h1>
+            <h1 className="sb-plan-doc-title m-0">{plan.title}</h1>
             {plan.stages.length > 0 && (
-              <p className="mt-3 text-[14px] text-muted-foreground">
+              <p className="m-0 text-[13px] leading-5 text-muted-foreground">
                 {plan.stages.length} {plan.stages.length === 1 ? "stage" : "stages"} · {fileCount} {fileCount === 1 ? "file" : "files"} touched
               </p>
             )}
             {document.previousSourceMarkdown !== undefined && document.sourceMarkdown !== undefined && (
-              <div className="mt-4 flex flex-col gap-2">
+              <div className="flex flex-col gap-2">
                 <Button
                   variant="secondary"
                   size="sm"
@@ -299,7 +375,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         </article>
         </div>
 
-        <PlanCommentLayer key={document.revision} container={container} content={content} comments={comments} editable={canDecide} onReply={reply} onResolve={resolve} />
+        <PlanCommentLayer key={document.revision} container={container} content={content} comments={comments} editable={canDecide} replyDrafts={replyDrafts} onReplyDraftChange={(id, text) => setReplyDrafts((current) => ({ ...current, [id]: text }))} onReply={reply} onResolve={resolve} />
 
         {selection !== null && draft === null && (
           <button
@@ -309,7 +385,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               setDraft(selection)
               setSelection(null)
             }}
-            className="absolute z-20 inline-flex items-center gap-1 rounded-md border border-line bg-sunken px-2 py-1 text-[12px] text-text-bright shadow-lg"
+            className="absolute z-20 inline-flex items-center gap-1 rounded-[6px] border border-line-strong bg-surface px-2 py-1 text-[12px] text-text-bright shadow-lg"
             style={{ top: selection.top, left: selection.left }}
           >
             <MessageSquarePlus className="size-3" /> Add comment
@@ -317,7 +393,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         )}
         {draft !== null && (
           <div
-            className="absolute z-30 w-[320px] rounded-lg border border-line bg-editor p-2 shadow-xl"
+            className="absolute z-30 w-[320px] rounded-[8px] border border-line-strong bg-surface p-2 shadow-xl"
             style={{ top: draft.top, left: Math.max(8, draft.left) }}
           >
             <textarea
@@ -325,7 +401,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               value={draftBody}
               onChange={(event) => setDraftBody(event.target.value)}
               rows={3}
-              className="w-full resize-none rounded border border-line bg-editor p-1.5 text-[13px] outline-none"
+              className="w-full resize-none rounded-[8px] border border-line bg-editor p-1.5 text-[13px] outline-none"
             />
             <div className="mt-1.5 flex justify-end gap-1.5">
               <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>Cancel</Button>
@@ -335,25 +411,22 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         )}
       </div>
 
-      {canDecide && (
-        <footer className="flex flex-col gap-2 border-t border-line bg-panel px-4 py-3">
-          {decisionError !== null && <p role="alert" className="text-[11.5px] text-red">{decisionError}</p>}
-          <div className="flex items-end gap-2">
-            <textarea
-              aria-label="General feedback"
-              placeholder="General feedback (optional)"
-              value={general}
-              onChange={(event) => setGeneral(event.target.value)}
-              rows={1}
-              className="min-w-0 flex-1 resize-none rounded border border-line bg-editor px-2 py-1.5 text-[13px] outline-none"
-            />
-            <Button variant="danger" size="sm" disabled={busy} onClick={() => void decide(false)}>
-              Request changes
-            </Button>
-            <Button size="sm" disabled={busy} onClick={() => void decide(true)}>Approve</Button>
-          </div>
-        </footer>
+      {showFooter && (
+        <PlanDecisionFooter
+          error={decisionError}
+          general={general}
+          onGeneralChange={setGeneral}
+          busy={busy}
+          blockedReason={blockedReason}
+          onDecide={requestDecision}
+        />
       )}
+      <DiscardCommentsDialog
+        open={pendingDecision !== null}
+        count={draftCount}
+        onOpenChange={(open) => { if (!open) setPendingDecision(null) }}
+        onDiscard={() => discardDraftsAndDecide(pendingDecision === true)}
+      />
     </section>
   )
 }

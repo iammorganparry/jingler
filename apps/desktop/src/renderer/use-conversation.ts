@@ -19,6 +19,7 @@ import type {
   GateDecision,
   Message,
   PermissionMode,
+  WorkMode,
   PlannotatorProjection,
   ProviderConnectionId,
   ProviderId,
@@ -37,6 +38,7 @@ import type {
 import { pendingQuestion } from "@jingler/core"
 import type { QueuedMessage } from "./conversation-machine.js"
 import { getConversationActor } from "./conversation-registry.js"
+import { setPlanDisconnected } from "./plan-presence.js"
 import { rpc } from "./rpc-client.js"
 
 export interface Conversation {
@@ -106,6 +108,10 @@ export interface Conversation {
   readonly retryPrompt: (() => void) | null
   readonly decideGate: (gateId: string, decision: GateDecision) => void
   readonly setMode: (mode: PermissionMode) => void
+  readonly approvalMode: PermissionMode
+  readonly workMode: WorkMode
+  readonly autoSwitch: boolean
+  readonly setWorkMode: (workMode: WorkMode, autoSwitch?: boolean) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
   readonly setModel: (
     runtimeId: AgentRuntimeId,
@@ -162,8 +168,7 @@ export function useConversation(
     let cancelled = false
     void rpc.agentPlannotatorRecoveryNeeded(session.id, chatId).then((needed) => {
       if (cancelled || !needed) return
-      actor.send({ type: "SET_MODE", mode: "plan" })
-      actor.send({ type: "SEND", text: "/plannotator-resume-review" })
+      setPlanDisconnected(chatId, true)
     }).catch(() => {
       if (!cancelled) recoveryChecked.current = null
     })
@@ -191,6 +196,7 @@ export function useConversation(
         answerQuestion: (requestId, answers) =>
           actor.send({ type: "ANSWER_QUESTION", requestId, answers }),
         setMode: (m) => actor.send({ type: "SET_MODE", mode: m }),
+        setWorkMode: (workMode, autoSwitch) => actor.send({ type: "SET_WORK_MODE", workMode, autoSwitch }),
         setReasoning: (value) =>
           actor.send({ type: "SET_REASONING", reasoning: value }),
         setModel: (runtime, endpoint, connection, provider, selectedModel) =>
@@ -216,6 +222,7 @@ export function useConversation(
         | "decideGate"
         | "answerQuestion"
         | "setMode"
+        | "setWorkMode"
         | "setReasoning"
         | "setModel"
         | "stop"
@@ -226,7 +233,7 @@ export function useConversation(
     [actor, session.id]
   )
   const {
-    messages, mode, reasoning, skills, files,
+    messages, mode, executionMode, autoSwitch, reasoning, skills, files,
     runtimeId, endpointId, connectionId, providerId, modelId, modelPending, queued, steeringId,
     subagents, subagentFleetEvents, subagentControlOutcomes,
     tokens, contextBreakdown, hasMoreHistory, loadingHistory,
@@ -270,6 +277,9 @@ export function useConversation(
     hasMoreHistory,
     loadingHistory,
     mode,
+    approvalMode: executionMode,
+    autoSwitch,
+    workMode: mode === "plan" ? "plan" as const : "build" as const,
     reasoning,
     skills,
     files,

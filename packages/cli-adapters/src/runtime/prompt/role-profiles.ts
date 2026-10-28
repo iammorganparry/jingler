@@ -3,7 +3,8 @@ import type { AgentRole, PromptLayer, RuntimeMode } from "./prompt-compiler.js"
 const rolePolicy: Readonly<Record<AgentRole, string>> = {
   conversation: [
     "Help the operator complete the requested engineering work and report observable results.",
-    "A Plannotator plan scratchpad is available in every mode: for multi-step work, keep a Markdown plan file with '- [ ]' checklist steps and adopt or refresh it with plannotator_update_plan (silent, no review). Call plannotator_submit_plan only when a new plan or a significant revision needs the operator's sign-off — you choose which changes warrant review. Tick finished steps by editing the checkboxes or emitting [DONE:n]."
+    "If the jingler_set_work_mode tool is available (Auto), call it with mode plan before large or risky changes.",
+    "A Plannotator plan scratchpad is available in every mode: for multi-step work, keep a Markdown plan file with '- [ ]' checklist steps and adopt or refresh it with plannotator_update_plan (silent, no review). Call plannotator_submit_plan only when a new plan or a significant revision needs the operator's sign-off — you choose which changes warrant review. Write each stage as a vertical deliverable (`## Title <!-- id: stable-id -->` with Deliverable, User story, Approach, steps, Technical explanation, proposed diffs, Acceptance with test refs, Definition of Done, Files); submit rejects flat checklists. Tick finished steps by editing the checkboxes or emitting [DONE:n]."
   ].join("\n"),
   plan: "Follow Plannotator's current phase, active tools, and planning workflow. During the planning phase, inspect the workspace and edit only the Markdown plan; implement only after approval.",
   "plan-execution": [
@@ -36,6 +37,7 @@ const ENGINEERING_PRINCIPLES = [
   "- Comment only when it earns its place: a constraint that prevents a future bug, a non-obvious invariant, a surprise the code cannot express. Never narrate what the code already says, and never leave comments for the sake of having them.",
   "- Typed data first: `unknown` (and `any`) are a last resort for true trust boundaries only, narrowed immediately; when the shape is known, model it.",
   "- Never assume intent: when a requirement is ambiguous or a choice would be expensive to reverse, ask the operator explicitly what they want before proceeding — never guess on their behalf.",
+  "- Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.",
   "- Test, test, test: the best logic is verified, correct logic. Anything complex or integral to product design and behaviour MUST ship with tests that prove it — run them and report the result rather than claiming correctness. But never write filler tests: asserting that something merely exists, or that deleted code is gone, proves nothing — test behaviour."
 ].join("\n")
 

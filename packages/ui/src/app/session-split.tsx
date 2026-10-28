@@ -1,5 +1,7 @@
+import type { SubagentFleetNode } from "@jingler/core"
+import type { UseSessionTerminals } from "./terminal-panel.js"
 import type { ReactNode } from "react"
-import type { DiffStat, IssueIdentity, Session, SessionActivity } from "@jingler/core"
+import type { DiffStat, IssueIdentity, Session, SessionActivity, SessionPrStatus } from "@jingler/core"
 import type { SplitGroup } from "./split-layout.js"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { effectiveDock } from "./dock-fit.js"
@@ -39,6 +41,10 @@ export interface SessionSplitProps {
   onTrackFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
   conversationPane?: ReactNode
+  /** Fleet nodes per session id; any with a PR join the header PRs chip. */
+  /** Open a session PR (main or subagent) in the PR view. */
+  onOpenSessionPr?: (sessionId: string, prNumber: number) => void
+  subagentPrNodes?: Readonly<Record<string, ReadonlyArray<SubagentFleetNode>>>
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -62,6 +68,7 @@ export interface SessionSplitProps {
   explanationSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>
   liveDiff?: Record<string, DiffStat>
+  prStates?: Record<string, SessionPrStatus>
   debugStopSequences?: Readonly<Record<string, number>>
   onOpenSettings?: () => void
   onOpenProviderSettings?: () => void
@@ -79,8 +86,12 @@ export interface SessionSplitProps {
    */
   paneContributions?: ReadonlyArray<PaneContribution>
   onRevealChanges?: (sessionId: string) => void
+  /** Pinned header view ids in order; absent hides the header view buttons. */
+  headerViews?: ReadonlyArray<string>
+  /** Persist a new pinned header view set. */
+  onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
+  useSessionTerminals?: UseSessionTerminals
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
    *
@@ -118,11 +129,13 @@ export function SessionSplit(props: SessionSplitProps) {
       renderExplanation={props.renderExplanation}
       renderFiles={props.renderFiles}
       renderBrowser={props.renderBrowser}
-      renderTerminal={props.renderTerminalDock}
+      useSessionTerminals={props.useSessionTerminals}
       onTrackFile={props.onTrackFile}
       onRequestCloseFile={props.onRequestCloseFile}
       conversationPane={props.conversationPane}
       renderSubagentTabs={props.renderSubagentTabs}
+      subagentPrNodes={props.subagentPrNodes}
+      onOpenSessionPr={props.onOpenSessionPr}
       onRenameSession={props.onRenameSession}
       onCreateChat={props.onCreateChat}
       onCloseUntouchedChat={props.onCloseUntouchedChat}
@@ -134,6 +147,7 @@ export function SessionSplit(props: SessionSplitProps) {
       explanationSessions={props.explanationSessions}
       liveActivity={props.liveActivity}
       liveDiff={props.liveDiff}
+      prStates={props.prStates}
       debugStopSequence={props.debugStopSequences?.[session.id] ?? 0}
       onOpenSettings={props.onOpenSettings}
       onOpenProviderSettings={props.onOpenProviderSettings}
@@ -143,6 +157,8 @@ export function SessionSplit(props: SessionSplitProps) {
       tabContributions={props.tabContributions}
       onSelectIssue={props.onSelectIssue}
       onRevealChanges={props.onRevealChanges}
+      headerViews={props.headerViews}
+      onHeaderViewsChange={props.onHeaderViewsChange}
       renderReviewTray={props.renderReviewTray}
     />
   ) : (

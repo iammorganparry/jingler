@@ -2,17 +2,10 @@ import { Command, CommandExecutor } from "@effect/platform"
 import type { AssetFileEntry } from "@jingler/core"
 import { Data, Effect, Schema, Stream } from "effect"
 import { AssetService } from "../../asset.js"
-import { ToolError, cwdOf, type ToolDefinition, type ToolExecutionContext, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
+import { ToolError, cwdOf, toolRoles, codeReadModes, type ToolDefinition, type ToolExecutionContext, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
 
-const roles = [
-  "conversation",
-  "plan",
-  "plan-execution",
-  "review",
-  "context-digest",
-  "background"
-] as const
-const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
+const roles = toolRoles
+const modes = codeReadModes
 const EmptyInput = Schema.Struct({})
 const EMPTY_PROVIDER_INPUT = {
   type: "object",

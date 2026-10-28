@@ -18,7 +18,7 @@ function CallFrame({ frame }: { readonly frame: PlanCallPathFrame }) {
 function CallPath({ label, frames }: { readonly label: string; readonly frames: ReadonlyArray<PlanCallPathFrame> }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">{label}</span>
+      <span className="text-[10px] font-semibold text-muted-foreground">{label}</span>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         {frames.map((frame, index) => (
           <div key={frameKey(frame, index)} className="contents">

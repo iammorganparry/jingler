@@ -1,4 +1,4 @@
-import { issueReferenceForProvider, type PrState, type Session } from "@jingler/core"
+import { issueReferenceForProvider, type PrState, type Session, type SessionPrStatus } from "@jingler/core"
 
 /**
  * Session ids whose linked PR has MERGED and whose linked issue should now be
@@ -33,23 +33,68 @@ import { issueReferenceForProvider, type PrState, type Session } from "@jingler/
  * `alreadyNotified` plays the same role as `alreadyClosed` above: a merged PR
  * stays merged, so without it the poll re-announces it every tick.
  */
-/** A session whose linked PR has resolved, and how. */
+/** One PR in a session's stack with its last polled status. */
+export interface PrLayer {
+  readonly number: number
+  readonly status: SessionPrStatus
+}
+
+/** PR numbers to poll for a session, bottom of the stack first. A pre-stack session reads as one PR. */
+export const prNumbersOf = (session: Session): ReadonlyArray<number> =>
+  session.prs?.length ? session.prs.map((pr) => pr.number) : session.prNumber === null ? [] : [session.prNumber]
+
+/** Dedupe key for "already announced": one notification per (session, PR), never per session. */
+export const prNotifyKey = (sessionId: string, prNumber: number): string => `${sessionId}#${prNumber}`
+
+/** A PR layer that has just RESOLVED, and how. `stackedUnder` is the next layer up, when there is one. */
 export interface ResolvedPr {
   readonly session: Session
+  readonly number: number
   readonly state: "merged" | "closed"
+  readonly stackedUnder?: number
 }
 
 export const prsToNotify = (
-  prStates: Readonly<Record<string, PrState>>,
+  stacks: Readonly<Record<string, ReadonlyArray<PrLayer>>>,
   sessions: ReadonlyArray<Session>,
   alreadyNotified: ReadonlySet<string>
 ): ReadonlyArray<ResolvedPr> =>
-  sessions.flatMap((session) => {
-    const state = prStates[session.id]
-    if (state !== "merged" && state !== "closed") return []
-    if (alreadyNotified.has(session.id)) return []
-    return [{ session, state }]
-  })
+  sessions.flatMap((session) =>
+    (stacks[session.id] ?? []).flatMap((layer, index, layers) => {
+      const state = layer.status.state
+      if (state !== "merged" && state !== "closed") return []
+      if (alreadyNotified.has(prNotifyKey(session.id, layer.number))) return []
+      const above = layers[index + 1]
+      return [{ session, number: layer.number, state, ...(above ? { stackedUnder: above.number } : {}) }]
+    })
+  )
+
+/**
+ * Lifecycle of a whole stack, for the close-on-merge sweep: it is "merged" only once EVERY layer
+ * has resolved and at least one merged ("closed" if none did). While any layer is unresolved the
+ * stack is still "open", so a merged bottom layer never closes the issue early.
+ */
+export const stackLifecycle = (layers: ReadonlyArray<PrLayer>): PrState | undefined => {
+  if (layers.length === 0) return undefined
+  const states = layers.map((layer) => layer.status.state)
+  if (!states.every((state) => state === "merged" || state === "closed")) return "open"
+  return states.includes("merged") ? "merged" : "closed"
+}
+
+// Lower is worse: failing CI, then closed, then running/queued, then healthy, then merged.
+const layerSeverity = ({ state, checks }: SessionPrStatus): number => {
+  if (state === "merged") return 4
+  if (state === "closed") return 1
+  if (checks === "fail") return 0
+  return checks === "running" || checks === "pending" ? 2 : 3
+}
+
+/** The status a session displays for its stack: the worst layer wins; merged lower layers never hide a failing upper one. */
+export const worstPrStatus = (layers: ReadonlyArray<PrLayer>): SessionPrStatus | undefined =>
+  layers.reduce<SessionPrStatus | undefined>(
+    (worst, { status }) => (worst === undefined || layerSeverity(status) < layerSeverity(worst) ? status : worst),
+    undefined
+  )
 
 export const issuesToCloseOnMerge = (
   prStates: Readonly<Record<string, PrState>>,

@@ -69,12 +69,17 @@ const setWindowSize = async (page: Page, width: number, height: number) => {
   await page.waitForTimeout(120)
 }
 
+// With only chats open, editor-groups renders the chat-lane header (#327) instead of
+// the file tab strip; it is the ancestor bar of the "New tab" launcher.
+const chatLaneBar = (page: Page) =>
+  page.getByRole("button", { name: "New tab" }).first().locator("xpath=ancestor::div[contains(@class,'border-hairline')][1]")
+
 test("the tab bar does not spill at half-screen width", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
   await sessionRow(window, "Alpha session").click()
   await setWindowSize(window, 940, 700)
 
-  const bar = window.getByTestId("editor-tab-strip").first()
+  const bar = chatLaneBar(window)
   await expect(bar).toBeVisible()
   // The tab STRIP scrolls; the bar itself must not.
   const over = await bar.evaluate((el) => el.scrollWidth - el.clientWidth)
@@ -88,7 +93,7 @@ test("the tab strip survives all the way down to the window's minimum", async ({
 
   // Everything else in the cluster may fold into the overflow menu. This may not:
   // it is the control you reach for BECAUSE the pane is too narrow to read.
-  await expect(window.getByTestId("editor-tab-strip").first()).toBeVisible()
+  await expect(chatLaneBar(window)).toBeVisible()
 })
 
 test("the sidebar collapses to a rail and every session stays reachable", async ({ launchApp }) => {
@@ -116,4 +121,35 @@ test("nothing non-scrollable overflows its box at the window minimum", async ({ 
     `div:not(.xterm-helpers):not(${SCROLLABLE}):not(:has(${SCROLLABLE}))`
   )
   expect(offenders).toEqual({})
+})
+
+test("at 1024px the chat lane is an overlay drawer: Esc closes it and it never covers the sidebar", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{ ...SESSIONS[0]!, worktreePath: context.repoPath }]
+  })
+  await sessionRow(window, "Alpha session").click()
+
+  // Open a file so the chat lane has content beside it, then narrow below 1100px.
+  await window.keyboard.press("Meta+p")
+  const palette = window.getByRole("dialog", { name: "Command palette" })
+  await palette.getByRole("option", { name: "README.md" }).click()
+  await setWindowSize(window, 1024, 700)
+
+  const drawer = window.getByTestId("chat-drawer")
+  await expect(drawer).toHaveCount(0)
+  await window.getByRole("button", { name: "Show chat lane" }).click()
+  await expect(drawer).toBeVisible()
+  await expect(window.getByTestId("chat-drawer-scrim")).toBeVisible()
+
+  const drawerBox = await drawer.boundingBox()
+  const sidebarBox = await window.getByTestId("session-sidebar").boundingBox()
+  expect(drawerBox!.width).toBeLessThanOrEqual(400)
+  expect(drawerBox!.x).toBeGreaterThanOrEqual(sidebarBox!.x + sidebarBox!.width - 1)
+
+  await window.keyboard.press("Escape")
+  await expect(drawer).toHaveCount(0)
 })

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
-import { compareVersions, notesBetween, parseChangelog } from "./release-notes.js"
+import { compareVersions, entriesBetween, notesBetween, parseChangelog } from "./release-notes.js"
 
 const CHANGELOG = [
   "# @jingler/desktop",
@@ -50,6 +50,7 @@ describe("release notes", () => {
   it("has nothing to say for the same or an older version", () => {
     const entries = parseChangelog(CHANGELOG)
     expect(notesBetween(entries, "0.3.0", "0.3.0")).toEqual([])
+    expect(entriesBetween(entries, "0.2.0", "0.3.0").map((entry) => entry.version)).toEqual(["0.3.0", "0.2.1"])
     expect(notesBetween(entries, "0.3.0", "0.2.1")).toEqual([])
   })
 

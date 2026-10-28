@@ -1,5 +1,6 @@
 import { NativeEndpointLogin } from "@jingler/core"
 import {
+  ImportableSession,
   ProjectConfig,
   RoutineInput,
   RoutineDocument,
@@ -25,7 +26,9 @@ import {
   GitConfig,
   GithubConfig,
   NotificationKind,
+  NotificationPermission,
   NotificationsConfig,
+  VoiceConfig,
   ObsidianExplanationsConfig,
   Issue,
   IssueAutomations,
@@ -56,11 +59,13 @@ import {
   SshHost,
   ExternalInstructionIdentity,
   PermissionMode,
+  WorkMode,
   PlanTemplateConfig,
   PrFileChange,
   McpConfigEntry,
   McpRemoteAuth,
   McpImportCandidateView,
+  McpImportResolution,
   McpImportSourceId,
   McpServer,
   McpServerStatus,
@@ -78,6 +83,7 @@ import {
   WorkspaceCheckpoint,
   WorkspaceCheckpointPreview,
   PublishCheckpoint,
+  RestackedLayer,
   PullRequest,
   PullRequestListItem,
   GitHubTeamDiscovery,
@@ -134,7 +140,8 @@ import {
   ManagedResourceScope,
   ResourceDetectionResult,
   ResourceImportResult,
-  FONT_SCALE_RANGE
+  FONT_SCALE_RANGE,
+  HEADER_VIEWS_MAX
 } from "@jingler/core"
 import {
   AssetOutsideWorktreeError,
@@ -152,6 +159,7 @@ import {
   GitHubApiError,
   GitError,
   PluginError,
+  RestackConflictError,
   ReviewError,
   SessionNotFoundError,
   TerminalError,
@@ -226,17 +234,21 @@ export type SessionReviewDiff = Schema.Schema.Type<typeof SessionReviewDiff>
  * one nested client type exceeds TypeScript's instantiation depth; the server
  * merges both groups back into the single IPC surface below.
  */
-export class AssetListRpcs extends RpcGroup.make(
-  Rpc.make("Asset.list", {
-    success: Schema.Array(AssetFileEntry),
-    error: Schema.Union(
-      AssetOutsideWorktreeError,
-      GitError,
-      SessionNotFoundError
-    ),
-    payload: { sessionId: Schema.String }
-  })
-) {}
+export const VoiceModel = Schema.Struct({
+  id: Schema.String,
+  sizeBytes: Schema.Number,
+  installed: Schema.Boolean,
+  downloading: Schema.Boolean,
+  receivedBytes: Schema.Number
+})
+export type VoiceModel = Schema.Schema.Type<typeof VoiceModel>
+
+/** Local speech-to-text failed; `no-model` means no whisper.cpp model/binary is installed. */
+export class VoiceError extends Schema.TaggedError<VoiceError>()("VoiceError", {
+  reason: Schema.Literal("no-model", "failed"),
+  message: Schema.String
+}) {}
+
 
 /**
  * The Jingler RPC surface — a single source of truth shared by the Electron
@@ -664,20 +676,19 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, path: Schema.String }
   }),
 
-  /** Revert just the uncommitted changes in a NEW-file line range (reverse-apply). */
-  Rpc.make("Workspace.revertLines", {
-    error: GitError,
-    payload: {
-      sessionId: Schema.String,
-      path: Schema.String,
-      startLine: Schema.Number,
-      endLine: Schema.Number
-    }
-  }),
-
   /** List all agent sessions for the sidebar. */
   Rpc.make("Sessions.list", {
     success: Schema.Array(Session)
+  }),
+
+  /**
+   * Chats whose last persisted turn was still streaming when the app died and
+   * that have no live turn now. Read-only: derived from each transcript's tail.
+   */
+  Rpc.make("Sessions.interruptedChats", {
+    success: Schema.Array(
+      Schema.Struct({ sessionId: Schema.String, chatId: Schema.String })
+    )
   }),
 
   /** Fetch one session by id. */
@@ -951,6 +962,21 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
+  /** Scan all local CLI session stores and return importable sessions. */
+  Rpc.make("Sessions.scanImportable", {
+    success: Schema.Array(ImportableSession)
+  }),
+
+  /** Import one session from a native CLI store. */
+  Rpc.make("Sessions.import", {
+    success: Session,
+    error: GitError,
+    payload: {
+      source: Schema.Literal("claude-code", "codex", "conductor", "t3code"),
+      nativeSessionId: Schema.String
+    }
+  }),
+
   /**
    * A newest-anchored window of the transcript.
    *
@@ -997,7 +1023,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.diff", {
     success: SessionReviewDiff,
     error: GitError,
-    payload: { id: Schema.String, checkoutId: Schema.optional(Schema.String) }
+    payload: {
+      id: Schema.String,
+      checkoutId: Schema.optional(Schema.String),
+      /** A subagent's own worktree to diff instead of the session checkout. */
+      workspacePath: Schema.optional(Schema.String)
+    }
   }),
 
   /** Lightweight totals for badges and the Changes tab. */
@@ -1058,6 +1089,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       chatId: Schema.String,
       requestId: Schema.String,
       answers: Schema.Array(QuestionAnswer)
+    }
+  }),
+
+  /** Switch a chat between Plan and Build without touching its approval level. */
+  Rpc.make("Agent.setWorkMode", {
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      workMode: WorkMode,
+      /** Omitted leaves the chat's Auto setting unchanged. */
+      autoSwitch: Schema.optional(Schema.Boolean)
     }
   }),
 
@@ -1216,99 +1258,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
-  // ── MCP servers — the operator's ~/jingler/mcp.json ────────────────────────
-
-  /**
-   * The redacted server list plus the file's parse problem, if any. Entries
-   * carry header/env NAMES only — mcp.json itself never crosses this boundary.
-   */
-  Rpc.make("Mcp.list", {
-    success: Schema.Struct({
-      servers: Schema.Array(McpServer),
-      /** Why mcp.json could not be parsed; `servers` is empty then. */
-      error: Schema.NullOr(Schema.String)
-    })
-  }),
-
-  /**
-   * Live probe of every configured server (`initialize` + `tools/list`).
-   * User-initiated only — probing spawns stdio server commands.
-   */
-  Rpc.make("Mcp.status", {
-    success: Schema.Array(McpServerStatus),
-    error: ConfigError
-  }),
-
-  /** Create or replace one entry. Values travel INBOUND only. */
-  Rpc.make("Mcp.write", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String, entry: McpConfigEntry }
-  }),
-
-  Rpc.make("Mcp.remove", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String }
-  }),
-
-  Rpc.make("Mcp.setEnabled", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String, enabled: Schema.Boolean }
-  }),
-
-  Rpc.make("Mcp.setAuth", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: { name: Schema.String, auth: McpRemoteAuth }
-  }),
-
-  /** Save or replace one API key in the encrypted device credential document. */
-  Rpc.make("Mcp.setApiKey", {
-    success: Schema.Void,
-    error: ConfigError,
-    payload: SetMcpApiKeyInput.fields
-  }),
-
-  /** Begin OAuth in the system browser; completion lands on a loopback callback. */
-  Rpc.make("Mcp.startAuthorization", {
-    success: McpAuthorizationStart,
-    error: ConfigError,
-    payload: { name: Schema.String }
-  }),
-
-  /** Parse one source config into redacted candidates for confirmation. */
-  Rpc.make("Mcp.importCandidates", {
-    success: Schema.Array(McpImportCandidateView),
-    error: ConfigError,
-    payload: {
-      source: McpImportSourceId,
-      /** Also run `claude mcp list` for claude.ai connectors and plugin servers (slow). */
-      connectors: Schema.optional(Schema.Boolean)
-    }
-  }),
-
-  /**
-   * Import the confirmed candidates by name. The source file is re-parsed in
-   * the main process, so secret values never round-trip through the renderer.
-   * Returns the names actually written; existing names are skipped.
-   */
-  Rpc.make("Mcp.applyImport", {
-    success: Schema.Array(Schema.String),
-    error: ConfigError,
-    payload: {
-      source: McpImportSourceId,
-      names: Schema.Array(Schema.String),
-      connectors: Schema.optional(Schema.Boolean)
-    }
-  }),
-
-  /** Reveal mcp.json in the file manager, creating an empty file if absent. */
-  Rpc.make("Mcp.reveal", {
-    success: Schema.Void,
-    error: ConfigError
-  }),
 
   /** Provider usage / rate-limit windows for the Usage & limits modal. */
   Rpc.make("Usage.get", {
@@ -1451,6 +1400,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: ObsidianExplanationsConfig
   }),
 
+  /** Persist voice input preferences (language, model, hold-to-talk key). */
+  Rpc.make("Config.setVoice", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: VoiceConfig
+  }),
+
   /** Persist the user's desktop-notification preferences. */
   Rpc.make("Config.setNotifications", {
     success: WorkspaceConfig,
@@ -1587,11 +1543,40 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
+  /**
+   * Can the OS show notifications? Settings → Notifications uses this to warn
+   * when they cannot. Electron has no permission query, so main answers
+   * `unsupported` or `unknown`, never a guessed `granted`/`denied`.
+   */
+  Rpc.make("Notify.permission", {
+    success: NotificationPermission
+  }),
+
+  /**
+   * Open the OS notification settings pane so the operator can un-block
+   * Jingler. macOS only (`shell.openExternal` with an `x-apple.systempreferences:`
+   * URL); other platforms no-op, since there is nowhere equivalent to send them.
+   */
+  Rpc.make("Notify.openSystemSettings", {
+    success: Schema.Void
+  }),
+
   /** Persist the full set of starred repo paths (replaces the stored list). */
   Rpc.make("Config.setStarredRepos", {
     success: WorkspaceConfig,
     error: ConfigError,
     payload: { paths: Schema.Array(Schema.String) }
+  }),
+
+  /**
+   * Persist the ordered list of views pinned to the workspace header. The bound
+   * lives in the contract (like `Config.setFontScale`), so a sixth view is
+   * rejected before main runs; unknown ids are dropped by the service.
+   */
+  Rpc.make("Config.setHeaderViews", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: { views: Schema.Array(Schema.String).pipe(Schema.maxItems(HEADER_VIEWS_MAX)) }
   }),
 
   /** Persist the full set of collapsed repo paths (replaces the stored list). */
@@ -1617,8 +1602,228 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
 ) {}
 
+/**
+ * Asset, voice, MCP and window RPCs. Split from the core group because inferring
+ * one client over every RPC exceeds TypeScript's instantiation depth (TS2589).
+ */
+export class AssetListRpcs extends RpcGroup.make(
+  Rpc.make("Asset.list", {
+    success: Schema.Array(AssetFileEntry),
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      GitError,
+      SessionNotFoundError
+    ),
+    payload: { sessionId: Schema.String }
+  }),
+  /**
+   * Read-only adversarial review of an inbox PR (no session). Nothing is stored or
+   * posted to GitHub — the findings come back as drafts for the Review drawer.
+   */
+  Rpc.make("Review.draftPr", {
+    success: AdversarialReview,
+    error: Schema.Union(ReviewError, GitHubApiError),
+    payload: { repository: Schema.String, number: Schema.Number }
+  }),
+  /** Transcribe a 16 kHz mono WAV (base64) locally with whisper.cpp. Macs prompt for mic access first. */
+  Rpc.make("Voice.transcribe", {
+    success: Schema.Struct({ text: Schema.String }),
+    error: VoiceError,
+    payload: {
+      wavBase64: Schema.String,
+      /** whisper-cli `-l` code, or "auto". */
+      language: Schema.optional(Schema.String),
+      /** Installed model id to use; falls back to any installed model. */
+      modelId: Schema.optional(Schema.String)
+    }
+  }),
+
+  /** Pinned whisper models with install state and live download progress. */
+  Rpc.make("Voice.models", {
+    success: Schema.Array(VoiceModel)
+  }),
+
+  /** Download a pinned model, verify its SHA-256, then move it into place. Resolves when installed. */
+  Rpc.make("Voice.downloadModel", {
+    success: Schema.Void,
+    error: VoiceError,
+    payload: { id: Schema.String }
+  }),
+
+  Rpc.make("Voice.removeModel", {
+    success: Schema.Void,
+    payload: { id: Schema.String }
+  }),
+
+  /** macOS mic permission (`askForMediaAccess`); other platforms resolve true. */
+  Rpc.make("Voice.requestMicrophone", {
+    success: Schema.Boolean
+  }),
+
+  // ── MCP servers — the operator's ~/jingler/mcp.json ────────────────────────
+
+  /**
+   * The redacted server list plus the file's parse problem, if any. Entries
+   * carry header/env NAMES only — mcp.json itself never crosses this boundary.
+   */
+  /** Has the operator dismissed the Home MCP-import card? */
+  Rpc.make("Mcp.importDismissed", {
+    success: Schema.Boolean,
+    error: ConfigError
+  }),
+
+  /** Persist that the Home MCP-import card is dismissed for good. */
+  Rpc.make("Mcp.dismissImport", {
+    success: Schema.Void,
+    error: ConfigError
+  }),
+
+  Rpc.make("Mcp.list", {
+    success: Schema.Struct({
+      servers: Schema.Array(McpServer),
+      /** Why mcp.json could not be parsed; `servers` is empty then. */
+      error: Schema.NullOr(Schema.String)
+    })
+  }),
+
+  /**
+   * Live probe of every configured server (`initialize` + `tools/list`).
+   * User-initiated only — probing spawns stdio server commands.
+   */
+  Rpc.make("Mcp.status", {
+    success: Schema.Array(McpServerStatus),
+    error: ConfigError
+  }),
+
+  /**
+   * The last `lines` (default 200, max 500) stderr lines the most recent probe saw
+   * from a stdio server. Empty for an unknown, remote or never-probed server.
+   */
+  Rpc.make("Mcp.logTail", {
+    success: Schema.Struct({ lines: Schema.Array(Schema.String) }),
+    payload: { server: Schema.String, lines: Schema.optional(Schema.Number) }
+  }),
+
+  /** Create or replace one entry. Values travel INBOUND only. */
+  Rpc.make("Mcp.write", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, entry: McpConfigEntry }
+  }),
+
+  Rpc.make("Mcp.remove", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String }
+  }),
+
+  Rpc.make("Mcp.setEnabled", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, enabled: Schema.Boolean }
+  }),
+
+  Rpc.make("Mcp.setAuth", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, auth: McpRemoteAuth }
+  }),
+
+  /** Persist the set of tool names disabled for one server; the runtime skips them on registration. */
+  Rpc.make("Mcp.setDisabledTools", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, disabledTools: Schema.Array(Schema.String) }
+  }),
+
+  /** Clear a server's stored OAuth credential only — the server config and other servers are untouched. */
+  Rpc.make("Mcp.signOut", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String }
+  }),
+
+  /** Save or replace one API key in the encrypted device credential document. */
+  Rpc.make("Mcp.setApiKey", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: SetMcpApiKeyInput.fields
+  }),
+
+  /** Begin OAuth in the system browser; completion lands on a loopback callback. */
+  Rpc.make("Mcp.startAuthorization", {
+    success: McpAuthorizationStart,
+    error: ConfigError,
+    payload: { name: Schema.String }
+  }),
+
+  /** Parse one source config into redacted candidates for confirmation. */
+  Rpc.make("Mcp.importCandidates", {
+    success: Schema.Array(McpImportCandidateView),
+    error: ConfigError,
+    payload: {
+      source: McpImportSourceId,
+      /** Also run `claude mcp list` for claude.ai connectors and plugin servers (slow). */
+      connectors: Schema.optional(Schema.Boolean)
+    }
+  }),
+
+  /**
+   * Import the confirmed candidates by name. The source file is re-parsed in
+   * the main process, so secret values never round-trip through the renderer.
+   * Returns the names actually written; existing names are skipped.
+   */
+  Rpc.make("Mcp.applyImport", {
+    success: Schema.Array(Schema.String),
+    error: ConfigError,
+    payload: {
+      source: McpImportSourceId,
+      names: Schema.Array(Schema.String),
+      /** Per-name conflict resolution; a conflicting name with no entry keeps the existing server. */
+      resolutions: Schema.optional(Schema.Record({ key: Schema.String, value: McpImportResolution })),
+      connectors: Schema.optional(Schema.Boolean)
+    }
+  }),
+
+  /** Open the app's log folder in the file manager (crash screen "Open logs"). */
+  Rpc.make("App.revealLogs", {}),
+
+  /** Minimize the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.minimize", {}),
+
+  /** Toggle maximize/restore on the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.toggleMaximize", {}),
+
+  /** Close the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.close", {}),
+
+  /** Check if the main window is currently maximized (Windows/Linux custom controls). */
+  Rpc.make("Window.isMaximized", {
+    success: Schema.Boolean
+  }),
+
+  /** Reveal mcp.json in the file manager, creating an empty file if absent. */
+  Rpc.make("Mcp.reveal", {
+    success: Schema.Void,
+    error: ConfigError
+  }),
+
+  /** Reopen a closed issue by repository slug (`gh issue reopen <n> --repo <slug>`). */
+  Rpc.make("Github.reopenIssue", {
+    error: GitHubApiError,
+    payload: { repository: Schema.String, number: Schema.Number }
+  })
+) {}
+
 /** Review, preview, theme, and plugin half of the renderer RPC client. */
 export class JinglerReviewRpcs extends RpcGroup.make(
+  /** Persist one PR lifecycle card (opened/merged) in the transcript. Null when that card already exists. */
+  Rpc.make("Github.recordPrEvent", {
+    success: Schema.NullOr(Message),
+    error: GitError,
+    payload: { sessionId: Schema.String, kind: Schema.Literal("opened", "merged"), number: Schema.Number }
+  }),
+
   /**
    * Run an adversarial review of the session's linked PR: a reviewer agent runs
    * READ-ONLY in the session's worktree, on the configured review model (Fable by
@@ -1730,7 +1935,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.pr", {
     success: Schema.NullOr(PullRequest),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, checkoutId: Schema.optional(Schema.String) }
+    /** `number` picks one layer of a stack; omitted reads the session's top PR. */
+    payload: { sessionId: Schema.String, number: Schema.optional(Schema.Number), checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** Open PRs across every repository granted to the GitHub App. */
@@ -1859,21 +2065,28 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.prState", {
     success: Schema.NullOr(SessionPrStatus),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, checkoutId: Schema.optional(Schema.String) }
+    /** `number` picks one layer of a stack; omitted reads the session's top PR. */
+    payload: { sessionId: Schema.String, number: Schema.optional(Schema.Number), checkoutId: Schema.optional(Schema.String) }
   }),
 
-  /** The changed files of a session's PR, for the Code Review file list. */
+  /**
+   * The changed files of a session's PR, for the Code Review file list. `prNumber`
+   * picks one layer of the session's PR stack (default: the top layer).
+   */
   Rpc.make("Github.files", {
     success: Schema.Array(PrFileChange),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, checkoutId: Schema.optional(Schema.String) }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number), checkoutId: Schema.optional(Schema.String) }
   }),
 
-  /** The unified diff of a session's PR vs its base branch. */
+  /**
+   * The unified diff of a session's PR vs its base branch. `prNumber` picks one
+   * layer of the stack (default: the top layer); a number outside the stack yields "".
+   */
   Rpc.make("Github.diff", {
     success: Schema.String,
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, checkoutId: Schema.optional(Schema.String) }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number), checkoutId: Schema.optional(Schema.String) }
   }),
 
   /**
@@ -1894,7 +2107,15 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.createPr", {
     success: PublishCheckpoint,
     stream: true,
-    payload: { sessionId: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      /**
+       * Target base branch. When it is the head branch of a PR already in the
+       * session's stack, the new PR is appended to the stack instead of
+       * replacing the session's single PR. Defaults to the session's base.
+       */
+      base: Schema.optional(Schema.String)
+    }
   }),
 
   /**
@@ -1955,7 +2176,12 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.Number,
     error: GitHubApiError,
     payload: {
-      sessionId: Schema.String,
+      /** A session's PR; omit it and pass `repository` + `number` for an inbox PR with no session. */
+      sessionId: Schema.optional(Schema.String),
+      repository: Schema.optional(Schema.String),
+      number: Schema.optional(Schema.Number),
+      /** The operator's own text, posted above the inline comments. */
+      body: Schema.optional(Schema.String),
       comments: Schema.Array(ReviewComment)
     }
   }),
@@ -2026,6 +2252,20 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.updateBranch", {
     error: GitHubApiError,
     payload: { sessionId: Schema.String }
+  }),
+
+  /**
+   * After the stack layer `mergedPr` merged, rebase every layer above it onto
+   * the merged layer's base, force-push each with `--force-with-lease`,
+   * retarget its PR base on GitHub, and update the stored stack. Returns one
+   * entry per restacked layer (empty when nothing sits above `mergedPr`). A
+   * rebase conflict fails with `RestackConflictError` carrying the paths; that
+   * layer's branch is left untouched.
+   */
+  Rpc.make("Github.restack", {
+    success: Schema.Array(RestackedLayer),
+    error: Schema.Union(GitHubApiError, GitError, SessionNotFoundError, RestackConflictError),
+    payload: { sessionId: Schema.String, mergedPr: Schema.Number }
   }),
 
   // ── Terminal ───────────────────────────────────────────────────────────────
@@ -2137,9 +2377,10 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   // lives in the OS keychain (main process); these procedures let the renderer
   // read the session, kick off sign-in, and sign out.
 
-  /** The current authenticated session, or null when signed out. */
+  /** The current authenticated session, or null when signed out; `AuthError` when the auth server is unreachable. */
   Rpc.make("Auth.getSession", {
-    success: Schema.NullOr(AuthSession)
+    success: Schema.NullOr(AuthSession),
+    error: AuthError
   }),
 
   /**
@@ -2199,6 +2440,16 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 
   /** Reload the current page. No-op if closed. */
   Rpc.make("BrowserPreview.reload", {
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /** Step back one history entry. No-op if closed or there is no history. */
+  Rpc.make("BrowserPreview.goBack", {
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /** Step forward one history entry. No-op if closed or there is no forward history. */
+  Rpc.make("BrowserPreview.goForward", {
     payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 

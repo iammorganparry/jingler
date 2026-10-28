@@ -5,6 +5,7 @@ import type {
   ResourceDetectionResult,
   ResourceImportResult
 } from "@jingler/core"
+import type { ResourceKindFilter, ResourceSourceFilter } from "@jingler/ui"
 import { assign, fromCallback, fromPromise, setup } from "xstate"
 
 export interface AgentsSettingsApi {
@@ -32,6 +33,9 @@ export interface AgentsSettingsContext {
   readonly detection: ResourceDetectionResult | null
   readonly selectedCandidateIds: ReadonlySet<string>
   readonly pending: PendingResourceAction | null
+  readonly query: string
+  readonly kind: ResourceKindFilter
+  readonly source: ResourceSourceFilter
   readonly error: string | null
 }
 
@@ -44,6 +48,9 @@ export type AgentsSettingsEvent =
   | { readonly type: "REMOVE"; readonly selector: ManagedResourceSelector }
   | { readonly type: "REVEAL"; readonly selector: ManagedResourceSelector }
   | { readonly type: "RETRY" }
+  | { readonly type: "SET_QUERY"; readonly query: string }
+  | { readonly type: "SET_KIND"; readonly kind: ResourceKindFilter }
+  | { readonly type: "SET_SOURCE"; readonly source: ResourceSourceFilter }
   | { readonly type: "WATCHED"; readonly resources: ReadonlyArray<ManagedResource> }
 
 const messageOf = (error: unknown): string =>
@@ -90,10 +97,16 @@ export const createAgentsSettingsMachine = (api: AgentsSettingsApi) =>
       detection: null,
       selectedCandidateIds: new Set(),
       pending: null,
+      query: "",
+      kind: "all",
+      source: "all",
       error: null
     },
     invoke: { src: "watch" },
     on: {
+      SET_QUERY: { actions: assign({ query: ({ event }) => event.query }) },
+      SET_KIND: { actions: assign({ kind: ({ event }) => event.kind }) },
+      SET_SOURCE: { actions: assign({ source: ({ event }) => event.source }) },
       WATCHED: {
         actions: assign({ resources: ({ event }) => event.resources })
       }

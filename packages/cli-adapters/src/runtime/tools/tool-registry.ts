@@ -7,7 +7,7 @@ import type {
 } from "@jingler/core"
 import type { PromptToolCapability } from "../prompt/prompt-compiler.js"
 import type { WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
-import { Effect, Either, JSONSchema, Schema } from "effect"
+import { Effect, Either, JSONSchema, ParseResult, Schema } from "effect"
 
 export const INTERACTIVE_TOOL_TIMEOUT_MS = 24 * 60 * 60_000
 
@@ -20,6 +20,7 @@ export type ToolIdempotency = "safe" | "keyed" | "unsafe"
 
 export const codeReadRoles = ["conversation", "plan", "plan-execution", "review", "background"] as const
 export const codeWriteRoles = ["conversation", "plan-execution", "background"] as const
+export const toolRoles = ["conversation", "plan", "plan-execution", "review", "context-digest", "background"] as const
 export const codeReadModes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 export const codeWriteModes = ["ask", "accept-edits", "auto"] as const
 
@@ -84,6 +85,8 @@ export interface ToolExecutionContext {
   /** Per-call cwd override (e.g. a validated subagent child cwd); absent means the tool's registered default. */
   readonly cwd?: string
   readonly signal: AbortSignal
+  /** True for plan-mode calls; scoped tools (plan-file writes, read-only shell) must self-check via plan-policy. */
+  readonly plan?: boolean
   readonly idempotencyKey: string | null
   readonly progress: (progress: ToolProgress) => void
 }
@@ -165,14 +168,28 @@ export interface ToolExecutionObserver {
   ) => Effect.Effect<void, ToolError>
 }
 
-const readOnlyRole = (role: AgentRole): boolean => role === "plan" || role === "review"
 const mutatingRisk = (risk: ToolRisk): boolean => risk === "mutate" || risk === "execute"
+
+/** Plan mode: the one capability filter every harness's tool calls route through (deny by default). */
+const PLAN_NETWORK_TOOLS = new Set(["web_search", "mcp_search"])
+/** Allowed in plan only after a per-call check in plan-policy.ts. */
+const PLAN_SCOPED_TOOLS = new Set(["workspace_write", "workspace_edit", "command_execute"])
+/** Jingler control tools that stay callable in plan: the agent must be able to switch modes. */
+const PLAN_CONTROL_TOOLS = new Set(["jingler_set_work_mode"])
+const isPlan = (role: AgentRole, mode: RuntimeMode): boolean => role === "plan" || mode === "plan"
+const planFlag = (input: ToolExecutionRequest): { readonly plan?: true } =>
+  isPlan(input.role, input.mode) ? { plan: true } : {}
+const planAllows = (tool: AnyToolDefinition): boolean =>
+  tool.origin?.kind === "plugin"
+    ? tool.risk === "read"
+    : tool.risk === "read" || PLAN_CONTROL_TOOLS.has(tool.id) || PLAN_NETWORK_TOOLS.has(tool.id) || PLAN_SCOPED_TOOLS.has(tool.id)
 
 const allowed = (tool: AnyToolDefinition, role: AgentRole, mode: RuntimeMode): boolean =>
   tool.roles.includes(role) &&
   tool.modes.includes(mode) &&
-  !(readOnlyRole(role) && mutatingRisk(tool.risk)) &&
-  !(mode === "read-only" && mutatingRisk(tool.risk))
+  !(role === "review" && mutatingRisk(tool.risk)) &&
+  !(mode === "read-only" && mutatingRisk(tool.risk)) &&
+  (!isPlan(role, mode) || planAllows(tool))
 
 const errorEnvelope = (error: ToolError): ToolResultEnvelope => ({
   status: error.code === "cancelled" ? "cancelled" : "error",
@@ -184,6 +201,31 @@ const errorEnvelope = (error: ToolError): ToolResultEnvelope => ({
 
 const abortError = (signal: AbortSignal): ToolError =>
   new ToolError(signal.reason === "timeout" ? "timed-out" : "cancelled", signal.reason === "timeout" ? "Tool timed out" : "Tool cancelled", true)
+
+/** Agent-supplied present-tense summary of the call; stripped before decoding, never forwarded to the tool. */
+const IntentValue = Schema.String.pipe(Schema.maxLength(60))
+const isIntentValue = Schema.is(IntentValue)
+
+const stripIntent = (
+  args: unknown
+): { readonly ok: true; readonly value: unknown } | { readonly ok: false } => {
+  if (typeof args !== "object" || args === null || Array.isArray(args) || !("intent" in args)) {
+    return { ok: true, value: args }
+  }
+  const { intent, ...rest } = args as Record<string, unknown>
+  return isIntentValue(intent) ? { ok: true, value: rest } : { ok: false }
+}
+
+const INTENT_PROPERTY = {
+  type: "string",
+  maxLength: 60,
+  description: "Present-tense summary of what this call does and why, shown to the user while it runs."
+} as const
+
+const withIntentProperty = (schema: ToolProviderInputSchema): ToolProviderInputSchema => ({
+  ...schema,
+  properties: { ...schema.properties, intent: INTENT_PROPERTY }
+})
 
 export type JsonSchemaNode = { readonly type?: unknown; readonly anyOf?: ReadonlyArray<JsonSchemaNode>; readonly properties?: Record<string, JsonSchemaNode> }
 
@@ -235,11 +277,15 @@ const validateExecution = (
   if (tool.idempotency === "keyed" && !input.idempotencyKey) {
     return { ok: false, result: errorEnvelope(new ToolError("invalid-input", "Tool requires an idempotency key")) }
   }
+  const stripped = stripIntent(input.arguments)
+  if (!stripped.ok) {
+    return { ok: false, result: errorEnvelope(new ToolError("invalid-input", "intent must be a string of at most 60 characters")) }
+  }
   const schema = (tool.providerInputSchema ?? JSONSchema.make(tool.input)) as JsonSchemaNode
-  const normalized = normalizeStringifiedArguments(schema, input.arguments)
+  const normalized = normalizeStringifiedArguments(schema, stripped.value)
   const decoded = Schema.decodeUnknownEither(tool.input)(normalized)
   return Either.isLeft(decoded)
-    ? { ok: false, result: errorEnvelope(new ToolError("invalid-input", "Tool input failed validation")) }
+    ? { ok: false, result: errorEnvelope(new ToolError("invalid-input", `Tool input failed validation: ${ParseResult.TreeFormatter.formatErrorSync(decoded.left).slice(0, 600)}`)) }
     : { ok: true, value: decoded.right }
 }
 
@@ -322,6 +368,7 @@ const executeDefinition = async (
     input.signal?.addEventListener("abort", onAbort, { once: true })
   const execution = tool.execute(value, {
     signal: controller.signal,
+    ...planFlag(input),
     idempotencyKey: input.idempotencyKey ?? null,
     progress: input.progress ?? (() => undefined),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd })
@@ -427,7 +474,12 @@ export class ToolRegistry {
   }
 
   providerInputSchemaFor(id: string): ToolProviderInputSchema | null {
-    return this.#tools.get(id)?.providerInputSchema ?? null
+    const tool = this.#tools.get(id)
+    if (!tool) return null
+    const schema =
+      tool.providerInputSchema ??
+      ({ ...(JSONSchema.make(tool.input) as unknown as Record<string, unknown>), type: "object" } as unknown as ToolProviderInputSchema)
+    return withIntentProperty(schema)
   }
 
   hasMutatingTools(role: AgentRole, mode: RuntimeMode): boolean {

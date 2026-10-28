@@ -27,6 +27,7 @@ import type {
   ExecutionMode,
   Environment,
   ExplanationDocument,
+  ImportableSession,
   PairSshEnvironmentInput,
   SshHost,
   ExternalInstructionIdentity,
@@ -40,7 +41,9 @@ import type {
   GitConfig,
   ObsidianExplanationsConfig,
   NotificationKind,
+  NotificationPermission,
   NotificationsConfig,
+  VoiceConfig,
   GithubConfig,
   Issue,
   IssueAutomations,
@@ -59,6 +62,7 @@ import type {
   ProjectRunCommand,
   WorkspaceRunState,
   PermissionMode,
+  WorkMode,
   PlanDocument,
   PlanTemplateConfig,
   PrFileChange,
@@ -66,6 +70,7 @@ import type {
   SessionPrStatus,
   PrSummary,
   PublishCheckpoint,
+  RestackedLayer,
   PullRequest,
   PullRequestListItem,
   IssueInboxResult,
@@ -110,6 +115,7 @@ import type {
   DetectedResourceCandidate,
   McpConfigEntry,
   McpImportCandidateView,
+  McpImportResolution,
   McpImportSourceId,
   McpServer,
   ManagedResource,
@@ -129,7 +135,8 @@ import {
   type SessionCreationUpdate,
   type SessionDiffStat,
   type SessionFileDiff,
-  type SessionReviewDiff
+  type SessionReviewDiff,
+  type VoiceModel
 } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type {
@@ -147,6 +154,7 @@ import {
   Scope,
   Stream
 } from "effect"
+import { reportRpcResult } from "./connectivity.js"
 import { unwrapRpcFailure } from "./rpc-failure.js"
 
 /**
@@ -221,7 +229,12 @@ const run = <A>(
 ): Promise<A> =>
   clientPromise
     .then((client) => coreRuntime.runPromise(f(client), { signal }))
-    .catch((error) => Promise.reject(unwrapRpcFailure(error)))
+    .then((value) => { reportRpcResult(); return value })
+    .catch((error) => {
+      const failure = unwrapRpcFailure(error)
+      if (!signal?.aborted) reportRpcResult(failure)
+      return Promise.reject(failure)
+    })
 
 const runAssetList = <A>(
   f: (
@@ -389,33 +402,43 @@ export const rpc = {
   mcpList: (): Promise<{
     readonly servers: ReadonlyArray<McpServer>
     readonly error: string | null
-  }> => run((c) => c.Mcp.list()),
+  }> => runAssetList((c) => c.Mcp.list()),
   mcpStatus: (): Promise<ReadonlyArray<McpServerStatus>> =>
-    run((c) => c.Mcp.status()),
+    runAssetList((c) => c.Mcp.status()),
+  mcpLogTail: (server: string, lines?: number): Promise<{ readonly lines: ReadonlyArray<string> }> =>
+    runAssetList((c) => c.Mcp.logTail({ server, lines })),
   mcpWrite: (name: string, entry: McpConfigEntry): Promise<void> =>
-    run((c) => c.Mcp.write({ name, entry })),
+    runAssetList((c) => c.Mcp.write({ name, entry })),
   mcpRemove: (name: string): Promise<void> =>
-    run((c) => c.Mcp.remove({ name })),
+    runAssetList((c) => c.Mcp.remove({ name })),
   mcpSetEnabled: (name: string, enabled: boolean): Promise<void> =>
-    run((c) => c.Mcp.setEnabled({ name, enabled })),
+    runAssetList((c) => c.Mcp.setEnabled({ name, enabled })),
   mcpSetAuth: (name: string, auth: McpRemoteAuth): Promise<void> =>
-    run((c) => c.Mcp.setAuth({ name, auth })),
+    runAssetList((c) => c.Mcp.setAuth({ name, auth })),
+  mcpSetDisabledTools: (name: string, disabledTools: ReadonlyArray<string>): Promise<void> =>
+    runAssetList((c) => c.Mcp.setDisabledTools({ name, disabledTools })),
+  mcpImportDismissed: (): Promise<boolean> => runAssetList((c) => c.Mcp.importDismissed()),
+  mcpDismissImport: (): Promise<void> => runAssetList((c) => c.Mcp.dismissImport()),
+  mcpSignOut: (name: string): Promise<void> =>
+    runAssetList((c) => c.Mcp.signOut({ name })),
   mcpSetApiKey: (name: string, apiKey: string): Promise<void> =>
-    run((c) => c.Mcp.setApiKey({ name, apiKey })),
+    runAssetList((c) => c.Mcp.setApiKey({ name, apiKey })),
   mcpStartAuthorization: (name: string) =>
-    run((c) => c.Mcp.startAuthorization({ name })),
+    runAssetList((c) => c.Mcp.startAuthorization({ name })),
   mcpImportCandidates: (
     source: McpImportSourceId,
     connectors?: boolean
   ): Promise<ReadonlyArray<McpImportCandidateView>> =>
-    run((c) => c.Mcp.importCandidates({ source, connectors })),
+    runAssetList((c) => c.Mcp.importCandidates({ source, connectors })),
   mcpApplyImport: (
     source: McpImportSourceId,
     names: ReadonlyArray<string>,
+    resolutions?: Readonly<Record<string, McpImportResolution>>,
     connectors?: boolean
   ): Promise<ReadonlyArray<string>> =>
-    run((c) => c.Mcp.applyImport({ source, names, connectors })),
-  mcpReveal: (): Promise<void> => run((c) => c.Mcp.reveal()),
+    runAssetList((c) => c.Mcp.applyImport({ source, names, resolutions, connectors })),
+  appRevealLogs: (): Promise<void> => runAssetList((c) => c.App.revealLogs()),
+  mcpReveal: (): Promise<void> => runAssetList((c) => c.Mcp.reveal()),
   agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>
     run((c) => c.AgentResources.remove(selector)),
   agentResourcesSetEnabled: (
@@ -557,8 +580,15 @@ export const rpc = {
     run((c) => c.Environment.revoke({ deviceId })),
   sessionsList: (): Promise<ReadonlyArray<Session>> =>
     run((c) => c.Sessions.list()),
+  sessionsInterruptedChats: (): Promise<
+    ReadonlyArray<{ readonly sessionId: string; readonly chatId: string }>
+  > => run((c) => c.Sessions.interruptedChats()),
   sessionsGet: (id: string): Promise<Session> =>
     run((c) => c.Sessions.get({ id })),
+  sessionsScanImportable: (): Promise<ReadonlyArray<ImportableSession>> =>
+    run((c) => c.Sessions.scanImportable()),
+  sessionsImport: (source: ImportableSession["source"], nativeSessionId: string): Promise<Session> =>
+    run((c) => c.Sessions.import({ source, nativeSessionId })),
   sessionsCreate: (
     input: CreateSessionInput,
     onProgress?: (phase: SessionCreationPhase) => void
@@ -613,6 +643,8 @@ export const rpc = {
     run((c) => c.Sessions.resolveRuntimeRecovery({ sessionId, runId, callId })),
   sessionsRetitle: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.retitle({ sessionId })),
+  sessionsRecordPrEvent: (sessionId: string, kind: "opened" | "merged", number: number): Promise<Message | null> =>
+    run((c) => c.Github.recordPrEvent({ sessionId, kind, number })),
   sessionsRename: (sessionId: string, title: string): Promise<Session> =>
     run((c) => c.Sessions.rename({ sessionId, title })),
   sessionsSetEnvironment: (sessionId: string, environmentId?: string): Promise<Session> =>
@@ -676,8 +708,8 @@ export const rpc = {
     attachmentId: string
   ): Promise<string | null> =>
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),
-  sessionsDiff: (id: string, checkoutId?: string): Promise<SessionReviewDiff> =>
-    run((c) => c.Sessions.diff({ id, checkoutId })),
+  sessionsDiff: (id: string, checkoutId?: string, workspacePath?: string): Promise<SessionReviewDiff> =>
+    run((c) => c.Sessions.diff({ id, checkoutId, workspacePath })),
   sessionsDiffStat: (id: string): Promise<SessionDiffStat> =>
     run((c) => c.Sessions.diffStat({ id })),
   sessionsFileDiff: (id: string, path: string): Promise<SessionFileDiff> =>
@@ -743,15 +775,6 @@ export const rpc = {
     run((c) => c.Asset.hidePdf({ sessionId })),
   workspaceRevertFile: (sessionId: string, path: string): Promise<void> =>
     run((c) => c.Workspace.revertFile({ sessionId, path })),
-  workspaceRevertLines: (
-    sessionId: string,
-    path: string,
-    startLine: number,
-    endLine: number
-  ): Promise<void> =>
-    run((c) =>
-      c.Workspace.revertLines({ sessionId, path, startLine, endLine })
-    ),
   skillsList: (sessionId: string): Promise<ReadonlyArray<Skill>> =>
     run((c) => c.Skills.list({ sessionId })),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),
@@ -794,6 +817,12 @@ export const rpc = {
     chatId: string,
     mode: PermissionMode
   ): Promise<void> => run((c) => c.Agent.setMode({ sessionId, chatId, mode })),
+  agentSetWorkMode: (
+    sessionId: string,
+    chatId: string,
+    workMode: WorkMode,
+    autoSwitch?: boolean
+  ): Promise<void> => run((c) => c.Agent.setWorkMode({ sessionId, chatId, workMode, ...(autoSwitch === undefined ? {} : { autoSwitch }) })),
   agentSetReasoning: (
     sessionId: string,
     chatId: string,
@@ -887,6 +916,8 @@ export const rpc = {
     run((c) => c.Config.setSubagentModel({ providerId, agent, modelId })),
   configSetPlanAutoRun: (planAutoRun: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanAutoRun({ planAutoRun })),
+  configSetVoice: (voice: VoiceConfig): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setVoice(voice)),
   /** Persist ADHD mode; resolves with the whole updated config. */
   configSetAdhdMode: (adhdMode: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setAdhdMode({ adhdMode })),
@@ -933,10 +964,23 @@ export const rpc = {
     body: string
     isActiveSession: boolean
   }): Promise<void> => run((c) => c.Notify.show(input)),
+  notifyPermission: (): Promise<NotificationPermission> =>
+    run((c) => c.Notify.permission()),
+  notifyOpenSystemSettings: (): Promise<void> =>
+    run((c) => c.Notify.openSystemSettings()),
+  voiceRequestMicrophone: (): Promise<boolean> =>
+    runAssetList((c) => c.Voice.requestMicrophone()),
+  voiceTranscribe: (wavBase64: string, language?: string, modelId?: string): Promise<{ text: string }> =>
+    runAssetList((c) => c.Voice.transcribe({ wavBase64, language, modelId })),
+  voiceModels: (): Promise<ReadonlyArray<VoiceModel>> => runAssetList((c) => c.Voice.models()),
+  voiceDownloadModel: (id: string): Promise<void> => runAssetList((c) => c.Voice.downloadModel({ id })),
+  voiceRemoveModel: (id: string): Promise<void> => runAssetList((c) => c.Voice.removeModel({ id })),
   configSetStarredRepos: (
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setStarredRepos({ paths })),
+  configSetHeaderViews: (views: ReadonlyArray<string>): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setHeaderViews({ views })),
   configSetCollapsedRepos: (
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>
@@ -947,10 +991,10 @@ export const rpc = {
     template: PlanTemplateConfig
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanTemplate({ template })),
-  githubPr: (sessionId: string, checkoutId?: string): Promise<PullRequest | null> =>
-    run((c) => c.Github.pr({ sessionId, checkoutId })),
-  githubPrState: (sessionId: string, checkoutId?: string): Promise<SessionPrStatus | null> =>
-    run((c) => c.Github.prState({ sessionId, checkoutId })),
+  githubPr: (sessionId: string, number?: number, checkoutId?: string): Promise<PullRequest | null> =>
+    run((c) => c.Github.pr({ sessionId, ...(number === undefined ? {} : { number }), ...(checkoutId === undefined ? {} : { checkoutId }) })),
+  githubPrState: (sessionId: string, number?: number, checkoutId?: string): Promise<SessionPrStatus | null> =>
+    run((c) => c.Github.prState({ sessionId, ...(number === undefined ? {} : { number }), ...(checkoutId === undefined ? {} : { checkoutId }) })),
   githubTeams: (): Promise<GitHubTeamDiscovery> => run((c) => c.Github.teams()),
   githubTeamPrs: (input: { accountId: string; organization: string; teamSlug: string; queue: GitHubTeamQueue; refresh: boolean }): Promise<GitHubTeamPrResult> =>
     run((c) => c.Github.teamPrs(input)),
@@ -974,6 +1018,8 @@ export const rpc = {
     run((c) => c.Github.issueCommentBySlug({ repository, number, body })),
   githubIssueCloseBySlug: (repository: string, number: number): Promise<void> =>
     run((c) => c.Github.issueCloseBySlug({ repository, number })),
+  githubReopenIssue: (repository: string, number: number): Promise<void> =>
+    runAssetList((c) => c.Github.reopenIssue({ repository, number })),
   githubListPrs: (
     repoPath: string,
     opts: { mine: boolean; search: string; githubSlug?: string }
@@ -992,10 +1038,10 @@ export const rpc = {
     run((c) => c.Github.closeIssue({ sessionId })),
   githubIssue: (sessionId: string): Promise<Issue | null> =>
     run((c) => c.Github.issue({ sessionId })),
-  githubFiles: (sessionId: string, checkoutId?: string): Promise<ReadonlyArray<PrFileChange>> =>
-    run((c) => c.Github.files({ sessionId, checkoutId })),
-  githubDiff: (sessionId: string, checkoutId?: string): Promise<string> =>
-    run((c) => c.Github.diff({ sessionId, checkoutId })),
+  githubFiles: (sessionId: string, prNumber?: number, checkoutId?: string): Promise<ReadonlyArray<PrFileChange>> =>
+    run((c) => c.Github.files({ sessionId, ...(prNumber === undefined ? {} : { prNumber }), ...(checkoutId === undefined ? {} : { checkoutId }) })),
+  githubDiff: (sessionId: string, prNumber?: number, checkoutId?: string): Promise<string> =>
+    run((c) => c.Github.diff({ sessionId, ...(prNumber === undefined ? {} : { prNumber }), ...(checkoutId === undefined ? {} : { checkoutId }) })),
   githubDetectPr: (sessionId: string): Promise<number | null> =>
     run((c) => c.Github.detectPr({ sessionId })),
   githubEvents: (
@@ -1062,6 +1108,9 @@ export const rpc = {
    */
   reviewRun: (sessionId: string, force = false): Promise<AdversarialReview> =>
     run((c) => c.Review.run({ sessionId, force })),
+  /** Read-only review of an inbox PR (no session); the findings are drafts, nothing is posted. */
+  reviewDraftPr: (repository: string, number: number): Promise<AdversarialReview> =>
+    runAssetList((c) => c.Review.draftPr({ repository, number })),
   reviewGet: (sessionId: string): Promise<AdversarialReview | null> =>
     run((c) => c.Review.get({ sessionId })),
   /**
@@ -1079,14 +1128,16 @@ export const rpc = {
     run((c) => c.Review.reconcile({ sessionId })),
   githubPublish: (
     sessionId: string,
-    onCheckpoint: (checkpoint: PublishCheckpoint) => void
+    onCheckpoint: (checkpoint: PublishCheckpoint) => void,
+    /** Stack the new PR on this branch (the head of a PR already in the stack). */
+    base?: string
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = coreRuntime.runFork(
-        client.Github.createPr({ sessionId }).pipe(
+        client.Github.createPr({ sessionId, ...(base === undefined ? {} : { base }) }).pipe(
           Stream.runForEach((checkpoint) =>
             Effect.sync(() => onCheckpoint(checkpoint))
           )
@@ -1133,6 +1184,14 @@ export const rpc = {
     comments: ReadonlyArray<ReviewComment>
   ): Promise<number> =>
     run((c) => c.Github.submitReview({ sessionId, comments })),
+  /** Same as `githubSubmitReview` for an inbox PR that has no session. */
+  githubSubmitReviewBySlug: (
+    repository: string,
+    number: number,
+    comments: ReadonlyArray<ReviewComment>,
+    body?: string
+  ): Promise<number> =>
+    run((c) => c.Github.submitReview({ repository, number, comments, ...(body ? { body } : {}) })),
   githubResolveThread: (
     sessionId: string,
     threadId: string,
@@ -1152,6 +1211,9 @@ export const rpc = {
   /** Merge the base into the PR's head on GitHub (clears a `BEHIND` merge state). */
   githubUpdateBranch: (sessionId: string): Promise<void> =>
     run((c) => c.Github.updateBranch({ sessionId })),
+  /** After `mergedPr` merged, rebase and retarget the stack layers above it. */
+  githubRestack: (sessionId: string, mergedPr: number): Promise<ReadonlyArray<RestackedLayer>> =>
+    run((c) => c.Github.restack({ sessionId, mergedPr })),
 
   /**
    * Subscribe to a prompt's normalized event stream. Forks the RPC stream on the
@@ -1252,6 +1314,12 @@ export const rpc = {
   /** Reload the current preview page. */
   browserPreviewReload: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.BrowserPreview.reload({ sessionId, chatId })),
+  /** Step the preview back one history entry. */
+  browserPreviewGoBack: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.goBack({ sessionId, chatId })),
+  /** Step the preview forward one history entry. */
+  browserPreviewGoForward: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.goForward({ sessionId, chatId })),
   /** Hide the native view for a tab switch, keeping its page and history alive. */
   browserPreviewSetVisible: (
     sessionId: string,
@@ -1536,7 +1604,13 @@ export const rpc = {
    * contract themes have, and the reason a plugin author can edit a file and see
    * the tab update without restarting the app.
    */
-  pluginsWatch: (onCatalog: (catalog: PluginCatalog) => void): (() => void) => {
+  // Window controls (Windows/Linux custom title bar)
+  windowMinimize: (): Promise<void> => runAssetList((c) => c.Window.minimize()),
+  windowToggleMaximize: (): Promise<void> => runAssetList((c) => c.Window.toggleMaximize()),
+  windowClose: (): Promise<void> => runAssetList((c) => c.Window.close()),
+  windowIsMaximized: (): Promise<boolean> => runAssetList((c) => c.Window.isMaximized()),
+
+    pluginsWatch: (onCatalog: (catalog: PluginCatalog) => void): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
     void clientPromise.then((client) => {

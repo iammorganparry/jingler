@@ -156,3 +156,97 @@ export const usageReportFromFacts = (
   }))
   return { generatedAt, facts: [...facts], groups }
 }
+
+/** Usage view filters: an inclusive ISO `startedAt` range and/or a single runtime. `project` is reserved until facts carry a project id. */
+export type UsageFactFilter = {
+  readonly from?: string
+  readonly to?: string
+  readonly runtimeId?: AgentRuntimeId
+}
+
+export const filterUsageFacts = (
+  facts: ReadonlyArray<UsageFact>,
+  filter: UsageFactFilter
+): ReadonlyArray<UsageFact> =>
+  facts.filter((fact) =>
+    (!filter.runtimeId || fact.runtimeId === filter.runtimeId) &&
+    (!filter.from || fact.startedAt >= filter.from) &&
+    (!filter.to || fact.startedAt <= filter.to)
+  )
+
+export const ModelPerformanceSortKey = Schema.Literal(
+  "modelId",
+  "runCount",
+  "successRate",
+  "durationMs",
+  "totalTokens",
+  "knownCostUsd"
+)
+export type ModelPerformanceSortKey = Schema.Schema.Type<typeof ModelPerformanceSortKey>
+
+/** Per-model report rows sorted by any numeric/string column; `null` sorts before every known value. */
+export const sortModelPerformance = (
+  groups: ReadonlyArray<UsageReportGroup>,
+  sortBy: ModelPerformanceSortKey,
+  direction: "asc" | "desc" = "desc"
+): ReadonlyArray<UsageReportGroup> => {
+  const sorted = [...groups].sort((a, b) => {
+    const av = a[sortBy]
+    const bv = b[sortBy]
+    if (av === bv) return 0
+    if (av === null) return -1
+    if (bv === null) return 1
+    return av < bv ? -1 : 1
+  })
+  return direction === "asc" ? sorted : sorted.reverse()
+}
+
+/** The longest runs, each mapped to the parent turn it belongs to (a child maps to its parent run). */
+export const slowestRuns = (
+  facts: ReadonlyArray<UsageFact>,
+  limit = 5
+): ReadonlyArray<UsageFact & { readonly turnRunId: string }> =>
+  [...facts]
+    .sort((a, b) => b.durationMs - a.durationMs)
+    .slice(0, limit)
+    .map((fact) => ({ ...fact, turnRunId: fact.parentRunId ?? fact.runId }))
+
+/** One point of a per-model duration/token trend, in run order (oldest first). */
+export type ModelDetailPoint = {
+  readonly runId: string
+  readonly startedAt: string
+  readonly durationMs: number
+  readonly tokens: number
+}
+
+/** The group row, a chronological sparkline series and the slowest runs for one model row. */
+export type ModelDetail = {
+  readonly group: UsageReportGroup
+  readonly sparkline: ReadonlyArray<ModelDetailPoint>
+  readonly slowestRuns: ReadonlyArray<UsageFact & { readonly turnRunId: string }>
+}
+
+/**
+ * Drill-down for one `UsageReportGroup` row (same runtime/provider/model/kind key):
+ * its aggregate stats, a duration/token trend and the slowest runs within it.
+ * `null` when no facts match the selector (the group no longer exists in the current filter).
+ */
+export const modelDetailFromFacts = (
+  facts: ReadonlyArray<UsageFact>,
+  selector: Pick<UsageFact, "runtimeId" | "providerId" | "modelId" | "kind">,
+  limit = 5
+): ModelDetail | null => {
+  const matching = facts.filter(
+    (fact) =>
+      fact.runtimeId === selector.runtimeId &&
+      fact.providerId === selector.providerId &&
+      fact.modelId === selector.modelId &&
+      fact.kind === selector.kind
+  )
+  const group = usageReportFromFacts(matching).groups[0]
+  if (!group) return null
+  const sparkline = [...matching]
+    .sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0))
+    .map((fact) => ({ runId: fact.runId, startedAt: fact.startedAt, durationMs: fact.durationMs, tokens: fact.totalTokens ?? 0 }))
+  return { group, sparkline, slowestRuns: slowestRuns(matching, limit) }
+}

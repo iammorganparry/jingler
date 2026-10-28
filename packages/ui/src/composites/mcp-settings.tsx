@@ -1,6 +1,7 @@
 import type {
   McpConfigEntry,
   McpImportCandidateView,
+  McpImportResolution,
   McpImportSourceId,
   McpRemoteAuth,
   McpServer,
@@ -19,8 +20,17 @@ import {
   DialogHeader,
   DialogTitle
 } from "../components/dialog.js"
+import { Checkbox } from "../components/checkbox.js"
+import { Field } from "../components/field.js"
 import { Input } from "../components/input.js"
+import { Textarea } from "../components/textarea.js"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select.js"
+import { SettingsCard, SettingsRow } from "../components/settings-row.js"
+import { StatusRow } from "../components/status-row.js"
+import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
+import { Trash2 } from "lucide-react"
+import { McpServerDetailDialog } from "./mcp-server-detail-dialog.js"
 
 /**
  * Settings › MCP servers — the operator's `~/jingler/mcp.json`.
@@ -40,19 +50,28 @@ export interface McpSettingsProps {
   readonly probe: () => void
   readonly setEnabled: (name: string, enabled: boolean) => Promise<void>
   readonly setAuth: (name: string, auth: McpRemoteAuth) => Promise<void>
+  /** Persist a per-tool toggle; the runtime skips disabled tools when registering MCP tools. */
+  readonly setDisabledTools: (name: string, disabledTools: ReadonlyArray<string>) => Promise<void>
+  /** Clears the server's stored OAuth credential only, not the server config. */
+  readonly signOut: (name: string) => Promise<void>
   readonly remove: (name: string) => Promise<void>
   readonly add: (name: string, entry: McpConfigEntry) => Promise<void>
   readonly setApiKey: (name: string, apiKey: string) => Promise<void>
   readonly startAuthorization: (name: string) => Promise<void>
   readonly reveal: () => Promise<void>
+  /** Last stderr lines for one server; refreshed each time its detail dialog opens. */
+  readonly logTail: (name: string) => Promise<{ readonly lines: ReadonlyArray<string> }>
   /** Import flow: load candidates from one source, then apply a selection. */
   readonly importCandidates: (
     source: McpImportSourceId,
     connectors?: boolean
   ) => Promise<ReadonlyArray<McpImportCandidateView>>
+  /** Host-rendered import card, shown above the list when importable servers are detected. */
+  readonly importEntry?: React.ReactNode
   readonly applyImport: (
     source: McpImportSourceId,
     names: ReadonlyArray<string>,
+    resolutions?: Readonly<Record<string, McpImportResolution>>,
     connectors?: boolean
   ) => Promise<ReadonlyArray<string>>
 }
@@ -71,24 +90,12 @@ const IMPORT_SOURCES: ReadonlyArray<{ id: McpImportSourceId; label: string }> = 
   { id: "opencode", label: "opencode" }
 ]
 
-function renderMcpStatus(status: McpServerStatus | null) {
-  return (status ? (
-                    <span
-                      className={`text-[10px] ${
-                        status.state === "connected"
-                          ? "text-green"
-                          : status.state === "failed"
-                            ? "text-red"
-                            : "text-dim"
-                      }`}
-                    >
-                      {status.state === "connected"
-                        ? `connected — ${status.toolCount ?? 0} tools`
-                        : status.state === "failed"
-                          ? status.error ?? "failed"
-                          : status.state}
-                    </span>
-                  ) : null)
+/** Dot colour is state only; everything else stays neutral. */
+const MCP_STATE_TONE: Partial<Record<string, string>> = {
+  connected: "bg-green",
+  "needs-auth": "bg-yellow",
+  authorizing: "bg-blue",
+  failed: "bg-red"
 }
 
 const statusFor = (
@@ -182,113 +189,76 @@ export function McpServerForm({
   }
 
   return (
-    <div className="flex max-w-xl flex-col gap-3 rounded-md border border-line bg-panel p-3">
-      <div className="flex items-center gap-2">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Name, e.g. context7"
-          aria-label="Server name"
-        />
-        <select
-          value={kind}
-          onChange={(e) => setKind(e.target.value === "local" ? "local" : "remote")}
-          aria-label="Server type"
-          className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text"
-        >
-          <option value="remote">Remote (URL)</option>
-          <option value="local">Local (command)</option>
-        </select>
-      </div>
-      <Input
-        value={target}
-        onChange={(e) => setTarget(e.target.value)}
-        placeholder={kind === "remote" ? "https://mcp.example.com/mcp" : '["npx", "-y", "some-mcp"]'}
-        aria-label={kind === "remote" ? "Server URL" : "Server command"}
-      />
-      {kind === "remote" && (
-        <div className="flex items-center gap-2">
-          <select
-            value={authKind}
-            onChange={(event) => setAuthKind(event.target.value as typeof authKind)}
-            aria-label="Authentication"
-            className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text"
-          >
-            <option value="none">No authentication</option>
-            <option value="api-key">API key</option>
-            <option value="oauth">OAuth</option>
-          </select>
-          {authKind === "api-key" && (
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
-              <Input
-                value={apiKeyHeader}
-                onChange={(event) => setApiKeyHeader(event.target.value)}
-                placeholder="Header"
-                aria-label="API key header"
-              />
-              <Input
-                value={apiKeyPrefix}
-                onChange={(event) => setApiKeyPrefix(event.target.value)}
-                placeholder="Prefix (optional)"
-                aria-label="API key prefix"
-              />
-              <Input
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKeyValue(event.target.value)}
-                placeholder="API key"
-                aria-label="API key"
-                className="col-span-2"
-              />
-            </div>
+    <div className="flex max-w-xl flex-col gap-4">
+      <div className="grid grid-cols-[1fr_auto] items-start gap-3">
+        <Field label="Server name">
+          {(c) => <Input {...c} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. context7" />}
+        </Field>
+        <Field label="Server type">
+          {() => (
+            <Select value={kind} onValueChange={(v) => setKind(v === "local" ? "local" : "remote")}>
+              <SelectTrigger aria-label="Server type"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="remote">Remote (URL)</SelectItem>
+                <SelectItem value="local">Local (command)</SelectItem>
+              </SelectContent>
+            </Select>
           )}
+        </Field>
+      </div>
+      <Field label={kind === "remote" ? "Server URL" : "Server command"}>
+        {(c) => (
+          <Input
+            {...c}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder={kind === "remote" ? "https://mcp.example.com/mcp" : '["npx", "-y", "some-mcp"]'}
+          />
+        )}
+      </Field>
+      {kind === "remote" && (
+        <Field label="Authentication">
+          {() => (
+            <Select value={authKind} onValueChange={(v) => setAuthKind(v as typeof authKind)}>
+              <SelectTrigger aria-label="Authentication"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No authentication</SelectItem>
+                <SelectItem value="api-key">API key</SelectItem>
+                <SelectItem value="oauth">OAuth</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+      )}
+      {kind === "remote" && authKind === "api-key" && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="API key header">
+            {(c) => <Input {...c} value={apiKeyHeader} onChange={(event) => setApiKeyHeader(event.target.value)} placeholder="Header" />}
+          </Field>
+          <Field label="API key prefix" help="Optional">
+            {(c) => <Input {...c} value={apiKeyPrefix} onChange={(event) => setApiKeyPrefix(event.target.value)} placeholder="Prefix" />}
+          </Field>
+          <Field label="API key" className="col-span-2">
+            {(c) => <Input {...c} type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} placeholder="API key" />}
+          </Field>
         </div>
       )}
-      <label className="flex flex-col gap-1">
-        <span className="text-[11px] text-muted-foreground">
-          {kind === "remote" ? "Headers" : "Environment"} — one KEY=value per line.
-          Use {"{env:VAR}"} to read a value from the environment.
-        </span>
-        <textarea
-          value={pairs}
-          onChange={(e) => setPairs(e.target.value)}
-          rows={2}
-          className="rounded-xl border border-line bg-panel px-3.5 py-2.5 font-mono text-[11px] text-text outline-none focus:border-text-bright/40 focus:ring-2 focus:ring-ring/40"
-          aria-label={kind === "remote" ? "Headers" : "Environment variables"}
-        />
-      </label>
+      <Field
+        label={kind === "remote" ? "Headers" : "Environment variables"}
+        help={`One KEY=value per line. Use {env:VAR} to read a value from the environment.`}
+      >
+        {(c) => <Textarea {...c} value={pairs} onChange={(e) => setPairs(e.target.value)} rows={2} className="min-h-16 font-mono text-[12px]" />}
+      </Field>
       {error ? <div role="alert"><Callout tone="red">{error}</Callout></div> : null}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
         <AsyncButton pendingLabel="Saving…" onClick={submit}>
           Save server
         </AsyncButton>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="text-[11px] text-dim hover:underline"
-        >
-          Cancel
-        </button>
       </div>
     </div>
-  )
-}
-
-function AddServerForm({
-  add,
-  setApiKey
-}: Pick<McpSettingsProps, "add" | "setApiKey">) {
-  const [open, setOpen] = React.useState(false)
-  return open ? (
-    <McpServerForm add={add} setApiKey={setApiKey} onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
-  ) : (
-    <button
-      type="button"
-      onClick={() => setOpen(true)}
-      className="self-start rounded-md border border-line bg-panel px-3 py-1.5 text-[12px] text-text hover:bg-surface"
-    >
-      Add server
-    </button>
   )
 }
 
@@ -366,12 +336,12 @@ function ImportFlow({
     if (source === null) return
     setError(null)
     try {
-      const imported = await applyImport(source, [...selected], connectors)
+      const imported = await applyImport(source, [...selected], undefined, connectors)
       setCandidates(null)
       setSource(null)
       setMessage(
         imported.length === 0
-          ? "Nothing imported — the selected servers already exist."
+          ? "Nothing imported, the selected servers already exist."
           : `Imported ${imported.join(", ")}.`
       )
     } catch (cause) {
@@ -384,18 +354,13 @@ function ImportFlow({
       <div className="flex items-center gap-2">
         <span className="text-[11px] text-muted-foreground">Import from</span>
         {IMPORT_SOURCES.map(({ id, label }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => void load(id)}
-            className="rounded-md border border-line bg-panel px-2 py-1 text-[11px] text-text hover:bg-surface"
-          >
+          <Button key={id} variant="secondary" size="sm" onClick={() => void load(id)}>
             {label}
-          </button>
+          </Button>
         ))}
       </div>
       {error ? <div role="alert"><Callout tone="red">{error}</Callout></div> : null}
-      {message ? <Callout tone="green">{message}</Callout> : null}
+      {message ? <Callout tone="blue">{message}</Callout> : null}
       {candidates !== null ? (
         candidates.length === 0 ? (
           <Callout tone="blue">No MCP servers found in the {source} config.</Callout>
@@ -403,13 +368,12 @@ function ImportFlow({
           <div className="flex max-w-xl flex-col gap-1 rounded-md border border-line bg-panel p-3">
             {candidates.map((candidate) => (
               <label key={candidate.name} className="flex items-center gap-2 text-[12px]">
-                <input
-                  type="checkbox"
+                <Checkbox
                   disabled={candidate.problem !== null}
                   checked={selected.has(candidate.name)}
-                  onChange={(e) => {
+                  onCheckedChange={(checked) => {
                     const next = new Set(selected)
-                    if (e.target.checked) next.add(candidate.name)
+                    if (checked) next.add(candidate.name)
                     else next.delete(candidate.name)
                     setSelected(next)
                   }}
@@ -430,16 +394,16 @@ function ImportFlow({
               <AsyncButton pendingLabel="Importing…" onClick={apply} disabled={selected.size === 0}>
                 Import {selected.size} server{selected.size === 1 ? "" : "s"}
               </AsyncButton>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setCandidates(null)
                   setSource(null)
                 }}
-                className="text-[11px] text-dim hover:underline"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         )
@@ -493,18 +457,25 @@ function McpAuthSetupDialogContent({
           <DialogDescription>Choose the authentication method required by this MCP server.</DialogDescription>
         </DialogHeader>
         <DialogBody>
-          <div className="flex flex-col gap-3">
-            <select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)} aria-label="Authentication method" className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text">
-              <option value="oauth">OAuth</option>
-              <option value="api-key">API key</option>
-            </select>
+          <div className="flex flex-col gap-4">
+            <Field label="Authentication method">
+              {() => (
+                <Select value={kind} onValueChange={(v) => setKind(v as typeof kind)}>
+              <SelectTrigger aria-label="Authentication method"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="oauth">OAuth</SelectItem>
+                <SelectItem value="api-key">API key</SelectItem>
+              </SelectContent>
+            </Select>
+              )}
+            </Field>
             {kind === "api-key" && (
               <>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input value={header} onChange={(event) => setHeader(event.target.value)} aria-label="API key header" />
-                  <Input value={prefix} onChange={(event) => setPrefix(event.target.value)} aria-label="API key prefix" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="API key header">{(c) => <Input {...c} value={header} onChange={(event) => setHeader(event.target.value)} />}</Field>
+                  <Field label="API key prefix">{(c) => <Input {...c} value={prefix} onChange={(event) => setPrefix(event.target.value)} />}</Field>
                 </div>
-                <Input type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} aria-label={`API key for ${server.displayName}`} />
+                <Field label={`API key for ${server.displayName}`}>{(c) => <Input {...c} type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} />}</Field>
               </>
             )}
             <AsyncButton disabled={kind === "api-key" && (apiKey.length === 0 || header.trim().length === 0)} pendingLabel={kind === "oauth" ? "Opening…" : "Saving…"} onClick={submit}>
@@ -539,7 +510,7 @@ export function McpApiKeyDialog({
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-3">
-            <Input type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} aria-label={`API key for ${server.displayName}`} autoFocus />
+            <Field label={`API key for ${server.displayName}`}>{(c) => <Input {...c} type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} autoFocus />}</Field>
             <AsyncButton
               disabled={apiKey.length === 0}
               pendingLabel="Saving…"
@@ -566,70 +537,125 @@ export function McpBrand({ server, compact = false }: { readonly server: McpServ
   )
 }
 
-function McpAuthAction({
+function McpServerHelp({ server, status, onConnect }: { readonly server: McpServer; readonly status: McpServerStatus | null; readonly onConnect: () => void }) {
+  const needsAuth = server.authState === "needs-auth"
+  if (!status && !needsAuth) return null
+  const failed = status?.state === "failed"
+  const toolCount = status?.toolCount ?? 0
+  return (
+    <div className="flex flex-col gap-1">
+      {status ? (
+        <StatusRow failed={failed}>
+          {failed ? (status.error ?? "Connection failed") : `${toolCount} tool${toolCount === 1 ? "" : "s"}`}
+        </StatusRow>
+      ) : null}
+      {needsAuth && (
+        <StatusRow>
+          Needs sign-in · <Button variant="ghost" size="sm" onClick={onConnect} className="inline h-auto px-0 py-0 hover:bg-transparent hover:underline">Connect</Button>
+        </StatusRow>
+      )}
+    </div>
+  )
+}
+
+function McpServerRow({
   server,
-  setApiKey,
+  status,
+  run,
+  openDetail,
   startAuthorization,
-  onConfigure,
-  onError
+  setEnabled,
+  remove
 }: {
   readonly server: McpServer
-  readonly setApiKey: McpSettingsProps["setApiKey"]
+  readonly status: McpServerStatus | null
+  readonly run: (action: () => Promise<void>) => void
+  readonly openDetail: (server: McpServer) => void
   readonly startAuthorization: McpSettingsProps["startAuthorization"]
-  readonly onConfigure: (server: McpServer) => void
-  readonly onError: (message: string) => void
+  readonly setEnabled: McpSettingsProps["setEnabled"]
+  readonly remove: McpSettingsProps["remove"]
 }) {
-  const [editing, setEditing] = React.useState(false)
-  const [apiKey, setApiKeyValue] = React.useState("")
-  if (server.authKind === "none") {
-    return server.transport === "http" ? (
-      <button type="button" onClick={() => onConfigure(server)} className="text-[11px] text-blue hover:underline">
-        Set up auth
-      </button>
-    ) : null
-  }
-  if (server.authKind === "oauth") {
-    return (
-      <AsyncButton
-        pendingLabel="Opening…"
-        onClick={() => startAuthorization(server.name).catch((cause) => {
-          const message = cause instanceof Error ? cause.message : "Authorization failed"
-          onError(message)
-          throw cause
-        })}
-      >
-        {server.authState === "ready" ? "Reauthorize" : "Authorize"}
-      </AsyncButton>
-    )
-  }
-  if (!editing) {
-    return (
-      <button type="button" onClick={() => setEditing(true)} className="text-[11px] text-blue hover:underline">
-        {server.authState === "ready" ? "Replace key" : "Add key"}
-      </button>
-    )
-  }
+  const state = server.authState === "needs-auth" ? "needs-auth" : (status?.state ?? "unknown")
   return (
-    <div className="flex items-center gap-1.5">
-      <Input
-        type="password"
-        value={apiKey}
-        onChange={(event) => setApiKeyValue(event.target.value)}
-        aria-label={`API key for ${server.displayName}`}
-        className="h-8 w-36"
-      />
-      <AsyncButton
-        disabled={apiKey.length === 0}
-        pendingLabel="Saving…"
-        onClick={() => setApiKey(server.name, apiKey).then(() => {
-          setApiKeyValue("")
-          setEditing(false)
-        }).catch((cause) => {
-          const message = cause instanceof Error ? cause.message : "Could not save API key"
-          onError(message)
-          throw cause
-        })}
-      >Save</AsyncButton>
+    <SettingsRow
+      label={
+        <div className="flex min-w-0 items-center gap-2.5">
+          <McpBrand server={server} compact />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-[13px] font-medium text-text-bright">
+              {server.displayName}
+              <StatusDot tone={MCP_STATE_TONE[state] ?? "bg-line-strong"} size={6} />
+              <span className="sr-only">{state}</span>
+            </div>
+            <div className="truncate font-mono text-[11px] text-dim">
+              {server.transport} · {server.target}
+            </div>
+          </div>
+        </div>
+      }
+      help={<McpServerHelp server={server} status={status} onConnect={() => run(() => startAuthorization(server.name))} />}
+      control={
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => openDetail(server)}>
+            Details
+          </Button>
+          <Toggle
+            checked={server.enabled}
+            onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
+            aria-label={`Enable ${server.name}`}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Remove ${server.name}`}
+            onClick={() => run(() => remove(server.name))}
+          >
+            <Trash2 size={14} />
+          </Button>
+        </div>
+      }
+    />
+  )
+}
+
+function McpServerList({
+  servers,
+  statuses,
+  ...rest
+}: {
+  readonly servers: ReadonlyArray<McpServer>
+  readonly statuses: ReadonlyArray<McpServerStatus> | null
+  readonly run: (action: () => Promise<void>) => void
+  readonly openDetail: (server: McpServer) => void
+  readonly startAuthorization: McpSettingsProps["startAuthorization"]
+  readonly setEnabled: McpSettingsProps["setEnabled"]
+  readonly remove: McpSettingsProps["remove"]
+}) {
+  return (
+    <SettingsCard>
+      {servers.map((server) => (
+        <McpServerRow key={server.name} server={server} status={statusFor(statuses, server.name)} {...rest} />
+      ))}
+    </SettingsCard>
+  )
+}
+
+function McpHeader({ probing, probe, canProbe, reveal, addButton }: { readonly probing: boolean; readonly probe: () => void; readonly canProbe: boolean; readonly reveal: () => void; readonly addButton: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <h2 className="text-[20px] font-semibold text-text-bright">MCP servers</h2>
+        <p className="mt-1 text-[12px] text-muted-foreground">
+          Servers from <code className="font-mono">~/jingler/mcp.json</code> are available to local sessions.
+        </p>
+      </div>
+      <div className="flex flex-none items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={probe} disabled={probing || !canProbe}>
+          {probing ? "Testing…" : "Test connections"}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={reveal}>Reveal mcp.json</Button>
+        {addButton}
+      </div>
     </div>
   )
 }
@@ -643,16 +669,34 @@ export function McpSettings({
   probe,
   setEnabled,
   setAuth,
+  setDisabledTools,
+  signOut,
   remove,
   add,
   setApiKey,
   startAuthorization,
   reveal,
+  logTail,
   importCandidates,
-  applyImport
+  applyImport,
+  importEntry
 }: McpSettingsProps) {
   const [actionError, setActionError] = React.useState<string | null>(null)
   const [authSetupServer, setAuthSetupServer] = React.useState<McpServer | null>(null)
+  const [detailServer, setDetailServer] = React.useState<McpServer | null>(null)
+  const [logLines, setLogLines] = React.useState<ReadonlyArray<string>>([])
+  const [logLoading, setLogLoading] = React.useState(false)
+
+  const openDetail = (server: McpServer) => {
+    setDetailServer(server)
+    setLogLines([])
+    setLogLoading(true)
+    void logTail(server.name)
+      .then((result) => setLogLines(result.lines))
+      .finally(() => setLogLoading(false))
+  }
+
+
   const run = (action: () => Promise<void>) => {
     setActionError(null)
     void action().catch((cause) =>
@@ -660,54 +704,16 @@ export function McpSettings({
     )
   }
 
-  const renderMcpServer = ((server) => {
-          const status = statusFor(statuses, server.name)
-          return (
-            <div
-              key={server.name}
-              className="flex max-w-xl items-center gap-3 rounded-md border border-line bg-panel px-3 py-2"
-            >
-              <McpBrand server={server} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-[12.5px] font-medium text-text-body">{server.name}</span>
-                  <span className="text-[10px] uppercase text-dim">{server.transport}</span>
-                  {renderMcpStatus(status)}
-                </div>
-                <div className="truncate font-mono text-[10px] text-dim">{server.target}</div>
-              </div>
-              <McpAuthAction
-                server={server}
-                setApiKey={setApiKey}
-                startAuthorization={startAuthorization}
-                onConfigure={setAuthSetupServer}
-                onError={setActionError}
-              />
-              <Toggle
-                checked={server.enabled}
-                onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
-                aria-label={`Enable ${server.name}`}
-              />
-              <button
-                type="button"
-                onClick={() => run(() => remove(server.name))}
-                className="text-[11px] text-red hover:underline"
-              >
-                Remove
-              </button>
-            </div>
-          )
-        }) satisfies  Parameters<typeof servers.map>[0]
+  const [addOpen, setAddOpen] = React.useState(false)
+  const addButton = (
+    <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
+      Add server
+    </Button>
+  )
 
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h3 className="text-[13px] font-semibold text-text-bright">MCP servers</h3>
-        <p className="mt-0.5 text-[11px] text-dim">
-          Servers from <code className="font-mono">~/jingler/mcp.json</code> are available to
-          local sessions. Edit the file directly or manage entries here — same file either way.
-        </p>
-      </div>
+    <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5">
+      <McpHeader probing={probing} probe={probe} canProbe={servers.length > 0} reveal={() => run(reveal)} addButton={servers.length > 0 ? addButton : null} />
 
       {parseError ? (
         <Callout tone="red">
@@ -717,32 +723,26 @@ export function McpSettings({
       ) : null}
       {actionError ? <div role="alert"><Callout tone="red">{actionError}</Callout></div> : null}
 
-      <div className="flex flex-col gap-1">
-        {servers.length === 0 && !loading && parseError === null ? (
-          <p className="text-[12px] text-dim">No servers configured yet.</p>
-        ) : null}
-        {servers.map(renderMcpServer)}
-      </div>
+      {importEntry}
 
-      <div className="flex items-center gap-2">
-        <AddServerForm add={add} setApiKey={setApiKey} />
-        <button
-          type="button"
-          onClick={probe}
-          disabled={probing || servers.length === 0}
-          className="rounded-md border border-line bg-panel px-3 py-1.5 text-[12px] text-text hover:bg-surface disabled:opacity-50"
-        >
-          {probing ? "Testing…" : "Test connections"}
-        </button>
-        <button
-          type="button"
-          onClick={() => run(reveal)}
-          className="text-[11px] text-blue hover:underline"
-        >
-          Reveal mcp.json
-        </button>
-      </div>
+      {servers.length === 0 && !loading && parseError === null ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-line px-4 py-10">
+          <p className="text-[13px] text-muted-foreground">No servers configured yet.</p>
+          {addButton}
+        </div>
+      ) : (
+        <McpServerList
+          servers={servers}
+          statuses={statuses}
+          run={run}
+          openDetail={openDetail}
+          startAuthorization={startAuthorization}
+          setEnabled={setEnabled}
+          remove={remove}
+        />
+      )}
 
+      <McpServerDialog open={addOpen} onOpenChange={setAddOpen} add={add} setApiKey={setApiKey} />
       <ImportFlow importCandidates={importCandidates} applyImport={applyImport} />
       <McpAuthSetupDialog
         server={authSetupServer}
@@ -751,6 +751,41 @@ export function McpSettings({
         setAuth={setAuth}
         setApiKey={setApiKey}
         startAuthorization={startAuthorization}
+      />
+      <McpServerDetailDialog
+        server={detailServer}
+        open={detailServer !== null}
+        onOpenChange={(open) => { if (!open) setDetailServer(null) }}
+        toolCount={detailServer === null ? null : (statusFor(statuses, detailServer.name)?.toolCount ?? null)}
+        toolNames={detailServer === null ? [] : (statusFor(statuses, detailServer.name)?.toolNames ?? [])}
+        logLines={logLines}
+        logLoading={logLoading}
+        oauthAccount={
+          detailServer !== null && detailServer.authKind === "oauth" && detailServer.authState === "ready"
+            ? detailServer.displayName
+            : null
+        }
+        disabledTools={detailServer?.disabledTools ?? []}
+        onToggleTool={(toolName, enabled) => {
+          if (detailServer === null) return
+          const current = new Set(detailServer.disabledTools ?? [])
+          if (enabled) current.delete(toolName)
+          else current.add(toolName)
+          const next = [...current]
+          setDetailServer({ ...detailServer, disabledTools: next })
+          run(() => setDisabledTools(detailServer.name, next))
+        }}
+        onSignOut={
+          detailServer === null
+            ? undefined
+            : () => {
+                const target = detailServer
+                run(async () => {
+                  await signOut(target.name)
+                  setDetailServer(null)
+                })
+              }
+        }
       />
     </div>
   )

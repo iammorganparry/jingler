@@ -6,12 +6,12 @@ import type {
   ProviderCatalog,
   ProviderLoginEvent,
 } from "@jingler/core";
-import { Plus, ShieldCheck, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { Button } from "../../components/button.js";
 import { Callout } from "../../components/callout.js";
 import { Eyebrow } from "../../components/eyebrow.js";
 import { Spinner } from "../../components/loading.js";
-import { ProviderIcon } from "../../components/provider-icon.js";
+import { HarnessCard } from "../../composites/harness-card.js";
 import { ProviderAuthForms } from "../../composites/provider-auth-forms.js";
 import {
   entitlementIssueLabel,
@@ -26,6 +26,8 @@ export interface ProviderSetupStepProps {
   busy: boolean;
   pendingAuthKind?: AuthKind | null;
   error: string | null;
+  /** Which machine failure state the step is in, if any. */
+  failure?: "loadFailed" | "completionFailed" | null;
   onConnectClaude: (token: string) => void;
   onStartCodex: (method: CodexLoginMethod) => void;
   onConnectApi: (providerId: string, apiKey: string) => void;
@@ -48,6 +50,44 @@ const providerProgressLabel = (pendingAuthKind: AuthKind | null) =>
           ? "Saving API key…"
           : "Updating provider connections…";
 
+const failureText = (failure: "loadFailed" | "completionFailed" | null, error: string): string =>
+  failure === "loadFailed"
+    ? "Couldn't load providers"
+    : failure === "completionFailed"
+      ? "Couldn't save setup"
+      : error;
+
+const continueBlockedText = (busy: boolean, canContinue: boolean): string | null =>
+  busy ? "Finishing sign-in…" : canContinue ? null : "Connect a provider to continue, or skip for now.";
+
+type CatalogConnection = NonNullable<ProviderSetupStepProps["catalog"]>["connections"][number]["connection"]
+
+const accountKey = (connection: CatalogConnection) =>
+  `${connection.providerId}:${connection.authKind}:${connection.account?.fingerprint ?? ""}`
+
+/** Authenticated connections, plus deduped unconfirmed ones no authenticated attempt supersedes. */
+function splitConnections(catalog: ProviderSetupStepProps["catalog"]) {
+  const all = catalog?.connections ?? []
+  const authenticatedConnections = all.filter(({ connection }) => connection.status === "authenticated")
+  const authenticatedAccounts = new Set(authenticatedConnections.map(({ connection }) => accountKey(connection)))
+  const seenUnconfirmed = new Set<string>()
+  const unconfirmedConnections = all.filter(({ connection }) => {
+    if (connection.status !== "entitlement-unconfirmed") return false
+    const key = accountKey(connection)
+    if (authenticatedAccounts.has(key) || seenUnconfirmed.has(key)) return false
+    seenUnconfirmed.add(key)
+    return true
+  })
+  return { authenticatedConnections, unconfirmedConnections }
+}
+
+const connectionDetail = (connection: CatalogConnection): string =>
+  [
+    connection.account?.displayLabel ?? connection.account?.fingerprint ?? connection.id,
+    connection.subscription.planLabel,
+    connection.subscription.confirmedBillingRoute
+  ].filter(Boolean).join(", ")
+
 export function ProviderSetupStep({
   catalog,
   endpointCatalog = null,
@@ -56,6 +96,7 @@ export function ProviderSetupStep({
   busy,
   pendingAuthKind = null,
   error,
+  failure = null,
   onConnectClaude,
   onStartCodex,
   onConnectApi,
@@ -66,31 +107,8 @@ export function ProviderSetupStep({
 }: ProviderSetupStepProps) {
   const detectedEndpoints = endpointCatalog?.endpoints ?? []
   const canContinue = canUseProviderCatalog(catalog, detectedEndpoints)
-  const authenticatedConnections =
-    catalog?.connections.filter(
-      ({ connection }) => connection.status === "authenticated",
-    ) ?? [];
-  const accountKey = (connection: {
-    providerId: string;
-    authKind: AuthKind;
-    account: { fingerprint: string } | null;
-  }) =>
-    `${connection.providerId}:${connection.authKind}:${connection.account?.fingerprint ?? ""}`;
-  const authenticatedAccounts = new Set(
-    authenticatedConnections.map(({ connection }) => accountKey(connection)),
-  );
-  const seenUnconfirmed = new Set<string>();
-  const unconfirmedConnections = (catalog?.connections ?? []).filter(
-    ({ connection }) => {
-      if (connection.status !== "entitlement-unconfirmed") return false;
-      const key = accountKey(connection);
-      // A later authenticated attempt supersedes stale unconfirmed duplicates.
-      if (authenticatedAccounts.has(key)) return false;
-      if (seenUnconfirmed.has(key)) return false;
-      seenUnconfirmed.add(key);
-      return true;
-    },
-  );
+  const { authenticatedConnections, unconfirmedConnections } = splitConnections(catalog)
+  const continueBlockedReason = continueBlockedText(busy, canContinue)
   const progressLabel = providerProgressLabel(pendingAuthKind)
 
   const authForms = (
@@ -124,7 +142,7 @@ export function ProviderSetupStep({
               <div
                 key={endpoint.id}
                 className={endpoint.status === "ready"
-                  ? "rounded-full border border-green/30 bg-green/10 px-2.5 py-1 text-xs text-green"
+                  ? "rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted-foreground"
                   : "rounded-full border border-line bg-canvas px-2.5 py-1 text-xs text-muted-foreground"}
               >
                 <NativeEndpointLogin endpoint={endpoint} actions={nativeEndpointLogin} />
@@ -137,7 +155,9 @@ export function ProviderSetupStep({
       {error && (
         <Callout tone="red">
           <div className="flex items-center justify-between gap-3">
-            <span>{error}</span>
+            <span title={error}>
+              {failureText(failure, error)}
+            </span>
             <Button variant="ghost" size="sm" onClick={onRetry}>
               Retry
             </Button>
@@ -146,7 +166,7 @@ export function ProviderSetupStep({
       )}
 
       {unconfirmedConnections.map(({ connection }) => (
-        <Callout key={connection.id} tone="yellow">
+        <Callout key={connection.id} tone="blue">
           <div className="flex flex-col gap-0.5">
             <span className="font-medium">
               {providerAuthRouteLabel(connection.authKind)} needs attention
@@ -162,31 +182,13 @@ export function ProviderSetupStep({
         <>
           <div className="flex flex-col gap-2">
             {authenticatedConnections.map(({ connection }) => (
-              <div
+              <HarnessCard
                 key={connection.id}
-                className="flex items-center gap-3 rounded-lg border border-line bg-hover px-3 py-2.5"
-              >
-                <span className="flex size-8 items-center justify-center rounded-md border border-line bg-canvas">
-                  <ProviderIcon providerId={connection.providerId} size={17} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12.5px] font-medium text-text-bright">
-                    {providerAuthRouteLabel(connection.authKind)}
-                  </div>
-                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground">
-                    {connection.account?.displayLabel ??
-                      connection.account?.fingerprint ??
-                      connection.id}
-                    {connection.subscription.planLabel
-                      ? ` · ${connection.subscription.planLabel}`
-                      : ""}
-                    {connection.subscription.confirmedBillingRoute
-                      ? ` · ${connection.subscription.confirmedBillingRoute}`
-                      : ""}
-                  </div>
-                </div>
-                <ShieldCheck size={15} className="text-green" />
-              </div>
+                providerId={connection.providerId}
+                name={providerAuthRouteLabel(connection.authKind)}
+                detail={connectionDetail(connection)}
+                status="ready"
+              />
             ))}
           </div>
           <details
@@ -236,6 +238,7 @@ export function ProviderSetupStep({
           variant="primary"
           onClick={onContinue}
           disabled={busy || !canContinue}
+          aria-describedby={continueBlockedReason ? "provider-continue-reason" : undefined}
         >
           Continue
         </Button>
@@ -243,6 +246,11 @@ export function ProviderSetupStep({
           Skip for now
         </Button>
       </div>
+      {continueBlockedReason && (
+        <p id="provider-continue-reason" className="text-[11px] text-muted-foreground">
+          {continueBlockedReason}
+        </p>
+      )}
       <p className="text-[11px] leading-[1.55] text-dim">
         Model choice happens when you create work. You can add or change
         provider connections later in Settings.

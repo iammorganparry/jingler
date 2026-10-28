@@ -72,6 +72,35 @@ describe("environment machine", () => {
     actor.stop()
   })
 
+  it("retains every connection state in the inventory", async () => {
+    const services = api()
+    const all = (
+      ["online", "offline", "reconnecting", "incompatible", "revoked"] as const
+    ).map((state) => ({ ...environment, id: `device_${state}`, state }))
+    services.list.mockResolvedValueOnce(all)
+    const actor = createActor(createEnvironmentMachine(services)).start()
+    await waitFor(actor, (snapshot) => !snapshot.context.loading)
+    expect(actor.getSnapshot().context.environments.map((e) => e.state)).toEqual(
+      ["online", "offline", "reconnecting", "incompatible", "revoked"]
+    )
+    actor.stop()
+  })
+
+  it("removes a revoked device and keeps the others", async () => {
+    const services = api()
+    services.list.mockResolvedValueOnce([environment, secondEnvironment])
+    const actor = createActor(createEnvironmentMachine(services)).start()
+    await waitFor(actor, (snapshot) => !snapshot.context.loading)
+    actor.send({ type: "REVOKE", id: environment.id })
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.context.environments.length === 1
+    )
+    expect(services.revoke).toHaveBeenCalledWith(environment.id)
+    expect(actor.getSnapshot().context.environments).toEqual([secondEnvironment])
+    actor.stop()
+  })
+
   it("reconciles an account-scoped device presence invalidation", async () => {
     const services = api()
     services.list.mockResolvedValueOnce([
@@ -178,7 +207,7 @@ describe("environment machine", () => {
     actor.stop()
   })
 
-  it("returns an SSH failure to editable host configuration", async () => {
+  it("records the failing step's error and keeps the host for Retry", async () => {
     const services = api()
     services.pairSsh.mockRejectedValueOnce(new Error("SSH authentication failed"))
     const actor = createActor(createEnvironmentMachine(services)).start()
@@ -186,9 +215,26 @@ describe("environment machine", () => {
     actor.send({ type: "EDIT", field: "host", value: "buildbox" })
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("failed"))
-    actor.send({ type: "RETRY" })
-    expect(actor.getSnapshot().matches("configuring")).toBe(true)
+    expect(actor.getSnapshot().context.error).toBe("SSH authentication failed")
     expect(actor.getSnapshot().context.host).toBe("buildbox")
+    actor.stop()
+  })
+
+  it("resumes the failed bootstrap step on Retry and pairs", async () => {
+    const services = api()
+    services.pairSsh.mockRejectedValueOnce(new Error("SSH authentication failed"))
+    const actor = createActor(createEnvironmentMachine(services)).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("configuring"))
+    actor.send({ type: "EDIT", field: "host", value: "buildbox" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("failed"))
+
+    actor.send({ type: "RETRY" })
+    expect(actor.getSnapshot().matches("enrolling")).toBe(true)
+    await waitFor(actor, (snapshot) => snapshot.matches("connected"))
+    expect(services.pairSsh).toHaveBeenCalledTimes(2)
+    expect(actor.getSnapshot().context.environment).toEqual(environment)
+    actor.stop()
   })
 
   it("clears a stale SSH error when the selected host changes", async () => {

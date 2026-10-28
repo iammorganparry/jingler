@@ -10,7 +10,7 @@ import {
   type StreamEvent,
   type Worktree
 } from "@jingler/core"
-import { INTERACTIVE_TOOL_TIMEOUT_MS, ToolError, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
+import { INTERACTIVE_TOOL_TIMEOUT_MS, codeReadModes, ToolError, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
 
 /** The session slice the checkout reducer reads and rewrites. */
 export type CheckoutSessionState = Parameters<typeof activeCheckoutOf>[0]
@@ -34,10 +34,16 @@ export interface CheckoutHost {
   }) => Promise<Worktree>
 }
 
-/** Directory the agent's tools operate in: the active checkout's worktree, else its repo. */
+/**
+ * Directory the agent's tools operate in: the active checkout's worktree,
+ * else its repo, else the session's scratch folder (Auto, before any
+ * `switch_checkout`) — `session().worktreePath` doubles as that scratch path
+ * for a zero-checkout session, same field `resolveTurnWorktree` resolves.
+ */
 export const activeCheckoutCwd = (host: CheckoutHost): string => {
-  const checkout = activeCheckoutOf(host.session())
-  const cwd = checkout.worktreePath ?? checkout.repoPath
+  const session = host.session()
+  const checkout = activeCheckoutOf(session)
+  const cwd = checkout.worktreePath ?? checkout.repoPath ?? session.worktreePath
   if (cwd === undefined) throw new ToolError("execution-failed", "Active checkout has no directory")
   return cwd
 }
@@ -127,7 +133,7 @@ export const registerCheckoutTool = (
     }),
     risk: "read",
     roles: ["conversation", "plan-execution"],
-    modes: ["ask", "accept-edits", "auto", "plan", "read-only"],
+    modes: codeReadModes,
     timeoutMs: INTERACTIVE_TOOL_TIMEOUT_MS,
     outputBudget: 16_000,
     cancellable: true,

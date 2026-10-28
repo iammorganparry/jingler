@@ -1,6 +1,8 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { PanelBottom, PanelRight, Plus, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { Button } from "../components/button.js"
+import type { Session } from "@jingler/core"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { clampDockWidth, effectiveDock } from "./dock-fit.js"
 import { useResizableWidth } from "../components/resizable.js"
@@ -19,6 +21,8 @@ export interface TerminalTab {
   id: string
   title: string
   status: TerminalTabStatus
+  /** Set once the shell has exited. */
+  exitCode?: number | null
 }
 
 export interface TerminalDockProps {
@@ -345,83 +349,90 @@ function DockResizeEdge({
       {/* The visible hairline, highlighted while hovered / dragging. */}
       <span
         className={cn(
-          "absolute bg-hairline transition-colors group-hover:bg-blue",
+          "absolute bg-hairline transition-colors group-hover:bg-line-strong",
           horizontal ? "inset-x-0 top-0 h-px" : "inset-y-0 left-0 w-px",
-          active && "bg-blue"
+          active && "bg-line-strong"
         )}
       />
     </div>
   )
 }
 
-/** Bottom terminal pane with shell tabs and a sample session (static; for stories). */
-export function TerminalPanel() {
-  return (
-    <div className="flex h-[256px] flex-none flex-col border-t border-hairline bg-sunken">
-      {/* Shell tabs */}
-      <div className="flex h-9 flex-none items-stretch border-b border-hairline bg-panel pr-2">
-        <div className="flex items-center gap-2 border-r border-hairline border-t-2 border-t-blue bg-sunken px-3.5">
-          <span className="size-1.5 rounded-full bg-green" />
-          <span className="font-mono text-[11.5px] text-text-bright">zsh — api</span>
-        </div>
-        <div className="flex items-center gap-2 border-r border-hairline px-3.5 opacity-60">
-          <span className="size-1.5 rounded-full bg-line-strong" />
-          <span className="font-mono text-[11.5px] text-muted-foreground">node</span>
-        </div>
-        <span className="flex items-center px-3 text-[16px] text-dim">+</span>
-        <div className="flex-1" />
-      </div>
+// ── TerminalPanel ─────────────────────────────────────────────────────────────
+// One shell's editor-tab body: the live cell, an exited/Restart bar and a
+// footer. The editor tab bar owns tab chrome; the panel only fills its tab.
 
-      {/* Body */}
-      <div className="flex-1 overflow-auto px-4 py-2.5 font-mono text-[12px] leading-[1.75] text-text">
-        <div>
-          <span className="text-green">➜</span>&nbsp;&nbsp;
-          <span className="font-semibold text-cyan">api</span>{" "}
-          <span className="text-blue">git:(</span>
-          <span className="text-red">feat/oauth</span>
-          <span className="text-blue">)</span> <span className="text-yellow">✗</span> npm test
-        </div>
-        <div className="h-2" />
-        <div>
-          <Pass /> <span className="text-muted-foreground">src/auth/</span>session.test.ts
-        </div>
-        <div>
-          <Pass /> <span className="text-muted-foreground">src/auth/</span>refresh.test.ts
-        </div>
-        <div className="h-2" />
-        <div>
-          <span className="text-muted-foreground">Tests:</span> <span className="text-green">24 passed</span>, 24 total
-        </div>
-        <div>
-          <span className="text-muted-foreground">Time:</span>&nbsp;&nbsp;3.42s
-        </div>
-        <div className="h-2.5" />
-        <div>
-          <span className="text-green">➜</span>&nbsp;&nbsp;
-          <span className="font-semibold text-cyan">api</span>{" "}
-          <span className="text-blue">git:(</span>
-          <span className="text-red">feat/oauth</span>
-          <span className="text-blue">)</span> <span className="text-yellow">✗</span>{" "}
-          <span className="inline-block h-[15px] w-2 -translate-y-px bg-text align-middle [animation:var(--animate-pulse-dot)]" />
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="flex h-7 flex-none items-center gap-2.5 border-t border-hairline bg-panel px-4 font-mono text-[10.5px] text-dim">
-        <span>
-          <span className="text-green">zsh</span> · ~/dev/trigify/api
-        </span>
-        <span className="text-line">·</span>
-        <span>
-          last exit <span className="text-green">0</span>
-        </span>
-        <div className="flex-1" />
-        <span>⌃` toggle</span>
-      </div>
-    </div>
-  )
+export interface TerminalPanelProps {
+  readonly tab: TerminalTab
+  /** Replace an exited shell with a fresh one. */
+  readonly onRestart: (id: string) => void
+  /** Working directory shown in the footer (the session's worktree). */
+  readonly cwdLabel?: string
+  /** Render the live terminal cell for a tab id (the desktop app's XtermView). */
+  readonly renderTerminal: (id: string) => ReactNode
 }
 
-function Pass() {
-  return <span className="rounded-sm bg-green px-1.5 font-bold text-editor">PASS</span>
+/** A session's shells, supplied by the host; every shell is an editor tab of kind `terminal`. */
+export interface SessionTerminals {
+  readonly tabs: ReadonlyArray<TerminalTab>
+  /** True once the session's existing shells have been listed. */
+  readonly hydrated: boolean
+  /** Spawns a shell; resolves its id, or null when the spawn failed. */
+  readonly create: () => Promise<string | null>
+  /** Kills a shell. */
+  readonly close: (id: string) => Promise<void>
+  /** Spawns a replacement and kills the old shell; resolves the new id. */
+  readonly restart: (id: string) => Promise<string | null>
+  /** Working directory shown in each shell's footer. */
+  readonly cwdLabel?: string
+  readonly renderTerminal: (id: string, visible: boolean) => ReactNode
+}
+
+/** A React hook, called once per session pane render, returning that session's shells. */
+export type UseSessionTerminals = (session: Session) => SessionTerminals
+
+/** "zsh", then "zsh 2" for a second shell with the same base name. */
+export const terminalTabLabel = (tabs: ReadonlyArray<TerminalTab>, id: string): string => {
+  const tab = tabs.find((candidate) => candidate.id === id)
+  if (!tab) return "Terminal"
+  const nth = tabs.filter((candidate) => candidate.title === tab.title).findIndex((candidate) => candidate.id === id) + 1
+  return nth > 1 ? `${tab.title} ${nth}` : tab.title
+}
+
+export function TerminalPanel({ tab, onRestart, cwdLabel, renderTerminal }: TerminalPanelProps) {
+  const exited = tab.status === "exited"
+  const lastExit = exited ? tab.exitCode : null
+  return (
+    <section
+      data-testid="terminal-panel"
+      aria-label="Terminal"
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-sunken"
+    >
+      <div className="relative min-h-0 flex-1 bg-sunken">
+        {exited && (
+          <div
+            data-testid="terminal-exited"
+            className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-hairline bg-panel px-3 py-1.5 text-[12px] text-muted-foreground"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              Shell exited{tab.exitCode != null ? ` with code ${tab.exitCode}` : ""}
+            </span>
+            <Button variant="secondary" size="sm" onClick={() => onRestart(tab.id)}>
+              Restart
+            </Button>
+          </div>
+        )}
+        <div className="absolute inset-0">{renderTerminal(tab.id)}</div>
+      </div>
+      <div className="flex h-7 flex-none items-center gap-2.5 border-t border-hairline bg-panel px-3 font-mono text-[10.5px] text-dim">
+        {cwdLabel && <span className="min-w-0 truncate text-muted-foreground">{cwdLabel}</span>}
+        {cwdLabel && lastExit != null && <span className="flex-none text-line">·</span>}
+        {lastExit != null && (
+          <span className="flex-none">
+            last exit <span className={lastExit === 0 ? "text-text-bright" : "text-state-failed"}>{lastExit}</span>
+          </span>
+        )}
+      </div>
+    </section>
+  )
 }

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useRef, useState, type ReactNode } from "react"
 import { Button } from "./button.js"
 import {
   Dialog,
@@ -14,7 +14,8 @@ import {
  * A small yes/no confirmation modal for destructive or irreversible actions
  * (e.g. deleting a session). Controlled via `open`/`onOpenChange`; `onConfirm`
  * fires then the dialog closes unless `closeOnConfirm={false}` leaves closing to
- * the caller. `tone="danger"` styles the confirm button red.
+ * the caller. `destructive` gives the confirm button the solid red fill (the only place one is allowed),
+ * moves initial focus to Cancel, and Esc always cancels.
  */
 export function ConfirmDialog({
   open,
@@ -23,7 +24,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
-  tone = "default",
+  destructive = false,
   onConfirm,
   closeOnConfirm = true
 }: {
@@ -33,11 +34,12 @@ export function ConfirmDialog({
   description?: ReactNode
   confirmLabel?: string
   cancelLabel?: string
-  tone?: "default" | "danger"
+  destructive?: boolean
   closeOnConfirm?: boolean
   onConfirm: () => void | Promise<void>
 }) {
   const [pending, setPending] = useState(false)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const confirm = () => {
     if (pending) return
     setPending(true)
@@ -48,21 +50,25 @@ export function ConfirmDialog({
   }
   return (
     <Dialog open={open} onOpenChange={(next) => !pending && onOpenChange(next)}>
-      <DialogContent className="w-[420px]">
+      <DialogContent
+        className="w-[420px]"
+        // Destructive dialogs start on the safe button so Enter can't confirm by accident.
+        onOpenAutoFocus={destructive ? (event) => { event.preventDefault(); cancelRef.current?.focus() } : undefined}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         {description && (
           <DialogBody>
-            <DialogDescription>{description}</DialogDescription>
+            <DialogDescription asChild><div>{description}</div></DialogDescription>
           </DialogBody>
         )}
         <DialogFooter>
-          <Button variant="secondary" size="sm" disabled={pending} onClick={() => onOpenChange(false)}>
+          <Button ref={cancelRef} variant="secondary" size="sm" disabled={pending} onClick={() => onOpenChange(false)}>
             {cancelLabel}
           </Button>
           <Button
-            variant={tone === "danger" ? "danger" : "primary"}
+            variant={destructive ? "destructive-solid" : "primary"}
             size="sm"
             disabled={pending}
             aria-busy={pending}

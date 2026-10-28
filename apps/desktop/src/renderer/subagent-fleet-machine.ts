@@ -92,7 +92,9 @@ export const projectLegacySubagents = (
         toolCalls: 0
       },
       artifacts: [],
-      attention: null
+      attention: null,
+      workspace: null,
+      prNumber: null
     }
     return {
       _tag: "Upsert",
@@ -154,12 +156,14 @@ const ACTIVE_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set([
 
 export const settleStoppedFleet = (
   events: ReadonlyArray<SubagentFleetEvent>,
-  occurredAt: number
+  occurredAt: number,
+  keepOutlivingChildren = false
 ): ReadonlyArray<SubagentFleetEvent> => {
   const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(events, "")
   if (parentRuntimeSessionId === "") return events
   const activeNodes = projectSubagentFleetEvents(parentRuntimeSessionId, events).nodes.filter((node) =>
-    ACTIVE_STATUSES.has(node.status)
+    ACTIVE_STATUSES.has(node.status) &&
+    !(keepOutlivingChildren && (node.status === "needs-attention" || node.background))
   )
   if (activeNodes.length === 0) return events
   return [
@@ -179,11 +183,32 @@ export const settleStoppedFleet = (
         currentTool: null,
         updatedAt: occurredAt,
         completedAt: occurredAt,
-        attention: null
+        attention: null,
+        workspace: null,
+        prNumber: null
       }
     }))
   ]
 }
+
+const FINISHED_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set(["completed", "failed"])
+
+/**
+ * Agents that went from active to completed/failed between two projections.
+ * The child the user has open is excluded: they are already watching it end.
+ * First sight of an already-finished node (history on mount) never counts.
+ */
+export const newlyFinishedNodes = (
+  previous: ReadonlyArray<SubagentFleetNode>,
+  next: ReadonlyArray<SubagentFleetNode>,
+  openId: string
+): ReadonlyArray<SubagentFleetNode> =>
+  next.filter((node) =>
+    node.nodeKind === "agent" &&
+    node.id !== openId &&
+    FINISHED_STATUSES.has(node.status) &&
+    previous.some((before) => before.id === node.id && ACTIVE_STATUSES.has(before.status))
+  )
 
 const hasNode = (nodes: ReadonlyArray<SubagentFleetNode>, id: string): boolean =>
   nodes.some((node) => node.id === id)

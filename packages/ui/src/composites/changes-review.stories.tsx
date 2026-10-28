@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import {
   adversarialReview,
+  agentTrees,
   localChanges,
   omittedFiles,
   prChanges,
@@ -16,6 +17,7 @@ import {
   type ExplorerFilter
 } from "./changes-review.js"
 import type { ReviewDraft } from "./review-tray.js"
+import type { ReviewTurn } from "./review-turns.js"
 
 /**
  * The changes review pieces one at a time, for styling. The same components
@@ -113,11 +115,138 @@ export const ExplorerOmittedFiles: Story = {
   )
 }
 
-/** Nothing to review. */
+const turns: readonly ReviewTurn[] = [
+  { id: "a1", label: "Turn 1", paths: [localChanges[0]!.file.path, localChanges[1]!.file.path] },
+  { id: "a3", label: "Turn 3", paths: [localChanges[2]!.file.path] }
+]
+
+function TurnFiltered() {
+  const [turnId, setTurnId] = useState<string | null>("a1")
+  const [active, setActive] = useState<string | null>(null)
+  return (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={files(localChanges)}
+        fileDiffs={diffs(localChanges)}
+        drafts={[]}
+        activePath={active}
+        onSelectFile={setActive}
+        turns={turns}
+        turnId={turnId}
+        onTurnChange={setTurnId}
+      />
+    </Frame>
+  )
+}
+
+/** "All turns ▾" narrows the file list to what one agent turn changed. */
+export const ExplorerTurnFilter: Story = { render: () => <TurnFiltered /> }
+
+function AgentScoped({ scope }: { readonly scope?: string }) {
+  const [active, setActive] = useState<string | null>(null)
+  const [picked, setPicked] = useState(scope ?? "all")
+  return (
+    <Frame width={320}>
+      <ChangedFilesExplorer
+        files={agentTrees.flatMap((tree) => tree.files)}
+        fileDiffs={diffs(prChanges)}
+        agentTrees={agentTrees}
+        agentScope={picked}
+        onAgentScopeChange={setPicked}
+        drafts={[]}
+        activePath={active}
+        onSelectFile={setActive}
+      />
+    </Frame>
+  )
+}
+
+/**
+ * Three trees — main plus two subagent worktrees — switch Changes to the
+ * agent scope filter and per-agent rows; `config/auth.json` shows once per
+ * tree that touched it.
+ */
+export const ExplorerAgentScoped: Story = { render: () => <AgentScoped /> }
+
+/** Scope "Main": child worktree files are hidden. */
+export const ExplorerAgentScopedMain: Story = { render: () => <AgentScoped scope="main" /> }
+
+/** Scope one agent: only that subagent's worktree. */
+export const ExplorerAgentScopedSingle: Story = { render: () => <AgentScoped scope="agent-refresh" /> }
+
+/** The change list is loading: rows at real height, nothing shifts on load. */
+export const ExplorerLoading: Story = {
+  render: () => (
+    <Frame width={280}>
+      <ChangedFilesExplorer files={[]} fileDiffs={[]} drafts={[]} activePath={null} onSelectFile={() => {}} loading />
+    </Frame>
+  )
+}
+
+/** The change list failed to load: message and Retry. */
+export const ExplorerError: Story = {
+  render: () => (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={[]}
+        fileDiffs={[]}
+        drafts={[]}
+        activePath={null}
+        onSelectFile={() => {}}
+        error="Couldn't read the worktree diff"
+        onRetry={() => {}}
+      />
+    </Frame>
+  )
+}
+
+/** Nothing to review: "No changes yet". */
 export const ExplorerEmpty: Story = {
   render: () => (
     <Frame width={280}>
       <ChangedFilesExplorer files={[]} fileDiffs={[]} drafts={[]} activePath={null} onSelectFile={() => {}} />
+    </Frame>
+  )
+}
+
+const prLayers = [{ number: 480 }, { number: 481 }, { number: 482 }]
+
+function PrFiltered() {
+  const [prNumber, setPrNumber] = useState(481)
+  const [active, setActive] = useState<string | null>(null)
+  return (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={files(prChanges)}
+        fileDiffs={diffs(prChanges)}
+        drafts={[]}
+        activePath={active}
+        onSelectFile={setActive}
+        prLayers={prLayers}
+        prNumber={prNumber}
+        onPrNumberChange={setPrNumber}
+      />
+    </Frame>
+  )
+}
+
+/** "PR: #481 ▾" narrows the changed-file list to one layer of a PR stack. */
+export const ExplorerPrLayerFilter: Story = { render: () => <PrFiltered /> }
+
+/** A layer with no commits of its own: "No commits in this layer". */
+export const ExplorerPrLayerEmpty: Story = {
+  render: () => (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={[]}
+        fileDiffs={[]}
+        drafts={[]}
+        activePath={null}
+        onSelectFile={() => {}}
+        prLayers={prLayers}
+        prNumber={481}
+        onPrNumberChange={() => {}}
+      />
     </Frame>
   )
 }
@@ -157,8 +286,6 @@ function Diff({
         onAddDraft={(draft) => setDrafts((current) => [...current, { id: `d${current.length}`, ...draft }])}
         onRemoveDraft={(id) => setDrafts((current) => current.filter((draft) => draft.id !== id))}
         onToggleViewed={(_path, next) => setViewed(next)}
-        onRevertLines={() => {}}
-        onRevertFile={() => {}}
         onDeslopFile={() => {}}
         onSendFindingToAgent={() => {}}
       />

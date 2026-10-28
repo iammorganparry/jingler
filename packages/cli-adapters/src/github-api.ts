@@ -30,6 +30,7 @@ import {
   mapCheck,
   mapIssue,
   mapIssueListItem,
+  mapLinkedPrs,
   mapIssueSummary,
   mapPrState,
   mapPrSummary,
@@ -139,6 +140,13 @@ export interface GitHubApiClient {
   readonly prViewBySlug: (slug: string, number: number) => Promise<PullRequest | null>
   readonly prFiles: (cwd: string, number: number) => Promise<ReadonlyArray<PrFileChange>>
   readonly prDiff: (cwd: string, number: number) => Promise<string>
+  readonly prHeadShaBySlug: (slug: string, number: number) => Promise<string | null>
+  readonly prDiffBySlug: (slug: string, number: number) => Promise<string>
+  readonly prReviewCommentsBySlug: (
+    slug: string,
+    number: number,
+    input: Parameters<GitHubApiClient["prReviewComments"]>[2]
+  ) => Promise<void>
   readonly prCheckout: (cwd: string, number: number) => Promise<GitHubPullRequestHead>
   readonly prCreate: (
     cwd: string,
@@ -184,11 +192,14 @@ export interface GitHubApiClient {
   readonly prMerge: (cwd: string, number: number, method?: PrMergeMethod) => Promise<void>
   readonly prMergeBySlug: (slug: string, number: number, method?: PrMergeMethod) => Promise<void>
   readonly prUpdateBranch: (cwd: string, number: number) => Promise<void>
+  /** Retarget a PR onto a different base branch (`PATCH /pulls/{n}` with `base`). */
+  readonly prSetBase: (cwd: string, number: number, base: string) => Promise<void>
   readonly prReady: (cwd: string, number: number) => Promise<void>
   readonly issueComment: (cwd: string, number: number, body: string) => Promise<void>
   readonly closeIssue: (cwd: string, number: number) => Promise<void>
   readonly issueCommentBySlug: (slug: string, number: number, body: string) => Promise<void>
   readonly issueCloseBySlug: (slug: string, number: number) => Promise<void>
+  readonly issueReopenBySlug: (slug: string, number: number) => Promise<void>
 }
 
 export interface GitHubApiClientOptions {
@@ -810,7 +821,11 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
             issue_number: issueNumber
           }, ["issues:read"])
         ])
-        return mapIssue({ ...issue.data, comments })
+        const timeline = await paginate(cwd, "/repos/{owner}/{repo}/issues/{issue_number}/timeline", {
+          issue_number: issueNumber
+        }, ["issues:read"])
+        const linkedPrs = mapLinkedPrs(timeline)
+        return { ...mapIssue({ ...issue.data, comments }), ...(linkedPrs.length ? { linkedPrs } : {}) }
       } catch (error) {
         if (error instanceof GitHubApiError && error.reason === "not-found") return null
         throw error
@@ -1023,6 +1038,10 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     },
     prCommentBySlug: (slug, pullNumber, body) =>
       client.prComment(`github-slug:${slug}`, pullNumber, body),
+    prHeadShaBySlug: (slug, pullNumber) => client.prHeadSha(`github-slug:${slug}`, pullNumber),
+    prDiffBySlug: (slug, pullNumber) => client.prDiff(`github-slug:${slug}`, pullNumber),
+    prReviewCommentsBySlug: (slug, pullNumber, input) =>
+      client.prReviewComments(`github-slug:${slug}`, pullNumber, input),
     prCloseBySlug: async (slug, pullNumber) => {
       await repositoryCall(
         `github-slug:${slug}`,
@@ -1104,6 +1123,15 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         ["pull_requests:write", "contents:write"]
       )
     },
+    prSetBase: async (cwd, pullNumber, base) => {
+      await repositoryCall(
+        cwd,
+        "PATCH",
+        "/repos/{owner}/{repo}/pulls/{pull_number}",
+        { pull_number: pullNumber, base },
+        ["pull_requests:write"]
+      )
+    },
     prReady: async (cwd, pullNumber) => {
       const repository = await resolveRepository(cwd)
       const pr = await pull(cwd, pullNumber)
@@ -1144,7 +1172,16 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     issueCommentBySlug: (slug, issueNumber, body) =>
       client.issueComment(`github-slug:${slug}`, issueNumber, body),
     issueCloseBySlug: (slug, issueNumber) =>
-      client.closeIssue(`github-slug:${slug}`, issueNumber)
+      client.closeIssue(`github-slug:${slug}`, issueNumber),
+    issueReopenBySlug: async (slug, issueNumber) => {
+      await repositoryCall(
+        `github-slug:${slug}`,
+        "PATCH",
+        "/repos/{owner}/{repo}/issues/{issue_number}",
+        { issue_number: issueNumber, state: "open" },
+        ["issues:write"]
+      )
+    }
   }
   return client
 }
@@ -1298,6 +1335,8 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         mutate(`github-slug:${slug}`, cli.issueCommentBySlug(slug, number, body), () => client.issueCommentBySlug(slug, number, body)),
       issueCloseBySlug: (slug: string, number: number) =>
         mutate(`github-slug:${slug}`, cli.issueCloseBySlug(slug, number), () => client.issueCloseBySlug(slug, number)),
+      issueReopenBySlug: (slug: string, number: number) =>
+        mutate(`github-slug:${slug}`, cli.issueReopenBySlug(slug, number), () => client.issueReopenBySlug(slug, number)),
       repository: (cwd: string) =>
         preferCli(cli.repository(cwd), () => client.repository(cwd)),
       rateLimit: () => Effect.sync(client.rateLimit),
@@ -1331,6 +1370,17 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         preferCli(cli.prFiles(cwd, number), () => client.prFiles(cwd, number)),
       prDiff: (cwd: string, number: number) =>
         preferCli(cli.prDiff(cwd, number), () => client.prDiff(cwd, number)),
+      prHeadShaBySlug: (slug: string, number: number) =>
+        preferCliNullable(cli.prHeadShaBySlug(slug, number), () => client.prHeadShaBySlug(slug, number)),
+      prDiffBySlug: (slug: string, number: number) =>
+        preferCli(cli.prDiffBySlug(slug, number), () => client.prDiffBySlug(slug, number)),
+      prReviewCommentsBySlug: (
+        slug: string,
+        number: number,
+        input: Parameters<GitHubApiClient["prReviewComments"]>[2]
+      ) =>
+        mutate(`github-slug:${slug}`, cli.prReviewCommentsBySlug(slug, number, input), () =>
+          client.prReviewCommentsBySlug(slug, number, input)),
       prCheckout: (cwd: string, number: number) =>
         preferCli(cli.prCheckout(cwd, number), () => client.prCheckout(cwd, number)),
       prCreate: (cwd: string, input: Parameters<GitHubApiClient["prCreate"]>[1]) =>
@@ -1370,6 +1420,8 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         mutate(`github-slug:${slug}`, cli.prMergeBySlug(slug, number, method), () => client.prMergeBySlug(slug, number, method)),
       prUpdateBranch: (cwd: string, number: number) =>
         mutate(cwd, cli.prUpdateBranch(cwd, number), () => client.prUpdateBranch(cwd, number)),
+      prSetBase: (cwd: string, number: number, base: string) =>
+        mutate(cwd, cli.prSetBase(cwd, number, base), () => client.prSetBase(cwd, number, base)),
       prReady: (cwd: string, number: number) =>
         mutate(cwd, cli.prReady(cwd, number), () => client.prReady(cwd, number)),
       issueComment: (cwd: string, number: number, body: string) =>

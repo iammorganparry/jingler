@@ -74,26 +74,27 @@
   /*
    * Surfaces (backmost → frontmost on a dark ground).
    *
-   * Warm-NEUTRAL greys stepping off #212121, the wordmark's own colour — not
-   * red-tinted. A brand-washed editor looks committed for about ten minutes and
-   * unreadable for the rest of the day, and the mark is loud enough that it does
-   * not need the walls helping.
+   * "Jingler Graphite": cool-neutral near-black greys, not red-tinted. A
+   * brand-washed editor looks committed for about ten minutes and unreadable for
+   * the rest of the day, and the mark is loud enough that it does not need the
+   * walls helping. The ramp is wider than the spec's raw swatches because
+   * `enforceSurfaceRamp` keeps each plane a visible step from the next.
    */
-  --sb-canvas: #141414;
-  --sb-sunken: #171717;
-  --sb-panel: #1b1b1b;
-  --sb-editor: #212121;
-  --sb-surface: #2b2b2b;
-  --sb-border: #0f0f0f;
-  --sb-line: #333333;
-  --sb-line-strong: #454545;
+  --sb-canvas: #0b0b0c;
+  --sb-sunken: #0e0e0f;
+  --sb-panel: #131315;
+  --sb-editor: #1a1a1d;
+  --sb-surface: #202024;
+  --sb-border: #232327;
+  --sb-line: #303036;
+  --sb-line-strong: #44444c;
 
   /* Text ramp (loudest → quietest) */
-  --sb-text-bright: #f4f1f1;
-  --sb-text-body: #dedada;
-  --sb-text: #c6c1c1;
-  --sb-muted: #8d8686;
-  --sb-dim: #6a6363;
+  --sb-text-bright: #ededef;
+  --sb-text-body: #dcdce0;
+  --sb-text: #c4c4cb;
+  --sb-muted: #a1a1aa;
+  --sb-dim: #7c7c86;
 
   /*
    * Accents — a full seven hues, deliberately.
@@ -136,6 +137,23 @@
    */
   --sb-brand: #ef3f57;
   --sb-brand-hover: #f5687b;
+
+  /*
+   * Neutral primary action — the loudest text tone as the fill, the app ground
+   * as the label. Red reads as destructive, so a filled CTA is never the brand;
+   * `--sb-brand` is for the mark, focus ring, selection and drop zone only.
+   */
+  --sb-primary-fill: #ededef;
+  --sb-primary-fg: #0b0b0c;
+  --sb-primary-hover: #ffffff;
+  --sb-primary-disabled: #27272b;
+
+  /* Workspace state, as aliases so they follow every theme's accent ramp. */
+  --sb-state-working: var(--sb-blue);
+  --sb-state-needs: var(--sb-yellow);
+  --sb-state-ready: var(--sb-green);
+  /* Spec §2/§6.10: destructive text and the confirm-dialog fill use #f0605d, not the softer --sb-red. */
+  --sb-state-failed: #f0605d;
 
   /*
    * Effects — translucent ON PURPOSE.
@@ -267,6 +285,15 @@
   /* `text-brand`, `bg-brand`, `border-brand`, `hover:bg-brand-hover`. */
   --color-brand: var(--sb-brand);
   --color-brand-hover: var(--sb-brand-hover);
+  /* `bg-primary-fill text-primary-fg hover:bg-primary-hover disabled:bg-primary-disabled`. */
+  --color-primary-fill: var(--sb-primary-fill);
+  --color-primary-fg: var(--sb-primary-fg);
+  --color-primary-hover: var(--sb-primary-hover);
+  --color-primary-disabled: var(--sb-primary-disabled);
+  --color-state-working: var(--sb-state-working);
+  --color-state-needs: var(--sb-state-needs);
+  --color-state-ready: var(--sb-state-ready);
+  --color-state-failed: var(--sb-state-failed);
 
   /*
    * Effects → utilities (bg-overlay, bg-hover, shadow-[…] via var, …).
@@ -308,6 +335,22 @@
   --radius-md: 4px;
   --radius-lg: 5px;
   --radius-xl: 7px;
+
+  /* Redesign radii (spec §2): 6 chips/buttons/rows, 8 inputs/menus, 12 cards/composer/dialogs.
+     New names so the legacy --radius-sm..xl above keep their values for existing components. */
+  --radius-chip: 6px;
+  --radius-input: 8px;
+  --radius-card: 12px;
+
+  /* Redesign type scale (spec §2): 11 meta/kbd, 12 secondary rows, 13 body UI, 15 section titles,
+     20 page titles. Utilities: text-scale-11 ... text-scale-20. Each multiplies --sb-font-scale, so
+     the Settings text-size preset scales them like the conversation sizes. (Named scale-N because
+     text-secondary etc. already mean colours.) */
+  --text-scale-11: calc(11px * var(--sb-font-scale, 1));
+  --text-scale-12: calc(12px * var(--sb-font-scale, 1));
+  --text-scale-13: calc(13px * var(--sb-font-scale, 1));
+  --text-scale-15: calc(15px * var(--sb-font-scale, 1));
+  --text-scale-20: calc(20px * var(--sb-font-scale, 1));
 
   --animate-pulse-dot: sb-pulse 1.4s ease-in-out infinite;
   --animate-shine: sb-shine 1.3s linear infinite;
@@ -894,9 +937,9 @@
   line-height: inherit;
 }
 .sb-plan-doc-title {
-  font-size: calc(28px * var(--sb-font-scale, 1));
-  font-weight: 650;
-  line-height: 1.25;
+  font-size: calc(20px * var(--sb-font-scale, 1));
+  font-weight: 600;
+  line-height: 1.4;
   letter-spacing: -0.01em;
   color: var(--sb-text-bright);
 }

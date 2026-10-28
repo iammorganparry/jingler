@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, sessionRow, showSessions, test } from "./fixtures.js"
+import { appShell, confirmArchive, expect, sessionRow, showSessions, test, openModelSettings } from "./fixtures.js"
+import { explorerTree } from "./explorer.js"
 import { showPullRequestDetails } from "./pull-request.js"
 import type { Page } from "@playwright/test"
 import type { SeedSession } from "./fixtures.js"
@@ -23,7 +24,7 @@ const SEND_ONE_TO_AGENT = /Send 1 to agent/
 
 /** Open the Pull Request tab with its details rail showing. */
 const openPullRequestDetails = async (window: Page) => {
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await showPullRequestDetails(window)
 }
 
@@ -238,19 +239,13 @@ test("the mode chip lives in the composer and Shift+Tab cycles all modes", async
   await expect(window.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "accept-edits")
 
-  // Shift+Tab cycles accept-edits → auto → plan → ask for every pi model.
+  // Shift+Tab flips Plan/Build and leaves the approval level alone.
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByRole("button", { name: "Auto", exact: true })).toBeVisible()
-  await expect(surface).toHaveAttribute("data-mode", "auto")
-
-  await window.keyboard.press("Shift+Tab")
-  // Plan mode is reachable for every certified pi model and themes the composer purple.
-  await expect(window.getByRole("button", { name: "Plan", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "plan")
+  await expect(window.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
 
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByRole("button", { name: "Ask Before Actions", exact: true })).toBeVisible()
-  await expect(surface).toHaveAttribute("data-mode", "ask")
+  await expect(surface).toHaveAttribute("data-mode", "accept-edits")
 })
 
 test("thinking strength is a compact per-session composer control", async ({ launchApp }) => {
@@ -260,6 +255,7 @@ test("thinking strength is a compact per-session composer control", async ({ lau
     sessions: seededSessions
   })
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
+  await openModelSettings(window)
   const thinking = window.getByRole("button", { name: "Thinking strength" })
 
   await expect(thinking).toContainText("Default")
@@ -341,6 +337,21 @@ test("AskUserQuestion replaces the composer with a question card and resumes on 
   await expect(window.getByText("HTTP middleware").last()).toBeVisible()
 })
 
+test("an errored turn renders the shared InlineError row", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[fail]] break the provider request")
+  await composer.press("Enter")
+
+  const errorRow = window.locator('[role="alert"]')
+  await expect(errorRow).toBeVisible({ timeout: 15_000 })
+  await expect(errorRow).toContainText("pi prompt failed")
+})
+
 test("a storm of consecutive tool calls collapses to the latest with a +N more toggle", async ({
   launchApp
 }) => {
@@ -355,6 +366,10 @@ test("a storm of consecutive tool calls collapses to the latest with a +N more t
   await expect(window.getByRole("button", { name: /\+ 3 more tool calls/ })).toBeVisible({ timeout: 15_000 })
   await expect(window.getByText("src/file-1.ts")).toHaveCount(0)
   await expect(window.getByText("src/file-4.ts").first()).toBeVisible()
+
+  // Graphite tool rows: completed calls carry neutral status; red is reserved for failures.
+  await expect(window.locator('[data-slot="tool-result"][data-tool-status="success"]').first()).toBeVisible()
+  await expect(window.locator('[data-slot="tool-result"][data-tool-status="error"]')).toHaveCount(0)
 
   // Expanding reveals the earlier calls; collapsing hides them again.
   await window.getByRole("button", { name: /\+ 3 more tool calls/ }).click()
@@ -387,7 +402,7 @@ test("the Changes action filters the Explorer to uncommitted files and reviews o
 
   // No PR yet → Changes filters the Explorer to the uncommitted diff.
   const explorer = await revealChanges(window)
-  await expect(window.getByRole("tab", { name: "Uncommitted" })).toBeVisible()
+  await expect(window.getByRole("radio", { name: /^Changed/ })).toBeChecked()
 
   const search = explorer.getByRole("searchbox", { name: "Search changed files" })
   await search.fill("auth")
@@ -425,14 +440,14 @@ test("the Changes action filters the Explorer to uncommitted files and reviews o
   await diff.getByRole("button", { name: "Mark viewed: README.md" }).click()
 
   // Focus gives the diff the width: the Explorer steps aside until it ends.
-  await diff.getByRole("button", { name: "Focus diff" }).click()
+  await window.getByRole("button", { name: "Focus diff" }).filter({ visible: true }).first().click()
   await expect(explorer).toHaveCount(0)
   await expect(diff).toBeVisible()
-  await diff.getByRole("button", { name: "Exit review focus" }).click()
+  await window.getByRole("button", { name: "Exit review focus" }).filter({ visible: true }).first().click()
   await expect(window.getByTestId("changed-files-explorer")).toBeVisible()
 
   // "All files" restores the full repository tree.
-  await window.getByRole("tab", { name: "All files" }).click()
+  await window.getByRole("radio", { name: "All", exact: true }).click()
   await expect(window.getByTestId("changed-files-explorer")).toHaveCount(0)
 })
 
@@ -446,22 +461,28 @@ test("renaming a session keeps the open tab and the breadcrumb follows it", asyn
   })
   await expect(appShell(window)).toBeVisible()
 
-  const files = window.getByRole("button", { name: "Files", exact: true }).first()
-  await files.click()
-  await expect(window.getByTestId("editor-tab-view-files")).toBeVisible()
+  // Files open from the Explorer sidebar now (no Files tab).
+  const tree = await explorerTree(window)
+  await tree.locator('[role="treeitem"][data-item-path="README.md"]').click()
+  const fileTab = window.getByTestId("editor-tab-file-README.md")
+  await expect(fileTab).toBeVisible()
+
+  // The session rows live in the Sessions half of the sidebar toggle.
+  await window.getByRole("tab", { name: "Sessions", exact: true }).click()
 
   const row = window.locator("[data-testid^='session-row-']").first()
   await row.getByTitle("Double-click to rename").dblclick()
   const input = row.getByRole("textbox")
   await input.fill("Renamed from sidebar")
   await input.press("Enter")
-  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Renamed from sidebar")
-  await expect(window.getByRole("tab", { name: "Files", exact: true })).toHaveAttribute("aria-selected", "true")
+  await expect(window.getByTestId("session-header-identity")).toContainText("Renamed from sidebar")
+  await expect(fileTab.getByRole("tab")).toHaveAttribute("aria-selected", "true")
 
   // Tabs live in the editor group, not the window title bar.
   await expect(window.getByTestId("title-bar").getByRole("tab")).toHaveCount(0)
   await expect(window.getByRole("button", { name: "Conversation", exact: true })).toHaveCount(0)
-  await window.getByRole("tab", { name: "Chat 1", exact: true }).first().click()
+  // The chat is a lane beside the open file now, not a "Chat 1" tab.
+  await expect(window.getByTestId("chat-lane-header").first()).toBeVisible()
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
@@ -491,15 +512,15 @@ test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes 
   // The sidebar row badges the linked PR number.
   await expect(window.getByText(/#482/).first()).toBeVisible()
 
-  await expect(window.getByTestId("view-tab-pr").first()).toBeVisible()
+  await expect(window.getByTestId("header-view-checks").first()).toBeVisible()
   // Code Review is no longer a tab: its review lives in the Explorer's filter.
   await expect(window.getByRole("button", { name: "Code Review" })).toHaveCount(0)
   await window.setViewportSize({ width: 900, height: 700 })
   const explorer = await revealChanges(window)
   await expect(window.getByText("Next milestone")).toHaveCount(0)
 
-  const prFilter = window.getByRole("tab", { name: "Pull request", exact: true })
-  await expect(prFilter).toHaveAttribute("aria-selected", "true", { timeout: 20_000 })
+  const prFilter = window.getByRole("radio", { name: /^PR #482/ })
+  await expect(prFilter).toBeChecked({ timeout: 20_000 })
   await explorer.locator('[data-item-path="src/auth.ts"]').click()
   const reviewDiff = window.getByTestId("review-file-diff")
   await expect(reviewDiff).toBeVisible({ timeout: 20_000 })
@@ -508,7 +529,7 @@ test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes 
     window.getByPlaceholder("Suggest a change or ask the agent to fix this…")
   ).toBeVisible()
 
-  const filterBar = prFilter.locator("..").locator("..")
+  const filterBar = window.getByRole("radiogroup", { name: "Explorer filter" })
   const [filterBox, prFilterBox] = await Promise.all([filterBar.boundingBox(), prFilter.boundingBox()])
   expect(filterBox).not.toBeNull()
   expect(prFilterBox).not.toBeNull()
@@ -544,7 +565,7 @@ test("the Pull Request tab leads with the description, in the conversation's col
     }
   })
   await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
 
   // The description renders as the opening comment — markdown and all.
   await expect(window.getByRole("heading", { name: "Why" })).toBeVisible({ timeout: 20_000 })
@@ -594,7 +615,8 @@ test("the merge box offers a strategy, and merges with the one chosen", async ({
   await expect(mergeButton).toBeVisible({ timeout: 20_000 })
 
   // Choosing squash re-labels the action, so the button says what will happen.
-  await window.getByRole("radio", { name: "Squash" }).click()
+  await window.getByRole("button", { name: "Merge method" }).click()
+  await window.getByRole("option", { name: "Squash and merge" }).click()
   await expect(window.getByRole("button", { name: "Squash and merge" })).toBeVisible()
 
   await window.getByRole("button", { name: "Squash and merge" }).click()
@@ -655,7 +677,9 @@ test("a passing check still links to its run", async ({ launchApp }) => {
       ]
     }
   })
-  await openPullRequestDetails(window)
+  // Per-check rows live in the Checks evidence tab; the details rail only summarises ("1/1 passing").
+  await window.getByTestId("header-view-checks").click()
+  await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
 
   const details = window.getByRole("link", { name: "Details for build" })
   await expect(details).toBeVisible({ timeout: 20_000 })
@@ -664,7 +688,7 @@ test("a passing check still links to its run", async ({ launchApp }) => {
   await expect(window.getByText("48s")).toBeVisible()
 })
 
-test("Changes falls back to the Uncommitted source and reverts a whole file", async ({ launchApp }) => {
+test("Changes falls back to the Uncommitted source and discards a whole file via right-click", async ({ launchApp }) => {
   // A session whose worktree (the e2e repo) has an uncommitted change. GitHub is
   // disconnected, so the PR source is empty and the Explorer falls back to the
   // "Uncommitted" (local) diff — where Revert is enabled.
@@ -679,17 +703,16 @@ test("Changes falls back to the Uncommitted source and reverts a whole file", as
   await expect(appShell(window)).toBeVisible()
 
   const explorer = await revealChanges(window)
-  await expect(window.getByRole("tab", { name: "Uncommitted" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-    { timeout: 20_000 }
-  )
+  await expect(window.getByRole("radio", { name: /^Changed/ })).toBeChecked({ timeout: 20_000 })
   await explorer.locator('[data-item-path="README.md"]').click()
   const diff = window.getByTestId("review-file-diff")
   await expect(diff.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
 
-  // Revert the whole file → the uncommitted change leaves the change set.
-  await diff.getByRole("button", { name: /Revert file/ }).click()
+  // No per-file Keep/Revert control renders; discarding is a right-click on the tree row.
+  await expect(diff.getByRole("button", { name: /Revert|Keep/ })).toHaveCount(0)
+  await explorer.locator('[data-item-path="README.md"]').click({ button: "right" })
+  await window.getByRole("menuitem", { name: "Discard file changes" }).click()
+  await window.getByRole("button", { name: "Discard", exact: true }).click()
   await expect(explorer.locator('[data-item-path="README.md"]')).toHaveCount(0, { timeout: 20_000 })
 })
 
@@ -809,6 +832,8 @@ test("an archived session shows in the Archived group, read-only, and restores",
   // It auto-selects → the archived banner + locked composer render (read-only).
   await expect(window.getByText(/was merged/)).toBeVisible()
   await expect(window.getByText(/Composer disabled/)).toBeVisible()
+  await expect(window.getByText(/This session is archived and now read-only/)).toBeVisible()
+  await expect(window.getByRole("button", { name: "Delete", exact: true })).toBeVisible()
 
   // Restore it → archived state clears (banner + lock gone, real composer back).
   await window.getByRole("button", { name: "Restore session" }).click()
@@ -859,6 +884,7 @@ test("sidebar quick-actions: hover a row to archive an active session", async ({
   const row = window.getByTestId("session-row-s_act")
   await row.hover()
   await window.getByRole("button", { name: "Archive Second session" }).click()
+  await confirmArchive(window)
 
   // Archiving now removes it from the default (active) list — and it is still
   // there, one filter away, rather than deleted.
@@ -894,6 +920,24 @@ test("sidebar quick-actions: right-click → Delete removes a session after conf
   await expect(window.getByTestId("session-row-s_act")).toHaveCount(0)
   await expect(sessionRow(window, "Second session")).toHaveCount(0)
   await expect(sessionRow(window, "First session")).toBeVisible()
+})
+
+test("destructive confirm dialog focuses Cancel first and Esc dismisses it without deleting", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: twoSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByTestId("session-row-s_act").click({ button: "right" })
+  await window.getByRole("menuitem", { name: "Delete" }).click()
+
+  const dialog = window.getByRole("dialog")
+  await expect(dialog.getByText("Delete session?")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused()
+
+  await window.keyboard.press("Escape")
+  await expect(dialog).toHaveCount(0)
+  await expect(window.getByTestId("session-row-s_act")).toBeVisible()
 })
 
 test("a merged PR badges its linked session but never archives it", async ({ launchApp }) => {
@@ -1015,7 +1059,16 @@ test("an adversarial review runs beside an active conversation and appears as a 
   ).toBeVisible({ timeout: 20_000 })
 
   // …and the reviewer is watchable in the still-visible conversation, mid-run.
-  await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
+  // The reviewer is a child agent: it shows in the lane header's subagent chip.
+  // The narrow-group details drawer is modal (scrim over the header), so dismiss it first; the run continues.
+  if (await window.getByTestId("drawer-scrim").isVisible()) {
+    await window.keyboard.press("Escape")
+    await expect(window.getByTestId("drawer-scrim")).toBeHidden()
+  }
+  await window.getByTestId("subagent-chip").first().click()
+  await expect(
+    window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ })
+  ).toBeVisible()
 })
 
 /**
@@ -1042,8 +1095,8 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   await expect(appShell(window)).toBeVisible()
 
   // The completed reviewer is back in its chat's subagent history, readable.
-  await window.getByRole("button", { name: "Previous subagents" }).click()
-  const reviewerTab = window.getByRole("menuitem", { name: /Open Reviewer/ })
+  await window.getByTestId("subagent-chip").first().click()
+  const reviewerTab = window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ })
   await expect(reviewerTab).toBeVisible()
   await reviewerTab.click()
   await expect(window.getByText(/stale token can be reused/)).toBeVisible()
@@ -1058,6 +1111,67 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   // AND its transcript is readable behind it. Only `Done`-terminated runs are ever
   // persisted, so a readable restored transcript IS the "finished, not mid-flight"
   // claim — a half-written run would have no assistant text to find.
+})
+
+test("long session rail shows gap marker and expands on click", async ({ launchApp }) => {
+  const turns = 15
+  const transcript = Array.from({ length: turns }, (_, index) => [
+    {
+      id: `u_rail_${index}`,
+      role: "user",
+      parts: [{ _tag: "Text", text: `Rail question ${index + 1}` }],
+      streaming: false,
+      createdAt: "2026-07-11T00:00:00.000Z"
+    },
+    {
+      id: `a_rail_${index}`,
+      role: "assistant",
+      parts: [{ _tag: "Text", text: `Answer ${index + 1}. ${"Long answer line to make the conversation overflow. ".repeat(12)}` }],
+      streaming: false,
+      createdAt: "2026-07-11T00:00:00.000Z"
+    }
+  ]).flat()
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions,
+    transcripts: { s_seeded: transcript }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await expect(window.getByText("Rail question 15")).toBeVisible()
+  const rail = window.getByRole("navigation", { name: "Message navigation" })
+  const ticks = rail.locator('[data-slot="preview-rail-item"]')
+  const gap = rail.getByRole("button", { name: /^Show \d+ earlier turns?$/ })
+
+  await expect(gap).toHaveCount(1)
+  await expect(ticks).toHaveCount(10)
+  await gap.click()
+  await expect(gap).toHaveCount(0)
+  await expect(ticks).toHaveCount(turns)
+})
+
+test("a blocked question shows an amber rail tick whose hover card jumps to it", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  // The rail needs two turns to render, so finish one turn before asking.
+  await composer.fill("Say hello")
+  await composer.press("Enter")
+  await expect(composer).toBeEnabled({ timeout: 30_000 })
+  await expect(window.getByText("Agent breathing…")).toHaveCount(0, { timeout: 30_000 })
+  await composer.fill("[[ask]] migrate the store")
+  await composer.press("Enter")
+  await expect(window.getByText("Agent needs your input")).toBeVisible({ timeout: 15_000 })
+
+  const rail = window.getByRole("navigation", { name: "Message navigation" })
+  const tick = rail.locator('[data-slot="preview-rail-item"]').last()
+  await expect(tick.locator('[data-slot="preview-rail-tick"]')).toHaveAttribute("data-kind", "needs-you")
+  await tick.hover()
+  await expect(window.locator('[data-slot="preview-rail-meta"]')).toContainText("Turn 2")
+  await expect(window.getByRole("button", { name: "Filter Changes" })).toBeVisible()
+  await window.getByRole("button", { name: "Jump", exact: true }).click()
+  await expect(window.getByText("[[ask]] migrate the store").first()).toBeVisible()
 })
 
 test("renders markdown in the operator's own message", async ({ launchApp }) => {

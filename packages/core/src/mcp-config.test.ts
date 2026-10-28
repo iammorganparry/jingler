@@ -1,6 +1,7 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
+  applyImportResolutions,
   interpolateEnv,
   interpolateEnvRecord,
   McpConfigEntry,
@@ -101,6 +102,61 @@ describe("mcpNameError", () => {
     for (const name of ["", "-leading", "has space", "a".repeat(65)]) {
       expect(mcpNameError(name)).not.toBeNull()
     }
+  })
+})
+
+describe("applyImportResolutions", () => {
+  const entry: McpConfigEntry = { type: "local", command: ["node", "x.mjs"], environment: {}, enabled: true, disabledTools: [] }
+  const other: McpConfigEntry = { type: "local", command: ["node", "y.mjs"], environment: {}, enabled: true, disabledTools: [] }
+
+  it("defaults a conflict with no resolution to keep-mine (skip)", () => {
+    const result = applyImportResolutions([{ name: "linear", entry }], new Set(["linear"]), {})
+    expect(result).toEqual([])
+  })
+
+  it("keep-mine skips the incoming entry", () => {
+    const result = applyImportResolutions(
+      [{ name: "linear", entry }],
+      new Set(["linear"]),
+      { linear: "keep-mine" }
+    )
+    expect(result).toEqual([])
+  })
+
+  it("replace overwrites the existing name", () => {
+    const result = applyImportResolutions(
+      [{ name: "linear", entry }],
+      new Set(["linear"]),
+      { linear: "replace" }
+    )
+    expect(result).toEqual([{ name: "linear", entry }])
+  })
+
+  it("keep-both writes the incoming entry under the first free suffixed name", () => {
+    const result = applyImportResolutions(
+      [{ name: "linear", entry }],
+      new Set(["linear"]),
+      { linear: "keep-both" }
+    )
+    expect(result).toEqual([{ name: "linear-2", entry }])
+  })
+
+  it("keep-both finds the next free suffix when -2 is also taken", () => {
+    const result = applyImportResolutions(
+      [{ name: "linear", entry }],
+      new Set(["linear", "linear-2"]),
+      { linear: "keep-both" }
+    )
+    expect(result).toEqual([{ name: "linear-3", entry }])
+  })
+
+  it("passes through non-conflicting candidates unchanged", () => {
+    const result = applyImportResolutions(
+      [{ name: "docs", entry: other }],
+      new Set(["linear"]),
+      {}
+    )
+    expect(result).toEqual([{ name: "docs", entry: other }])
   })
 })
 

@@ -4,7 +4,7 @@ import { cn } from "../lib/cn.js"
 import { StatusDot } from "./status-dot.js"
 
 /** Pill — a status lozenge with an optional leading dot (rounded-lg = 5px). */
-const pill = cva("inline-flex items-center gap-1.5 rounded-lg px-2.5 py-[3px] text-[11px]", {
+const pill = cva("inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-[3px] text-[11px]", {
   variants: {
     tone: {
       yellow: "bg-yellow/12 text-yellow",

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { PullRequest, PullRequestListItem } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
@@ -190,7 +190,7 @@ describe("PullRequestInbox", () => {
     const sessionButton = screen.getByRole("button", { name: "Create session" })
     expect(sessionButton.getAttribute("data-slot")).toBe("button")
     expect(sessionButton.querySelector(".lucide-download")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Files changed 1" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Files 1" }))
     expect(onOpenFiles).toHaveBeenCalledTimes(1)
 
     fireEvent.change(screen.getByPlaceholderText("Leave a comment…"), {
@@ -220,6 +220,34 @@ describe("PullRequestInbox", () => {
     )
     expect(screen.getByText("GitHub could not load this pull request.")).toBeTruthy()
     expect(screen.queryByText("No pull request yet for this branch")).toBeNull()
+  })
+
+  it("shows a skeleton while loading, then a failed load with Retry that recovers", () => {
+    const onRetry = vi.fn()
+    const props = { viewerLogin: "morgan", selected: null, detail: null, onSelect: () => {}, onRetry }
+    const { container, rerender } = render(<WidthTierValue width={1200}><PullRequestInbox prs={[]} loading {...props} /></WidthTierValue>)
+    expect(container.querySelector("[aria-busy='true']")).toBeTruthy()
+    rerender(<WidthTierValue width={1200}><PullRequestInbox prs={[]} error="GitHub could not load pull requests." {...props} /></WidthTierValue>)
+    expect(container.querySelector("[aria-busy='true']")).toBeNull()
+    expect(screen.getByText("GitHub could not load pull requests.")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+    rerender(<WidthTierValue width={1200}><PullRequestInbox prs={prs} {...props} /></WidthTierValue>)
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
+    expect(screen.getByRole("button", { name: UPDATE_API })).toBeTruthy()
+  })
+
+  it("shows an empty state when no pull requests match", () => {
+    render(<WidthTierValue width={1200}><PullRequestInbox prs={[]} viewerLogin="morgan" selected={null} detail={null} onSelect={() => {}} /></WidthTierValue>)
+    expect(screen.getByText("No pull requests match this view")).toBeTruthy()
+  })
+
+  it("offers Clear filters on an empty filtered view, and clearing brings the rows back", () => {
+    render(<WidthTierValue width={1200}><PullRequestInbox prs={[item({ author: { login: "lee", avatarUrl: null } })]} viewerLogin="morgan" selected={null} detail={null} onSelect={() => {}} /></WidthTierValue>)
+    fireEvent.click(screen.getByRole("radio", { name: "Created" }))
+    const empty = screen.getByText("No pull requests match this view").parentElement as HTMLElement
+    fireEvent.click(within(empty).getByRole("button", { name: "Clear filters" }))
+    expect(screen.getByRole("button", { name: /Fix token refresh/ })).toBeTruthy()
   })
 
   it("replaces the list with detail on small screens and returns", () => {

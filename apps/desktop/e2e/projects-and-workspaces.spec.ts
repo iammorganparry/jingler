@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
@@ -8,8 +8,7 @@ import {
   expect,
   sessionRow,
   type SeedSession,
-  test
-} from "./fixtures.js"
+  test, openModelSettings } from "./fixtures.js"
 
 const LOCAL_REPOSITORY = /^Local repository/
 
@@ -26,7 +25,8 @@ const makeProject = (home: string, name: string): string => {
 const addProject = async (window: Page, projectPath: string) => {
   await window.getByTestId("new-session").click()
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
-  await window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+  await window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
+  await window.getByRole("option", { name: "Add project…" }).click()
   await expect(window.getByRole("heading", { name: "Add project" })).toBeVisible()
   await window.getByRole("option", { name: LOCAL_REPOSITORY }).click()
   const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…")
@@ -39,14 +39,14 @@ const addProject = async (window: Page, projectPath: string) => {
 
 const createWorkspace = async (
   window: Page,
-  input: { checkout: "Local" | "Worktree"; task?: string; baseBranch?: string }
+  input: { checkout: "This checkout" | "Worktree"; task?: string; baseBranch?: string }
 ) => {
   if (!(await window.getByTestId("new-session-view").isVisible())) {
     await window.getByTestId("new-session").click()
   }
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
   if (input.baseBranch) {
-    await window.getByRole("button", { name: "Base branch" }).click()
+    await window.getByRole("button", { name: "Start from" }).click()
     await window.getByPlaceholder("Search branches…").fill(input.baseBranch)
     await window.getByRole("option", { name: new RegExp(input.baseBranch) }).click()
   }
@@ -123,7 +123,8 @@ test("Browse opens the native file browser and registers its selected repository
   }, projectPath)
 
   await launched.window.getByTestId("new-session").click()
-  await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+  await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
+  await launched.window.getByRole("option", { name: "Add project…" }).click()
   await launched.window.getByRole("option", { name: LOCAL_REPOSITORY }).click()
   await launched.window.getByRole("button", { name: "Browse in Finder" }).click()
   await expect(launched.window.getByRole("textbox", { name: "Project directory" })).toHaveValue(projectPath)
@@ -157,7 +158,8 @@ test("Clone from GitHub loads installation repositories and clones with GitHub c
     }, cloneParent)
 
     await launched.window.getByTestId("new-session").click()
-    await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+    await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
+    await launched.window.getByRole("option", { name: "Add project…" }).click()
     await launched.window.getByRole("option", { name: /^Remote repository/ }).click()
     await launched.window.getByRole("option", { name: /widget.*acme on GitHub/i }).click()
     await expect(launched.window.getByText(join(cloneParent, "widget"))).toBeVisible()
@@ -180,7 +182,7 @@ test("creates a direct workspace from a registered project", async ({ launchApp 
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
   await createWorkspace(launched.window, {
-    checkout: "Local"
+    checkout: "This checkout"
   })
 
   const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
@@ -278,6 +280,7 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   const projectPath = makeProject(launched.home, "journey-project")
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
+  await openModelSettings(launched.window)
   await expect(
     launched.window.getByRole("button", { name: "Model: Deterministic pi model" })
   ).toBeVisible()
@@ -291,6 +294,7 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
     return persisted.chats[0].modelId
   }).toBe("jingler-e2e/eval-model")
 
+  await openModelSettings(launched.window)
   await expect(launched.window.getByRole("button", { name: /^Model:/ })).toBeVisible()
   const sessions = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))
   const worktreePath = sessions[0].worktreePath as string
@@ -300,9 +304,9 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   await launched.window.getByTestId("editor-tab-view-plan").getByRole("tab").first().click()
   await launched.window.getByTestId("plan-review")
     .getByRole("button", { name: "Approve", exact: true }).click()
-  await launched.window.getByRole("tab", {
-    name: "[[plan]] refactor auth to a TokenStore", exact: true
-  }).click()
+  // The Plan view opens in its own split editor group; the chat's group (now a
+  // single-chat ChatLaneHeader with a thread switcher, not a tab role) is a
+  // separate pane that stays visible throughout, so no tab switch is needed.
   await expect(
     launched.window.getByText("Implemented and verified the approved plan.").first()
   ).toBeVisible({ timeout: 30_000 })
@@ -332,7 +336,7 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
       await expect(dialog).toHaveCount(0)
     }
     await rail.getByRole("button", { name: "Athena", exact: true }).click()
-    await createWorkspace(window, { checkout: "Local" })
+    await createWorkspace(window, { checkout: "This checkout" })
     await expect.poll(() => realpathSync(JSON.parse(readFileSync(join(launched.home, "jingler", "config.json"), "utf8")).lastRepoPath)).toBe(realpathSync(athena))
 
     if (entry === "sidebar") {
@@ -349,7 +353,7 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
       }
     }
     await expect(window.getByRole("button", { name: "Project", exact: true })).toContainText("Jingler")
-    await createWorkspace(window, { checkout: "Local" })
+    await createWorkspace(window, { checkout: "This checkout" })
     const persisted: ReadonlyArray<{ repoPath: string; worktreePath: string }> = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     )
@@ -360,3 +364,56 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
     })
   })
 }
+
+test("a renamed project folder shows the missing-folder state until it is located", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    isolateSystemHome: true,
+    seed: ({ home, repoPath }) => {
+      mkdirSync(join(home, "jingler"), { recursive: true })
+      writeFileSync(join(home, "jingler", "projects.json"), JSON.stringify([
+        { id: "imported-widget", name: "widget", path: repoPath, imported: true, availability: "available", createdAt: "2026-01-01", updatedAt: "2026-01-01" }
+      ]))
+    }
+  })
+  const projects = launched.window.getByRole("navigation", { name: "Projects" })
+  const tile = projects.getByRole("button", { name: "widget", exact: true })
+  await expect(tile).toBeVisible()
+  const renamed = `${launched.repoPath}-moved`
+  renameSync(launched.repoPath, renamed)
+
+  // The project list is read on load; reload so availability is re-checked.
+  await launched.window.reload()
+  await expect(tile).toBeVisible()
+  await tile.click()
+  await expect(launched.window.getByTestId("banner-shell")).toContainText("widget: folder not found")
+  await tile.click({ button: "right" })
+  await expect(launched.window.getByRole("menuitem", { name: "Folder not found" })).toBeDisabled()
+  await expect(launched.window.getByRole("menuitem", { name: "Locate folder…" })).toBeVisible()
+  await expect(launched.window.getByRole("menuitem", { name: "Remove project" })).toBeVisible()
+  await launched.window.keyboard.press("Escape")
+
+  await launched.app.evaluate(({ dialog }, selected) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] })
+  }, renamed)
+  await launched.window.getByTestId("banner-shell").getByRole("button", { name: "Locate folder…" }).click()
+  await expect(launched.window.getByTestId("banner-shell")).toHaveCount(0)
+  await expect(projects.getByRole("button", { name: "widget", exact: true })).toHaveCount(1)
+  await projects.getByRole("button", { name: "widget", exact: true }).click({ button: "right" })
+  await expect(launched.window.getByRole("menuitem", { name: "Locate folder…" })).toHaveCount(0)
+})
+
+test("new session hides the environment chip without remote environments and shows the Linear load-failure state", async ({ launchApp }) => {
+  const launched = await launchApp({ configured: true })
+  await expect(appShell(launched.window)).toBeVisible()
+  await launched.window.getByTestId("new-session").click()
+  const view = launched.window.getByTestId("new-session-view")
+  await expect(view.getByRole("heading", { name: "New session" })).toBeVisible()
+  await expect(view.getByRole("button", { name: "Execution environment", exact: true })).toHaveCount(0)
+  await view.getByRole("button", { name: "Start from", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "Issue" }).click()
+  await launched.window.getByRole("option", { name: /^Linear issue/ }).click()
+  await expect(view.getByText("Couldn't load issues")).toBeVisible({ timeout: 20_000 })
+  await expect(view.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+})

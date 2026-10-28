@@ -4,13 +4,16 @@ import type {
   GitHubConnection,
   GitConfig,
   GithubConfig,
+  NotificationPermission,
   NotificationsConfig,
   ObsidianExplanationsConfig,
   OffloadComputeSettings,
   ContextConfig,
   ContextSnapshot,
   Environment,
-  ExecutionMode
+  ExecutionMode,
+  Session,
+  PlanTemplateConfig
 } from "@jingler/core"
 import {
   BUDGET_RANGE,
@@ -25,20 +28,23 @@ import {
   type ProviderConnectionsSettingsProps
 } from "./provider-connections-settings.js"
 import {
+  Bell,
   Boxes,
-  ChevronRight,
   Cloud,
   Cpu,
   Keyboard,
   FolderCog,
   Palette,
+  PanelTop,
   Plug,
   RefreshCw,
   Server,
   ShieldCheck,
   Gauge,
+  Mic,
   SlidersHorizontal,
   Sparkles,
+  TriangleAlert,
   X
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
@@ -46,6 +52,7 @@ import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/beui/select.js"
 import { Callout } from "../components/callout.js"
+import { BannerShell } from "../components/banner-shell.js"
 import {
   Dialog,
   DialogBody,
@@ -54,8 +61,14 @@ import {
   DialogHeader,
   DialogTitle
 } from "../components/dialog.js"
-import { Eyebrow } from "../components/eyebrow.js"
+import { SearchField } from "../components/search-input.js"
+import { Badge } from "../components/badge.js"
+import { EmptyState } from "../components/feedback.js"
+import { JinglerWordmark } from "../brand/jingler-mark.js"
+import { AsyncButton } from "../components/async-button.js"
 import { GithubMark } from "../components/github-mark.js"
+import { HeaderViewsSettings, type HeaderViewsSettingsProps } from "./header-views-settings.js"
+import { UsageSettings, type UsageSettingsProps } from "./usage-settings.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
 import {
   PluginsSettings,
@@ -64,12 +77,15 @@ import {
 import { SegmentedControl } from "../components/segmented-control.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
+import { Spinner } from "../components/loading.js"
+import { Field } from "../components/field.js"
+import { Textarea } from "../components/textarea.js"
+import { SettingsCard, SettingsRow } from "../components/settings-row.js"
+import { ConfirmDialog } from "../components/confirm-dialog.js"
+import { VoiceSettings, type VoiceSettingsProps } from "./voice-settings.js"
 import { McpSettings, type McpSettingsProps } from "./mcp-settings.js"
 import { Input } from "../components/input.js"
-import {
-  EnvironmentDialog,
-  type EnvironmentDialogProps
-} from "./environment-dialog.js"
+import { PairingSheet, type PairingSheetProps } from "./pairing-sheet.js"
 import { AgentsSettings, type AgentsSettingsProps } from "./agents-settings.js"
 import { RuntimeInspector, type RuntimeInspectorProps } from "./runtime-inspector.js"
 import {
@@ -83,6 +99,8 @@ import { ProjectWorkflowSettings, type ProjectWorkflowSettingsProps } from "./pr
 
 type SectionKey =
   | "general"
+  | "notifications"
+  | "voice"
   | "projects"
   | "routines"
   | "providers"
@@ -94,6 +112,8 @@ type SectionKey =
   | "connectors"
   | "github"
   | "themes"
+  | "headerViews"
+  | "usage"
   | "plugins"
   | "keybindings"
   | "devices"
@@ -106,62 +126,55 @@ interface NavItem {
   ready: boolean
 }
 
-const NAV: ReadonlyArray<NavItem> = [
+// ── Grouped nav structure per §5e ──────────────────────────────────────────
+
+interface NavGroup {
+  label: string
+  items: ReadonlyArray<NavItem>
+}
+
+const NAV_GROUPS: ReadonlyArray<NavGroup> = [
   {
-    key: "general",
-    label: "General",
-    icon: <SlidersHorizontal size={14} />,
-    ready: true
-  },
-  { key: "projects", label: "Projects", icon: <FolderCog size={14} />, ready: true },
-  { key: "devices", label: "Devices", icon: <Server size={14} />, ready: true },
-  {
-    key: "providers",
-    label: "Providers",
-    icon: <Cpu size={14} />,
-    ready: true
-  },
-  { key: "context", label: "Context", icon: <Gauge size={14} />, ready: true },
-  { key: "plan", label: "Plan", icon: <Sparkles size={14} />, ready: true },
-  {
-    key: "agents",
-    label: "Agents & skills",
-    icon: <Sparkles size={14} />,
-    ready: true
+    label: "Workspace",
+    items: [
+      { key: "general", label: "General", icon: <SlidersHorizontal size={14} />, ready: true },
+      { key: "notifications", label: "Notifications", icon: <Bell size={14} />, ready: true },
+      { key: "voice", label: "Voice", icon: <Mic size={14} />, ready: true },
+      { key: "projects", label: "Projects", icon: <FolderCog size={14} />, ready: true },
+      { key: "usage", label: "Usage", icon: <Gauge size={14} />, ready: true },
+      { key: "permissions", label: "Permissions", icon: <ShieldCheck size={14} />, ready: false }
+    ]
   },
   {
-    key: "runtime",
-    label: "Runtime",
-    icon: <Gauge size={14} />,
-    ready: true
+    label: "Agents",
+    items: [
+      { key: "providers", label: "Providers", icon: <Cpu size={14} />, ready: true },
+      { key: "agents", label: "Agents & skills", icon: <Sparkles size={14} />, ready: true },
+      { key: "context", label: "Context", icon: <Gauge size={14} />, ready: true },
+      { key: "plan", label: "Plan", icon: <Sparkles size={14} />, ready: true },
+      { key: "runtime", label: "Runtime", icon: <Gauge size={14} />, ready: true }
+    ]
   },
   {
-    key: "permissions",
-    label: "Permissions",
-    icon: <ShieldCheck size={14} />,
-    ready: false
+    label: "Integrations",
+    items: [
+      { key: "github", label: "GitHub", icon: <GithubMark size={14} />, ready: true },
+      { key: "connectors", label: "MCP servers", icon: <Plug size={14} />, ready: true },
+      { key: "plugins", label: "Plugins", icon: <Boxes size={14} />, ready: true },
+      { key: "devices", label: "Devices", icon: <Server size={14} />, ready: true }
+    ]
   },
   {
-    key: "connectors",
-    label: "MCP servers",
-    icon: <Plug size={14} />,
-    ready: true
-  },
-  {
-    key: "github",
-    label: "GitHub",
-    icon: <GithubMark size={14} />,
-    ready: true
-  },
-  { key: "themes", label: "Themes", icon: <Palette size={14} />, ready: true },
-  { key: "plugins", label: "Plugins", icon: <Boxes size={14} />, ready: true },
-  {
-    key: "keybindings",
-    label: "Keybindings",
-    icon: <Keyboard size={14} />,
-    ready: false
+    label: "Appearance",
+    items: [
+      { key: "themes", label: "Themes", icon: <Palette size={14} />, ready: true },
+      { key: "headerViews", label: "Header views", icon: <PanelTop size={14} />, ready: true },
+      { key: "keybindings", label: "Keybindings", icon: <Keyboard size={14} />, ready: false }
+    ]
   }
 ]
+
+const NAV: ReadonlyArray<NavItem> = NAV_GROUPS.flatMap(g => g.items)
 
 export interface SettingsViewProps {
   routines?: (projectId: string, templates?: ReadonlyArray<import("@jingler/core").ProjectRoutineTemplate>) => import("react").ReactNode
@@ -180,6 +193,10 @@ export interface SettingsViewProps {
    * renders the stub, exactly as an unbuilt section does.
    */
   themes?: ThemesSettingsProps
+  /** Pin toggles for the session header views; absent renders the stub. */
+  headerViews?: HeaderViewsSettingsProps
+  /** Full Usage page; absent renders the stub. */
+  usage?: UsageSettingsProps
   /**
    * Everything the Plugins pane needs. Optional for the same reason `themes`
    * is — Storybook mounts Settings without a plugin catalog, and absent renders
@@ -190,7 +207,9 @@ export interface SettingsViewProps {
     environments: ReadonlyArray<Environment>
     loading: boolean
     error?: string | null
-    dialog: EnvironmentDialogProps
+    dialog: PairingSheetProps
+    /** Live workspaces; those on a device are listed before it can be revoked. */
+    workspaces?: ReadonlyArray<Pick<Session, "id" | "title" | "environmentId">>
     onOpen: () => void
     onRefresh: () => void | Promise<void>
     onRename: (id: string, name: string) => void | Promise<void>
@@ -198,6 +217,8 @@ export interface SettingsViewProps {
   }
   /** MCP servers from ~/jingler/mcp.json (from `useMcpSettings`). */
   mcp?: McpSettingsProps
+  /** Local speech-to-text models, language and hold-to-talk key. */
+  voice?: VoiceSettingsProps
   /** Auto-compaction levers (master switch + working-set budget). */
   context?: ContextConfig | null
   onSaveContext?: (config: ContextConfig) => void
@@ -231,16 +252,30 @@ export interface SettingsViewProps {
   /** Desktop-notification prefs; absent means the defaults, not "off". */
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
+  /**
+   * Can the OS show Jingler's notifications? Only "denied" is actionable here —
+   * main never emits it today (see `notificationPermission` in
+   * apps/desktop/src/main/notifications.ts), so the warning row stays dark
+   * until a real macOS probe exists.
+   */
+  notificationPermission?: NotificationPermission | null
+  /** Opens System Settings → Notifications; macOS only. */
+  onOpenNotificationSystemSettings?: () => void | Promise<void>
   /** Automatic read-only cloud routing for eligible agent commands. */
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
+  /** Re-run Offload Compute priming after a failed save. */
+  onRetryOffload?: () => void
   /** Permission mode used for new chats across every provider model. */
   defaultMode?: ExecutionMode | null
   onSaveDefaultMode?: (defaultMode: ExecutionMode) => void | Promise<void>
   /** Whether plan mode runs commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
+  /** Custom starting plan structure; absent or empty means the built-in draft. */
+  planTemplate?: PlanTemplateConfig | null
+  onSavePlanTemplate?: (template: PlanTemplateConfig) => void | Promise<void>
   /** Whether final completion summaries are shaped for an ADHD reader. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
@@ -250,7 +285,7 @@ export interface SettingsViewProps {
   /** Close the view and return to the active session. */
   onClose?: () => void
   /** Recovery actions open directly on GitHub; ordinary Settings opens Providers. */
-  initialSection?: "providers" | "github" | "devices" | "agents" | "runtime"
+  initialSection?: SectionKey
 }
 
 /**
@@ -275,9 +310,12 @@ export function SettingsView({
   webSearch,
   runtimeInspector,
   themes,
+  headerViews,
+  usage,
   plugins,
   devices,
   mcp,
+  voice,
   context,
   onSaveContext,
   contextSessions,
@@ -297,11 +335,18 @@ export function SettingsView({
   obsidianVaultConfigured,
   notifications,
   onSaveNotifications,
+  notificationPermission,
+  onOpenNotificationSystemSettings,
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
+  onRetryOffload,
   defaultMode,
   onSaveDefaultMode,
+  planAutoRun,
+  onSavePlanAutoRun,
+  planTemplate,
+  onSavePlanTemplate,
   adhdMode,
   onSaveAdhdMode,
   fontScale,
@@ -309,25 +354,65 @@ export function SettingsView({
   onClose,
   initialSection = "providers"
 }: SettingsViewProps) {
-         function getSection() {
+         /** Sections that render their props or a stub; split out to keep getSection under the complexity gate. */
+         function getOptionalSection(): React.ReactNode | undefined {
            switch (section) {
 case "devices": {
 return (renderOptionalSection(devices, (props) => <DevicesSection {...props} />, "Devices"))
 }
+case "voice": {
+return renderOptionalSection(voice, (props) => <VoiceSettings {...props} />, "Voice")
+}
+case "providers": {
+return (renderOptionalSection(providerConnections, (props) => <ProviderConnectionsSettings {...props} />, "Providers"))
+}
+case "agents": {
+return (renderOptionalSection(agents, (props) => <AgentsSettings {...props} />, "Agents & skills"))
+}
+case "runtime": {
+return (renderOptionalSection(runtimeInspector, (props) => <RuntimeInspector {...props} />, "Runtime"))
+}
+case "plugins": {
+return (renderOptionalSection(plugins, (props) => <PluginsSettings {...props} />, "Plugins"))
+}
+case "headerViews": {
+return renderOptionalSection(headerViews, (props) => <HeaderViewsSettings {...props} />, "Header views")
+}
+case "usage": {
+return renderOptionalSection(usage, (props) => <UsageSettings {...props} />, "Usage")
+}
+case "themes": {
+return (renderOptionalSection(themes, (props) => <ThemesSettings {...props} />, "Themes"))
+}
+           }
+           return undefined
+         }
+
+         function getSection() {
+           const optional = getOptionalSection()
+           if (optional !== undefined) return optional
+           switch (section) {
 case "routines":
 case "projects": {
 return renderOptionalSection(projectWorkflows, (props) => <ProjectWorkflowSettings {...props} routines={routines} />, "Projects")
+}
+case "notifications": {
+return (<NotificationsSection
+          notifications={notifications}
+          onSaveNotifications={onSaveNotifications}
+          permission={notificationPermission}
+          onOpenSystemSettings={onOpenNotificationSystemSettings}
+        />)
 }
 case "general": {
 return (<GeneralSection
           obsidianExplanations={obsidianExplanations}
           onSaveObsidianExplanations={onSaveObsidianExplanations}
           obsidianVaultConfigured={obsidianVaultConfigured}
-          notifications={notifications}
-          onSaveNotifications={onSaveNotifications}
           offloadCompute={offloadCompute}
           onSaveOffloadCompute={onSaveOffloadCompute}
           offloadStatus={offloadStatus}
+          onRetryOffload={onRetryOffload}
           offloadEnvironments={devices?.environments.filter((environment) =>
             environment.kind === "owned"
           ) ?? []}
@@ -341,9 +426,6 @@ return (<GeneralSection
           webSearch={webSearch}
         />)
 }
-case "providers": {
-return (renderOptionalSection(providerConnections, (props) => <ProviderConnectionsSettings {...props} />, "Providers"))
-}
 case "context": {
 return (<ContextSection
           context={context}
@@ -352,36 +434,17 @@ return (<ContextSection
         />)
 }
 case "plan": {
-return (<div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
-          <div className="mx-auto w-full max-w-[760px] rounded-xl border border-line bg-panel p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-purple">
-              Plannotator
-            </p>
-            <h2 className="mt-1 text-[19px] font-semibold text-text-bright">Plan mode</h2>
-            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              Plans are Markdown files reviewed and revised in Plannotator. Jingler&apos;s todo list,
-              Plan drawer, progress dock, composer summary, and transcript card are read-only views
-              of that plan.
-            </p>
-          </div>
-        </div>)
-}
-case "agents": {
-return (renderOptionalSection(agents, (props) => <AgentsSettings {...props} />, "Agents & skills"))
-}
-case "runtime": {
-return (renderOptionalSection(runtimeInspector, (props) => <RuntimeInspector {...props} />, "Runtime"))
+return (<PlanSection
+          planAutoRun={planAutoRun}
+          onSavePlanAutoRun={onSavePlanAutoRun}
+          planTemplate={planTemplate}
+          onSavePlanTemplate={onSavePlanTemplate}
+        />)
 }
 case "connectors": {
-return (<div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-6">
+return (<div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-8">
           {renderOptionalSection(mcp, (props) => <McpSettings {...props} />, "MCP servers")}
         </div>)
-}
-case "plugins": {
-return (renderOptionalSection(plugins, (props) => <PluginsSettings {...props} />, "Plugins"))
-}
-case "themes": {
-return (renderOptionalSection(themes, (props) => <ThemesSettings {...props} />, "Themes"))
 }
 case "github": {
 return (<GithubSection
@@ -405,16 +468,18 @@ return (<GithubSection
          }
 
   const [section, setSection] = React.useState<SectionKey>(initialSection)
+  const [searchQuery, setSearchQuery] = React.useState("")
   const selectSection = (next: SectionKey) => {
     setSection(next)
     if (next === "providers") providerConnections?.onReload?.()
     if (next === "runtime") runtimeInspector?.onRefresh()
+    if (next === "usage") usage?.onOpen?.()
   }
 
   // Three `flex-none` columns (216 + 328 + detail) is ~544px of chrome before
   // the settings themselves get a pixel. Below `mid` the nav narrows to an icon
   // rail so the section you're editing keeps the room.
-  const compact = !atLeast(useWidthTier(), "mid")
+  const compact = !atLeast(useWidthTier(), "wide")
 
   return (
     <div className="flex min-h-0 flex-1 bg-editor">
@@ -422,7 +487,7 @@ return (<GithubSection
       <nav
         className={cn(
           "flex flex-none flex-col gap-0.5 border-r border-hairline bg-panel p-2.5",
-          compact ? "w-[56px] items-center" : "w-[216px]"
+          compact ? "w-[56px] items-center" : "w-[220px]"
         )}
       >
         <div
@@ -431,7 +496,7 @@ return (<GithubSection
             compact ? "justify-center" : "justify-between"
           )}
         >
-          {!compact && <Eyebrow>Settings</Eyebrow>}
+          {!compact && <JinglerWordmark className="text-[13px]" />}
           {onClose && (
             <button
               type="button"
@@ -443,42 +508,73 @@ return (<GithubSection
             </button>
           )}
         </div>
-        {NAV.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => selectSection(item.key)}
-            aria-current={section === item.key}
-            // The label is the accessible name in both modes — the compact rail
-            // hides the TEXT, not the name, so a by-name lookup still finds it.
-            aria-label={item.label}
-            title={item.label}
-            className={cn(
-              "flex items-center gap-2.5 rounded-md py-2 text-[13px] transition-colors",
-              compact ? "justify-center px-2" : "px-2.5",
-              section === item.key
-                ? "border border-blue/45 bg-surface font-semibold text-text-bright shadow-[0_0_0_3px] shadow-blue/10"
-                : "border border-transparent text-text-body hover:bg-surface/60"
-            )}
-          >
-            <span
-              className={cn(
-                section === item.key ? "text-blue" : "text-muted-foreground"
+        
+        {/* Search */}
+        {!compact && (
+          <div className="px-1 pb-2">
+            <SearchField
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Search settings"
+              aria-label="Search settings"
+            />
+          </div>
+        )}
+
+        {/* Grouped nav items */}
+        {NAV_GROUPS.map((group) => {
+          const visibleItems = group.items.filter(item => 
+            !searchQuery || item.label.toLowerCase().includes(searchQuery.toLowerCase())
+          )
+          if (visibleItems.length === 0) return null
+          
+          return (
+            <div key={group.label} className={cn("flex flex-col gap-0.5", compact && "items-center")}>
+              {!compact && (
+                <div className="px-2.5 pb-1 pt-2 text-[11px] font-semibold text-text-dim">
+                  {group.label}
+                </div>
               )}
-            >
-              {item.icon}
-            </span>
-            {!compact && <span className="flex-1 text-left">{item.label}</span>}
-            {!compact && item.key === "providers" && (
-              <span className="rounded bg-hover px-1.5 py-px font-mono text-[9px] text-muted-foreground">
-                {providerConnections?.catalog?.connections.length ?? 0}
-              </span>
-            )}
-          </button>
-        ))}
-        {/* A three-line path caption is the first thing to go at 56px — it is
-            reference material, not navigation, and the same path is printed in
-            the Settings body. */}
+              {visibleItems.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => selectSection(item.key)}
+                  aria-current={section === item.key}
+                  aria-label={item.label}
+                  title={item.label}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-md py-2 text-[13px] transition-colors",
+                    compact ? "justify-center px-2" : "px-2.5",
+                    section === item.key
+                      ? "bg-surface font-medium text-text-bright"
+                      : "text-muted-foreground hover:bg-hover"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      section === item.key ? "text-text-bright" : "text-muted-foreground"
+                    )}
+                  >
+                    {item.icon}
+                  </span>
+                  {!compact && (
+                    <>
+                      <span className="flex-1 text-left">{item.label}</span>
+                      {!item.ready && <Badge tone="count">Soon</Badge>}
+                      {item.key === "providers" && (
+                        <span className="rounded bg-hover px-1.5 py-px font-mono text-[9px] text-muted-foreground">
+                          {providerConnections?.catalog?.connections.length ?? 0}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          )
+        })}
+        
         {!compact && (
           <div className="mt-auto rounded-md border border-line px-2.5 py-2 font-mono text-[10px] leading-relaxed text-dim">
             config ·{" "}
@@ -494,11 +590,67 @@ return (<GithubSection
   )
 }
 
+/** From apps/device-agent/README.md "Build and bootstrap". */
+const DEVICE_AGENT_UPDATE_COMMAND = "pnpm --filter @jingler/device-agent build"
+
+const DEVICE_STATUS_LABEL: Record<Environment["state"], string> = {
+  online: "Online",
+  offline: "Offline",
+  reconnecting: "Reconnecting…",
+  incompatible: "Incompatible",
+  revoked: "Revoked",
+  provisioning: "Provisioning…",
+  sleeping: "Sleeping",
+  restoring: "Restoring…",
+  paused: "Paused",
+  failed: "Failed"
+}
+
+const agentTooOldText = (agentVersion: string | null): string =>
+  agentVersion
+    ? `Device agent v${agentVersion.replace(/^v/, "")} is older than this app needs`
+    : "Device agent is older than this app needs"
+
+/** One neutral line of text; only Incompatible carries a (red) icon, never a fill. */
+function DeviceStatus({ state }: { state: Environment["state"] }) {
+  return (
+    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+      {state === "incompatible" && (
+        <TriangleAlert size={12} className="text-state-failed" aria-hidden />
+      )}
+      {DEVICE_STATUS_LABEL[state]}
+    </span>
+  )
+}
+
+function RevokeImpact({
+  workspaces
+}: {
+  workspaces: ReadonlyArray<{ id: string; title: string }>
+}) {
+  const count = workspaces.length
+  if (count === 0) return <p>No workspaces run on it.</p>
+  return (
+    <>
+      <p>
+        {count} {count === 1 ? "workspace runs" : "workspaces run"} on it and
+        will stop.
+      </p>
+      <ul className="mt-2 list-disc pl-5">
+        {workspaces.map((workspace) => (
+          <li key={workspace.id}>{workspace.title}</li>
+        ))}
+      </ul>
+    </>
+  )
+}
+
 export function DevicesSection({
   environments,
   loading,
   error,
   dialog,
+  workspaces = [],
   onOpen,
   onRefresh,
   onRename,
@@ -509,6 +661,13 @@ export function DevicesSection({
   )
   const [renameValue, setRenameValue] = React.useState("")
   const [renamePending, setRenamePending] = React.useState(false)
+  const [revokeTarget, setRevokeTarget] = React.useState<Environment | null>(
+    null
+  )
+  const [updateOpen, setUpdateOpen] = React.useState(false)
+  const revokeWorkspaces = workspaces.filter(
+    (workspace) => revokeTarget && workspace.environmentId === revokeTarget.id
+  )
 
   const openRename = (environment: Environment): void => {
     setRenameTarget(environment)
@@ -536,7 +695,7 @@ export function DevicesSection({
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-[16px] font-semibold text-text-bright">
+            <h2 className="text-[20px] font-semibold text-text-bright">
               Devices
             </h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
@@ -569,26 +728,22 @@ export function DevicesSection({
         )}
         <div className="overflow-hidden rounded-lg border border-line bg-panel">
           {environments.length === 0 ? (
-            <div className="px-4 py-10 text-center text-[12px] text-muted-foreground">
-              {loading ? "Loading devices…" : "No owned machines yet."}
-            </div>
+            loading ? (
+              <div className="px-4 py-10 text-center text-[12px] text-muted-foreground">
+                Loading devices…
+              </div>
+            ) : (
+              <EmptyState
+                title="No owned machines yet"
+                action={
+                  <Button size="sm" onClick={onOpen}>
+                    Pair a machine
+                  </Button>
+                }
+              />
+            )
           ) : (
-            environments.map((environment) => {
-                               function getClassName() {
-                                 switch (environment.state) {
-case "online": {
-return ("bg-green/10 text-green")
-}
-case "incompatible": {
-return ("bg-yellow/10 text-yellow")
-}
-case "revoked": {
-return ("bg-red/10 text-red")
-}
-}
-                                 return ("bg-surface text-muted-foreground")
-                               }
-return ((
+            environments.map((environment) => (
               <div
                 key={environment.id}
                 className="flex items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0"
@@ -612,15 +767,20 @@ return ((
                         ? `agent ${environment.agentVersion}`
                         : "agent version unknown"}
                   </span>
-                </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-1 text-[10px] font-medium",
-                    getClassName()
+                  {environment.state === "incompatible" && (
+                    <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                      {agentTooOldText(environment.agentVersion)}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setUpdateOpen(true)}
+                      >
+                        How to update
+                      </Button>
+                    </div>
                   )}
-                >
-                  {environment.state}
-                </span>
+                </div>
+                <DeviceStatus state={environment.state} />
                 {environment.kind === "owned" && (
                   <Button
                     variant="ghost"
@@ -634,24 +794,49 @@ return ((
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Revoke ${environment.name}? Active remote sessions will disconnect.`
-                        )
-                      )
-                        void onRevoke(environment.id)
-                    }}
+                    onClick={() => setRevokeTarget(environment)}
                   >
                     Revoke
                   </Button>
                 )}
               </div>
-            )); })
+            ))
           )}
         </div>
       </div>
-      <EnvironmentDialog {...dialog} />
+      <PairingSheet {...dialog} />
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRevokeTarget(null)
+        }}
+        title={`Revoke ${revokeTarget?.name ?? ""}?`}
+        description={<RevokeImpact workspaces={revokeWorkspaces} />}
+        confirmLabel="Revoke device"
+        destructive
+        onConfirm={() => (revokeTarget ? onRevoke(revokeTarget.id) : undefined)}
+      />
+      <Dialog open={updateOpen} onOpenChange={setUpdateOpen}>
+        <DialogContent className="w-[460px]">
+          <DialogHeader>
+            <DialogTitle>Update the device agent</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <p className="mb-2 text-[12px] text-muted-foreground">
+              Build the current agent, then use Add owned machine to upload it
+              over SSH.
+            </p>
+            <code className="block rounded-md bg-sunken px-3 py-2 font-mono text-[11px] text-text-bright">
+              {DEVICE_AGENT_UPDATE_COMMAND}
+            </code>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setUpdateOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={renameTarget !== null}
         onOpenChange={(open) => {
@@ -663,22 +848,20 @@ return ((
             <DialogTitle>Rename environment</DialogTitle>
           </DialogHeader>
           <DialogBody>
-            <label
-              htmlFor="environment-rename-name"
-              className="flex flex-col gap-2 text-[11px] font-medium text-muted-foreground"
-            >
-              Name
-              <Input
-                id="environment-rename-name"
-                aria-label="Environment name"
-                value={renameValue}
-                onChange={(event) => setRenameValue(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void submitRename()
-                }}
-                disabled={renamePending}
-              />
-            </label>
+            <Field label="Name">
+              {(c) => (
+                <Input
+                  {...c}
+                  aria-label="Environment name"
+                  value={renameValue}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void submitRename()
+                  }}
+                  disabled={renamePending}
+                />
+              )}
+            </Field>
           </DialogBody>
           <DialogFooter>
             <Button
@@ -705,12 +888,9 @@ return ((
 
 function StubSection({ label }: { label: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 bg-editor text-center">
-      <span className="text-[14px] font-semibold text-text-body">{label}</span>
-      <span className="max-w-[280px] text-[12px] leading-relaxed text-muted-foreground">
-        This section isn&apos;t wired up yet — it&apos;s coming in a later pass.
-      </span>
-    </div>
+    <section aria-label={label} className="flex flex-1 items-center justify-center bg-editor">
+      <EmptyState title={label} description="Coming soon, this section isn't available yet." />
+    </section>
   )
 }
 
@@ -752,8 +932,8 @@ function ContextSection({
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor">
-      <div className="flex max-w-[560px] flex-col gap-4 p-6">
+    <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6">
         <div className="flex items-center gap-2 border-b border-hairline pb-2.5">
           <Gauge size={14} className="text-text-bright" />
           <span className="text-[13px] font-semibold text-text-bright">
@@ -764,67 +944,57 @@ function ContextSection({
         <Callout tone="blue">
           Long conversations lose accuracy well before they hit a model&apos;s
           limit. Jingler summarises a session in the background once it outgrows
-          the budget below, then quietly continues from that summary — your
+          the budget below, then quietly continues from that summary, your
           transcript is never truncated.
         </Callout>
 
-        <div className="divide-y divide-hairline">
-          <ToggleRow
+        <SettingsCard title="Auto-compaction">
+          <GeneralToggleRow
             label="Compact sessions automatically"
             description="Summarise and reseed in the background when a session outgrows its budget. Off leaves the selected provider model to enforce its own limit."
             checked={draft.auto}
             onChange={(auto) => save({ ...draft, auto })}
           />
-        </div>
-
-        {/* ── The budget ── */}
-        <div className={draft.auto ? "" : "pointer-events-none opacity-50"}>
-          <div className="flex items-baseline justify-between">
-            <span className="text-[12.5px] font-medium text-text-body">
-              Working-set budget
-            </span>
-            <span className="font-mono text-[12px] tabular-nums text-text-bright">
-              {fmtK(draft.budgetTokens)} tokens
-            </span>
-          </div>
-          <p className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-            How much conversation a session carries before it is compacted.
-            Lower keeps answers sharper; higher keeps more raw history in play.
-          </p>
-          <input
-            type="range"
-            min={BUDGET_RANGE.min}
-            max={BUDGET_RANGE.max}
-            step={8_000}
-            value={draft.budgetTokens}
-            disabled={!draft.auto}
-            onChange={(e) =>
-              save({ ...draft, budgetTokens: Number(e.target.value) })
+          <SettingsRow
+            className={draft.auto ? undefined : "pointer-events-none opacity-50"}
+            label="Working-set budget"
+            help="How much conversation a session carries before it is compacted. Lower keeps answers sharper; higher keeps more raw history in play."
+            control={
+              <div className="flex w-[240px] flex-col gap-1">
+                <span className="self-end font-mono text-[12px] tabular-nums text-text-bright">
+                  {fmtK(draft.budgetTokens)} tokens
+                </span>
+                <input
+                  type="range"
+                  min={BUDGET_RANGE.min}
+                  max={BUDGET_RANGE.max}
+                  step={8_000}
+                  value={draft.budgetTokens}
+                  disabled={!draft.auto}
+                  onChange={(e) =>
+                    save({ ...draft, budgetTokens: Number(e.target.value) })
+                  }
+                  aria-label="Working-set budget"
+                  className="w-full accent-blue"
+                />
+                <div className="flex justify-between font-mono text-[10px] text-dim">
+                  <span>{fmtK(BUDGET_RANGE.min)}</span>
+                  <span>sharper ← → more history</span>
+                  <span>{fmtK(BUDGET_RANGE.max)}</span>
+                </div>
+              </div>
             }
-            aria-label="Working-set budget"
-            className="mt-2.5 w-full accent-blue"
           />
-          <div className="flex justify-between font-mono text-[10px] text-dim">
-            <span>{fmtK(BUDGET_RANGE.min)}</span>
-            <span>sharper ← → more history</span>
-            <span>{fmtK(BUDGET_RANGE.max)}</span>
-          </div>
-        </div>
+        </SettingsCard>
 
-        {/* ── Live sessions ── */}
         {sessions !== undefined && sessions.length > 0 && (
-          <div className="rounded-lg border border-line bg-sunken p-3">
-            <Eyebrow>Your sessions right now</Eyebrow>
-            <div className="mt-1.5 space-y-1.5">
-              {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-text-body">
-                    {s.title}
-                  </span>
-                  {s.snapshot.triggerAt === null ? (
+          <SettingsCard title="Your sessions right now">
+            {sessions.map((s) => (
+              <SettingsRow
+                key={s.id}
+                label={<span className="block truncate text-[12px] font-normal">{s.title}</span>}
+                control={
+                  s.snapshot.triggerAt === null ? (
                     <span className="font-mono text-[10.5px] text-dim">
                       not measurable
                     </span>
@@ -837,12 +1007,91 @@ function ContextSection({
                       digestReady={s.snapshot.digestReady}
                       stalled={s.snapshot.stalled}
                     />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+                  )
+                }
+              />
+            ))}
+          </SettingsCard>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── Plan section ─────────────────────────────────────────────────────────────
+
+/** Settings → Plan: plan-mode auto-run and the starting plan template. */
+function PlanSection({
+  planAutoRun,
+  onSavePlanAutoRun,
+  planTemplate,
+  onSavePlanTemplate
+}: {
+  planAutoRun?: boolean | null
+  onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
+  planTemplate?: PlanTemplateConfig | null
+  onSavePlanTemplate?: (template: PlanTemplateConfig) => void | Promise<void>
+}) {
+  // Absent means ON, matching the renderer's default.
+  const [autoRun, setAutoRun] = React.useState<boolean>(planAutoRun ?? true)
+  React.useEffect(() => setAutoRun(planAutoRun ?? true), [planAutoRun])
+  const [source, setSource] = React.useState<string>(planTemplate?.source ?? "")
+  React.useEffect(() => setSource(planTemplate?.source ?? ""), [planTemplate])
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6">
+        <div className="flex items-center gap-2 border-b border-hairline pb-2.5">
+          <Sparkles size={14} className="text-text-bright" />
+          <span className="text-[13px] font-semibold text-text-bright">
+            Plan mode
+          </span>
+        </div>
+
+        <Callout tone="blue">
+          Plans are Markdown files reviewed and revised in Plannotator.
+          Jingler&apos;s todo list, Plan drawer, progress dock, composer summary,
+          and transcript card are read-only views of that plan.
+        </Callout>
+
+        <SettingsCard title="Execution">
+          <GeneralToggleRow
+            label="Plan auto-run"
+            description="Let plan mode run its read-only commands without asking for approval each time."
+            checked={autoRun}
+            onChange={(next) => {
+              setAutoRun(next)
+              void onSavePlanAutoRun?.(next)
+            }}
+          />
+        </SettingsCard>
+
+        <SettingsCard title="Plan template">
+          <SettingsRow
+            label="Starting plan structure"
+            help="A structured plan (JSON) injected into every planning turn. Leave empty to use the built-in blank draft."
+            control={
+              <AsyncButton
+                variant="secondary"
+                pendingLabel="Saving…"
+                successLabel="Saved"
+                onClick={() => onSavePlanTemplate?.({ source })}
+              >
+                Save template
+              </AsyncButton>
+            }
+          />
+          <div className="px-4 py-3">
+            <Textarea
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              rows={8}
+              spellCheck={false}
+              aria-label="Plan template"
+              className="font-mono text-[12px]"
+            />
+          </div>
+        </SettingsCard>
       </div>
     </div>
   )
@@ -857,38 +1106,6 @@ const DEFAULT_GITHUB: GithubConfig = {
   postAdversarialReviewComments: true
 }
 const DEFAULT_GIT: GitConfig = { shareCheckedOutBranches: true }
-
-function ToggleRow({
-  label,
-  description,
-  checked,
-  disabled,
-  onChange
-}: {
-  label: string
-  description: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (v: boolean) => void
-}) {
-  return (
-    <div className="flex items-start gap-3 py-2.5">
-      <div className="flex-1">
-        <div className="text-[12.5px] font-medium text-text-body">{label}</div>
-        <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-          {description}
-        </div>
-      </div>
-      <Toggle
-        aria-label={label}
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onChange}
-        className="mt-0.5"
-      />
-    </div>
-  )
-}
 
 /**
  * The four conversation text-size steps. Stored as the raw multiplier the
@@ -921,25 +1138,91 @@ function FontSizeRow({
   onChange: (v: number) => void
 }) {
   return (
-    <div className="flex items-start gap-3 py-2.5">
-      <div className="flex-1">
-        <div className="text-[12.5px] font-medium text-text-body">
-          Text size
-        </div>
-        <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-          Scale the conversation and code text. The rest of the app stays put.
-        </div>
-      </div>
-      <SegmentedControl
-        className="mt-0.5 flex-none"
-        value={String(value)}
-        items={FONT_SCALE_PRESETS.map((preset) => ({
-          value: String(preset.value),
-          label: preset.label
-        }))}
-        onChange={(next) => onChange(Number(next))}
-      />
-    </div>
+    <SettingsRow
+      label="Text size"
+      help="Scale the conversation and code text. The rest of the app stays put."
+      control={
+        <SegmentedControl
+          value={String(value)}
+          items={FONT_SCALE_PRESETS.map((preset) => ({
+            value: String(preset.value),
+            label: preset.label
+          }))}
+          onChange={(next) => onChange(Number(next))}
+        />
+      }
+    />
+  )
+}
+
+/** A General-section toggle on the cataloged SettingsRow. */
+function GeneralToggleRow({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange
+}: {
+  label: string
+  description: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <SettingsRow
+      label={label}
+      help={description}
+      control={<Toggle aria-label={label} checked={checked} disabled={disabled} onCheckedChange={onChange} />}
+    />
+  )
+}
+
+const OFFLOAD_STATUS_HELP = {
+  priming: "Saving Offload Compute settings…",
+  failed: "Offload Compute settings could not be saved.",
+  readyCloud: "Cloud compute is enabled; eligible sessions prime in the background.",
+  readyDevice: "Owned-device compute is enabled and will fail closed if that device is unavailable."
+} as const
+
+/** Offload row status: Priming… / Ready / Failed · Retry. Retry re-saves, which re-runs priming. */
+function OffloadStatusRow({
+  status,
+  targetKind,
+  onRetry
+}: {
+  status?: "disabled" | "priming" | "ready" | "failed"
+  targetKind: "cloud" | "owned-device"
+  onRetry?: () => void
+}) {
+  if (status !== "priming" && status !== "ready" && status !== "failed") return null
+  const help =
+    status === "ready"
+      ? targetKind === "cloud" ? OFFLOAD_STATUS_HELP.readyCloud : OFFLOAD_STATUS_HELP.readyDevice
+      : OFFLOAD_STATUS_HELP[status]
+  return (
+    <SettingsRow
+      label="Status"
+      help={<span role={status === "failed" ? "alert" : undefined}>{help}</span>}
+      control={
+        status === "failed" ? (
+          <span className="flex items-center gap-1 text-[12px] text-state-failed">
+            Failed <span aria-hidden>·</span>
+            <Button variant="ghost" size="sm" onClick={onRetry}>
+              Retry
+            </Button>
+          </span>
+        ) : status === "priming" ? (
+          <span role="status" className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <Spinner size={12} /> Priming…
+          </span>
+        ) : (
+          <span role="status" className="text-[12px] text-state-ready">
+            Ready
+          </span>
+        )
+      }
+    />
   )
 }
 
@@ -958,11 +1241,10 @@ function GeneralSection({
   obsidianExplanations,
   onSaveObsidianExplanations,
   obsidianVaultConfigured,
-  notifications,
-  onSaveNotifications,
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
+  onRetryOffload,
   offloadEnvironments,
   onRefreshOffloadEnvironments,
   defaultMode,
@@ -976,11 +1258,11 @@ function GeneralSection({
   obsidianExplanations?: ObsidianExplanationsConfig | null
   onSaveObsidianExplanations?: (config: ObsidianExplanationsConfig) => void | Promise<void>
   obsidianVaultConfigured?: boolean
-  notifications?: NotificationsConfig | null
-  onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
+  /** Re-run Offload Compute priming after a failed save. */
+  onRetryOffload?: () => void
   offloadEnvironments: ReadonlyArray<Environment>
   onRefreshOffloadEnvironments?: () => void | Promise<void>
   defaultMode?: ExecutionMode | null
@@ -991,29 +1273,6 @@ function GeneralSection({
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
   webSearch?: WebSearchSettingsProps
 }) {
-  function getOffloadStatus() {
-    switch (offloadStatus) {
-case "priming": {
-return (<p className="px-1 py-2 text-[11px] text-muted-foreground" role="status">
-              Saving Offload Compute settings…
-            </p>)
-}
-case "ready": {
-return (<p className="px-1 py-2 text-[11px] text-success" role="status">
-              {offloadTarget.kind === "cloud"
-                ? "Cloud compute is enabled; eligible sessions prime in the background."
-                : "Owned-device compute is enabled and will fail closed if that device is unavailable."}
-            </p>)
-}
-case "failed": {
-return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
-              Offload Compute settings could not be saved.
-            </p>)
-}
-}
-    return (null)
-  }
-
   const [offloadDraft, setOffloadDraft] = React.useState<boolean>(
     offloadCompute?.enabled ?? false
   )
@@ -1059,6 +1318,171 @@ return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
     setObsidianDraft(next)
     void onSaveObsidianExplanations?.(next)
   }
+  const toggle = (label: string, description: string, checked: boolean, onChange: (v: boolean) => void, disabled?: boolean) => (
+    <GeneralToggleRow label={label} description={description} checked={checked} disabled={disabled} onChange={onChange} />
+  )
+  return (
+    <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6">
+        <SettingsCard title="Compute">
+          {toggle(
+            "Offload Compute",
+            "When this machine is under sustained CPU or memory pressure, automatically run eligible lint, typecheck, test, build, and allowlisted argv on your preferred Cloud Sandbox or owned device. Interactive, stateful, shell-composed, and unknown commands stay local.",
+            offloadDraft,
+            (enabled) => {
+              setOffloadDraft(enabled)
+              saveOffload({ enabled })
+            }
+          )}
+          <SettingsRow
+            label="Compute target"
+            help="The selected target is fail-closed; unavailable devices never fall back to cloud or local execution."
+            control={
+              <div className="flex w-[200px] flex-col items-stretch gap-2">
+                <Select
+                  value={offloadTarget.kind}
+                  onValueChange={(value) => {
+                    if (value === "cloud") saveOffload({ target: { kind: "cloud" } })
+                    else if (offloadEnvironments[0]) {
+                      saveOffload({
+                        target: { kind: "owned-device", deviceId: offloadEnvironments[0].id }
+                      })
+                    }
+                  }}
+                >
+                  <SelectTrigger ariaLabel="Offload Compute target" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cloud">Cloud Sandbox</SelectItem>
+                    <SelectItem value="owned-device" disabled={offloadEnvironments.length === 0}>
+                      Owned device
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {offloadTarget.kind === "owned-device" && (
+                  <Select
+                    value={offloadTarget.deviceId}
+                    onValueChange={(deviceId) => saveOffload({
+                      target: { kind: "owned-device", deviceId }
+                    })}
+                  >
+                    <SelectTrigger ariaLabel="Owned device for Offload Compute" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {offloadEnvironments.map((environment) => (
+                        <SelectItem key={environment.id} value={environment.id}>
+                          {environment.name}{environment.state === "online" ? " · online" : " · offline"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => void onRefreshOffloadEnvironments?.()}>
+                  Refresh devices
+                </Button>
+              </div>
+            }
+          />
+          <OffloadStatusRow status={offloadStatus} targetKind={offloadTarget.kind} onRetry={onRetryOffload} />
+        </SettingsCard>
+
+        <SettingsCard title="Agent defaults">
+          <SettingsRow
+            label="Default mode"
+            help="Start new chats in this permission mode for every model."
+            control={
+              <SegmentedControl
+                value={defaultModeDraft}
+                items={[
+                  { value: "ask", label: "Ask" },
+                  { value: "accept-edits", label: "Accept Edits" },
+                  { value: "auto", label: "Auto" }
+                ]}
+                onChange={(next) => {
+                  const mode = next as ExecutionMode
+                  setDefaultModeDraft(mode)
+                  void onSaveDefaultMode?.(mode)
+                }}
+              />
+            }
+          />
+        </SettingsCard>
+
+        <SettingsCard title="Responses">
+          {toggle(
+            "ADHD mode",
+            "Only final completion summaries lead with the action, number multi-step work, state progress, and end with one next step. Working updates, planning, and questions stay natural.",
+            adhdDraft,
+            (next) => {
+              setAdhdDraft(next)
+              void onSaveAdhdMode?.(next)
+            }
+          )}
+          <FontSizeRow
+            value={fontScaleDraft}
+            onChange={(next) => {
+              setFontScaleDraft(next)
+              void onSaveFontScale?.(next)
+            }}
+          />
+        </SettingsCard>
+
+        {webSearch ? <WebSearchSettings {...webSearch} /> : null}
+
+        {obsidianVaultConfigured ? (
+          <SettingsCard title="Obsidian">
+            <GeneralToggleRow
+              label="Save explanations to Obsidian"
+              description="Write every explanation an agent publishes as a Markdown note in the session's vault. Publishing again updates the same note."
+              checked={obsidianDraft.enabled}
+              onChange={(enabled) => saveObsidian({ ...obsidianDraft, enabled })}
+            />
+            <div className="px-4 py-3">
+              <Field label="Vault folder">
+                {(c) => (
+                  <Input
+                    {...c}
+                    value={obsidianDraft.folder}
+                    disabled={!obsidianDraft.enabled}
+                    onChange={(event) => setObsidianDraft({ ...obsidianDraft, folder: event.target.value })}
+                    onBlur={() => saveObsidian(obsidianDraft)}
+                  />
+                )}
+              </Field>
+            </div>
+          </SettingsCard>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Settings → Notifications. Per-kind toggles (see the module doc on the old
+ * General section, moved here unchanged) plus the one thing a toggle can't
+ * fix: macOS blocking Jingler at the OS level, which needs a way out, not a
+ * switch.
+ *
+ * The warning row only ever renders for `permission === "denied"`. Main never
+ * emits `denied` today (no platform probe exists — see `notificationPermission`
+ * in apps/desktop/src/main/notifications.ts), so this row is dark in practice
+ * until that detection lands. It must NOT fire for `unknown`: every macOS user
+ * who hasn't explicitly blocked notifications reports `unknown` (Electron has
+ * no permission query), so treating `unknown` as blocked would warn everyone.
+ */
+function NotificationsSection({
+  notifications,
+  onSaveNotifications,
+  permission,
+  onOpenSystemSettings
+}: {
+  notifications?: NotificationsConfig | null
+  onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
+  permission?: NotificationPermission | null
+  onOpenSystemSettings?: () => void | Promise<void>
+}) {
   // Absent config means the DEFAULTS, not silence — an operator who never opened
   // this pane should still be told when an agent needs them.
   const [draft, setDraft] = React.useState<NotificationsConfig>(
@@ -1074,224 +1498,42 @@ return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
     void onSaveNotifications?.(next)
   }
 
+  const toggle = (label: string, description: string, checked: boolean, onChange: (v: boolean) => void, disabled?: boolean) => (
+    <GeneralToggleRow label={label} description={description} checked={checked} disabled={disabled} onChange={onChange} />
+  )
+
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
-      <div className="mx-auto w-full max-w-[560px]">
-        <div className="mb-1 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Compute
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
-            label="Offload Compute"
-            description="When this machine is under sustained CPU or memory pressure, automatically run eligible lint, typecheck, test, build, and allowlisted argv on your preferred Cloud Sandbox or owned device. Interactive, stateful, shell-composed, and unknown commands stay local."
-            checked={offloadDraft}
-            onChange={(enabled) => {
-              setOffloadDraft(enabled)
-              saveOffload({ enabled })
-            }}
-          />
-          <div className="space-y-2 px-1 py-3">
-              <div className="flex items-center justify-between">
-                <label className="block text-[11px] font-medium text-muted-foreground" htmlFor="offload-target">
-                  Compute target
-                </label>
-                <button
-                  type="button"
-                  className="text-[10px] text-blue hover:underline"
-                  onClick={() => void onRefreshOffloadEnvironments?.()}
-                >
-                  Refresh devices
-                </button>
-              </div>
-              <Select
-                value={offloadTarget.kind}
-                onValueChange={(value) => {
-                  if (value === "cloud") saveOffload({ target: { kind: "cloud" } })
-                  else if (offloadEnvironments[0]) {
-                    saveOffload({
-                      target: { kind: "owned-device", deviceId: offloadEnvironments[0].id }
-                    })
-                  }
-                }}
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6">
+        {permission === "denied" && (
+          <BannerShell
+            placement="card"
+            icon={<Bell size={14} />}
+            actions={[
+              <Button
+                key="open-system-settings"
+                variant="secondary"
+                size="sm"
+                onClick={() => void onOpenSystemSettings?.()}
               >
-                <SelectTrigger ariaLabel="Offload Compute target" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cloud">Cloud Sandbox</SelectItem>
-                  <SelectItem value="owned-device" disabled={offloadEnvironments.length === 0}>
-                    Owned device
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              {offloadTarget.kind === "owned-device" && (
-                <Select
-                  value={offloadTarget.deviceId}
-                  onValueChange={(deviceId) => saveOffload({
-                    target: { kind: "owned-device", deviceId }
-                  })}
-                >
-                  <SelectTrigger ariaLabel="Owned device for Offload Compute" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {offloadEnvironments.map((environment) => (
-                      <SelectItem key={environment.id} value={environment.id}>
-                        {environment.name}{environment.state === "online" ? " · online" : " · offline"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <p className="text-[10px] text-dim">
-                The selected target is fail-closed; unavailable devices never fall back to cloud or local execution.
-              </p>
-          </div>
-          {getOffloadStatus()}
-        </div>
-
-        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Agent defaults
-          </span>
-        </div>
-        <div className="flex items-start gap-3 py-2.5">
-          <div className="flex-1">
-            <div className="text-[12.5px] font-medium text-text-body">
-              Default mode
-            </div>
-            <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-              Start new chats in this permission mode for every model.
-            </div>
-          </div>
-          <SegmentedControl
-            className="mt-0.5 flex-none"
-            value={defaultModeDraft}
-            items={[
-              { value: "ask", label: "Ask" },
-              { value: "accept-edits", label: "Accept Edits" },
-              { value: "auto", label: "Auto" }
+                Open System Settings
+              </Button>
             ]}
-            onChange={(next) => {
-              const mode = next as ExecutionMode
-              setDefaultModeDraft(mode)
-              void onSaveDefaultMode?.(mode)
-            }}
-          />
-        </div>
-
-        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Responses
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
-            label="ADHD mode"
-            description="Only final completion summaries lead with the action, number multi-step work, state progress, and end with one next step. Working updates, planning, and questions stay natural."
-            checked={adhdDraft}
-            onChange={(next) => {
-              setAdhdDraft(next)
-              void onSaveAdhdMode?.(next)
-            }}
-          />
-          <FontSizeRow
-            value={fontScaleDraft}
-            onChange={(next) => {
-              setFontScaleDraft(next)
-              void onSaveFontScale?.(next)
-            }}
-          />
-        </div>
-
-        {webSearch ? <WebSearchSettings {...webSearch} /> : null}
-
-        {obsidianVaultConfigured ? (
-          <>
-            <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-              <span className="text-[13px] font-semibold text-text-bright">
-                Obsidian
-              </span>
-            </div>
-            <div className="divide-y divide-hairline">
-              <ToggleRow
-                label="Save explanations to Obsidian"
-                description="Write every explanation an agent publishes as a Markdown note in the session's vault. Publishing again updates the same note."
-                checked={obsidianDraft.enabled}
-                onChange={(enabled) => saveObsidian({ ...obsidianDraft, enabled })}
-              />
-              <label
-                htmlFor="obsidian-explanations-folder"
-                className="flex flex-col gap-2 py-2.5 text-[11px] font-medium text-muted-foreground"
-              >
-                Vault folder
-                <Input
-                  id="obsidian-explanations-folder"
-                  value={obsidianDraft.folder}
-                  disabled={!obsidianDraft.enabled}
-                  onChange={(event) =>
-                    setObsidianDraft({ ...obsidianDraft, folder: event.target.value })
-                  }
-                  onBlur={() => saveObsidian(obsidianDraft)}
-                />
-              </label>
-            </div>
-          </>
-        ) : null}
-
-        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Notifications
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
-            label="Desktop notifications"
-            description="Tell me when a session needs me or stops, while Jingler is in the background."
-            checked={draft.enabled}
-            onChange={(enabled) => set({ enabled })}
-          />
-          <ToggleRow
-            label="Needs input"
-            description="An agent is blocked waiting on your approval or an answer."
-            checked={draft.needsInput}
-            disabled={!draft.enabled}
-            onChange={(needsInput) => set({ needsInput })}
-          />
-          <ToggleRow
-            label="Run finished"
-            description="An agent completed its turn."
-            checked={draft.done}
-            disabled={!draft.enabled}
-            onChange={(done) => set({ done })}
-          />
-          <ToggleRow
-            label="Run failed"
-            description="An agent's run ended in an error."
-            checked={draft.failed}
-            disabled={!draft.enabled}
-            onChange={(failed) => set({ failed })}
-          />
-          <ToggleRow
-            label="Pull request resolved"
-            description="A session's pull request was merged or closed on GitHub."
-            checked={draft.pr}
-            disabled={!draft.enabled}
-            onChange={(pr) => set({ pr })}
-          />
-          <ToggleRow
-            label="Play a sound"
-            description="Use the system notification sound instead of showing them silently."
-            checked={draft.sound}
-            disabled={!draft.enabled}
-            onChange={(sound) => set({ sound })}
-          />
-        </div>
-        <p className="mt-4 text-[11px] leading-[1.6] text-muted-foreground">
+          >
+            Notifications are blocked by macOS
+          </BannerShell>
+        )}
+        <SettingsCard title="Notifications">
+          {toggle("Desktop notifications", "Tell me when a session needs me or stops, while Jingler is in the background.", draft.enabled, (enabled) => set({ enabled }))}
+          {toggle("Needs input", "An agent is blocked waiting on your approval or an answer.", draft.needsInput, (needsInput) => set({ needsInput }), !draft.enabled)}
+          {toggle("Run finished", "An agent completed its turn.", draft.done, (done) => set({ done }), !draft.enabled)}
+          {toggle("Run failed", "An agent's run ended in an error.", draft.failed, (failed) => set({ failed }), !draft.enabled)}
+          {toggle("Pull request resolved", "A session's pull request was merged or closed on GitHub.", draft.pr, (pr) => set({ pr }), !draft.enabled)}
+          {toggle("Play a sound", "Use the system notification sound instead of showing them silently.", draft.sound, (sound) => set({ sound }), !draft.enabled)}
+        </SettingsCard>
+        <p className="text-[11px] leading-[1.6] text-muted-foreground">
           Notifications are suppressed for the session you already have open and
-          focused — you can see that one for yourself.
+          focused, you can see that one for yourself.
         </p>
       </div>
     </div>
@@ -1324,37 +1566,59 @@ function GithubSection({
   onSaveGit?: (config: GitConfig) => void
 }) {
   function renderConnectionStatus() {
-    return (<div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-3 py-2.5">
-          <StatusDot
-            tone={
-              getTone()
-            }
-            size={8}
-            glow={connection.mode === "connected"}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="text-[12.5px] font-medium text-text-body">
-              {connection.mode === "connecting"
-                ? "Waiting for GitHub authorization"
-                : connected
-                  ? `Connected as @${connection.user?.login ?? "user"}`
-                  : connection.mode === "error"
-                    ? "GitHub connection needs attention"
-                    : "GitHub is not connected"}
+    const title =
+      connection.mode === "connecting"
+        ? "Waiting for GitHub authorization"
+        : connected
+          ? `Connected as @${connection.user?.login ?? "user"}`
+          : connection.mode === "error"
+            ? "GitHub connection needs attention"
+            : "GitHub is not connected"
+    return (
+      <SettingsCard title="Connection">
+        <SettingsRow
+          label={
+            <span className="flex items-center gap-2">
+              <StatusDot tone={getTone()} size={8} glow={connection.mode === "connected"} />
+              <span>{title}</span>
+            </span>
+          }
+          help={connection.user?.name}
+          control={
+            <div className="flex flex-wrap justify-end gap-2">
+              {!connected ? (
+                <Button variant="primary" size="sm" onClick={onConnect} disabled={busy}>
+                  Install / Connect GitHub
+                </Button>
+              ) : (
+                <>
+                  <Button variant="primary" size="sm" onClick={onManage} disabled={busy}>
+                    Manage repositories
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={onRefresh} disabled={busy}>
+                    Refresh
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setConfirmDisconnect(true)} disabled={busy}>
+                    Disconnect
+                  </Button>
+                </>
+              )}
+              {connection.mode === "connecting" && (
+                <Button variant="secondary" size="sm" onClick={onRefresh}>
+                  Cancel / check status
+                </Button>
+              )}
             </div>
-            {connection.user?.name && (
-              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
-                {connection.user.name}
-              </div>
-            )}
-          </div>
-        </div>)
+          }
+        />
+      </SettingsCard>
+    )
   }
 
   function getTone() {
     switch (connection.mode) {
 case "connected": {
-return ("bg-green")
+return ("bg-line-strong")
 }
 case "error": {
 return ("bg-red")
@@ -1363,13 +1627,14 @@ case "disconnected": {
 return ("bg-line-strong")
 }
 }
-    return ("bg-yellow")
+    return ("bg-line-strong")
   }
 
   const [draft, setDraft] = React.useState<GithubConfig>(
     github ?? DEFAULT_GITHUB
   )
   const [gitDraft, setGitDraft] = React.useState<GitConfig>(git ?? DEFAULT_GIT)
+  const [confirmDisconnect, setConfirmDisconnect] = React.useState(false)
 
   React.useEffect(() => setDraft(github ?? DEFAULT_GITHUB), [github])
   React.useEffect(() => setGitDraft(git ?? DEFAULT_GIT), [git])
@@ -1418,186 +1683,122 @@ return ("bg-line-strong")
         )}
 
         {connection.installations.length > 0 && (
-          <div
-            className="flex flex-col gap-2"
-            aria-label="GitHub installations"
-          >
+          <SettingsCard title="GitHub installations">
             {connection.installations.map((installation) => (
-              <div
+              <SettingsRow
                 key={installation.id}
-                className="flex items-center gap-2.5 rounded-lg border border-line bg-hover px-3 py-2.5"
-              >
-                <StatusDot
-                  tone={
-                    installation.status === "active" ? "bg-green" : "bg-red"
-                  }
-                  size={7}
-                  glow={false}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12px] font-medium text-text-body">
-                    @{installation.account.login}
-                  </div>
-                  <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-                    {installation.status === "suspended"
-                      ? "Suspended"
-                      : installation.repositorySelection === "all"
-                        ? "All repositories"
-                        : "Selected repositories only"}
-                  </div>
-                </div>
-                <span className="font-mono text-[10px] text-dim">
-                  {installation.account.type}
-                </span>
-              </div>
+                label={
+                  <span className="flex items-center gap-2">
+                    <StatusDot
+                      tone={installation.status === "active" ? "bg-line-strong" : "bg-red"}
+                      size={7}
+                      glow={false}
+                    />
+                    <span>@{installation.account.login}</span>
+                  </span>
+                }
+                help={
+                  installation.status === "suspended"
+                    ? "Suspended"
+                    : installation.repositorySelection === "all"
+                      ? "All repositories"
+                      : "Selected repositories only"
+                }
+                control={<span className="font-mono text-[10px] text-dim">{installation.account.type}</span>}
+              />
             ))}
-          </div>
+          </SettingsCard>
         )}
 
-        <div className="flex flex-wrap gap-2">
-          {!connected ? (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={onConnect}
-              disabled={busy}
-            >
-              Install / Connect GitHub
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={onManage}
-                disabled={busy}
-              >
-                Manage repositories
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={onRefresh}
-                disabled={busy}
-              >
-                Refresh
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onDisconnect}
-                disabled={busy}
-              >
-                Disconnect
-              </Button>
-            </>
-          )}
-          {connection.mode === "connecting" && (
-            <Button variant="secondary" size="sm" onClick={onRefresh}>
-              Cancel / check status
-            </Button>
-          )}
-        </div>
-
-        <div className="divide-y divide-hairline">
-          <ToggleRow
+        <SettingsCard title="Pull requests">
+          <GeneralToggleRow
             label="Enable pull-request features"
             description="Show the Pull Request & Code Review tabs and allow posting reviews to GitHub."
             checked={draft.enabled}
             onChange={(enabled) => setGithub({ ...draft, enabled })}
           />
-          <ToggleRow
+          <GeneralToggleRow
             label="Auto-detect pull requests"
             description="Link a PR automatically when one is already open on a session's branch."
             checked={draft.autoDetectPr}
             disabled={!draft.enabled}
             onChange={(autoDetectPr) => setGithub({ ...draft, autoDetectPr })}
           />
-          <ToggleRow
+          <GeneralToggleRow
             label="Auto-create pull requests"
             description="Open a PR automatically once a session's branch has pushable commits."
             checked={draft.autoCreatePr}
             disabled={!draft.enabled}
             onChange={(autoCreatePr) => setGithub({ ...draft, autoCreatePr })}
           />
-        </div>
+        </SettingsCard>
 
-        {/* Adversarial review */}
-        <div className="mt-1 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Adversarial review
-          </span>
-        </div>
-        {agentEndpointCatalog && (
-          <div className="flex items-center gap-3 py-2.5">
-            <div className="min-w-0 flex-1">
-              <div className="text-[12.5px] font-medium text-text-body">Review model</div>
-              <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-                Desktop harness and model used for read-only adversarial reviews.
-              </div>
-            </div>
-            <ProviderModelBrowser
-              catalog={{
-                ...agentEndpointCatalog,
-                endpoints: agentEndpointCatalog.endpoints.filter(
-                  ({ endpoint }) => endpoint.targetId === "desktop"
-                )
-              }}
-              endpointId={draft.adversarialReviewModel?.endpointId}
-              connectionId={null}
-              providerId={draft.adversarialReviewModel?.providerId}
-              modelId={draft.adversarialReviewModel?.modelId ?? null}
-              onSelect={({ runtimeId, endpointId, providerId, modelId }) =>
-                setGithub({
-                  ...draft,
-                  adversarialReviewModel: { runtimeId, endpointId, providerId, modelId }
-                })
+        <SettingsCard title="Adversarial review">
+          {agentEndpointCatalog && (
+            <SettingsRow
+              label="Review model"
+              help="Desktop harness and model used for read-only adversarial reviews."
+              control={
+                <ProviderModelBrowser
+                  catalog={{
+                    ...agentEndpointCatalog,
+                    endpoints: agentEndpointCatalog.endpoints.filter(
+                      ({ endpoint }) => endpoint.targetId === "desktop"
+                    )
+                  }}
+                  endpointId={draft.adversarialReviewModel?.endpointId}
+                  connectionId={null}
+                  providerId={draft.adversarialReviewModel?.providerId}
+                  modelId={draft.adversarialReviewModel?.modelId ?? null}
+                  onSelect={({ runtimeId, endpointId, providerId, modelId }) =>
+                    setGithub({
+                      ...draft,
+                      adversarialReviewModel: { runtimeId, endpointId, providerId, modelId }
+                    })
+                  }
+                  className="max-w-[220px]"
+                />
               }
-              className="max-w-[220px]"
             />
-          </div>
-        )}
-        <div className="divide-y divide-hairline">
-          <ToggleRow
+          )}
+          <GeneralToggleRow
             label="Auto-run on new commits"
             description="Review a pull request automatically when it opens and each time its head advances. Runs at most once per commit."
             checked={draft.autoAdversarialReview ?? false}
             disabled={!draft.enabled}
-            onChange={(autoAdversarialReview) =>
-              setGithub({ ...draft, autoAdversarialReview })
-            }
+            onChange={(autoAdversarialReview) => setGithub({ ...draft, autoAdversarialReview })}
           />
-          <ToggleRow
+          <GeneralToggleRow
             label="Post low-severity findings to the pull request"
             description="Turn off to keep adversarial feedback local and send every finding to the session agent instead."
             checked={draft.postAdversarialReviewComments ?? true}
             disabled={!draft.enabled}
-            onChange={(postAdversarialReviewComments) =>
-              setGithub({ ...draft, postAdversarialReviewComments })
-            }
+            onChange={(postAdversarialReviewComments) => setGithub({ ...draft, postAdversarialReviewComments })}
           />
-        </div>
+        </SettingsCard>
         <p className="text-[11px] leading-[1.6] text-muted-foreground">
           Reviews run read-only on the selected desktop harness. Until you choose
           one, Jingler uses each session&apos;s pinned model.
         </p>
 
-        <div className="mt-1 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Git
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
+        <SettingsCard title="Git">
+          <GeneralToggleRow
             label="Open PRs whose branch is checked out elsewhere"
             description="Start a session from a PR even when its branch is already checked out in another worktree. The worktrees then share the branch."
             checked={gitDraft.shareCheckedOutBranches}
-            onChange={(shareCheckedOutBranches) =>
-              setGitCfg({ shareCheckedOutBranches })
-            }
+            onChange={(shareCheckedOutBranches) => setGitCfg({ shareCheckedOutBranches })}
           />
-        </div>
+        </SettingsCard>
       </div>
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onOpenChange={setConfirmDisconnect}
+        title="Disconnect GitHub?"
+        description="Pull-request features stop working until you reconnect. Your GitHub App installation stays in place on GitHub."
+        confirmLabel="Disconnect"
+        destructive
+        onConfirm={() => onDisconnect?.()}
+      />
     </div>
   )
 }

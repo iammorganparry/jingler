@@ -4,6 +4,7 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import type { SubagentFleetEvent, SubagentFleetNode } from "@jingler/core"
 import { afterEach, describe, expect, it } from "vitest"
 import {
+  activeOrchestratorNodes,
   clearSubagentTabs,
   completedSubagentNodes,
   publishActorSubagentTabs,
@@ -47,12 +48,24 @@ const node = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => ({
   },
   artifacts: [],
   attention: null,
+  workspace: null,
+  prNumber: null,
   ...over
 })
 
 afterEach(() => {
   cleanup()
   clearSubagentTabs("session-1")
+})
+
+describe("activeOrchestratorNodes", () => {
+  it("keeps a workflow root only while an agent under it is live", () => {
+    const root = node({ id: "r", nodeKind: "workflow" })
+    const live = node({ id: "a", parentId: "r" })
+    const settled = node({ id: "b", parentId: "r", status: "completed" })
+    expect(activeOrchestratorNodes([root, live, settled])).toEqual([root])
+    expect(activeOrchestratorNodes([root, settled])).toEqual([])
+  })
 })
 
 describe("subagent tab store", () => {

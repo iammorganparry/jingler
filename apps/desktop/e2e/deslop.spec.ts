@@ -44,14 +44,14 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
   // No PR yet, so Changes lists the uncommitted work; open the file's diff.
   const diff = await openChangedFile(window, "README.md")
 
-  // The Deslop button sits in the file's sticky header, beside Revert file.
+  // The Deslop button sits in the file's sticky header, beside Viewed.
   const deslop = diff.getByRole("button", { name: "Deslop" }).first()
   await expect(deslop).toBeVisible({ timeout: 30_000 })
   await deslop.click()
 
   // The cleanup runs as a turn on THIS session — its prompt lands in the
   // Conversation tab, not a new session.
-  await window.getByRole("tab", { name: "Chat 1", exact: true }).first().click()
+  await expect(window.getByTestId("chat-lane-header").first()).toBeVisible()
   await expect(
     window.getByText(/Pull repeated logic into shared helpers/).first()
   ).toBeVisible({ timeout: 30_000 })

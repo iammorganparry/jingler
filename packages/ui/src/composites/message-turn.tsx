@@ -1,6 +1,6 @@
 import { Spin } from "../components/spin.js"
 import { createContext, memo, type ReactNode, useContext, useState } from "react"
-import type { ContentPart, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
+import type { McpServer, ContentPart, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import {
   AlertCircle,
   CheckCircle2,
@@ -18,15 +18,20 @@ import { DiffPeek } from "../components/diff-peek.js"
 import { FileChangeList } from "../components/file-change-list.js"
 import { Markdown } from "../components/markdown.js"
 import { ToolResult as BeUIToolResult, ToolResultOutput } from "../components/beui/tool-result.js"
+import { Button } from "../components/button.js"
+import type { SubagentChipItem } from "../app/subagent-chip.js"
 import { providerColor, providerLabel, ProviderIcon } from "../components/provider-icon.js"
 import { ApprovalGate } from "./approval-gate.js"
 import { BranchDriftBanner } from "./branch-drift-banner.js"
+import { PrEventCard } from "./pr-event-card.js"
 import { ContextDivider } from "./context-divider.js"
 import { QuestionSummary } from "./question-summary.js"
 import { ThoughtBlock } from "./thought-block.js"
 import { ToolCall } from "./tool-call.js"
 import { StreamingText } from "./streaming-text.js"
+import { InlineError } from "../components/feedback.js"
 import { toolDisplayName } from "../lib/tool-names.js"
+import { mcpToolAuthServer } from "../lib/mcp-tool-auth.js"
 
 // Parts fill the transcript's centered content column (width is owned by
 // ConversationView), so nothing here caps its own width.
@@ -90,12 +95,12 @@ const pathOf = (tool: ToolCallModel, displayName: string): string | null => {
 const HUNK_PREVIEW_LINES = 12
 
 const TASK_PROGRESS_META = {
-  "in-progress": { label: "In progress", Icon: LoaderCircle, tone: "text-blue border-blue/30 bg-blue/10" },
-  completed: { label: "Completed", Icon: CheckCircle2, tone: "text-green border-green/30 bg-green/10" },
-  blocked: { label: "Blocked", Icon: AlertCircle, tone: "text-yellow border-yellow/30 bg-yellow/10" },
+  "in-progress": { label: "In progress", Icon: LoaderCircle, tone: "text-text-bright border-line bg-surface" },
+  completed: { label: "Completed", Icon: CheckCircle2, tone: "text-muted-foreground border-line bg-surface" },
+  blocked: { label: "Blocked", Icon: AlertCircle, tone: "text-muted-foreground border-line bg-surface" },
   skipped: { label: "Skipped", Icon: Circle, tone: "text-dim border-line bg-sunken" },
-  failed: { label: "Failed", Icon: XCircle, tone: "text-red border-red/30 bg-red/10" },
-  interrupted: { label: "Interrupted", Icon: PauseCircle, tone: "text-orange border-orange/30 bg-orange/10" }
+  failed: { label: "Failed", Icon: XCircle, tone: "text-state-failed border-state-failed/30 bg-state-failed/10" },
+  interrupted: { label: "Interrupted", Icon: PauseCircle, tone: "text-muted-foreground border-line bg-surface" }
 } as const
 
 function PlanTaskProgressChip({ progress }: { progress: Omit<PlanTaskProgressPart, "_tag"> }) {
@@ -188,6 +193,15 @@ function renderProgressMarkers(
   return null
 }
 
+/**
+ * The runner's own text for a prompt that failed outright (no tool, no
+ * assistant reply — see `pi-agent-runtime.ts`). It is written as a plain Text
+ * part, so without this check it would render as ordinary prose; the reader
+ * needs the same "this broke" signal every other load failure gets.
+ */
+const PROMPT_FAILURE_PREFIX = "pi prompt failed"
+export const isPromptFailureText = (text: string): boolean => text.startsWith(PROMPT_FAILURE_PREFIX)
+
 function MessageText({
   text,
   streaming = false
@@ -197,6 +211,9 @@ function MessageText({
 }) {
   const planDocument = useContext(PlanProgressContext)
   if (text.length === 0) return null
+  if (isPromptFailureText(text)) {
+    return <InlineError message={text} className={WIDTH} />
+  }
   return (
     renderProgressMarkers(text, planDocument, streaming) ?? (
       <StreamingText text={text} streaming={streaming} className={WIDTH} />
@@ -209,7 +226,73 @@ function MessageText({
  * (ConversationView) so a running Bash card can carry a stop button without
  * threading the callback through every nested renderer (ToolGroup, PartView).
  */
+/** MCP servers plus the sign-in starter, so a failed MCP tool row can offer sign-in. */
+export const McpAuthContext = createContext<{
+  readonly servers: ReadonlyArray<McpServer>
+  readonly authorize: (name: string) => Promise<void>
+} | null>(null)
+
+const useMcpSignIn = (tool: ToolCallModel) => {
+  const mcpAuth = useContext(McpAuthContext)
+  const server = mcpAuth === null ? null : mcpToolAuthServer(tool, mcpAuth.servers)
+  if (mcpAuth === null || server === null) return undefined
+  return {
+    label: `Sign in to ${server.displayName}`,
+    onClick: () => { void mcpAuth.authorize(server.name).catch(() => undefined) }
+  }
+}
+
 export const ToolStopContext = createContext<(() => void) | null>(null)
+
+/**
+ * Children of the active chat plus the callback the lane-header chip rows use
+ * to open one. Fleet nodes carry no tool-call id, so a spawn card or row cannot
+ * be tied to its own child: both open from this chat-wide list (first child for
+ * the card's View).
+ */
+export const SubagentEntryContext = createContext<{
+  readonly subagents: ReadonlyArray<SubagentChipItem>
+  readonly onOpenSubagent: (id: string) => void
+} | null>(null)
+
+const SPAWN_TOOL = /(^|_)subagents?$/
+const isSpawnTool = (name: string): boolean => SPAWN_TOOL.test(name)
+
+/** True when an assistant turn called a subagent-spawning tool. */
+export const isSubagentSpawnMessage = (message: Message): boolean =>
+  message.role === "assistant" &&
+  message.parts.some((part) => part._tag === "Tool" && isSpawnTool(part.tool.name))
+
+function SubagentSpawnRow() {
+  const entry = useContext(SubagentEntryContext)
+  if (entry === null || entry.subagents.length === 0) return null
+  const count = entry.subagents.length
+  return (
+    <div data-testid="subagent-spawn-row" className={cn("flex items-center gap-1.5 text-xs text-dim", WIDTH)}>
+      <span>Spawned {count} {count === 1 ? "subagent" : "subagents"}</span>
+      {entry.subagents.slice(0, 3).map((item) => (
+        <Button
+          key={item.id}
+          variant="ghost"
+          size="sm"
+          data-testid={`subagent-spawn-row-${item.id}`}
+          onClick={() => entry.onOpenSubagent(item.id)}
+        >
+          {item.agent}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+/** A command card's title: the agent-written intent over the raw command, else the command. */
+const commandTitle = (tool: ToolCallModel, displayName: string): ReactNode =>
+  tool.intent ? (
+    <span className="flex min-w-0 flex-col">
+      <span className="truncate font-sans">{tool.intent}</span>
+      {tool.target && <span className="truncate font-mono text-[11px] text-dim">{tool.target}</span>}
+    </span>
+  ) : (tool.target ?? displayName)
 
 /** Command tools that can hang for minutes and so earn an inline stop button. */
 const isStoppableTool = (displayName: string): boolean =>
@@ -223,7 +306,7 @@ const isStoppableTool = (displayName: string): boolean =>
 const emptyBodyNote = (tool: ToolCallModel): string => {
   if (tool.status === "running") return "Running…"
   return tool.compacted === true
-    ? "Output released from memory — the full record is in the session transcript."
+    ? "Output released from memory, the full record is in the session transcript."
     : "No output."
 }
 
@@ -243,12 +326,14 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
                               return (<ToolCall
       status={tool.status}
       name={displayName}
-      target={tool.target ?? undefined}
+      target={tool.intent ?? tool.target ?? undefined}
+      detail={tool.intent ? (tool.target ?? undefined) : undefined}
       filePath={path}
       meta={toolMeta(tool)}
       expanded={expanded}
       onToggle={openable ? () => setExpanded((v) => !v) : undefined}
       onStop={onStop}
+      signIn={signIn}
       className={WIDTH}
     >
       {canonicalChanges.length > 0 && (
@@ -278,6 +363,17 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
         </div>
       )}
       {renderLegacyPreview()}
+      {isSpawnTool(tool.name) && subagentEntry !== null && subagentEntry.subagents.length > 0 && (
+        <div className="flex justify-end px-2.5 py-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => subagentEntry.onOpenSubagent(subagentEntry.subagents[0]!.id)}
+          >
+            View
+          </Button>
+        </div>
+      )}
     </ToolCall>)
                             }
 
@@ -286,20 +382,22 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
         <div>
           <DiffPeek preview={shown} />
           {lines.length > HUNK_PREVIEW_LINES && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={() => setExpanded((v) => !v)}
-              className="flex w-full items-center gap-1 bg-editor px-3 py-1 text-[11px] text-line-strong transition-colors hover:text-muted-foreground active:scale-[0.99]"
+              className="h-6 w-full justify-start gap-1 rounded-none bg-editor px-3 text-[11px] text-dim"
             >
               {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
               {expanded ? "Hide" : `Show all ${lines.length} lines`}
-            </button>
+          </Button>
           )}
         </div>
       ))
                             }
 
   const stopTool = useContext(ToolStopContext)
+  const subagentEntry = useContext(SubagentEntryContext)
+  const signIn = useMcpSignIn(tool)
   const [expanded, setExpanded] = useState(tool.status === "running")
   const canonicalChanges = tool.fileChanges?.changes ?? []
   const legacyPreview = canonicalChanges.length === 0 ? tool.preview : null
@@ -322,7 +420,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
     return (
       <BeUIToolResult
         tool={displayName}
-        title={tool.target ?? displayName}
+        title={commandTitle(tool, displayName)}
         meta={toolMeta(tool)}
         status={tool.status}
         kind="terminal"
@@ -360,16 +458,17 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ReadonlyArray<Tool
   const hidden = tools.length - 1
   return (
     <div className={cn("flex flex-col gap-3", WIDTH)}>
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        size="sm"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 self-start rounded-md border border-line px-2.5 py-1 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-surface hover:text-text active:scale-[0.98]"
+        className="gap-1.5 self-start font-mono text-[11px] text-muted-foreground"
       >
         {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         {expanded
           ? `Hide ${hidden} earlier ${hidden === 1 ? "call" : "calls"}`
           : `+ ${hidden} more tool ${hidden === 1 ? "call" : "calls"}`}
-      </button>
+      </Button>
       {expanded ? (
         tools.map((tool, i) => <ToolCardView key={i} tool={tool} />)
       ) : (
@@ -409,6 +508,7 @@ const MergedThoughts = memo(function MergedThoughts({ parts }: { parts: Readonly
 const PartView = memo(function PartView({
   part,
   onDecideGate,
+  onSwitchToAuto,
   onForkOntoBranch,
   onAdoptBranch,
   streamingText = false
@@ -416,6 +516,7 @@ const PartView = memo(function PartView({
   part: ContentPart
   streamingText?: boolean
   onDecideGate?: (gateId: string, decision: GateDecision) => void
+  onSwitchToAuto?: () => void
   onForkOntoBranch?: () => void | Promise<void>
   onAdoptBranch?: () => void | Promise<void>
 }) {
@@ -444,14 +545,20 @@ const PartView = memo(function PartView({
           allowLabel={part.gate.allowLabel}
           status={part.gate.status}
           onDecide={(decision) => onDecideGate?.(part.gate.id, decision)}
+          onSwitchToAuto={onSwitchToAuto}
           className={WIDTH}
         />
       )
     case "Question":
       // Pending questions dock in the composer (as the QuestionCard); once
       // answered, show a compact record of the picks here so the choice persists.
-      return part.answers === null ? null : (
-        <QuestionSummary request={part.request} answers={part.answers} className={WIDTH} />
+      return part.answers === null && !part.cancelled ? null : (
+        <QuestionSummary
+          request={part.request}
+          answers={part.answers ?? []}
+          cancelled={part.cancelled}
+          className={WIDTH}
+        />
       )
     case "Plan":
       return null
@@ -459,6 +566,8 @@ const PartView = memo(function PartView({
       // Deliberately full-width and unindented: this marks a boundary in the
       // conversation rather than being something the agent said.
       return <ContextDivider digest={part.digest} tokensBefore={part.tokensBefore} />
+    case "PrEvent":
+      return <PrEventCard event={part} className={WIDTH} />
     case "BranchDrift":
       return (
         <BranchDriftBanner
@@ -481,6 +590,7 @@ function renderParts(
   parts: ReadonlyArray<ContentPart>,
   {
     onDecideGate,
+    onSwitchToAuto,
     onForkOntoBranch,
     onAdoptBranch,
     afterPart,
@@ -488,6 +598,7 @@ function renderParts(
     streamingTextIndex = -1
   }: {
     onDecideGate?: (gateId: string, decision: GateDecision) => void
+    onSwitchToAuto?: () => void
     onForkOntoBranch?: () => void | Promise<void>
     onAdoptBranch?: () => void | Promise<void>
     afterPart?: { readonly index: number; readonly content: ReactNode }
@@ -574,6 +685,7 @@ function renderParts(
         part={part}
         streamingText={i === streamingTextIndex}
         onDecideGate={onDecideGate}
+        onSwitchToAuto={onSwitchToAuto}
         onForkOntoBranch={onForkOntoBranch}
         onAdoptBranch={onAdoptBranch}
       />
@@ -622,20 +734,25 @@ function MessageTurnImpl({
   message,
   providerId,
   onDecideGate,
+  onSwitchToAuto,
   onForkOntoBranch,
   onAdoptBranch,
-  afterPart
+  afterPart,
+  showSubagentRow = false
 }: {
   message: Message
   /** Canonical provider identity for the assistant eyebrow. */
   providerId?: ProviderId | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
+  onSwitchToAuto?: () => void
   /** Fork a drifted direct session's work onto a new worktree session. */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session. */
   onAdoptBranch?: () => void | Promise<void>
   /** Insert transcript-owned UI immediately after one absolute part index. */
   afterPart?: { readonly index: number; readonly content: ReactNode }
+  /** Show the "Spawned N subagents" row under this turn. */
+  showSubagentRow?: boolean
 }) {
   const isAssistant = message.role === "assistant"
   // From the FULL part list, not the visible slice: a mega-turn's collapsed
@@ -657,29 +774,32 @@ function MessageTurnImpl({
           icon={<ProviderIcon providerId={providerId ?? undefined} mono />}
           style={{ color: providerColor(providerId) }}
         >
-          {providerLabel(providerId)}
+          <span>{providerLabel(providerId)}</span>
         </Eyebrow>
       ) : (
         <Eyebrow>You</Eyebrow>
       )}
       {hiddenParts > 0 && (
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          size="sm"
           data-testid="show-earlier-steps"
           onClick={() => setShowAllParts(true)}
-          className="flex w-fit items-center gap-1.5 rounded-full border border-line bg-sunken px-3 py-1 text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground"
+          className="w-fit text-muted-foreground"
         >
           Show {hiddenParts} earlier steps
-        </button>
+        </Button>
       )}
       {renderParts(visibleParts, {
         onDecideGate,
+        onSwitchToAuto,
         onForkOntoBranch,
         onAdoptBranch,
         afterPart,
         keyOffset: hiddenParts,
         streamingTextIndex
       })}
+      {showSubagentRow && <SubagentSpawnRow />}
     </div>
   )
 }

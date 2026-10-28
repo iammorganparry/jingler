@@ -2,12 +2,16 @@ import { useEffect, useRef } from "react"
 import type {
   Message,
   ProviderId,
+  QuestionRequest,
   SubagentFleetControlOutcome,
   SubagentFleetNode,
   SubagentFleetStatus
 } from "@jingler/core"
 import { MessageTurn } from "../composites/message-turn.js"
+import { QuestionCard } from "../composites/question-card.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { StatusDot } from "../components/status-dot.js"
+import { SubagentMetaStrip } from "./subagent-meta-strip.js"
 import { Markdown } from "../components/markdown.js"
 
 const SUMMARY = "text-[12px] leading-[1.55]"
@@ -107,7 +111,17 @@ export interface FleetAgentViewProps {
   readonly error?: string | null
   readonly controlOutcome?: SubagentFleetControlOutcome | null
   readonly onOpenArtifact?: (path: string) => void
+  readonly onOpenPullRequest?: (prNumber: number) => void
+  readonly onRetry?: () => void
+  /** Answer the child's pending attention request (its `reply` control action). */
+  readonly onReply?: (text: string) => void
 }
+
+/** The child's pending attention message as a single free-text question. */
+const attentionQuestion = (attention: SubagentFleetNode["attention"]): QuestionRequest => ({
+  id: attention!.requestId,
+  questions: [{ question: attention!.message, header: "Reply", options: [], multiSelect: false }]
+})
 
 /** Full read-only child session selected from its chat-row tab. */
 export function FleetAgentView({
@@ -117,7 +131,10 @@ export function FleetAgentView({
   loading = false,
   error = null,
   controlOutcome = null,
-  onOpenArtifact
+  onOpenArtifact,
+  onOpenPullRequest,
+  onRetry,
+  onReply
 }: FleetAgentViewProps) {
          function renderAgentHeader() {
            return (<div className="flex items-center gap-2 border-b border-line px-[30px] py-2 text-[11px] text-muted-foreground">
@@ -125,16 +142,6 @@ export function FleetAgentView({
           <strong className="text-text-bright">{node?.agent ?? "Agent"}</strong>
           {node && <span> · {node.task}</span>}
         </div>
-        {node?.artifacts.map((artifact) => (
-          <button
-            key={artifact.path}
-            type="button"
-            onClick={() => onOpenArtifact?.(artifact.path)}
-            className="flex-none rounded border border-line px-1.5 py-0.5 text-[10px] text-blue hover:bg-panel"
-          >
-            {artifact.label ?? artifact.path.split("/").at(-1)}
-          </button>
-        ))}
       </div>)
          }
 
@@ -152,10 +159,10 @@ export function FleetAgentView({
                     <Markdown className={SUMMARY}>{`Workflow ${node.terminal.reason}: ${node.terminal.summary}`}</Markdown>
                   </div>
                 )}
-                <p className="text-[12px] text-dim">
-                  This workflow orchestrates other agents and has no transcript of
-                  its own — select one of its step agents to see their output.
-                </p>
+                <EmptyState
+                  title="This agent has no transcript (orchestrator)"
+                  description="This workflow orchestrates other agents and has no transcript of its own, select one of its step agents to see their output."
+                />
               </div>
             ) : node ? (
               <LiveAgentActivity node={node} />
@@ -187,6 +194,7 @@ export function FleetAgentView({
   return (
     <div data-testid="fleet-agent-transcript" className="flex min-h-0 flex-1 flex-col bg-editor">
       {renderAgentHeader()}
+      {node && <SubagentMetaStrip node={node} providerId={providerId} onOpenArtifact={onOpenArtifact} onOpenPullRequest={onOpenPullRequest} />}
       {controlOutcome && (
         <div
           data-testid="subagent-control-outcome"
@@ -200,11 +208,22 @@ export function FleetAgentView({
       )}
       <div ref={scrollRef} data-testid="fleet-agent-transcript-scroll" className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-[760px] space-y-6">
-          {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
-          {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
+          {node && (
+            <blockquote
+              data-testid="subagent-task"
+              className="whitespace-pre-wrap border-l-2 border-line-strong pl-3 text-[12px] leading-[1.55] text-text-body"
+            >
+              {node.task}
+            </blockquote>
+          )}
+          {loading && <ListSkeleton rows={3} rowHeight={48} />}
+          {error && <InlineError message={error} onRetry={onRetry} />}
           {node?.attention && (
-            <div data-testid="subagent-attention" className="rounded border border-purple/30 bg-purple/[0.06] p-3 text-[12px] text-text-body">
-              {node.attention.message}
+            <div data-testid="subagent-attention">
+              <QuestionCard
+                request={attentionQuestion(node.attention)}
+                onSubmit={(answers) => onReply?.(answers[0]?.other ?? "")}
+              />
             </div>
           )}
           {renderEmptyTranscript()}

@@ -1,14 +1,23 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   fuzzyScore,
   groupPaletteItems,
   itemKeywords,
+  itemsInScope,
   matchFileQuickOpenChord,
+  matchNeedsYouChord,
   matchPaletteChord,
+  matchSettingsChord,
+  needsYouGroupName,
+  needsYouPaletteItems,
+  nextNeedsYouSession,
+  nextScope,
   PALETTE_GROUP,
   type PaletteItem,
   pluginGroupName,
-  scoreItem
+  scoreItem,
+  subagentPaletteItems,
+  viewPaletteItems
 } from "./command-palette-model.js"
 
 /** Real `KeyboardEvent`s, for the reason `split-shortcuts.test.ts` gives. */
@@ -21,6 +30,7 @@ const item = (over: Partial<PaletteItem> = {}): PaletteItem => ({
   detail: over.detail,
   group: over.group ?? "Group",
   hint: over.hint,
+  scope: over.scope,
   run: over.run ?? (() => {})
 })
 
@@ -129,24 +139,24 @@ describe("fuzzyScore", () => {
 })
 
 describe("matchFileQuickOpenChord", () => {
-  it("matches Cmd+Shift+P on macOS without colliding with the ordinary palette", () => {
-    const event = chord({ key: "P", code: "KeyP", metaKey: true, shiftKey: true })
+  it("matches Cmd+P on macOS without colliding with the ordinary palette", () => {
+    const event = chord({ key: "p", code: "KeyP", metaKey: true })
     expect(matchFileQuickOpenChord(event, true)).toBe(true)
     expect(matchPaletteChord(event, true)).toBe(false)
   })
 
-  it("matches Ctrl+Shift+P off macOS and refuses the other platform modifier", () => {
+  it("matches Ctrl+P off macOS and refuses the other platform modifier", () => {
     expect(
-      matchFileQuickOpenChord(
-        chord({ key: "P", code: "KeyP", ctrlKey: true, shiftKey: true }),
-        false
-      )
+      matchFileQuickOpenChord(chord({ key: "p", code: "KeyP", ctrlKey: true }), false)
     ).toBe(true)
     expect(
-      matchFileQuickOpenChord(
-        chord({ key: "P", code: "KeyP", metaKey: true, shiftKey: true }),
-        false
-      )
+      matchFileQuickOpenChord(chord({ key: "p", code: "KeyP", metaKey: true }), false)
+    ).toBe(false)
+  })
+
+  it("leaves Cmd+Shift+P to Checks", () => {
+    expect(
+      matchFileQuickOpenChord(chord({ key: "P", code: "KeyP", metaKey: true, shiftKey: true }), true)
     ).toBe(false)
   })
 })
@@ -251,12 +261,11 @@ describe("matchPaletteChord", () => {
   const MAC = true
   const PC = false
 
-  it.each([
-    ["KeyK", "k"],
-    ["KeyP", "p"]
-  ])("matches ⌘%s on macOS and Ctrl+%s elsewhere", (code, key) => {
-    expect(matchPaletteChord(chord({ code, key, metaKey: true }), MAC)).toBe(true)
-    expect(matchPaletteChord(chord({ code, key, ctrlKey: true }), PC)).toBe(true)
+  it("matches ⌘K on macOS and Ctrl+K elsewhere, and leaves ⌘P to the file picker", () => {
+    expect(matchPaletteChord(chord({ code: "KeyK", key: "k", metaKey: true }), MAC)).toBe(true)
+    expect(matchPaletteChord(chord({ code: "KeyK", key: "k", ctrlKey: true }), PC)).toBe(true)
+    expect(matchPaletteChord(chord({ code: "KeyP", key: "p", metaKey: true }), MAC)).toBe(false)
+    expect(matchPaletteChord(chord({ code: "KeyP", key: "p", ctrlKey: true }), PC)).toBe(false)
   })
 
   /**
@@ -332,5 +341,163 @@ describe("matchPaletteChord", () => {
     // jsdom's navigator reports a non-Mac UA, so the Ctrl branch is the live one
     // here. The assertion is that the default is READ at all, not what it says.
     expect(matchPaletteChord(chord({ code: "KeyK", key: "k", ctrlKey: true }))).toBe(true)
+  })
+})
+
+describe("subagentPaletteItems", () => {
+  it("lists agent + task under Go to subagent… and opens the chosen node", () => {
+    const open = vi.fn()
+    const items = subagentPaletteItems(
+      [
+        { id: "a", agent: "worker", task: "Survey the tab bar" },
+        { id: "b", agent: "scout", task: "Audit the theme tokens" }
+      ],
+      open
+    )
+    expect(items.map((i) => [i.label, i.detail, i.group])).toEqual([
+      ["worker", "Survey the tab bar", "Go to subagent…"],
+      ["scout", "Audit the theme tokens", "Go to subagent…"]
+    ])
+    items[1]!.run()
+    expect(open).toHaveBeenCalledExactlyOnceWith("b")
+  })
+})
+
+describe("viewPaletteItems", () => {
+  it("lists every view under Open view… and opens the chosen one by id", () => {
+    const open = vi.fn()
+    const items = viewPaletteItems(
+      [
+        { id: "checks", label: "Checks", icon: undefined },
+        { id: "linear.issues", label: "Linear", icon: undefined }
+      ],
+      open
+    )
+    expect(items.map((i) => [i.id, i.label, i.group])).toEqual([
+      ["view:checks", "Checks", "Open view…"],
+      ["view:linear.issues", "Linear", "Open view…"]
+    ])
+    items[1]!.run()
+    expect(open).toHaveBeenCalledExactlyOnceWith("linear.issues")
+  })
+})
+
+describe("palette scopes", () => {
+  const rows = [
+    item({ id: "s", group: PALETTE_GROUP.sessions }),
+    item({ id: "a", group: PALETTE_GROUP.actions }),
+    item({ id: "t", group: PALETTE_GROUP.tabs, scope: "chat" }),
+    item({ id: "v", group: PALETTE_GROUP.views, scope: "chat" }),
+    item({ id: "g", group: PALETTE_GROUP.subagents, scope: "chat" })
+  ]
+
+  it("Workspace keeps every row", () => {
+    expect(itemsInScope(rows, "workspace")).toHaveLength(rows.length)
+  })
+
+  it("Chat keeps only rows marked with an explicit chat scope — never by group name", () => {
+    expect(itemsInScope(rows, "chat").map((i) => i.id)).toEqual(["t", "v", "g"])
+    // A row sitting under a chat-shaped heading but with no explicit scope is
+    // NOT swept in — the whole point of `item.scope` over matching `group`.
+    const impostor = item({ id: "fake", group: PALETTE_GROUP.tabs })
+    expect(itemsInScope([impostor], "chat")).toEqual([])
+  })
+
+  it("Tab cycles Workspace → Chat → Workspace", () => {
+    expect(nextScope("workspace")).toBe("chat")
+    expect(nextScope("chat")).toBe("workspace")
+  })
+})
+
+describe("nextNeedsYouSession", () => {
+  const blocked = [
+    { id: "a", title: "Alpha" },
+    { id: "b", title: "Beta" },
+    { id: "c", title: "Gamma" }
+  ]
+
+  it("cycles to the next blocked workspace in list order", () => {
+    expect(nextNeedsYouSession(blocked, "a")).toBe("b")
+    expect(nextNeedsYouSession(blocked, "b")).toBe("c")
+  })
+
+  it("wraps from the last back to the first", () => {
+    expect(nextNeedsYouSession(blocked, "c")).toBe("a")
+  })
+
+  it("starts from the first when the current session isn't blocked (or there is none)", () => {
+    expect(nextNeedsYouSession(blocked, "not-blocked")).toBe("a")
+    expect(nextNeedsYouSession(blocked, null)).toBe("a")
+  })
+
+  it("returns null when nothing is blocked", () => {
+    expect(nextNeedsYouSession([], "a")).toBeNull()
+  })
+})
+
+describe("needsYouPaletteItems", () => {
+  const blocked = [
+    { id: "a", title: "Alpha" },
+    { id: "b", title: "Beta" }
+  ]
+
+  it("produces no section at all when nothing is blocked — absent, not empty", () => {
+    expect(needsYouPaletteItems([], null, vi.fn())).toEqual([])
+  })
+
+  it("lists each blocked workspace, pinned under 'Needs you (N)', in order", () => {
+    const open = vi.fn()
+    const items = needsYouPaletteItems(blocked, null, open)
+    expect(items.map((i) => [i.id, i.label, i.group])).toEqual([
+      ["needs-you:a", "Alpha", needsYouGroupName(2)],
+      ["needs-you:b", "Beta", needsYouGroupName(2)],
+      ["action:next-needs-you", "Go to next workspace that needs you", needsYouGroupName(2)]
+    ])
+  })
+
+  it("each row opens its own workspace", () => {
+    const open = vi.fn()
+    const items = needsYouPaletteItems(blocked, null, open)
+    items[1]!.run()
+    expect(open).toHaveBeenCalledExactlyOnceWith("b")
+  })
+
+  it("the cycling action opens the next blocked workspace after the current one", () => {
+    const open = vi.fn()
+    const items = needsYouPaletteItems(blocked, "a", open)
+    items.at(-1)!.run()
+    expect(open).toHaveBeenCalledExactlyOnceWith("b")
+  })
+})
+
+describe("matchNeedsYouChord", () => {
+  const MAC = true
+  const PC = false
+
+  it("matches ⌘J on macOS and Ctrl+J elsewhere", () => {
+    expect(matchNeedsYouChord(chord({ code: "KeyJ", key: "j", metaKey: true }), MAC)).toBe(true)
+    expect(matchNeedsYouChord(chord({ code: "KeyJ", key: "j", ctrlKey: true }), PC)).toBe(true)
+  })
+
+  it("does not fire with Shift held, or on the old ⌘⇧N chord", () => {
+    expect(matchNeedsYouChord(chord({ code: "KeyJ", key: "j", metaKey: true, shiftKey: true }), MAC)).toBe(false)
+    expect(matchNeedsYouChord(chord({ code: "KeyN", key: "n", metaKey: true, shiftKey: true }), MAC)).toBe(false)
+  })
+
+  it("does not fire with Alt held, or on an already-handled event", () => {
+    expect(matchNeedsYouChord(chord({ code: "KeyJ", key: "j", metaKey: true, altKey: true }), MAC)).toBe(false)
+    const e = chord({ code: "KeyJ", key: "j", metaKey: true, cancelable: true })
+    e.preventDefault()
+    expect(matchNeedsYouChord(e, MAC)).toBe(false)
+  })
+})
+
+describe("matchSettingsChord", () => {
+  it("matches ⌘, on macOS and Ctrl+, elsewhere, and nothing adjacent", () => {
+    expect(matchSettingsChord(chord({ code: "Comma", key: ",", metaKey: true }), true)).toBe(true)
+    expect(matchSettingsChord(chord({ code: "Comma", key: ",", ctrlKey: true }), false)).toBe(true)
+    expect(matchSettingsChord(chord({ code: "Comma", key: ",", ctrlKey: true }), true)).toBe(false)
+    expect(matchSettingsChord(chord({ code: "Comma", key: ",", metaKey: true, shiftKey: true }), true)).toBe(false)
+    expect(matchSettingsChord(chord({ code: "KeyK", key: "k", metaKey: true }), true)).toBe(false)
   })
 })

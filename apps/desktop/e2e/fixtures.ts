@@ -76,6 +76,14 @@ export const showSessions = async (
   await expect(window.getByTestId("session-filter-menu")).toBeVisible();
 };
 
+/** Confirm the "Archive this workspace?" dialog every archive now opens. */
+export const confirmArchive = async (window: Page): Promise<void> => {
+  await window
+    .getByRole("dialog", { name: "Archive this workspace?" })
+    .getByRole("button", { name: "Archive", exact: true })
+    .click();
+};
+
 /**
  * "The app shell is on screen" — the sentinel ~19 specs assert before doing
  * anything else.
@@ -94,6 +102,17 @@ export const showSessions = async (
  * in the collapsible sidebar, so it cannot prove that a narrow app has mounted.
  */
 export const appShell = (window: Page) => window.getByTestId("title-bar");
+
+/**
+ * Open the composer's model popover (model, reasoning, environment). It
+ * toggles, and stays open after a pick, so only click when it's closed. With
+ * no model chosen the trigger reads "Select model" instead of "Model settings".
+ */
+export const openModelSettings = async (window: Page): Promise<void> => {
+  if (await window.getByRole("button", { name: /^Model:/ }).isVisible()) return;
+  const trigger = window.getByRole("button", { name: /^(Model settings|Select model)$/ }).first();
+  await trigger.click();
+};
 
 /** Create a normal workspace through the current project-scoped composer. */
 export const createWorkspace = async (
@@ -115,7 +134,7 @@ export const createWorkspace = async (
   }
   if (checkout === "direct") {
     await window.getByRole("button", { name: "Checkout" }).click();
-    await window.getByRole("option", { name: "Local" }).click();
+    await window.getByRole("option", { name: "This checkout" }).click();
   }
   const create = window.getByRole("button", { name: "Create workspace" });
   await expect(create).toBeEnabled();
@@ -126,7 +145,8 @@ const LOCAL_REPOSITORY_OPTION = /^Local repository/;
 
 /** Register a local repository as a project from the New session view. */
 export const addProject = async (window: Page, projectPath: string): Promise<void> => {
-  await window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click();
+  await window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click();
+  await window.getByRole("option", { name: "Add project…" }).click();
   await expect(window.getByRole("heading", { name: "Add project" })).toBeVisible();
   await window.getByRole("option", { name: LOCAL_REPOSITORY_OPTION }).click();
   const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…");
@@ -189,6 +209,16 @@ export interface SeedSession {
   readonly environmentId?: string;
   readonly diff: { added: number; removed: number };
   readonly prNumber: number | null;
+  /** The PR stack, bottom layer first. */
+  readonly prs?: ReadonlyArray<{ number: number; repo?: string; branch?: string; base?: string }>;
+  readonly checkouts?: ReadonlyArray<{
+    id: string;
+    repo: string;
+    branch: string;
+    prNumber: number | null;
+    worktreePath?: string;
+  }>;
+  readonly activeCheckoutId?: string;
   readonly githubInstallationId?: string;
   readonly githubRepositoryId?: string;
   readonly githubFeedbackDeliveryIds?: ReadonlyArray<string>;
@@ -285,6 +315,10 @@ export interface LaunchOptions {
     readonly seedConnection?: boolean;
     readonly apiPriced?: boolean;
     readonly modelCount?: number;
+    /** Codex OAuth login waits on cancellation instead of resolving, for Cancel-flow e2e coverage. */
+    readonly codexLoginHangs?: boolean;
+    /** When set, Provider.setApiKey/verifyModel fails with this message instead of succeeding. */
+    readonly rejectApiKey?: string;
   };
   /**
    * Relaunch against an EXISTING `~/jingler` (a previous launch's `home`) —
@@ -432,6 +466,12 @@ export interface LaunchedApp {
    * normally do this after the browser flow). Emits the main-process `open-url`.
    */
   readonly completeDeepLinkSignIn: () => Promise<void>;
+  /**
+   * Drive a denied/failed `jingler://` OAuth callback (no token, an `error`
+   * param) into the running app — the user declined the provider's consent
+   * screen, or the provider failed.
+   */
+  readonly completeDeniedOAuth: (kind?: "denied" | "failed") => Promise<void>;
   /** Complete GitHub installation and emit its dedicated desktop callback. */
   readonly completeGitHubConnection: () => Promise<void>;
   /** Semantic GitHub writes observed by the fake API server. */
@@ -560,6 +600,13 @@ export const test = base.extend<{
         }, `jingler://auth/callback?token=${authSessionServer.token}`);
       };
 
+      const completeDeniedOAuth = async (kind: "denied" | "failed" = "denied") => {
+        const error = kind === "denied" ? "access_denied" : "server_error";
+        await app.evaluate(({ app: electronApp }, url) => {
+          electronApp.emit("open-url", { preventDefault() {} }, url);
+        }, `jingler://auth/callback?error=${error}`);
+      };
+
       const completeGitHubConnection = async () => {
         githubServer.connect();
         await app.evaluate(({ app: electronApp }) => {
@@ -584,6 +631,7 @@ export const test = base.extend<{
         githubServer,
         githubRelay,
         completeDeepLinkSignIn,
+        completeDeniedOAuth,
         completeGitHubConnection,
         githubOperations,
       };
@@ -699,7 +747,7 @@ function seedFixtureWorkspace({
   piFixture: {
     readonly scenarioId: string; readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"; readonly reasoning?: ReadonlyArray<
       "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-    >; readonly seedConnection?: boolean; readonly modelCount?: number;
+    >; readonly seedConnection?: boolean; readonly modelCount?: number; readonly codexLoginHangs?: boolean; readonly rejectApiKey?: string;
   };
   repoPath: string;
   home: string;
@@ -747,7 +795,7 @@ function seedFixtureWorkspace({
 function seedFixtureRecords(jinglerDir: string, options: LaunchOptions, reused: boolean, reposDir: string, piFixture: {
   readonly scenarioId: string; readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"; readonly reasoning?: ReadonlyArray<
     "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-  >; readonly seedConnection?: boolean; readonly modelCount?: number;
+  >; readonly seedConnection?: boolean; readonly modelCount?: number; readonly codexLoginHangs?: boolean; readonly rejectApiKey?: string;
 }, repoPath: string) {
   const configPath = join(jinglerDir, "config.json");
   if (options.configured && !(reused && existsSync(configPath))) {
@@ -935,6 +983,10 @@ function fixtureLaunchEnvironment({
       JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ARCHIVE,
       JINGLER_SSH_DIR: join(home, ".ssh"),
       JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl"),
+      // Presence of this file fails the next `enroll` attempt once; see
+      // fake-ssh-host.ts. Tests write it to exercise the pairing sheet's
+      // failed step (log tail + Retry).
+      JINGLER_E2E_SSH_FAIL_MARKER: join(home, "ssh-fail-marker"),
     });
   }
   return launchEnv;

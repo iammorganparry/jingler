@@ -7,9 +7,9 @@ import type { ReviewSeverity, SessionDisplayStatus, SessionStatus } from "@jingl
 
 /** Semantic accent per session/agent status → Tailwind text color utility. */
 export const statusTextClass: Record<SessionStatus, string> = {
-  thinking: "text-yellow",
-  running: "text-blue",
-  "needs-input": "text-blue",
+  thinking: "text-state-working",
+  running: "text-state-working",
+  "needs-input": "text-state-needs",
   idle: "text-line-strong",
   settled: "text-green",
   done: "text-green"
@@ -17,9 +17,9 @@ export const statusTextClass: Record<SessionStatus, string> = {
 
 /** Accent per status → Tailwind background color utility (for dots). */
 export const statusDotClass: Record<SessionStatus, string> = {
-  thinking: "bg-yellow",
-  running: "bg-blue",
-  "needs-input": "bg-blue",
+  thinking: "bg-state-working",
+  running: "bg-state-working",
+  "needs-input": "bg-state-needs",
   idle: "bg-line-strong",
   settled: "bg-green",
   done: "bg-green"
@@ -45,7 +45,8 @@ export const displayStatusLabel: Record<SessionDisplayStatus, string> = {
   "needs-input": "Needs Input",
   monitoring: "Monitoring",
   idle: "Idle",
-  settled: "Settled"
+  settled: "Settled",
+  interrupted: "Interrupted"
 }
 
 /**
@@ -63,7 +64,8 @@ export const displayStatusTone: Record<SessionDisplayStatus, SessionStatus> = {
   "needs-input": "needs-input",
   monitoring: "running",
   idle: "idle",
-  settled: "settled"
+  settled: "settled",
+  interrupted: "idle"
 }
 
 /** Whether a status should glow/pulse its dot. */

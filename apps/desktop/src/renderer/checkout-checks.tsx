@@ -12,7 +12,7 @@ export function CheckoutChecks({ session }: { readonly session: Session }) {
   const prs = useQueries({
     queries: linked.map((checkout) => ({
       queryKey: ["github", "pr-checkout", session.id, checkout.id, checkout.prNumber] as const,
-      queryFn: () => rpc.githubPr(session.id, checkout.id),
+      queryFn: () => rpc.githubPr(session.id, undefined, checkout.id),
       enabled: checkouts.length > 1,
       refetchInterval: CHECKOUT_CHECKS_MS
     }))

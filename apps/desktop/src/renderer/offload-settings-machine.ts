@@ -113,7 +113,8 @@ export const createOffloadSettingsMachine = (api: OffloadSettingsApi) =>
           },
           RETRY: {
             target: "saving",
-            guard: ({ context }) => context.pending !== null
+            guard: ({ context }) => context.pending !== null,
+            actions: assign({ error: null })
           }
         }
       }

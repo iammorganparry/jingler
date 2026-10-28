@@ -9,6 +9,11 @@ interface ProviderConnectionsSettingsInput {
 interface ProviderConnectionsSettingsContext {
   readonly knownIds: ReadonlyArray<ProviderConnectionId>
   readonly selectedId: ProviderConnectionId | null
+  /** OAuth login id for the in-flight device/browser login, set while waiting. */
+  readonly oauthLoginId: string | null
+  /** Last-typed API key value; kept on an invalid-key error instead of being cleared. */
+  readonly apiKeyValue: string
+  readonly apiKeyError: string | null
 }
 
 type ProviderConnectionsSettingsEvent =
@@ -18,6 +23,11 @@ type ProviderConnectionsSettingsEvent =
       readonly type: "CATALOG_UPDATED"
       readonly connectionIds: ReadonlyArray<ProviderConnectionId>
     }
+  | { readonly type: "START_OAUTH"; readonly loginId: string }
+  | { readonly type: "CANCEL" }
+  | { readonly type: "SUBMIT_API_KEY"; readonly value: string }
+  | { readonly type: "API_KEY_INVALID"; readonly error: string }
+  | { readonly type: "API_KEY_VERIFIED" }
 
 const addedConnectionId = (
   knownIds: ReadonlyArray<ProviderConnectionId>,
@@ -66,7 +76,20 @@ export const providerConnectionsSettingsMachine = setup({
               ? context.selectedId
               : (event.connectionIds[0] ?? null)
       }
-    })
+    }),
+    beginOauth: assign(({ event }) =>
+      event.type === "START_OAUTH" ? { oauthLoginId: event.loginId } : {}
+    ),
+    clearOauth: assign({ oauthLoginId: null }),
+    /** No-op by default; the host composite `.provide()`s this to call the Provider.cancelLogin RPC. */
+    cancelLogin: () => {},
+    setApiKeyValue: assign(({ event }) =>
+      event.type === "SUBMIT_API_KEY" ? { apiKeyValue: event.value, apiKeyError: null } : {}
+    ),
+    setApiKeyError: assign(({ event }) =>
+      event.type === "API_KEY_INVALID" ? { apiKeyError: event.error } : {}
+    ),
+    clearApiKey: assign({ apiKeyValue: "", apiKeyError: null })
   }
 }).createMachine({
   id: "provider-connections-settings",
@@ -76,7 +99,10 @@ export const providerConnectionsSettingsMachine = setup({
     selectedId:
       input.defaultConnectionId !== null && input.connectionIds.includes(input.defaultConnectionId)
         ? input.defaultConnectionId
-        : (input.connectionIds[0] ?? null)
+        : (input.connectionIds[0] ?? null),
+    oauthLoginId: null,
+    apiKeyValue: "",
+    apiKeyError: null
   }),
   on: {
     CATALOG_UPDATED: [
@@ -91,7 +117,10 @@ export const providerConnectionsSettingsMachine = setup({
         actions: "clearConnections"
       },
       { actions: "syncConnections" }
-    ]
+    ],
+    SUBMIT_API_KEY: { actions: "setApiKeyValue" },
+    API_KEY_INVALID: { actions: "setApiKeyError" },
+    API_KEY_VERIFIED: { actions: "clearApiKey" }
   },
   states: {
     routing: {
@@ -103,12 +132,24 @@ export const providerConnectionsSettingsMachine = setup({
     browsing: {
       on: {
         ADD: { target: "adding", actions: "beginAdding" },
-        SELECT: { actions: "selectConnection" }
+        SELECT: { actions: "selectConnection" },
+        START_OAUTH: { target: "oauthWaitingFromBrowsing", actions: "beginOauth" }
       }
     },
     adding: {
       on: {
-        SELECT: { target: "browsing", actions: "selectConnection" }
+        SELECT: { target: "browsing", actions: "selectConnection" },
+        START_OAUTH: { target: "oauthWaitingFromAdding", actions: "beginOauth" }
+      }
+    },
+    oauthWaitingFromBrowsing: {
+      on: {
+        CANCEL: { target: "browsing", actions: ["cancelLogin", "clearOauth"] }
+      }
+    },
+    oauthWaitingFromAdding: {
+      on: {
+        CANCEL: { target: "adding", actions: ["cancelLogin", "clearOauth"] }
       }
     }
   }

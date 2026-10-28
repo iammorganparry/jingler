@@ -231,9 +231,9 @@ describe("EditorGroups rendering", () => {
     }
 
     fireEvent.dragOver(screen.getAllByTestId("editor-group")[1]!, { clientX: 0, clientY: 0, dataTransfer })
-    fireEvent.dragOver(screen.getAllByTestId("editor-tab-strip")[1]!, { altKey: true, dataTransfer })
+    fireEvent.dragOver(screen.getAllByTestId("editor-tab-strip")[0]!, { altKey: true, dataTransfer })
     expect(screen.getAllByTestId("editor-drop-overlay")).toHaveLength(1)
-    fireEvent.drop(screen.getAllByTestId("editor-tab-strip")[1]!, { altKey: true, dataTransfer })
+    fireEvent.drop(screen.getAllByTestId("editor-tab-strip")[0]!, { altKey: true, dataTransfer })
 
     expect(onDrop).toHaveBeenCalledOnce()
     expect(onDrop).toHaveBeenCalledWith(drag, "right", "center", false)
@@ -305,4 +305,26 @@ it("offers checkpoints only on conversation surfaces and hands off the surviving
   await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Checkpoints" })).toBeNull())
   rendered.rerender(<EditorGroups {...props(() => null)} layout={{ focusedGroupId: "right", root: { type: "group", id: "right", tabs: [source], active: sessionSurfaceKey(source) } }} onOpenCheckpoints={onOpenCheckpoints} />)
   expect(screen.queryByRole("button", { name: "More conversation actions" })).toBeNull()
+})
+
+describe("EditorGroups breadcrumbs", () => {
+  it("shows path crumbs for file tabs and none for chat tabs", () => {
+    const describeWithCrumbs = (surface: SessionSurface) => ({
+      label: surface.id,
+      ...(surface.kind === "file" ? { crumbs: surface.id.split("/") } : {})
+    })
+    const body = () => null
+    const chatOnly: EditorLayout = {
+      focusedGroupId: "g",
+      root: { type: "group", id: "g", tabs: [a], active: sessionSurfaceKey(a) }
+    }
+    const view = render(<EditorGroups {...props(body)} describe={describeWithCrumbs} layout={chatOnly} />)
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull()
+    const fileOnly: EditorLayout = {
+      focusedGroupId: "g",
+      root: { type: "group", id: "g", tabs: [source], active: sessionSurfaceKey(source) }
+    }
+    view.rerender(<EditorGroups {...props(body)} describe={describeWithCrumbs} layout={fileOnly} />)
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" }).textContent).toContain("a.ts")
+  })
 })

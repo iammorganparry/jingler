@@ -1,5 +1,7 @@
-import { AlertTriangle, ArrowRight, Search, X } from "lucide-react"
+import { ArrowRight, Search } from "lucide-react"
 import type { ReactNode } from "react"
+import { Badge } from "../components/badge.js"
+import { BannerShell } from "../components/banner-shell.js"
 import { Button } from "../components/button.js"
 
 export interface RuntimeRecoveryCardProps {
@@ -11,6 +13,8 @@ export interface RuntimeRecoveryCardProps {
   readonly message: string
   readonly icon?: ReactNode
   readonly detail?: string | null
+  /** Red icon only when failed; neutral otherwise. */
+  readonly failed?: boolean
   readonly actionLabel: string
   readonly actionDisabled?: boolean
   readonly onAction: () => void
@@ -28,6 +32,7 @@ export function RuntimeRecoveryCard({
   message,
   icon,
   detail = null,
+  failed = false,
   actionLabel,
   actionDisabled = false,
   onAction,
@@ -35,39 +40,43 @@ export function RuntimeRecoveryCard({
   onInspect,
   onDismiss
 }: RuntimeRecoveryCardProps) {
+  const actionButton = (
+    <Button key="action" variant="secondary" size="sm" disabled={actionDisabled} onClick={onAction}>
+      {actionLabel} <ArrowRight size={12} />
+    </Button>
+  )
+
+  const actions: readonly [ReactNode] | readonly [ReactNode, ReactNode] = onInspect
+    ? [
+        <Button key="inspect" variant="ghost" size="sm" onClick={onInspect}>
+          <Search size={12} /> {inspectLabel}
+        </Button>,
+        actionButton
+      ]
+    : [actionButton]
+
   return (
-    <section
-      aria-label={label}
-      className="flex flex-none items-start gap-3 border-b border-yellow/30 bg-yellow/5 px-3 py-2.5"
-    >
-      {icon ?? <AlertTriangle size={15} className="mt-0.5 flex-none text-yellow" />}
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-1.5">
-          {kind && (
-            <span className="flex-none rounded border border-yellow/30 bg-yellow/10 px-1.5 py-px font-mono text-[9.5px] font-medium uppercase tracking-wide text-yellow">
-              {kind}
-            </span>
-          )}
-          <span className="truncate text-[11.5px] font-semibold text-text-bright">{title}</span>
+    <section aria-label={label} className="flex-none">
+      <BannerShell
+        placement="lane"
+        icon={icon}
+        failed={failed}
+        actions={actions}
+        onDismiss={onDismiss}
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {kind && (
+              <Badge tone="neutral" size="xs">
+                {kind}
+              </Badge>
+            )}
+            <span className="truncate text-[11.5px] font-semibold">{title}</span>
+          </div>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">{message}</p>
+          {detail && <p className="mt-0.5 font-mono text-[10px] text-dim">{detail}</p>}
         </div>
-        <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{message}</p>
-        {detail && <p className="mt-1 font-mono text-[10px] text-dim">{detail}</p>}
-      </div>
-      <div className="flex flex-none items-center gap-1.5">
-        {onInspect && (
-          <Button variant="ghost" size="sm" onClick={onInspect}>
-            <Search size={12} /> {inspectLabel}
-          </Button>
-        )}
-        <Button variant="secondary" size="sm" disabled={actionDisabled} onClick={onAction}>
-          {actionLabel} <ArrowRight size={12} />
-        </Button>
-        {onDismiss && (
-          <Button variant="ghost" size="icon" aria-label={`Dismiss: ${title}`} onClick={onDismiss}>
-            <X size={13} />
-          </Button>
-        )}
-      </div>
+      </BannerShell>
     </section>
   )
 }

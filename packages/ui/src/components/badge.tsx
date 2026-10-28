@@ -42,7 +42,7 @@ export function Badge({ children, tone = "neutral", size = "sm", className, titl
       status={statusFor[tone]}
       size={size === "xs" ? "sm" : "md"}
       showIcon={false}
-      className={cn("font-mono", toneClass[tone], className)}
+      className={cn("shrink-0 whitespace-nowrap font-mono", toneClass[tone], className)}
     >
       {children}
     </AnimatedBadge>

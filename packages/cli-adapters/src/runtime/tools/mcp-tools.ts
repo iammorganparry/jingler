@@ -12,20 +12,13 @@ import type { ProviderId, ProviderModelId, RuntimeDiagnosticMcpHealth } from "@j
 import { Data, Effect, Schema } from "effect"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { loginShellEnvironment } from "../../login-shell-env.js"
-import { ToolError, type ToolRegistry, type ToolRisk } from "./tool-registry.js"
+import { ToolError, toolRoles, codeReadModes, type ToolRegistry, type ToolRisk } from "./tool-registry.js"
 
 const TOOL_PAGE_LIMIT = 32
 const TOOL_TIMEOUT_MS = 60_000
 const TOOL_OUTPUT_BUDGET = 16_000
-const roles = [
-  "conversation",
-  "plan",
-  "plan-execution",
-  "review",
-  "context-digest",
-  "background"
-] as const
-const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
+const roles = toolRoles
+const modes = codeReadModes
 const argumentsSchema = Schema.Record({ key: Schema.String, value: Schema.Unknown })
 const progressiveSearchInput = Schema.Struct({
   query: Schema.String,
@@ -306,7 +299,7 @@ const discoverTools = (
         const result = yield* client.listTools(cursor)
         tools.push(...result.tools)
         cursor = result.nextCursor
-        if (cursor === undefined) return tools
+        if (cursor === undefined) return filterDisabledTools(server, tools)
       }
       return yield* clientFailure(
         server.name,
@@ -314,6 +307,14 @@ const discoverTools = (
       )
     })
   )
+
+/** Operator-disabled tools never reach the registry — not just the UI. */
+const filterDisabledTools = (server: RuntimeMcpServer, tools: ReadonlyArray<Tool>): ReadonlyArray<Tool> => {
+  const disabled = server.disabledTools
+  return disabled === undefined || disabled.length === 0
+    ? tools
+    : tools.filter((tool) => !disabled.includes(tool.name))
+}
 
 const safeName = (name: string): string =>
   name.replaceAll(/[^a-zA-Z0-9_-]/g, "_")

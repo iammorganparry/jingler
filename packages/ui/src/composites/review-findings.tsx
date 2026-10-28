@@ -14,7 +14,7 @@ import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Spinner } from "../components/loading.js"
 import { cn } from "../lib/cn.js"
-import { severityAccent } from "../tokens.js"
+import { CommentRow } from "../components/comment-row.js"
 import { fmtElapsed } from "../lib/relative-time.js"
 
 /**
@@ -124,7 +124,7 @@ const OUTCOME_META: Record<
   Exclude<FindingOutcome["kind"], "manual" | "resolved">,
   { Icon: LucideIcon; label: string; tone: string }
 > = {
-  routed: { Icon: CornerDownRight, label: "Sent to agent", tone: "text-green" },
+  routed: { Icon: CornerDownRight, label: "Sent to agent", tone: "text-muted-foreground" },
   posted: { Icon: MessageSquare, label: "Posted to PR", tone: "text-dim" },
   "post-failed": { Icon: AlertTriangle, label: "Couldn't post to PR", tone: "text-red" }
 }
@@ -139,8 +139,8 @@ function OutcomeLine({ outcome }: { outcome: FindingOutcome }) {
   if (outcome.kind === "resolved") {
     return (
       <div
-        className="flex items-center gap-[5px] text-[10.5px] leading-none text-green"
-        title={`${outcome.sha.slice(0, 7)} — ${outcome.subject}`}
+        className="flex items-center gap-[5px] text-[10.5px] leading-none text-muted-foreground"
+        title={`${outcome.sha.slice(0, 7)}, ${outcome.subject}`}
       >
         <GitCommitHorizontal size={11} strokeWidth={2.25} />
         <span>Resolved in</span>
@@ -168,123 +168,165 @@ export interface ReviewFindingRowProps {
   /** The review this finding belongs to — carries the routed/posted stamps. */
   review?: AdversarialReview | null
   onSendToAgent?: (findingId: string) => void
+  /** Shown when this finding is dismissed and revealed again: offers Restore. */
+  dismissed?: boolean
+  onDismiss?: (findingId: string) => void
+  onRestore?: (findingId: string) => void
 }
 
-/**
- * One finding.
- *
- * The severity rail down the left is the whole triage signal: the list is
- * ranked worst-first, and the rail lets you see where "worst" stops without
- * reading a word. A filled badge per row was the old shape — four of them
- * stacked shout equally, which is the opposite of ranking.
- */
+function FindingActions({
+  canAsk,
+  canRoute,
+  onAsk,
+  onRestore
+}: {
+  canAsk: boolean
+  canRoute: boolean
+  onAsk: () => void
+  onRestore?: () => void
+}) {
+  if (!canAsk && !onRestore) return null
+  return (
+    <>
+      {canAsk && (
+        <Button variant="ghost" size="sm" disabled={!canRoute} onClick={onAsk}>
+          Ask agent to fix
+        </Button>
+      )}
+      {onRestore && (
+        <Button variant="ghost" size="sm" onClick={onRestore}>
+          Restore
+        </Button>
+      )}
+    </>
+  )
+}
+
+/** One finding, as a plain comment row (severity text, message, Ask agent to fix, Dismiss). */
 export function ReviewFindingRow({
   finding,
   sent,
   canRoute,
   review = null,
-  onSendToAgent
+  onSendToAgent,
+  dismissed = false,
+  onDismiss,
+  onRestore
 }: ReviewFindingRowProps) {
-  const accent = severityAccent[finding.severity]
   const location = findingLocation(finding)
   const outcome = outcomeOf(finding, review, { sent })
   const resolved = outcome.kind === "resolved"
-  // Resolved findings collapse to their title + outcome. The rationale and
-  // suggestion are the bulk of a card, and once a finding is dealt with they are
-  // archive rather than work — left expanded they push the findings that still
-  // need attention (and the merge box below them) off-screen. Re-openable,
-  // because "what was raised and how was it answered" is exactly what you go
-  // looking for when reviewing the fix.
+  // Resolved findings collapse to title + outcome; re-openable to check the fix.
   const [expanded, setExpanded] = useState(false)
   const collapsed = resolved && !expanded
+  const canAsk = onSendToAgent && outcome.kind !== "routed" && !resolved && !dismissed
   return (
     <div
       data-testid={`finding-${finding.id}`}
       data-resolved={resolved ? "true" : undefined}
-      className={cn(
-        "group flex flex-col gap-[7px] rounded-[6px] rounded-l-[3px] border border-l-2 border-hairline bg-surface/30 px-[11px] py-[9px] transition-colors hover:bg-surface/50",
-        accent.rail,
-        // Recedes rather than disappears. A resolved finding still holds its place
-        // above the file's diff — it is the record that this was raised and dealt
-        // with — but it must not compete with the ones still outstanding. Full
-        // opacity returns on hover, so the text stays readable when you go looking.
-        resolved && "opacity-55 hover:opacity-100"
-      )}
+      data-dismissed={dismissed ? "true" : undefined}
+      className={cn((resolved || dismissed) && "opacity-55 hover:opacity-100")}
     >
-      <div className="flex items-baseline gap-[7px]">
-        <span
-          className={cn("size-[5px] flex-none translate-y-[-1px] rounded-full", accent.dot)}
-          aria-hidden
-        />
-        <span className={cn("flex-none text-[10px] font-medium uppercase tracking-[0.5px]", accent.text)}>
-          {finding.severity}
-        </span>
-        {location !== null && (
-          <span className="min-w-0 flex-1 truncate text-right font-mono text-[10px] text-dim" title={location}>
-            {location}
-          </span>
-        )}
-      </div>
-
-      {resolved ? (
-        // The title doubles as the disclosure control once resolved. A real
-        // button, so it's reachable by keyboard and announces its state.
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
-          className="flex w-full items-start gap-[5px] text-left text-[12.5px] font-semibold leading-[1.35] text-muted-foreground line-through decoration-dim"
-        >
-          <ChevronRight
-            size={12}
-            aria-hidden
-            className={cn(
-              "mt-[3px] flex-none no-underline transition-transform",
-              expanded && "rotate-90"
-            )}
+      <CommentRow
+        severity={finding.severity}
+        location={location ?? undefined}
+        onDismiss={!dismissed && onDismiss ? () => onDismiss(finding.id) : undefined}
+        action={
+          <FindingActions
+            canAsk={!!canAsk}
+            canRoute={canRoute}
+            onAsk={() => onSendToAgent?.(finding.id)}
+            onRestore={dismissed && onRestore ? () => onRestore(finding.id) : undefined}
           />
-          <span className="min-w-0 flex-1">{finding.title}</span>
-        </button>
-      ) : (
-        <span className="text-[12.5px] font-semibold leading-[1.35] text-text-bright">
-          {finding.title}
-        </span>
-      )}
-
-      {!collapsed && (
-        <>
-          <p className="text-[11.5px] leading-[1.5] text-text">{finding.rationale}</p>
-
-          {finding.suggestion !== null && (
-            <p className="rounded-[3px] border-l border-line bg-editor/40 py-[5px] pl-[7px] pr-[6px] text-[11px] leading-[1.45] text-muted-foreground">
-              {finding.suggestion}
-            </p>
-          )}
-        </>
-      )}
-
-      {(outcome.kind !== "manual" || onSendToAgent) && (
-        <div className="flex items-center justify-between gap-2 pt-[1px]">
-          <OutcomeLine outcome={outcome} />
-          {/*
-            The manual send survives as a FALLBACK, not the main path. It earns
-            its place in two states the automatic route can't reach: a nit you
-            want the agent to fix anyway, and a critical finding on a session
-            with no live conversation to route through. Shown on hover so it
-            doesn't compete with the outcome line in the common case.
-          */}
-          {onSendToAgent && outcome.kind !== "routed" && !resolved && (
-            <button
-              type="button"
-              disabled={!canRoute}
-              onClick={() => onSendToAgent(finding.id)}
-              className="ml-auto rounded-[3px] px-[5px] py-[2px] text-[10.5px] text-dim opacity-0 transition-opacity hover:bg-surface hover:text-text focus-visible:opacity-100 disabled:pointer-events-none group-hover:opacity-100"
+        }
+      >
+        <div className="flex flex-col gap-[7px]">
+          {resolved ? (
+            <Button
+              variant="ghost"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((v) => !v)}
+              className="h-auto w-full justify-start gap-[5px] p-0 text-left text-[12.5px] font-semibold leading-[1.35] text-muted-foreground line-through decoration-dim"
             >
-              Send to agent
-            </button>
+              <ChevronRight
+                size={12}
+                aria-hidden
+                className={cn("flex-none no-underline transition-transform", expanded && "rotate-90")}
+              />
+              <span className="min-w-0 flex-1">{finding.title}</span>
+            </Button>
+          ) : (
+            <span className="font-semibold">{finding.title}</span>
           )}
+          {!collapsed && (
+            <>
+              <p className="text-[11.5px] leading-[1.5] text-text">{finding.rationale}</p>
+              {finding.suggestion !== null && (
+                <p className="border-l border-line py-[2px] pl-[7px] text-[11px] leading-[1.45] text-muted-foreground">
+                  {finding.suggestion}
+                </p>
+              )}
+            </>
+          )}
+          <OutcomeLine outcome={outcome} />
         </div>
+      </CommentRow>
+    </div>
+  )
+}
+
+export interface FindingsListProps {
+  findings: readonly ReviewFinding[]
+  review: AdversarialReview | null
+  sentFindingIds?: ReadonlySet<string>
+  canRoute: boolean
+  onSendFindingToAgent?: (findingId: string) => void
+  dismissedFindingIds?: ReadonlySet<string>
+  /** Dismiss (`dismissed` true) or restore (false) a finding. */
+  onDismissFinding?: (findingId: string, dismissed?: boolean) => void
+}
+
+/** Findings minus the dismissed ones, plus a "Dismissed (N) · Show" row that reveals them again. */
+export function FindingsList({
+  findings,
+  review,
+  sentFindingIds,
+  canRoute,
+  onSendFindingToAgent,
+  dismissedFindingIds,
+  onDismissFinding
+}: FindingsListProps) {
+  const [showDismissed, setShowDismissed] = useState(false)
+  const dismissed = findings.filter((f) => dismissedFindingIds?.has(f.id))
+  const active = findings.filter((f) => !dismissedFindingIds?.has(f.id))
+  const row = (finding: ReviewFinding, isDismissed: boolean) => (
+    <ReviewFindingRow
+      key={finding.id}
+      finding={finding}
+      sent={sentFindingIds?.has(finding.id) ?? false}
+      canRoute={canRoute}
+      review={review}
+      onSendToAgent={onSendFindingToAgent}
+      dismissed={isDismissed}
+      onDismiss={onDismissFinding ? (id) => onDismissFinding(id, true) : undefined}
+      onRestore={onDismissFinding ? (id) => onDismissFinding(id, false) : undefined}
+    />
+  )
+  return (
+    <div className="flex flex-col">
+      {active.map((f) => row(f, false))}
+      {dismissed.length > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="justify-start text-muted-foreground"
+          aria-expanded={showDismissed}
+          onClick={() => setShowDismissed((v) => !v)}
+        >
+          {`Dismissed (${dismissed.length}) · ${showDismissed ? "Hide" : "Show"}`}
+        </Button>
       )}
+      {showDismissed && dismissed.map((f) => row(f, true))}
     </div>
   )
 }
@@ -307,6 +349,8 @@ export interface ReviewFindingsProps {
   onSendFindingToAgent?: (findingId: string) => void
   /** Ids of findings already sent to the agent — their action stays "Sent". */
   sentFindingIds?: ReadonlySet<string>
+  dismissedFindingIds?: ReadonlySet<string>
+  onDismissFinding?: (findingId: string, dismissed?: boolean) => void
 }
 
 /**
@@ -325,7 +369,9 @@ export function ReviewFindings({
   canRoute = true,
   onRun,
   onSendFindingToAgent,
-  sentFindingIds
+  sentFindingIds,
+  dismissedFindingIds,
+  onDismissFinding
 }: ReviewFindingsProps) {
          function renderReviewButton() {
            return (<Button
@@ -354,12 +400,11 @@ export function ReviewFindings({
         <div className="flex flex-wrap items-center gap-x-[7px] gap-y-1 text-[11px] text-muted-foreground">
           {split.toAgent.length > 0 && (
             <span className="flex items-center gap-[5px]">
-              <CornerDownRight size={11} strokeWidth={2.25} className="text-green" />
+              <CornerDownRight size={11} strokeWidth={2.25} className="text-muted-foreground" />
               <span className="tabular-nums text-text">{split.toAgent.length}</span>
               <span>to the agent</span>
             </span>
           )}
-          {split.toAgent.length > 0 && split.toPr.length > 0 && <span className="text-dim">·</span>}
           {split.toPr.length > 0 && (
             <span className="flex items-center gap-[5px]">
               <MessageSquare size={11} strokeWidth={2.25} className="text-blue" />
@@ -375,9 +420,8 @@ export function ReviewFindings({
           */}
           {resolved > 0 && (
             <>
-              <span className="text-dim">·</span>
               <span className="flex items-center gap-[5px]">
-                <GitCommitHorizontal size={12} strokeWidth={2.25} className="text-green" />
+                <GitCommitHorizontal size={12} strokeWidth={2.25} className="text-muted-foreground" />
                 <span className="tabular-nums text-text">{resolved}</span>
                 <span>resolved</span>
               </span>
@@ -409,13 +453,13 @@ export function ReviewFindings({
       {/* The reviewer ran but said something we couldn't parse — a refusal, or
           prose. Showing its words beats an empty list that reads as "no bugs". */}
       {review?.note != null && (
-        <Callout tone="yellow" className="items-start">
+        <Callout tone="blue" className="items-start">
           {review.note}
         </Callout>
       )}
 
       {review !== null && findings.length === 0 && review.note == null && (
-        <Callout tone="green">
+        <Callout tone="blue">
           The reviewer argued against this diff and found nothing to report.
         </Callout>
       )}
@@ -438,18 +482,15 @@ export function ReviewFindings({
       )}
 
       {findings.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {findings.map((finding) => (
-            <ReviewFindingRow
-              key={finding.id}
-              finding={finding}
-              sent={sentFindingIds?.has(finding.id) ?? false}
-              canRoute={canRoute}
-              review={review}
-              onSendToAgent={onSendFindingToAgent}
-            />
-          ))}
-        </div>
+        <FindingsList
+          findings={findings}
+          review={review}
+          sentFindingIds={sentFindingIds}
+          canRoute={canRoute}
+          onSendFindingToAgent={onSendFindingToAgent}
+          dismissedFindingIds={dismissedFindingIds}
+          onDismissFinding={onDismissFinding}
+        />
       )}
 
       {review !== null && (

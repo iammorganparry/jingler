@@ -1,0 +1,4 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-09-26T19:14:09.184Z","sessionId":"test-session-id"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-09-26T19:14:09.185Z","sessionId":"test-session-id"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Add a test feature to the app"}]},"cwd":"/tmp/test-project","sessionId":"test-session-id","gitBranch":"feat/test-feature","timestamp":"2026-09-26T19:14:09.207Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll add the test feature"}]},"timestamp":"2026-09-26T19:14:10.000Z"}

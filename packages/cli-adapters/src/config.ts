@@ -4,6 +4,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  VoiceConfig,
   ObsidianExplanationsConfig,
   OffloadComputeSettings,
   PlanTemplateConfig,
@@ -14,6 +15,7 @@ import type {
 } from "@jingler/core"
 import {
   clampFontScale,
+  normalizeHeaderViews,
   DEFAULT_THEME_ID,
   ProviderId,
   SubagentModelAssignments,
@@ -34,14 +36,14 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   if (existing === null) return {}
   // Every unrelated section must survive this whole-object read-modify-write.
   const truthyKeys = [
-    "context", "github", "git", "obsidianExplanations", "starredRepos", "collapsedRepos", "lastRepoPath",
+    "context", "github", "git", "obsidianExplanations", "starredRepos", "headerViews", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
-    "subagentModelsByProvider", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
+    "subagentModelsByProvider", "planTemplate", "notifications", "voice", "theme", "webSearch", "offloadCompute",
     "disabledPlugins"
   ] as const
   // A saved false (or zero) is a real value, not an absent section.
   const definedKeys = [
-    "connectionSelectionRequired", "providerSetupCompleted", "planAutoRun", "adhdMode", "fontScale",
+    "connectionSelectionRequired", "providerSetupCompleted", "planAutoRun", "adhdMode", "mcpImportDismissed", "fontScale",
     "subagentDelegationEnabled"
   ] as const
   return Object.fromEntries([
@@ -217,6 +219,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       const setPlanAutoRun = (planAutoRun: boolean) => patch({ planAutoRun })
 
       /** Whether final completion summaries are shaped for an ADHD reader. */
+      const setMcpImportDismissed = (mcpImportDismissed: boolean) => patch({ mcpImportDismissed })
+
+      const setVoice = (voice: VoiceConfig) => patch({ voice })
+
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
 
       /**
@@ -228,6 +234,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       const setStarredRepos = (starredRepos: ReadonlyArray<string>) =>
         patch({ starredRepos })
+
+      /** Unknown ids and repeats are dropped; the list is clamped to the header's max. */
+      const setHeaderViews = (views: ReadonlyArray<string>) =>
+        patch({ headerViews: normalizeHeaderViews(views) })
 
       const setCollapsedRepos = (collapsedRepos: ReadonlyArray<string>) =>
         patch({ collapsedRepos })
@@ -337,9 +347,12 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setSubagentDelegationEnabled,
         setSubagentModel,
         setPlanAutoRun,
+        setVoice,
         setAdhdMode,
+        setMcpImportDismissed,
         setFontScale,
         setStarredRepos,
+        setHeaderViews,
         setCollapsedRepos,
         setLastRepoPath,
         setContext,

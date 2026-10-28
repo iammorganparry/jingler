@@ -1,5 +1,6 @@
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
+import type { Page } from "@playwright/test"
 
 /**
  * The native PTY terminal, end to end against the built app. Unlike the agent,
@@ -31,7 +32,13 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   }
 ]
 
-test("opens Terminal as a view tab and its `+` button adds another shell", async ({ launchApp }) => {
+const shellTab = (window: Page, name: string) => window.getByRole("tab", { name, exact: true })
+const newShellFromLauncher = async (window: Page) => {
+  await window.getByRole("button", { name: "New tab" }).last().click()
+  await window.getByTestId("new-tab-option-terminal").click()
+}
+
+test("each shell is its own editor tab; closing one leaves the other", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     isolateSystemHome: true,
@@ -41,16 +48,24 @@ test("opens Terminal as a view tab and its `+` button adds another shell", async
 
   await expect(appShell(window)).toBeVisible()
   await expect(window.locator(".xterm")).toHaveCount(0)
-  await window.getByTestId("view-tab-terminal").click()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+  await window.getByTestId("header-view-terminal").click()
+  await expect(shellTab(window, "zsh")).toBeVisible({ timeout: 20_000 })
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
 
-  // A second terminal from the dock's "New terminal" (+) affordance.
-  await window.getByRole("button", { name: "New terminal" }).click()
+  // A second shell from the + menu is a second tab in the main tab bar.
+  await newShellFromLauncher(window)
+  await expect(shellTab(window, "zsh 2")).toBeVisible({ timeout: 20_000 })
+  await expect(shellTab(window, "zsh")).toBeVisible()
   await expect(window.locator(".xterm")).toHaveCount(2, { timeout: 20_000 })
+
+  // Closing one leaves the other.
+  await window.getByRole("button", { name: "Close zsh 2", exact: true }).click()
+  await expect(shellTab(window, "zsh 2")).toHaveCount(0)
+  await expect(shellTab(window, "zsh")).toBeVisible()
+  await expect(window.locator(".xterm")).toHaveCount(1)
 })
 
-test("does not respawn a shell after the last terminal and its view tab are closed", async ({
+test("does not respawn a shell when the last shell tab is closed", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -61,18 +76,16 @@ test("does not respawn a shell after the last terminal and its view tab are clos
   })
 
   await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("view-tab-terminal").click()
+  await window.getByTestId("header-view-terminal").click()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
-  await window
-    .getByRole("button", { name: "New terminal" })
-    .locator("..")
-    .getByRole("button", { name: /^Close / })
-    .click()
+  await window.getByRole("button", { name: "Close zsh", exact: true }).click()
   await expect(window.locator(".xterm")).toHaveCount(0)
-  await window.getByRole("button", { name: "Close Terminal", exact: true }).click()
-  await window.getByTestId("view-tab-terminal").click()
+  await expect(shellTab(window, "zsh")).toHaveCount(0)
+  // Nothing respawns on its own; only an explicit open creates a shell again.
+  await window.waitForTimeout(500)
   await expect(window.locator(".xterm")).toHaveCount(0)
-  await expect(window.getByLabel("New terminal")).toBeVisible()
+  await window.getByTestId("header-view-terminal").click()
+  await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
 })
 
 test("keystrokes reach the PTY and its exit surfaces in the dock footer", async ({ launchApp }) => {
@@ -99,4 +112,64 @@ test("keystrokes reach the PTY and its exit surfaces in the dock footer", async 
 
   // "last exit 0" — the label + the exit code render in one footer span.
   await expect(window.getByText("last exit 0")).toBeVisible({ timeout: 20_000 })
+})
+
+test("the terminal fills the whole Terminal tab", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("header-view-terminal").click()
+  await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole("separator", { name: "Resize terminal" })).toHaveCount(0)
+  const panel = await window.getByTestId("terminal-panel").boundingBox()
+  const viewport = window.viewportSize() ?? (await window.evaluate(() => ({ width: innerWidth, height: innerHeight })))
+  // The old bottom-anchored panel was 240px tall; filling the tab means most of the window height.
+  expect(panel?.height ?? 0).toBeGreaterThan(viewport.height * 0.6)
+})
+
+test("an exited shell offers Restart, which replaces it with a live shell", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("header-view-terminal").click()
+  await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
+
+  await window.getByRole("textbox", { name: "Terminal input" }).click()
+  await window.waitForTimeout(300)
+  await window.keyboard.type("exit 3")
+  await window.keyboard.press("Enter")
+  await expect(window.getByText("Shell exited with code 3")).toBeVisible({ timeout: 20_000 })
+
+  await window.getByRole("button", { name: "Restart" }).click()
+  await expect(window.getByText("Shell exited with code 3")).toHaveCount(0)
+  await expect(shellTab(window, "zsh")).toHaveCount(1)
+  await expect(shellTab(window, "zsh 2")).toHaveCount(0)
+  await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
+})
+
+test("closing the last shell tab leaves none, and the + menu opens a new one", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("header-view-terminal").click()
+  await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
+  await window.getByRole("button", { name: "Close zsh", exact: true }).click()
+  await expect(shellTab(window, "zsh")).toHaveCount(0)
+  await expect(window.locator(".xterm")).toHaveCount(0)
+
+  await newShellFromLauncher(window)
+  await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
+  await expect(shellTab(window, "zsh")).toBeVisible()
 })

@@ -89,6 +89,32 @@ const rejectedFileDrag = async (page: Page, sourceSelector: string, targetGroup:
     return result
   }, { sourceSelector, targetGroup })
 
+/** Starts a drag and hovers a point of the target; `dropHeldDrag` finishes it. */
+const hoverDrag = async (page: Page, sourceSelector: string, targetGroup: number, x: number, y = 0.5) =>
+  page.evaluate(({ sourceSelector, targetGroup, x, y }) => {
+    const source = document.querySelector(sourceSelector)
+    const target = document.querySelectorAll('[data-testid="editor-group"]')[targetGroup]
+    if (!(source && target)) throw new Error(`missing drag node: ${sourceSelector}`)
+    const box = target.getBoundingClientRect()
+    const init = {
+      dataTransfer: new DataTransfer(),
+      bubbles: true,
+      cancelable: true,
+      clientX: box.left + box.width * x,
+      clientY: box.top + box.height * y
+    }
+    source.dispatchEvent(new DragEvent("dragstart", init))
+    target.dispatchEvent(new DragEvent("dragover", init))
+    Object.assign(window, { heldDrag: { source, target, init } })
+  }, { sourceSelector, targetGroup, x, y })
+
+const dropHeldDrag = async (page: Page) =>
+  page.evaluate(() => {
+    const { source, target, init } = (window as unknown as { heldDrag: { source: Element; target: Element; init: DragEventInit } }).heldDrag
+    target.dispatchEvent(new DragEvent("drop", init))
+    source.dispatchEvent(new DragEvent("dragend", init))
+  })
+
 const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => {
   const base = {
     repo: "widget",
@@ -139,7 +165,7 @@ test("chats stay left while files and views share a persistent right pane", asyn
   await expect(groups(window)).toHaveCount(1)
   await expect(window.getByTestId("editor-tab-chat-c_side")).toBeVisible()
 
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in Alpha session…").fill("a.ts")
   await window.getByTestId("palette-item-file:a.ts").click()
   await expect(groups(window)).toHaveCount(2)
@@ -157,17 +183,16 @@ test("chats stay left while files and views share a persistent right pane", asyn
   await groups(window).nth(1).getByRole("button", { name: "New tab" }).click()
   await window.getByTestId("new-tab-option-terminal").click()
   await expect(groups(window)).toHaveCount(2)
-  await expect(groups(window).nth(1).getByTestId("editor-tab-view-terminal")).toBeVisible()
+  await expect(groups(window).nth(1).locator('[data-testid^="editor-tab-terminal-"]')).toBeVisible()
 
   // Dropping a chat on the content pane still routes it to the chat pane.
-  await dragTo(window, '[data-testid="session-tree-chat-c_side"] button', '[aria-label="Editor group: Terminal"]', 0.5)
+  await dragTo(window, '[data-testid="session-tree-chat-c_side"] button', '[aria-label="Editor group: zsh"]', 0.5)
   await expect(groups(window)).toHaveCount(2)
   await expect(groups(window).nth(0).getByTestId("editor-tab-chat-c_side")).toBeVisible()
   await expect(groups(window).nth(1).getByTestId("editor-tab-chat-c_side")).toHaveCount(0)
 
-  await tree.getByTestId("session-tree-view-terminal").hover()
-  await tree.getByRole("button", { name: "Close Terminal everywhere" }).click()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toHaveCount(0)
+  await window.getByRole("button", { name: "Close zsh", exact: true }).click()
+  await expect(window.locator('[data-testid^="editor-tab-terminal-"]')).toHaveCount(0)
   await expect(groups(window)).toHaveCount(2)
 
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Beta session" }).first().click()
@@ -197,21 +222,27 @@ test("closing an untouched chat tab removes it from the sidebar", async ({ launc
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Beta session" }).first().click()
   await expect(window.getByText("Keep this chat.")).toBeVisible()
 
-  await window.getByRole("button", { name: "New tab" }).click()
-  await window.getByTestId("new-tab-option-chat").click()
-  await expect(window.getByRole("tab", { name: "Chat 2" })).toBeVisible()
+  // Chat-only groups use ChatLaneHeader with a dedicated "New chat" button
+  await window.getByTestId("new-chat-button").click()
+  await expect(window.getByTestId("thread-switcher")).toContainText("Chat 2")
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toBeVisible()
 
-  await window.getByRole("tab", { name: "Chat 2" }).locator("..").getByRole("button", { name: "Close Chat 2" }).click()
+  // Close via the thread switcher's per-chat close item
+  await window.getByTestId("thread-switcher").click()
+  await window.getByRole("menuitem", { name: "Close Chat 2" }).click()
 
-  await expect(window.getByRole("tab", { name: "Chat 2" })).toHaveCount(0)
+  await expect(window.getByTestId("thread-switcher")).not.toContainText("Chat 2")
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toHaveCount(0)
   await expect(window.getByTestId("session-tree-s_beta").getByText(/^Closed/)).toHaveCount(0)
 
   // Closing a chat with history only closes its tab; its sidebar entry remains.
-  await window.getByRole("tab", { name: "Chat 1" }).locator("..").getByRole("button", { name: "Close Chat 1" }).click()
-  await expect(window.getByRole("tab", { name: "Chat 1" })).toHaveCount(0)
+  await window.getByTestId("thread-switcher").click()
+  await window.getByRole("menuitem", { name: "Close Chat 1" }).click()
+  // Chat 1 was the last tab, so the pane closes and Home returns; reopening the
+  // session shows the chat is still there.
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Beta session" }).first().click()
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 1")).toBeVisible()
+  await expect(window.getByText("Keep this chat.")).toBeVisible()
 })
 
 test("dragging file and view tabs creates horizontal and vertical splits", async ({ launchApp }) => {
@@ -229,7 +260,7 @@ test("dragging file and view tabs creates horizontal and vertical splits", async
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
 
   const openFile = async (path: string) => {
-    await window.keyboard.press("Meta+Shift+p")
+    await window.keyboard.press("Meta+p")
     await window.getByPlaceholder("Open a file in Alpha session…").fill(path)
     await window.getByTestId(`palette-item-file:${path}`).click()
   }
@@ -241,15 +272,52 @@ test("dragging file and view tabs creates horizontal and vertical splits", async
   await expect(groups(window)).toHaveCount(3)
   await expect(window.getByTestId("editor-split-row")).toBeVisible()
 
-  await groups(window).nth(1).getByRole("tab", { name: "a.ts" }).click()
+  await groups(window).nth(1).getByRole("tab", { name: "a.ts", exact: true }).click()
   await groups(window).nth(1).getByRole("button", { name: "New tab" }).click()
   await window.getByTestId("new-tab-option-terminal").click()
-  await dragTo(window, '[data-testid="editor-tab-view-terminal"]', '[aria-label="Editor group: Terminal"]', 0.5, 0.95)
+  await dragTo(window, '[data-testid^="editor-tab-terminal-"]', '[aria-label="Editor group: zsh"]', 0.5, 0.95)
 
   await expect(groups(window)).toHaveCount(4)
   await expect(window.getByTestId("editor-split-column")).toBeVisible()
   await expect(window.getByTestId("editor-tab-file-b.ts")).toBeVisible()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+  await expect(window.locator('[data-testid^="editor-tab-terminal-"]')).toBeVisible()
+})
+
+test("dragging a tab shows five labelled drop zones, highlights the hovered one and splits on an edge drop", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions,
+    seed: ({ repoPath }) => {
+      writeFileSync(join(repoPath, "a.ts"), "export const a = 1\n")
+      writeFileSync(join(repoPath, "b.ts"), "export const b = 2\n")
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
+  for (const path of ["a.ts", "b.ts"]) {
+    await window.keyboard.press("Meta+p")
+    await window.getByPlaceholder("Open a file in Alpha session…").fill(path)
+    await window.getByTestId(`palette-item-file:${path}`).click()
+  }
+  await expect(groups(window)).toHaveCount(2)
+
+  await hoverDrag(window, '[data-testid="editor-tab-file-b.ts"]', 1, 0.95)
+  const overlay = groups(window).nth(1).getByTestId("editor-drop-overlay")
+  await expect(overlay.getByTestId("editor-drop-zone")).toHaveCount(5)
+  for (const label of ["Split left", "Split right", "Split up", "Split down", "Move here"]) {
+    await expect(overlay.getByText(label)).toBeVisible()
+  }
+  await expect(overlay.locator('[data-active="true"]')).toHaveCount(1)
+  await expect(overlay.locator('[data-zone="right"]')).toHaveAttribute("data-active", "true")
+  await expect(overlay.locator('[data-zone="right"] polygon')).toHaveClass(/fill-brand\/20/)
+  await expect(overlay.locator('[data-zone="left"]')).toHaveAttribute("data-active", "false")
+
+  await dropHeldDrag(window)
+  await expect(window.getByTestId("editor-drop-overlay")).toHaveCount(0)
+  await expect(groups(window)).toHaveCount(3)
+  await expect(window.getByTestId("editor-split-row")).toBeVisible()
 })
 
 test("⌘T opens the focused group's tab-type chooser", async ({ launchApp }) => {
@@ -260,7 +328,7 @@ test("⌘T opens the focused group's tab-type chooser", async ({ launchApp }) =>
   await window.keyboard.press("Meta+t")
   await expect(window.getByTestId("new-tab-command-menu")).toBeVisible()
   await window.getByTestId("palette-item-new-tab:terminal").click()
-  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+  await expect(window.locator('[data-testid^="editor-tab-terminal-"]')).toBeVisible()
 })
 
 test("⌘W closes the focused editor tab without closing the app window", async ({ launchApp }) => {
@@ -273,7 +341,7 @@ test("⌘W closes the focused editor tab without closing the app window", async 
   })
   await expect(appShell(window)).toBeVisible()
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in Alpha session…").fill("close-me.ts")
   await window.getByTestId("palette-item-file:close-me.ts").click()
   await expect(window.getByTestId("editor-tab-file-close-me.ts")).toBeVisible()
@@ -293,4 +361,13 @@ test("legacy split shortcuts cannot create duplicate panes", async ({ launchApp 
   await window.keyboard.press("Meta+Backslash")
   await window.keyboard.press("Meta+Shift+Backslash")
   await expect(groups(window)).toHaveCount(1)
+})
+
+test("session chrome: header chips, no chat breadcrumb, New chat button", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, isolateSystemHome: true, withRepo: true, sessions })
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
+  await expect(window.getByTestId("session-header-identity")).toBeVisible()
+  await expect(window.getByTestId("header-branch")).toBeVisible()
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" })).toHaveCount(0)
+  await expect(window.getByTestId("new-chat-button")).toBeVisible()
 })

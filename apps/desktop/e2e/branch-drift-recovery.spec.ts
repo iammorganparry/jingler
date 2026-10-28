@@ -65,6 +65,14 @@ test("a drifted direct session surfaces the recovery banner and adopts the live 
   const adopt = window.getByRole("button", { name: "Adopt fix/other" })
   await expect(adopt).toBeVisible()
 
+  // Restyled banner: neutral (no coloured fill) with both actions on one line.
+  const banner = window.getByTestId("banner-shell").filter({ hasText: "Checkout moved off main" })
+  await expect(banner).toBeVisible()
+  expect(await banner.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)")
+  const fork = window.getByRole("button", { name: "Fork new session" })
+  const [adoptBox, forkBox] = await Promise.all([adopt.boundingBox(), fork.boundingBox()])
+  expect(Math.abs(adoptBox!.y - forkBox!.y)).toBeLessThan(2)
+
   // Adopt re-points the session at the branch the checkout is now on.
   await adopt.click()
   await expect

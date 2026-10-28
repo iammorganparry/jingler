@@ -71,6 +71,7 @@ const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray
   return [
     "Treat Jingler's active tools as first-class runtime capabilities. Prefer them over inferred shell workflows or provider-native substitutes that duplicate the same operation.",
     "Use capability metadata progressively: choose the narrowest relevant catalog or server from its name and description, search or list with a bounded query, then load or call only what the task needs. Do not enumerate every server or load every resource speculatively.",
+    "Always fill the intent argument on every tool call with a short present-tense summary of what it does and why, no more than 60 characters.",
     ...(ids.has("jingler_list_resources") && ids.has("jingler_load_resource")
       ? [
           "For skills and prompt templates, call jingler_list_resources with a narrow query before jingler_load_resource. When the operator explicitly names a skill, load it before acting; otherwise load a skill only when its catalog description matches the task."

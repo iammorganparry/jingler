@@ -50,6 +50,21 @@ export const manifest = defineManifest({
         id: "github-issues.fetch",
         title: "Fetch linked issue",
         category: "GitHub"
+      },
+      {
+        id: "github-issues.close",
+        title: "Close linked issue",
+        category: "GitHub"
+      },
+      {
+        id: "github-issues.reopen",
+        title: "Reopen linked issue",
+        category: "GitHub"
+      },
+      {
+        id: "github-issues.comment",
+        title: "Comment on linked issue",
+        category: "GitHub"
       }
     ]
   }

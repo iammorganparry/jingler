@@ -8,7 +8,7 @@
  * so its work + any approval gates/questions surface in the Conversation tab.
  * Keeps `@jingler/ui`'s `PullRequestView` presentational.
  */
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrMergeMethod, PullRequest, ReviewSubmitKind, Session } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
@@ -30,6 +30,10 @@ export const prKey = (sessionId: string, prNumber: number | null) =>
 export interface PullRequestState {
   readonly pr: PullRequest | null
   readonly busy: boolean
+  /** The message from a failed PR read, or null. */
+  readonly loadError: string | null
+  /** Re-run the PR read after a failure. */
+  readonly retryLoad: () => void
   /** Merge the PR. Defaults to a merge commit; the side panel offers the choice. */
   readonly mergePr: (method?: PrMergeMethod) => Promise<void>
   /** A merge is in flight. */
@@ -57,17 +61,33 @@ export interface PullRequestState {
   /** Reply into an inline review thread (`commentId` = the REST databaseId). */
   readonly replyToThread: (commentId: number, body: string) => Promise<void>
   readonly openOnGithub: () => void
+  /**
+   * The PR's changed files, fetched only while merging is blocked by conflicts
+   * — the closest list GitHub's REST API gives us to "the conflicting files"
+   * without actually attempting the merge. Named in the side panel's
+   * conflict-resolution prompt.
+   */
+  readonly conflictedFiles: ReadonlyArray<string>
+  /** Post a conflict-resolution prompt into the session's chat, as a normal turn. */
+  readonly resolveConflicts: (prompt: string) => void
 }
 
 export function usePullRequest(
   session: Session,
-  opts: { connected: boolean; autoDetect: boolean; onPrLinked?: (sessionId: string, prNumber: number) => void }
+  opts: {
+    connected: boolean
+    autoDetect: boolean
+    onPrLinked?: (sessionId: string, prNumber: number) => void
+    /** The stack layer to show; defaults to the session's own PR. */
+    prNumber?: number | null
+  }
 ): PullRequestState {
   const qc = useQueryClient()
   const { autoDetect, onPrLinked } = opts
+  const prNumber = opts.prNumber ?? session.prNumber
 
   const query = useQuery({
-    queryKey: prKey(session.id, session.prNumber),
+    queryKey: prKey(session.id, prNumber),
     // Checks and review state change outside Jingler. Keep the visible PR current
     // without polling hidden/background windows.
     refetchInterval: PR_REFRESH_MS,
@@ -78,7 +98,7 @@ export function usePullRequest(
         const n = await rpc.githubDetectPr(session.id).catch(() => null)
         if (n != null && n !== session.prNumber) onPrLinked?.(session.id, n)
       }
-      return rpc.githubPr(session.id)
+      return rpc.githubPr(session.id, prNumber ?? undefined)
     }
   })
 
@@ -96,7 +116,7 @@ export function usePullRequest(
   const reviewMutation = useMutation({
     mutationFn: (input: { body: string; kind: ReviewSubmitKind }) =>
       rpc.githubReview(session.id, input.kind, input.body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
 
   // "Merge pull request" merges the linked PR through GitHub's API. On success the
@@ -104,13 +124,18 @@ export function usePullRequest(
   // sweep, which polls the PR state, retires the session).
   const mergeMutation = useMutation({
     mutationFn: (method: PrMergeMethod) => rpc.githubMerge(session.id, method),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   // "Ready for review" flips a draft PR through GraphQL. On success the PR
   // read is invalidated so the header + side panel leave the Draft state.
   const markReadyMutation = useMutation({
     mutationFn: () => rpc.githubMarkReady(session.id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    // Write the new state into the cache instead of invalidating: GitHub can serve
+    // the stale draft right after the mutation, and the 10s poll reconciles later.
+    onSuccess: () =>
+      qc.setQueryData<PullRequest | null>(prKey(session.id, prNumber), (old) =>
+        old ? { ...old, isDraft: false, state: old.state === "draft" ? "open" : old.state } : old
+      )
   })
   const markReady = useCallback(
     () => markReadyMutation.mutateAsync().then(() => undefined),
@@ -120,7 +145,7 @@ export function usePullRequest(
   // `BEHIND` merge state. The re-read is what drops the blocker from the box.
   const updateBranchMutation = useMutation({
     mutationFn: () => rpc.githubUpdateBranch(session.id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   const updateBranch = useCallback(
     () => updateBranchMutation.mutateAsync().then(() => undefined),
@@ -146,7 +171,7 @@ export function usePullRequest(
   const resolveThreadMutation = useMutation({
     mutationFn: (input: { threadId: string; resolved: boolean }) =>
       rpc.githubResolveThread(session.id, input.threadId, input.resolved),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   const resolveThread = useCallback(
     (threadId: string, resolved: boolean) =>
@@ -158,7 +183,7 @@ export function usePullRequest(
   const replyToThreadMutation = useMutation({
     mutationFn: (input: { commentId: number; body: string }) =>
       rpc.githubReplyToThread(session.id, input.commentId, input.body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   const replyToThread = useCallback(
     (commentId: number, body: string) =>
@@ -167,7 +192,20 @@ export function usePullRequest(
   )
 
   const pr = query.data ?? null
-  const sentEntryIds = useRoutedEntries(session.id, session.prNumber)
+  // Only the REST file list names conflicting paths; fetch it only once the PR
+  // read says merging is blocked by conflicts, never on every PR view.
+  const hasConflicts = pr?.mergeBlockers.includes("Merge conflicts") ?? false
+  const filesQuery = useQuery({
+    queryKey: ["github", "conflicted-files", session.id, prNumber],
+    queryFn: () => rpc.githubFiles(session.id, prNumber ?? undefined),
+    enabled: hasConflicts
+  })
+  const conflictedFiles = useMemo(
+    () => (hasConflicts ? (filesQuery.data ?? []).map((file) => file.path) : []),
+    [hasConflicts, filesQuery.data]
+  )
+  const resolveConflicts = useCallback((prompt: string) => routeToAgent(prompt), [routeToAgent])
+  const sentEntryIds = useRoutedEntries(session.id, prNumber)
   const sendEntryToAgent = useCallback(
     async (entryId: string) => {
       // An id is either a top-level timeline entry or a comment inside an inline
@@ -189,9 +227,9 @@ export function usePullRequest(
       if (!found) return
       const ref = reviewFeedbackReference(found.path, found.line)
       routeToAgent(`Review feedback from @${found.author}${ref}:\n\n${found.body}\n\nPlease address this.`)
-      if (session.prNumber !== null) markRouted(session.id, session.prNumber, entryId)
+      if (prNumber !== null) markRouted(session.id, prNumber, entryId)
     },
-    [pr, routeToAgent, session.id, session.prNumber]
+    [pr, routeToAgent, session.id, prNumber]
   )
 
   const openOnGithub = useCallback(() => {
@@ -201,6 +239,8 @@ export function usePullRequest(
   return {
     pr,
     busy: query.isPending,
+    loadError: query.error ? ((query.error as { message?: string }).message ?? "Failed to load pull request") : null,
+    retryLoad: () => void query.refetch(),
     mergePr,
     merging: mergeMutation.isPending,
     mergeError: mergeMutation.error
@@ -221,7 +261,9 @@ export function usePullRequest(
     sentEntryIds,
     resolveThread,
     replyToThread,
-    openOnGithub
+    openOnGithub,
+    conflictedFiles,
+    resolveConflicts
   }
 }
 

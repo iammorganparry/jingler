@@ -67,7 +67,9 @@ export const McpServer = Schema.Struct({
   /** Names of HTTP headers sent to a remote server. Values are deliberately absent. */
   headerKeys: Schema.Array(Schema.String),
   /** False when the operator disabled the managed server. */
-  enabled: Schema.Boolean
+  enabled: Schema.Boolean,
+  /** Tool names the operator has turned off for this server; matches `McpConfigEntry.disabledTools`. Absent means none. */
+  disabledTools: Schema.optional(Schema.Array(Schema.String))
 })
 export type McpServer = Schema.Schema.Type<typeof McpServer>
 
@@ -79,6 +81,8 @@ export const McpServerStatus = Schema.Struct({
   state: McpServerState,
   /** Tools reported by `tools/list`; null unless the probe connected. */
   toolCount: Schema.NullOr(Schema.Number),
+  /** Tool names reported by `tools/list`; empty unless the probe connected. */
+  toolNames: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
   /** Why the probe failed, for the dialog. Null when it didn't. */
   error: Schema.NullOr(Schema.String),
   /** ISO-8601 timestamp of the probe, so the dialog can show "checked 2m ago". */

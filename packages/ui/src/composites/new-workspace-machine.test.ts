@@ -3,7 +3,7 @@ import { nativeCliEndpointId, piEndpointId, ProviderConnectionId, ProviderId, Pr
 import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
-import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
+import { AUTO_PROJECT_ID, newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
 
 const projects: ReadonlyArray<Project> = [
   { id: "p-local", name: "local", path: "/repos/local", availability: "available", createdAt: "now", updatedAt: "now" },
@@ -157,6 +157,23 @@ describe("newWorkspaceMachine", () => {
       modelId
     }), [], expect.any(Function))
     expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("connectionId")
+  })
+
+  it("Auto: creates a session with no repoPath/repoName/baseBranch, requiring only a model and the blank source", async () => {
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate).start()
+    actor.send({ type: "OPEN", projectId: AUTO_PROJECT_ID })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    expect(actor.getSnapshot().can({ type: "SUBMIT" })).toBe(true)
+    actor.send({ type: "SET_DRAFT", draft: "do a thing" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    const input = onCreate.mock.calls[0]?.[0] as CreateSessionInput
+    expect(input).not.toHaveProperty("repoPath")
+    expect(input).not.toHaveProperty("repoName")
+    expect(input).not.toHaveProperty("baseBranch")
+    expect(input.initialPrompt).toBe("do a thing")
   })
 
   it("starts every model in the configured default mode and falls back to Auto", async () => {
@@ -501,6 +518,29 @@ describe("newWorkspaceMachine", () => {
     )
   })
 
+  it("records a source load failure and retries it", async () => {
+    const issue = { id: "1", providerId: "github", identifier: "#1", title: "t", body: "", url: "u", labels: [], assignees: [] } as never
+    const loadGithubIssues = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([issue])
+    const actor = actorFor(undefined, { loadGithubIssues }).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_SOURCE", source: "github" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing") && snapshot.context.sourceError === "boom")
+    actor.send({ type: "RETRY_SOURCE" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing") && snapshot.context.issues.length === 1)
+    expect(actor.getSnapshot().context.sourceError).toBeNull()
+  })
+
+  it("does not load issues for a provider that is not connected", async () => {
+    const loadProviderIssues = vi.fn(async () => [])
+    const actor = actorFor(undefined, { loadProviderIssues, issueProviders: [] }).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_SOURCE", source: "provider:linear" })
+    expect(actor.getSnapshot().matches("editing")).toBe(true)
+    expect(loadProviderIssues).not.toHaveBeenCalled()
+  })
+
   it("loads and submits a selected pull request with composer settings", async () => {
     const pr = {
       number: 42,
@@ -554,4 +594,53 @@ it("retains the selected provider when overlapping native models refresh", async
     actor.send({ type: "SYNC_MODELS" })
     expect(actor.getSnapshot().context).toMatchObject({ endpointId, providerId: beta, modelId })
   } finally { actor.stop() }
+})
+
+describe("newWorkspaceMachine provisioning", () => {
+  const submitFailing = async (onCreate: NewWorkspaceDeps["onCreate"]) => {
+    const actor = actorFor(onCreate).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_DRAFT", draft: "keep me" })
+    actor.send({ type: "SUBMIT" })
+    return actor
+  }
+
+  it("fails into a state that keeps the form values and records the failed phase", async () => {
+    const onCreate = vi.fn(async (_i: CreateSessionInput, _a: unknown, onProgress?: (p: "creating-session") => void) => {
+      onProgress?.("creating-session")
+      throw new Error("boom")
+    })
+    const actor = await submitFailing(onCreate as NewWorkspaceDeps["onCreate"])
+    await waitFor(actor, (snapshot) => snapshot.matches("failed"))
+    expect(actor.getSnapshot().context).toMatchObject({ draft: "keep me", error: "boom", failedPhase: "creating-session" })
+  })
+
+  it("Retry re-runs creation; Edit returns to the form", async () => {
+    const onCreate = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValue(undefined)
+    const actor = await submitFailing(onCreate)
+    await waitFor(actor, (snapshot) => snapshot.matches("failed"))
+    actor.send({ type: "RETRY_PROVISION" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+    expect(onCreate).toHaveBeenCalledTimes(2)
+
+    const second = await submitFailing(vi.fn().mockRejectedValue(new Error("nope")))
+    await waitFor(second, (snapshot) => snapshot.matches("failed"))
+    second.send({ type: "EDIT_AFTER_FAILURE" })
+    expect(second.getSnapshot().matches("editing")).toBe(true)
+    expect(second.getSnapshot().context.draft).toBe("keep me")
+  })
+
+  it("Cancel aborts provisioning, returns to the form, and ignores a late result", async () => {
+    let fail!: (e: Error) => void
+    const onCreate = vi.fn(() => new Promise<void>((_ok, reject) => { fail = reject }))
+    const actor = await submitFailing(onCreate)
+    await waitFor(actor, (snapshot) => snapshot.matches("submitting"))
+    actor.send({ type: "CANCEL_PROVISION" })
+    expect(actor.getSnapshot().matches("editing")).toBe(true)
+    fail(new Error("late"))
+    await Promise.resolve()
+    expect(actor.getSnapshot().matches("editing")).toBe(true)
+    expect(actor.getSnapshot().context).toMatchObject({ draft: "keep me", error: null })
+  })
 })

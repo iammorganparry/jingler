@@ -1,6 +1,7 @@
 import type {
   GitHubRateLimit,
   Issue,
+  IssueLinkedPr,
   IssueListItem,
   IssueSummary,
   PrCheck,
@@ -474,6 +475,29 @@ export const mapIssueListItem = (raw: unknown, repository: string, comments: num
   return { ...summary, number: Number(summary.id), repository, comments }
 }
 
+/**
+ * Maps GitHub issue timeline events to linked PRs. Only `cross-referenced`
+ * events whose source is a pull request count — see
+ * https://docs.github.com/en/rest/issues/timeline#list-timeline-events-for-an-issue
+ * and https://docs.github.com/en/rest/using-the-rest-api/issue-event-types#cross-referenced.
+ */
+export const mapLinkedPrs = (raw: unknown): ReadonlyArray<IssueLinkedPr> => {
+  const events = Array.isArray(raw) ? raw : []
+  return events.flatMap((event) => {
+    const item = jsonRecord(event)
+    if (text(item.event) !== "cross-referenced") return []
+    const sourceIssue = jsonRecord(jsonRecord(item.source).issue)
+    const pullRequest = sourceIssue.pull_request
+    if (pullRequest === undefined || pullRequest === null) return []
+    const number = integer(sourceIssue.number)
+    const url = text(field(sourceIssue, "htmlUrl", "html_url")) ?? text(sourceIssue.url)
+    if (number === null || url === null) return []
+    const merged = text(field(jsonRecord(pullRequest), "mergedAt", "merged_at")) !== null
+    const state = merged ? "merged" : (text(sourceIssue.state)?.toLowerCase() ?? "open")
+    return [{ number, state, url }]
+  })
+}
+
 export const mapIssue = (raw: unknown): Issue => {
   const issue = jsonRecord(raw)
   const author = jsonRecord(issue.author ?? issue.user)
@@ -517,23 +541,25 @@ export const mapIssue = (raw: unknown): Issue => {
   }
 }
 
-export const mapPrState = (raw: unknown, checks: ReadonlyArray<PrCheck>): SessionPrStatus | null => {
-  const pr = jsonRecord(raw)
+const prStateOf = (pr: ReturnType<typeof jsonRecord>): PrState | null => {
   const rawState = text(pr.state)?.toUpperCase()
   const merged = field(pr, "mergedAt", "merged_at") !== null && field(pr, "mergedAt", "merged_at") !== undefined
-  const state: PrState | null = merged
-    ? "merged"
-    : rawState === "CLOSED"
-      ? "closed"
-      : rawState === "OPEN"
-        ? field(pr, "isDraft", "draft") === true
-          ? "draft"
-          : "open"
-        : null
+  if (merged) return "merged"
+  if (rawState === "CLOSED") return "closed"
+  if (rawState !== "OPEN") return null
+  return field(pr, "isDraft", "draft") === true ? "draft" : "open"
+}
+
+export const mapPrState = (raw: unknown, checks: ReadonlyArray<PrCheck>): SessionPrStatus | null => {
+  const state = prStateOf(jsonRecord(raw))
   if (state === null) return null
+  if (state === "closed" || state === "merged" || checks.length === 0) {
+    return { state, checks: state === "closed" || state === "merged" ? null : rollupChecks(checks) }
+  }
   return {
     state,
-    checks: state === "closed" || state === "merged" ? null : rollupChecks(checks)
+    checks: rollupChecks(checks),
+    checkCounts: { passing: checks.filter((check) => check.status === "pass").length, total: checks.length }
   }
 }
 

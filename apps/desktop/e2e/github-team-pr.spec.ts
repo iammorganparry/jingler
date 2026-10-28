@@ -75,7 +75,7 @@ if (args[0] === 'api') {
     output({total_count:items.length,incomplete_results:control.partial,items:items.slice((page-1)*100,page*100)})
   }
   if (endpoint === 'repos/acme/widget') output({id:7,node_id:'R_7',clone_url:control.repoPath,ssh_url:null})
-  if (endpoint.endsWith('/files')) output([[]])
+  if (endpoint.endsWith('/files')) output([[{filename:'src/only-in-pr.ts',additions:1,deletions:0,status:'added',patch:'@@ -0,0 +1 @@\\n+pr'}]])
   if (endpoint === 'graphql') {
     if (joined.includes('search(query:')) {
       const rows = control.filterRows ? filterItems() : [item(42)]
@@ -173,8 +173,8 @@ test("team queues use CLI only, refresh partial/access failures, and reuse local
     await expect(inbox.getByRole("button", { name: /Team PR 45/ })).toBeVisible()
     await expect(inbox.getByRole("button", { name: /Team PR 46/ })).toBeVisible()
     await inbox.getByRole("button", { name: /Team PR 46/ }).click()
-    await expect(inbox.getByRole("button", { name: "Create session" })).toBeDisabled()
-    await expect(inbox.getByRole("button", { name: "Create session" })).toHaveAttribute("title", "Add this repository as a local project to create a session.")
+    await expect(inbox.getByRole("button", { name: "Start session from this PR" })).toBeDisabled()
+    await expect(inbox.getByRole("button", { name: "Start session from this PR" })).toHaveAttribute("title", "Add this repository as a local project to create a session.")
 
     await inbox.getByRole("button", { name: /Team PR 45/ }).click()
     await expect(inbox.getByRole("heading", { name: "Team PR 45" })).toBeVisible()
@@ -236,7 +236,7 @@ test("team pickup creates a session using pinned HTTPS fetches and files reuse t
     await inbox.getByRole("button", { name: /Team PR 45/ }).click()
     await expect(inbox.getByRole("heading", { name: "Team PR 45" })).toBeVisible()
     const appWrites = githubServer.operations.length
-    await inbox.getByRole("button", { name: "Create session" }).click()
+    await inbox.getByRole("button", { name: "Start session from this PR" }).click()
     await expect(window.getByTestId("new-session-view")).toBeVisible()
     await window.getByRole("button", { name: "Create workspace" }).click()
     await expect(sessionRow(window, "Team PR 45")).toBeVisible({ timeout: 30_000 })
@@ -254,10 +254,18 @@ test("team pickup creates a session using pinned HTTPS fetches and files reuse t
     await expect(scope).toBeEnabled()
     await inbox.getByRole("button", { name: /Team PR 45/ }).click()
     await expect(inbox.getByRole("heading", { name: "Team PR 45" })).toBeVisible()
-    await inbox.getByRole("tab", { name: /Files changed/ }).click()
+    await inbox.getByRole("tab", { name: /^Files \d+/ }).click()
     await expect(inbox).not.toBeVisible()
-    await expect(window.getByTestId("view-tab-files").first()).toBeVisible()
+    // Files accessed via Explorer (files tab removed in redesign 3.6)
+    await expect(window.getByRole("tab", { name: "Explorer", exact: true })).toBeVisible()
     expect(JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf8"))).toHaveLength(1)
+    // The PR view's Files sub-tab lists this PR's files only, not the working tree.
+    await sessionRow(window, "Team PR 45").click()
+    await window.getByTestId("header-link-pr").click()
+    await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Files/ }).click()
+    const panel = window.getByTestId("pr-files-panel")
+    await expect(panel.getByText("only-in-pr.ts").first()).toBeVisible()
+    await expect(panel.getByText("README.md")).toHaveCount(0)
   } finally { rmSync(cli.root, { recursive: true, force: true }) }
 })
 
@@ -380,16 +388,11 @@ for (const mode of ["personal", "team"] as const) {
       const composer = inbox.getByPlaceholder("Leave a comment…")
       await composer.fill("Keep draft while filtering")
       if (mode === "personal") {
-        const tablist = inbox.getByRole("tablist").filter({ has: window.getByRole("tab", { name: "Review requested", exact: true }) })
-        const viewport = tablist.locator("..")
-        expect(await viewport.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true)
-        expect(await tablist.getByRole("tab").evaluateAll((tabs) => tabs.every((tab) => tab.scrollWidth <= tab.clientWidth + 1))).toBe(true)
-        const scrollBefore = await window.evaluate(() => ({ x: window.scrollX, y: window.scrollY }))
-        await tablist.getByRole("tab", { name: "All", exact: true }).press("End")
-        await expect(tablist.getByRole("tab", { name: "Review requested", exact: true })).toBeFocused()
-        await expect.poll(() => viewport.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0)
-        expect(await window.evaluate(() => ({ x: window.scrollX, y: window.scrollY }))).toEqual(scrollBefore)
-        await tablist.getByRole("tab", { name: "Review requested", exact: true }).press("Home")
+        const chips = inbox.getByRole("radiogroup", { name: "Pull request filter" })
+        expect(await chips.getByRole("radio").evaluateAll((radios) => radios.every((radio) => radio.scrollWidth <= radio.clientWidth + 1))).toBe(true)
+        await chips.getByRole("radio", { name: "All", exact: true }).press("ArrowRight")
+        await expect(chips.getByRole("radio", { name: "Created", exact: true })).toBeFocused()
+        await chips.getByRole("radio", { name: "Created", exact: true }).press("ArrowLeft")
         await expect(inbox.getByText("3 of 3 loaded PRs")).toBeVisible()
         expect(await window.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       }
@@ -431,3 +434,28 @@ for (const mode of ["personal", "team"] as const) {
     } finally { rmSync(cli.root, { recursive: true, force: true }) }
   })
 }
+
+test("a failed team load shows Retry that re-runs the load and recovers", async ({ launchApp }) => {
+  test.setTimeout(120_000)
+  const cli = installCli()
+  try {
+    const { window } = await launchApp({ configured: true, withRepo: true, sessions, e2eEnv: cli.env })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByTestId("pull-requests-sidebar-item").click()
+    const inbox = window.getByTestId("pull-request-inbox")
+    const scope = inbox.getByRole("combobox", { name: "Pull request scope" })
+    await expect(scope).toBeEnabled()
+    await scope.selectOption("7")
+    await expect(inbox.getByRole("button", { name: /Team PR 42/ })).toBeVisible()
+
+    cli.update({ discoveryFail: true })
+    await inbox.getByRole("button", { name: "Refresh", exact: true }).click()
+    await expect(inbox.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
+    await expect(inbox.getByRole("button", { name: /Team PR 42/ })).toHaveCount(0)
+
+    cli.update({ discoveryFail: false })
+    await inbox.getByRole("button", { name: "Retry", exact: true }).click()
+    await expect(inbox.getByRole("button", { name: /Team PR 42/ })).toBeVisible()
+    await expect(inbox.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0)
+  } finally { rmSync(cli.root, { recursive: true, force: true }) }
+})

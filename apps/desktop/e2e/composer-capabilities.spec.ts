@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, type SeedSession, test } from "./fixtures.js"
+import { appShell, expect, type SeedSession, test, openModelSettings } from "./fixtures.js"
 
 const CONNECTION_ID = "jingler-e2e-connection"
 const PROVIDER_ID = "jingler-e2e"
@@ -52,6 +52,7 @@ test("offers certified models with canonical route identity", async ({ launchApp
   })
   await expect(appShell(launched.window)).toBeVisible()
 
+  await openModelSettings(launched.window)
   await launched.window.getByRole("button", { name: /^Model: Deterministic pi model/ }).click()
   const search = launched.window.getByRole("textbox", { name: "Search models" })
   const listbox = launched.window.getByRole("listbox")
@@ -98,7 +99,8 @@ test("offers the same Jingler permission modes for every certified model", async
   await expect(launched.window.getByRole("option", { name: /^Ask Before Actions\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Accept Edits\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Auto\b/ })).toBeVisible()
-  await expect(launched.window.getByRole("option", { name: /^Plan\b/ })).toBeVisible()
+  // Plan moved out of the permission menu into the composer's Work mode control.
+  await expect(launched.window.getByRole("tablist", { name: "Work mode" }).getByRole("tab", { name: "Plan" })).toBeVisible()
 })
 
 test("derives reasoning choices from the certified model capability", async ({ launchApp }) => {
@@ -109,6 +111,8 @@ test("derives reasoning choices from the certified model capability", async ({ l
     sessions: sessions("s_reasoning_models")
   })
   await expect(appShell(launched.window)).toBeVisible()
+
+  await openModelSettings(launched.window)
 
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   for (const label of ["Off", "Low", "Medium", "High", "Xhigh"]) {
@@ -126,6 +130,7 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
   await expect(appShell(first.window)).toBeVisible()
   await first.window.getByRole("button", { name: "Accept Edits", exact: true }).click()
   await first.window.getByRole("option", { name: /^Auto\b/ }).click()
+  await openModelSettings(first.window)
   await first.window.getByRole("button", { name: "Thinking strength" }).click()
   await first.window.getByRole("option", { name: "High", exact: true }).click()
 
@@ -154,6 +159,7 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
     piFixture: PI_FIXTURE
   })
   await expect(appShell(reopened.window)).toBeVisible()
+  await openModelSettings(reopened.window)
   await expect(reopened.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Auto" })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
@@ -176,26 +182,33 @@ test("configures canonical model, mode, and reasoning before creating a session"
   await expect(appShell(launched.window)).toBeVisible()
   await launched.window.getByTestId("new-session").click()
 
-  const selectorWidths = await Promise.all(
+  const chipRow = launched.window.getByTestId("new-workspace-chip-row")
+  const boxes = await Promise.all(
     [
-      launched.window.getByRole("button", { name: "Project", exact: true }),
-      launched.window.getByRole("button", { name: "Checkout", exact: true }),
-      launched.window.getByRole("button", { name: "Base branch", exact: true })
-    ].map(async (selector) => (await selector.boundingBox())?.width)
+      chipRow.getByRole("button", { name: "Project", exact: true }),
+      chipRow.getByRole("button", { name: "Checkout", exact: true }),
+      chipRow.getByRole("button", { name: "Start from", exact: true })
+    ].map(async (chip) => chip.boundingBox())
   )
-  const [projectWidth, ...otherWidths] = selectorWidths
-  expect(projectWidth).toBeGreaterThanOrEqual(210)
-  expect(otherWidths).toEqual([projectWidth, projectWidth])
+  const [project, ...others] = boxes
+  expect(project?.width).toBeGreaterThan(0)
+  for (const box of others) {
+    expect(box?.width).toBeGreaterThan(0)
+    expect(box?.height).toBeCloseTo(project?.height ?? 0, 0) // sub-pixel: chips are content-sized
+    expect(box?.y).toBeCloseTo(project?.y ?? 0, 0)
+  }
 
+  await openModelSettings(launched.window)
   await expect(
     launched.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })
   ).toBeVisible()
   await launched.window.getByRole("button", { name: "Auto", exact: true }).click()
   await launched.window.getByRole("option", { name: /^Ask Before Actions\b/ }).click()
+  await openModelSettings(launched.window)
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   await launched.window.getByRole("option", { name: "High", exact: true }).click()
   await launched.window.getByRole("button", { name: "Checkout" }).click()
-  await launched.window.getByRole("option", { name: "Local" }).click()
+  await launched.window.getByRole("option", { name: "This checkout" }).click()
   const composer = launched.window.getByTestId("new-session-view").getByRole("textbox")
   await expect(composer).toBeEnabled()
   await composer.fill("Check the configured runtime capabilities.")
@@ -219,4 +232,53 @@ test("configures canonical model, mode, and reasoning before creating a session"
     mode: "ask",
     reasoning: { enabled: true, effort: "high" }
   })
+})
+
+test("the @ menu shows a Files header, keyboard footer and a No matches state", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions: sessions("s_mention_menu"),
+    seed: ({ repoPath }) => {
+      mkdirSync(join(repoPath, "src"), { recursive: true })
+      writeFileSync(join(repoPath, "src", "menu-target.ts"), "export {}\n")
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.click()
+
+  await composer.pressSequentially("@menu-t")
+  const list = window.getByRole("listbox", { name: "Files" })
+  await expect(list.getByRole("option", { selected: true })).toContainText("menu-target.ts")
+  await expect(list.getByText("Files", { exact: true }).first()).toBeVisible()
+  await expect(window.getByText("navigate").first()).toBeVisible()
+
+  await composer.pressSequentially("zzz")
+  await expect(window.getByRole("status").filter({ hasText: "No matches for “menu-tzzz”" })).toBeVisible()
+
+  await composer.press("Escape")
+  await expect(window.getByRole("status").filter({ hasText: "No matches" })).toHaveCount(0)
+})
+
+test("changes reasoning from the model popover and the next send uses it", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions: sessions("s_popover_reasoning")
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await expect(launched.window.getByRole("button", { name: "Thinking strength" })).toHaveCount(0)
+  await openModelSettings(launched.window)
+  await launched.window.getByRole("button", { name: "Thinking strength" }).click()
+  await launched.window.getByRole("option", { name: "High", exact: true }).click()
+  const composer = launched.window.getByPlaceholder("Message the agent…")
+  await composer.fill("use popover reasoning")
+  await composer.press("Enter")
+  await expect.poll(() => {
+    const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
+    return persisted.chats[0].reasoning
+  }).toEqual({ enabled: true, effort: "high" })
 })

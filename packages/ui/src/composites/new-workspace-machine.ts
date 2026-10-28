@@ -61,6 +61,8 @@ export interface NewWorkspaceContext {
   issues: ReadonlyArray<IssueSummary>
   selectedPr: PrSummary | null
   selectedIssue: IssueSummary | null
+  /** Why the last Start-from list load failed; null when it has not failed. */
+  sourceError: string | null
   draft: string
   attachments: ReadonlyArray<Attachment>
   mode: PermissionMode
@@ -71,12 +73,14 @@ export interface NewWorkspaceContext {
   providerId: ProviderId | null
   modelId: ProviderModelId | null
   provisioningPhase: SessionCreationPhase | null
+  /** The phase that was running when creation failed; null otherwise. */
+  failedPhase: SessionCreationPhase | null
   error: string | null
 }
 
 export type NewWorkspaceEvent =
   | { type: "SET_CHECKPOINT_SAFE_MODE"; enabled: boolean }
-  | { type: "OPEN"; projectId?: string; pr?: PrSummary; issue?: IssueSummary }
+  | { type: "OPEN"; projectId?: string; pr?: PrSummary; issue?: IssueSummary; draft?: string; source?: "pr" | "github"; baseBranch?: string; isolation?: "worktree" | "direct" }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
   | { type: "SET_ENVIRONMENT"; environmentId: string }
@@ -85,6 +89,7 @@ export type NewWorkspaceEvent =
   | { type: "SET_SOURCE"; source: NewSessionSource }
   | { type: "SET_SEARCH"; search: string }
   | { type: "SET_MINE"; mine: boolean }
+  | { type: "RETRY_SOURCE" }
   | { type: "SELECT_PR"; pr: PrSummary }
   | { type: "SELECT_ISSUE"; issue: IssueSummary }
   | { type: "SET_DRAFT"; draft: string }
@@ -104,6 +109,9 @@ export type NewWorkspaceEvent =
   | { type: "PROVISION_PROGRESS"; phase: SessionCreationPhase }
   | { type: "PROVISION_DONE" }
   | { type: "PROVISION_FAILED"; error: unknown }
+  | { type: "CANCEL_PROVISION" }
+  | { type: "RETRY_PROVISION" }
+  | { type: "EDIT_AFTER_FAILURE" }
 
 const canonicalWorkspaceModel = (context: NewWorkspaceContext) => (
               context.runtimeId !== null &&
@@ -128,36 +136,68 @@ const assertCheckpointSource = (context: NewWorkspaceContext): void => {
 }
 const checkpointCreationFields = (context: NewWorkspaceContext) => context.checkpointSafeMode ? { checkpointSafeMode: true } : {}
 
+/** The project-picker value for Auto: no repo chosen, no checkout until `switch_checkout`. */
+export const AUTO_PROJECT_ID = "auto"
+const isAutoProject = (context: NewWorkspaceContext): boolean => context.projectId === AUTO_PROJECT_ID
+
+const submitAuto = (
+  context: NewWorkspaceContext,
+  canonical: NonNullable<ReturnType<typeof canonicalWorkspaceModel>>,
+  onProgress: (phase: SessionCreationPhase) => void
+): Promise<void> =>
+  context.getDeps().onCreate({
+    ...canonical,
+    ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}),
+    mode: context.mode,
+    reasoning: context.reasoning ?? null
+  }, context.attachments, onProgress)
+
+const commonFields = (
+  context: NewWorkspaceContext,
+  project: NonNullable<NewWorkspaceContext["resolvedProject"]>,
+  canonical: NonNullable<ReturnType<typeof canonicalWorkspaceModel>>
+) => ({
+  projectId: project.id,
+  ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
+  repoPath: project.path,
+  repoName: project.name,
+  ...canonical,
+  mode: context.mode,
+  reasoning: context.reasoning ?? null
+})
+
+const submitFromRemote = (
+  context: NewWorkspaceContext,
+  common: ReturnType<typeof commonFields>,
+  initialPrompt: { initialPrompt?: string },
+  onProgress: (phase: SessionCreationPhase) => void
+): Promise<void> => {
+  if (context.source === "pr") {
+    const createFromPr = context.getDeps().onCreateFromPr
+    if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
+    return createFromPr({ ...common, ...initialPrompt, pr: context.selectedPr }, context.attachments, onProgress)
+  }
+  const createFromIssue = context.getDeps().onCreateFromIssue
+  if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
+  return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
+}
+
 const submitWorkspace = (
   context: NewWorkspaceContext,
   onProgress: (phase: SessionCreationPhase) => void
 ): Promise<void> => {
             assertCheckpointSource(context)
-            const project = context.resolvedProject
-            if (project === null) return Promise.reject(new Error("Select a project."))
             const canonical = canonicalWorkspaceModel(context)
             if (canonical === null) {
               return Promise.reject(new Error("Select a certified provider model."))
             }
-            const common = {
-              projectId: project.id,
-              ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
-              repoPath: project.path,
-              repoName: project.name,
-              ...canonical,
-              mode: context.mode,
-              reasoning: context.reasoning ?? null
-            }
+            if (isAutoProject(context)) return submitAuto(context, canonical, onProgress)
+            const project = context.resolvedProject
+            if (project === null) return Promise.reject(new Error("Select a project."))
+            const common = commonFields(context, project, canonical)
             const initialPrompt = context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}
-            if (context.source === "pr") {
-              const createFromPr = context.getDeps().onCreateFromPr
-              if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
-              return createFromPr({ ...common, ...initialPrompt, pr: context.selectedPr }, context.attachments, onProgress)
-            }
-            if (context.source === "github" || context.source.startsWith("provider:")) {
-              const createFromIssue = context.getDeps().onCreateFromIssue
-              if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
-              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
+            if (context.source !== "blank" && context.source !== "branch") {
+              return submitFromRemote(context, common, initialPrompt, onProgress)
             }
             return context.getDeps().onCreate({
               ...common,
@@ -171,6 +211,16 @@ const submitWorkspace = (
 
 const projectFor = (context: NewWorkspaceContext): Project | undefined =>
   context.getDeps().projects.find((project) => project.id === context.projectId)
+
+/** Home's from/checkout chip values; a requested PR or issue wins over a bare source. */
+const homePrefill = (event: NewWorkspaceEvent, hasTarget: unknown) => {
+  const open = event.type === "OPEN" ? event : undefined
+  return {
+    isolation: open?.isolation ?? ("worktree" as const),
+    baseBranch: open?.baseBranch ?? "",
+    source: open?.source && !hasTarget ? { source: open.source } : {}
+  }
+}
 
 const preferredBranch = (branches: ReadonlyArray<string>): string =>
   branches.find((branch) => branch === "main") ??
@@ -256,7 +306,8 @@ const resetSource = {
   pullRequests: [] as ReadonlyArray<PrSummary>,
   issues: [] as ReadonlyArray<IssueSummary>,
   selectedPr: null,
-  selectedIssue: null
+  selectedIssue: null,
+  sourceError: null as string | null
 }
 
 export const newWorkspaceMachine = setup({
@@ -329,16 +380,23 @@ export const newWorkspaceMachine = setup({
     })
   },
   guards: {
-    sourceNeedsLoading: ({ event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source),
-    canSubmit: ({ context }) =>
-      context.resolvedProject !== null &&
-      context.baseBranch.length > 0 &&
-      context.runtimeId !== null &&
-      context.endpointId !== null &&
-      context.providerId !== null &&
-      context.modelId !== null &&
-      (context.source === "pr" ? context.selectedPr !== null :
-        context.source === "github" || context.source.startsWith("provider:") ? context.selectedIssue !== null : true)
+    // Home's "Start from a PR / issue" opens with a bare remote source: load its list once the project resolves.
+    preselectedSourceNeedsLoading: ({ context, event }) => isRemoteSource(context.source) && context.selectedPr === null &&
+      context.selectedIssue === null && (event as unknown as { output: { project: Project | null } }).output.project !== null,
+    sourceNeedsLoading: ({ context, event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source) &&
+      (!event.source.startsWith("provider:") || (context.getDeps().issueProviders ?? []).some((provider) => `provider:${provider.id}` === event.source)),
+    canSubmit: ({ context }) => {
+      const hasModel = context.runtimeId !== null &&
+        context.endpointId !== null &&
+        context.providerId !== null &&
+        context.modelId !== null
+      if (isAutoProject(context)) return hasModel && context.source === "blank"
+      return context.resolvedProject !== null &&
+        context.baseBranch.length > 0 &&
+        hasModel &&
+        (context.source === "pr" ? context.selectedPr !== null :
+          context.source === "github" || context.source.startsWith("provider:") ? context.selectedIssue !== null : true)
+    }
   },
   actions: {
     seed: assign(({ context, event }) => {
@@ -346,19 +404,24 @@ export const newWorkspaceMachine = setup({
       const requested = event.type === "OPEN" ? event.projectId : undefined
       const requestedPr = event.type === "OPEN" ? event.pr : undefined
       const requestedIssue = event.type === "OPEN" ? event.issue : undefined
+      const open = homePrefill(event, requestedPr ?? requestedIssue)
       const selected = deps.projects.find((project) => project.id === requested) ??
         deps.projects.find((project) => project.id === deps.defaultProjectId) ??
         deps.projects.find((project) => project.availability === "available")
       const provider = providerSelection(deps, "local")
       return {
-        projectId: selected?.id ?? "",
+        // Auto is requested explicitly (never a fallback default): it has no
+        // entry in `deps.projects` to match, so it must be handled ahead of
+        // the "fall back to an available project" lookup above.
+        projectId: requested === AUTO_PROJECT_ID ? AUTO_PROJECT_ID : (selected?.id ?? ""),
         environmentId: "local",
         resolvedProject: null,
-        isolation: "worktree" as const,
+        isolation: open.isolation,
         checkpointSafeMode: false,
-        baseBranch: "",
+        baseBranch: open.baseBranch,
         branches: [] as ReadonlyArray<string>,
         ...resetSource,
+        ...open.source,
         ...(requestedPr
           ? {
               source: "pr" as const,
@@ -370,12 +433,13 @@ export const newWorkspaceMachine = setup({
         ...(requestedIssue
           ? { source: "github" as const, issues: [requestedIssue], selectedIssue: requestedIssue }
           : {}),
-        draft: requestedIssue ? [requestedIssue.title, requestedIssue.body].filter(Boolean).join("\n\n") : "",
+        draft: requestedIssue ? [requestedIssue.title, requestedIssue.body].filter(Boolean).join("\n\n") : (event.type === "OPEN" ? event.draft : undefined) ?? "",
         attachments: [] as ReadonlyArray<Attachment>,
         ...provider,
         mode: deps.defaultMode ?? "auto",
         reasoning: undefined,
         provisioningPhase: null,
+        failedPhase: null,
         error: null
       }
     }),
@@ -412,26 +476,28 @@ export const newWorkspaceMachine = setup({
       return {
         resolvedProject: output.project,
         branches: output.branches,
-        baseBranch: context.selectedPr?.baseRefName ?? preferredBranch(output.branches),
+        baseBranch: context.selectedPr?.baseRefName ?? (output.branches.includes(context.baseBranch) ? context.baseBranch : preferredBranch(output.branches)),
         error: null
       }
     }),
     applySource: assign(({ event }) => {
       const output = (event as unknown as { output: { pullRequests: ReadonlyArray<PrSummary>; issues: ReadonlyArray<IssueSummary> } }).output
-      return { ...output, selectedPr: null, selectedIssue: null, error: null }
+      return { ...output, selectedPr: null, selectedIssue: null, sourceError: null }
     }),
     setLoadError: assign(({ event }) => ({ branches: [], baseBranch: "", resolvedProject: null, error: errorText((event as unknown as { error: unknown }).error, "Could not load branches.") })),
-    setSourceError: assign(({ event }) => ({ pullRequests: [], issues: [], error: errorText((event as unknown as { error: unknown }).error, "Could not load this source.") })),
+    setSourceError: assign(({ event }) => ({ pullRequests: [], issues: [], sourceError: errorText((event as unknown as { error: unknown }).error, "Could not load this source.") })),
     beginSubmit: assign(({ context }) => ({
       provisioningPhase: (context.environmentId === "local"
         ? "creating-session"
         : "checking-access") as SessionCreationPhase,
+      failedPhase: null,
       error: null
     })),
     setProvisioningPhase: assign(({ event }) =>
       event.type === "PROVISION_PROGRESS" ? { provisioningPhase: event.phase } : {}
     ),
-    setSubmitError: assign(({ event }) => ({
+    setSubmitError: assign(({ context, event }) => ({
+      failedPhase: context.provisioningPhase,
       error: errorText(event.type === "PROVISION_FAILED" ? event.error : event, "Could not create the workspace.")
     })),
     close: ({ context }) => context.getDeps().onClose()
@@ -459,6 +525,7 @@ export const newWorkspaceMachine = setup({
     providerId: null,
     modelId: null,
     provisioningPhase: null,
+    failedPhase: null,
     error: null
   }),
   on: {
@@ -483,7 +550,10 @@ export const newWorkspaceMachine = setup({
                 )?.kind
               })
         }),
-        onDone: { target: "editing", actions: "applyBranches" },
+        onDone: [
+          { guard: "preselectedSourceNeedsLoading", target: "sourceLoading", actions: "applyBranches" },
+          { target: "editing", actions: "applyBranches" }
+        ],
         onError: { target: "editing", actions: "setLoadError" }
       },
       on: {
@@ -517,6 +587,7 @@ export const newWorkspaceMachine = setup({
         ],
         SET_SEARCH: { target: "sourceLoading", actions: assign(({ event }) => ({ search: event.search })) },
         SET_MINE: { target: "sourceLoading", actions: assign(({ event }) => ({ mine: event.mine })) },
+        RETRY_SOURCE: { target: "sourceLoading" },
         SET_CHECKPOINT_SAFE_MODE: { actions: assign(({ event }) => ({ checkpointSafeMode: event.enabled })) },
         SET_ISOLATION: { actions: assign(({ event }) => ({ isolation: event.isolation })) },
         SET_BASE: { actions: assign(({ event }) => ({ baseBranch: event.baseBranch })) },
@@ -557,7 +628,16 @@ export const newWorkspaceMachine = setup({
       on: {
         PROVISION_PROGRESS: { actions: "setProvisioningPhase" },
         PROVISION_DONE: { target: "closed", actions: "close" },
-        PROVISION_FAILED: { target: "editing", actions: "setSubmitError" },
+        PROVISION_FAILED: { target: "failed", actions: "setSubmitError" },
+        // Leaving the state stops the callback, so a late result is ignored.
+        CANCEL_PROVISION: { target: "editing", actions: assign({ provisioningPhase: null, error: null }) },
+        CLOSE: { target: "closed", actions: "close" }
+      }
+    },
+    failed: {
+      on: {
+        RETRY_PROVISION: { guard: "canSubmit", target: "submitting", actions: "beginSubmit" },
+        EDIT_AFTER_FAILURE: { target: "editing", actions: assign({ provisioningPhase: null }) },
         CLOSE: { target: "closed", actions: "close" }
       }
     }

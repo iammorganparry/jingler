@@ -8,6 +8,7 @@
  * Explorer decides which diff the Files view shows.
  */
 import { useSyncExternalStore } from "react"
+import { readDismissedFindings, writeDismissedFindings } from "./dismissed-findings-store.js"
 import { readViewedPaths, viewedStorageKey } from "./viewed-store.js"
 
 /** Which files the Explorer lists: everything, or one diff source's changes. */
@@ -24,8 +25,14 @@ export interface ReviewDraft {
 
 export interface SessionReviewState {
   readonly filter: ReviewFilter
+  /** The agent turn the Changes list is narrowed to, or null for all turns. */
+  readonly turnId: string | null
+  /** The PR stack layer the Changes list is narrowed to, or null for the session's own PR. */
+  readonly prLayer: number | null
   readonly drafts: ReadonlyArray<ReviewDraft>
   readonly viewed: ReadonlySet<string>
+  /** Fingerprints (see `findingFingerprint`) of adversarial-review findings the reviewer dismissed. */
+  readonly dismissedFindings: ReadonlySet<string>
 }
 
 const states = new Map<string, SessionReviewState>()
@@ -42,8 +49,11 @@ const read = (sessionId: string, prNumber: number | null): SessionReviewState =>
   if (existing !== undefined) return existing
   const initial: SessionReviewState = {
     filter: "all",
+    turnId: null,
+    prLayer: null,
     drafts: [],
-    viewed: readViewedPaths(sessionId, prNumber)
+    viewed: readViewedPaths(sessionId, prNumber),
+    dismissedFindings: readDismissedFindings(sessionId, prNumber)
   }
   states.set(key, initial)
   return initial
@@ -79,6 +89,24 @@ export const setReviewFilter = (
 ): void =>
   update(sessionId, prNumber, (state) =>
     state.filter === filter ? state : { ...state, filter }
+  )
+
+export const setReviewTurn = (
+  sessionId: string,
+  prNumber: number | null,
+  turnId: string | null
+): void =>
+  update(sessionId, prNumber, (state) =>
+    state.turnId === turnId ? state : { ...state, turnId }
+  )
+
+export const setReviewPrLayer = (
+  sessionId: string,
+  prNumber: number | null,
+  prLayer: number | null
+): void =>
+  update(sessionId, prNumber, (state) =>
+    state.prLayer === prLayer ? state : { ...state, prLayer }
   )
 
 /**
@@ -142,6 +170,22 @@ export const setReviewViewed = (
       /* storage unavailable: the marker still holds for this run */
     }
     return { ...state, viewed: next }
+  })
+
+/** Dismissal is reviewer-local too, so it persists per session and PR like "viewed". */
+export const setFindingDismissed = (
+  sessionId: string,
+  prNumber: number | null,
+  fingerprint: string,
+  dismissed: boolean
+): void =>
+  update(sessionId, prNumber, (state) => {
+    if (state.dismissedFindings.has(fingerprint) === dismissed) return state
+    const next = new Set(state.dismissedFindings)
+    if (dismissed) next.add(fingerprint)
+    else next.delete(fingerprint)
+    writeDismissedFindings(sessionId, prNumber, next)
+    return { ...state, dismissedFindings: next }
   })
 
 /** Test seam: forget every session's review state. */

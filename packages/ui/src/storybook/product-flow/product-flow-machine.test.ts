@@ -19,14 +19,12 @@ describe("mocked product journey", () => {
     expect(actor.getSnapshot().matches("providerConnecting")).toBe(true)
     actor.send({ type: "PROVIDER_CONNECTED" })
     actor.send({ type: "CONTINUE" })
-    actor.send({ type: "IMPORT_RESOURCES" })
 
     expect(actor.getSnapshot().matches("app")).toBe(true)
     expect(actor.getSnapshot().context).toMatchObject({
       workspaceChosen: true,
       githubConnected: true,
-      providerConnected: true,
-      resourcesImported: true
+      providerConnected: true
     })
   })
 
@@ -40,20 +38,18 @@ describe("mocked product journey", () => {
     expect(actor.getSnapshot().context.providerConnected).toBe(false)
   })
 
-  it("allows optional GitHub, provider, and resource setup to be skipped", () => {
+  it("allows optional GitHub and provider setup to be skipped", () => {
     const actor = createActor(productFlowMachine, {
       input: { startAt: "github" }
     }).start()
 
     actor.send({ type: "SKIP_GITHUB" })
     actor.send({ type: "SKIP_PROVIDER" })
-    actor.send({ type: "SKIP_RESOURCES" })
 
     expect(actor.getSnapshot().matches("app")).toBe(true)
     expect(actor.getSnapshot().context).toMatchObject({
       githubConnected: false,
-      providerConnected: false,
-      resourcesImported: false
+      providerConnected: false
     })
   })
 })

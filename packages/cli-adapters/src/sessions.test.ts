@@ -34,7 +34,8 @@ import {
   isSessionPublishBranchReady,
   SessionStore,
   migrateRepoName,
-  migrateSessionChats
+  migrateSessionChats,
+  migrateSessionPrs
 } from "./sessions.js"
 import {
   failureOf,
@@ -129,6 +130,21 @@ describe("SessionStore", () => {
     modelId,
     baseBranch: "main",
     ...over
+  })
+
+  it("creates an Auto session with no checkout, in a scratch folder under ~/jingler/sessions/<id>", async () => {
+    const created = await Effect.runPromise(
+      SessionStore.create({
+        title: "Auto workspace",
+        connectionId,
+        providerId,
+        modelId
+      } as CreateSessionInput).pipe(Effect.provide(services), Effect.provide(temp.layer))
+    )
+    expect(created.repoPath).toBeUndefined()
+    expect(created.checkouts).toEqual([])
+    expect(created.worktreePath).toBe(join(temp.root, "sessions", created.id))
+    expect(existsSync(created.worktreePath!)).toBe(true)
   })
 
   it("reads legacy port assignments without losing session metadata or sibling sessions", async () => {
@@ -687,7 +703,7 @@ describe("SessionStore", () => {
     )
     expect(withDefaults._tag).toBe("Success")
     if (withDefaults._tag === "Success") {
-      expect(activeChat(withDefaults.value).mode).toBe("plan")
+      expect(activeChat(withDefaults.value).workMode).toBe("plan")
       expect(activeChat(withDefaults.value).modelId).toBe(modelId)
       expect(activeChat(withDefaults.value).reasoning).toStrictEqual({
         enabled: false,
@@ -968,6 +984,29 @@ describe("SessionStore", () => {
     expect(failureOf(exit)?._tag).toBe("SessionNotFoundError")
   })
 
+  it("setBranch and setCheckoutBranch keep the checkout's own branch in step", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Branch Session" }))
+        const co = (id: string, repoPath: string) => ({
+          id, projectId: "p", repo: id, repoPath, worktreePath: `/w/${id}`,
+          workspaceMode: "worktree" as const, branch: "main", baseBranch: "main", prNumber: null
+        })
+        yield* SessionStore.setCheckouts(created.id, {
+          ...created, checkouts: [co("web", "/r/web"), co("api", "/r/api")], activeCheckoutId: "web"
+        })
+        yield* SessionStore.setBranch(created.id, "feat/x")
+        yield* SessionStore.setCheckoutBranch(created.id, "api", "feat/x")
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.branch).toBe("feat/x")
+    expect(exit.value.checkouts?.map((c) => c.branch)).toEqual(["feat/x", "feat/x"])
+  })
+
   it("setPrNumber links (and clears) a session's PR across a fresh read", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
@@ -996,6 +1035,61 @@ describe("SessionStore", () => {
       temp.layer
     )
     expect(cleared._tag === "Success" && cleared.value.prNumber).toBe(null)
+  })
+
+  it("reads a session persisted with only prNumber as a one-element stack", async () => {
+    const original = await Effect.runPromise(SessionStore.create(input({ title: "Pre-stack" })).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const file = join(temp.root, "sessions.json")
+    // SAFETY: the store wrote this JSON immediately above; this test strips the field to mimic an old file.
+    const persisted = JSON.parse(readFileSync(file, "utf-8")) as JsonObject[]
+    delete persisted[0]!.prs
+    persisted[0]!.prNumber = 481
+    writeFileSync(file, JSON.stringify(persisted))
+    const restored = await Effect.runPromise(SessionStore.get(original.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    expect(restored.prNumber).toBe(481)
+    expect(restored.prs).toEqual([{ number: 481 }])
+  })
+
+  it("appends stacked PRs bottom-first, mirrors the top into prNumber, and round-trips the order", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Stacked" }))
+        yield* SessionStore.appendPr(created.id, { number: 481, branch: "feat/a", base: "main" })
+        yield* SessionStore.appendPr(created.id, { number: 482, branch: "feat/b", base: "feat/a" })
+        yield* SessionStore.appendPr(created.id, { number: 481, state: "merged" })
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.prs).toEqual([
+      { number: 481, branch: "feat/a", base: "main", state: "merged" },
+      { number: 482, branch: "feat/b", base: "feat/a" }
+    ])
+    expect(exit.value.prNumber).toBe(482)
+    const onDisk = JSON.parse(readFileSync(join(temp.root, "sessions.json"), "utf-8")) as Array<{ prs: Array<{ number: number }> }>
+    expect(onDisk[0]!.prs.map((pr) => pr.number)).toEqual([481, 482])
+  })
+
+  it("setPrNumber replaces the stack with the single new PR and null clears it", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Relink" }))
+        yield* SessionStore.appendPr(created.id, { number: 1 })
+        yield* SessionStore.appendPr(created.id, { number: 2 })
+        yield* SessionStore.setPrNumber(created.id, 9)
+        const relinked = yield* SessionStore.get(created.id)
+        yield* SessionStore.setPrNumber(created.id, null)
+        return [relinked, yield* SessionStore.get(created.id)] as const
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value[0].prs).toEqual([{ number: 9 }])
+    expect(exit.value[1].prNumber).toBeNull()
+    expect(exit.value[1].prs).toBeUndefined()
   })
 
   it("clears stale App routing identity when the PR number changes", async () => {
@@ -1280,6 +1374,49 @@ describe("SessionStore", () => {
     expect(result.chats.find((chat) => chat.id === result.activeChatId)?.mode).toBe("auto")
   })
 
+  it("persists work mode across reload", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Work mode" }))
+        yield* SessionStore.setMode(created.id, "auto")
+        yield* SessionStore.setWorkMode(created.id, created.activeChatId, "plan")
+        return created.id
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    const reread = await runExit(SessionStore.get(exit.value).pipe(Effect.provide(SessionStore.Default)), temp.layer)
+    expect(reread._tag).toBe("Success")
+    if (reread._tag !== "Success") return
+    expect(activeChat(reread.value).workMode).toBe("plan")
+    expect(activeChat(reread.value).mode).toBe("auto")
+  })
+
+  it("migrates legacy plan mode", async () => {
+    const created = await runExit(
+      SessionStore.create(input({ title: "Legacy plan" })).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+    const chat = created.value.chats[0]
+    const other = { ...chat, id: `${chat?.id}_x`, mode: "bogus" }
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      JSON.stringify([{ ...created.value, chats: [{ ...chat, mode: "plan" }, other] }])
+    )
+    const reread = await runExit(SessionStore.get(created.value.id).pipe(Effect.provide(SessionStore.Default)), temp.layer)
+    expect(reread._tag).toBe("Success")
+    if (reread._tag !== "Success") return
+    const [first, second] = reread.value.chats
+    expect(first?.workMode).toBe("plan")
+    expect(first?.mode).toBe("auto")
+    // Unknown strings fall back to the default level, not "ask", and do not enter plan.
+    expect(second?.mode).toBe("auto")
+    expect(second?.workMode).toBeUndefined()
+  })
+
   /**
    * Switching harness is not just a field write. `resumeId` holds the PREVIOUS
    * harness's thread id — handing a Codex thread id to Claude would resume
@@ -1544,7 +1681,7 @@ describe("SessionStore", () => {
     expect(s.baseBranch).toBe("main")
     expect(s.title).toBe("Fix Auth Refresh")
     expect(activeChat(s)).toMatchObject({
-      mode: "plan",
+      workMode: "plan",
       modelId
     })
     // The slug carries the PR number so same-titled PRs never collide.
@@ -2082,7 +2219,7 @@ describe("SessionStore", () => {
     expect(s.initialPrompt).toBe("Refund route 500s on a stale token\n\nFix the refund route.")
     expect(s.prNumber).toBe(null)
     expect(activeChat(s)).toMatchObject({
-      mode: "plan",
+      workMode: "plan",
       modelId
     })
   })
@@ -2397,6 +2534,50 @@ describe("SessionStore", () => {
  * headings — the old name holding every session that predated the rename, the
  * new name holding only what came after.
  */
+describe("migrateSessionPrs", () => {
+  // SAFETY: only prNumber/prs are read by the migration; the rest of a Session is irrelevant here.
+  const withPrs = (prNumber: number | null, prs?: Session["prs"]) =>
+    ({ prNumber, ...(prs ? { prs } : {}) }) as Session
+
+  it("derives a one-element stack from prNumber", () => {
+    expect(migrateSessionPrs(withPrs(7)).prs).toEqual([{ number: 7 }])
+  })
+
+  it("leaves a session with no PR untouched", () => {
+    expect(migrateSessionPrs(withPrs(null))).toEqual({ prNumber: null })
+  })
+
+  it("makes prNumber the top of an existing stack", () => {
+    const migrated = migrateSessionPrs(withPrs(1, [{ number: 1 }, { number: 2 }]))
+    expect(migrated.prNumber).toBe(2)
+    expect(migrated.prs?.map((pr) => pr.number)).toEqual([1, 2])
+  })
+})
+
+describe("migrateSessionPrs per checkout", () => {
+  const co = (id: string, repo: string, prNumber: number | null) => ({ id, repo, branch: "b", prNumber })
+  const twoRepos = (activeCheckoutId: string) =>
+    ({
+      prNumber: null,
+      activeCheckoutId,
+      checkouts: [co("web", "qa-web", 1), co("api", "qa-api", 2)]
+    }) as unknown as Session
+
+  it("lists every checkout's PR with its repo and mirrors the active one", () => {
+    const migrated = migrateSessionPrs(twoRepos("web"))
+    expect(migrated.prs).toEqual([
+      { number: 2, repo: "qa-api" },
+      { number: 1, repo: "qa-web" }
+    ])
+    expect(migrated.prNumber).toBe(1)
+  })
+
+  it("leaves single-checkout sessions without repo labels", () => {
+    const single = { prNumber: 3, activeCheckoutId: "web", checkouts: [co("web", "qa-web", 3)] } as unknown as Session
+    expect(migrateSessionPrs(single).prs).toEqual([{ number: 3 }])
+  })
+})
+
 describe("migrateRepoName", () => {
   const at = (repoPath: string | undefined, repo: string) => {
     const input = repoPath === undefined ? { id: "s1", repo } : { id: "s1", repo, repoPath }

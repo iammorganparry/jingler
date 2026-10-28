@@ -1,10 +1,7 @@
 import {
   ProviderCatalog as ProviderCatalogSchema,
-  type DetectedResourceCandidate,
   type ProviderCatalog,
   type ProviderConnection,
-  type ResourceDetectionResult,
-  type ResourceImportResult,
   type Session,
 } from "@jingler/core";
 import { Schema } from "effect";
@@ -61,8 +58,6 @@ const providerCatalog = Schema.decodeSync(ProviderCatalogSchema)({
   stale: false,
 });
 
-const emptyDetection: ResourceDetectionResult = { candidates: [], skipped: [] };
-const emptyImport: ResourceImportResult = { imported: [], skipped: [] };
 const authenticatedCatalogWithoutModels = Schema.decodeSync(
   ProviderCatalogSchema,
 )({
@@ -113,13 +108,6 @@ const unconfigured = () =>
         async () => providerCatalog.connections[0]!.connection,
       ),
       completeProviderSetup: fromPromise<void>(async () => undefined),
-      detectResources: fromPromise<ResourceDetectionResult>(
-        async () => emptyDetection,
-      ),
-      importResources: fromPromise<
-        ResourceImportResult,
-        ReadonlyArray<DetectedResourceCandidate>
-      >(async () => emptyImport),
     },
   });
 
@@ -256,15 +244,36 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
-  it("coordinates workspace, GitHub, provider auth, resources, and startup", async () => {
+  // Acceptance: onboarding completes with no resources step — CONTINUE_PROVIDER
+  // lands on importSessions directly, never on a "resources" state.
+  it("coordinates workspace, GitHub, provider auth, and startup with no resources step", async () => {
     const actor = createActor(unconfigured()).start();
     await reachProvider(actor);
     actor.send({ type: "CONTINUE_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
-    actor.send({ type: "SKIP_RESOURCES" });
+    expect(actor.getSnapshot().matches({ setup: "resources" } as never)).toBe(false);
+    actor.send({ type: "SKIP_IMPORT_SESSIONS" });
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
+    actor.stop();
+  });
+
+  it("skipping GitHub from the error state proceeds to provider and stays completable", async () => {
+    const actor = createActor(unconfigured()).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    actor.send({ type: "CONTINUE" });
+    expect(actor.getSnapshot().matches({ setup: "github" })).toBe(true);
+    actor.send({ type: "SKIP_GITHUB" });
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { provider: "idle" } }),
+    );
+    actor.send({ type: "CONTINUE_PROVIDER" });
+    await waitFor(actor, (snapshot) => snapshot.matches({ setup: "importSessions" }));
     actor.stop();
   });
 
@@ -292,7 +301,7 @@ describe("appMachine first-run coordination", () => {
     actor.send({ type: "CONTINUE_PROVIDER" });
 
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
     expect(completeProviderSetup).toHaveBeenCalledOnce();
     actor.stop();
@@ -323,7 +332,7 @@ describe("appMachine first-run coordination", () => {
     );
     actor.send({ type: "SKIP_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
     actor.stop();
   });
@@ -365,6 +374,44 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
+  it("recovers from a failed provider catalog load via RETRY_PROVIDER", async () => {
+    let loads = 0;
+    const machine = unconfigured().provide({
+      actors: {
+        loadProviderCatalog: fromPromise<ProviderCatalog>(async () => {
+          loads += 1;
+          if (loads === 1) throw new Error("Catalog unavailable");
+          return providerCatalog;
+        }),
+      },
+    });
+    const actor = createActor(machine).start();
+    await waitFor(actor, (s) => s.matches({ setup: "workspace" }));
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (s) => s.context.reposDir === "/repos");
+    actor.send({ type: "CONTINUE" });
+    actor.send({ type: "SKIP_GITHUB" });
+    await waitFor(actor, (s) => s.matches({ setup: { provider: "loadFailed" } }));
+    expect(actor.getSnapshot().context.error).toBe("Catalog unavailable");
+    actor.send({ type: "RETRY_PROVIDER" });
+    await waitFor(actor, (s) => s.matches({ setup: { provider: "idle" } }));
+    expect(actor.getSnapshot().context.error).toBeNull();
+    actor.stop();
+  });
+
+  it("blocks CONTINUE_PROVIDER while no provider is connected", async () => {
+    const machine = unconfigured().provide({
+      actors: {
+        loadProviderCatalog: fromPromise<ProviderCatalog>(async () => disconnectedCatalog),
+      },
+    });
+    const actor = createActor(machine).start();
+    await reachProvider(actor);
+    actor.send({ type: "CONTINUE_PROVIDER" });
+    expect(actor.getSnapshot().matches({ setup: { provider: "idle" } })).toBe(true);
+    actor.stop();
+  });
+
   it("retries provider setup persistence independently from authentication", async () => {
     let attempts = 0;
     const machine = unconfigured().provide({
@@ -383,31 +430,9 @@ describe("appMachine first-run coordination", () => {
     );
     actor.send({ type: "RETRY_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
     expect(attempts).toBe(2);
-    actor.stop();
-  });
-
-  it("skips resource import without mutating detected candidates", async () => {
-    const importSpy = vi.fn(async () => emptyImport);
-    const machine = unconfigured().provide({
-      actors: {
-        importResources: fromPromise<
-          ResourceImportResult,
-          ReadonlyArray<DetectedResourceCandidate>
-        >(importSpy),
-      },
-    });
-    const actor = createActor(machine).start();
-    await reachProvider(actor);
-    actor.send({ type: "CONTINUE_PROVIDER" });
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
-    );
-    actor.send({ type: "SKIP_RESOURCES" });
-    await waitFor(actor, (snapshot) => snapshot.matches("ready"));
-    expect(importSpy).not.toHaveBeenCalled();
     actor.stop();
   });
 
@@ -475,10 +500,188 @@ describe("appMachine first-run coordination", () => {
     );
     actor.send({ type: "CONTINUE_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { resources: "reviewing" } }),
+      snapshot.matches({ setup: "importSessions" }),
     );
-    actor.send({ type: "SKIP_RESOURCES" });
+    actor.send({ type: "SKIP_IMPORT_SESSIONS" });
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
+    actor.stop();
+  });
+
+  it("keeps onboarding on step 1 when the folder scan fails, then recovers on retry", async () => {
+    let attempts = 0;
+    const flaky = unconfigured().provide({
+      actors: {
+        chooseDir: fromPromise<ChosenRepositoryDirectory | null>(async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("EACCES: permission denied");
+          return { reposDir: "/repos", repos: [] };
+        }),
+      },
+    });
+    const actor = createActor(flaky).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ setup: { workspace: "idle" } }) &&
+        snapshot.context.error !== null,
+    );
+    expect(actor.getSnapshot().context.error).toContain("permission denied");
+    expect(actor.getSnapshot().matches("failure")).toBe(false);
+
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    expect(actor.getSnapshot().context.error).toBeNull();
+    actor.stop();
+  });
+});
+
+describe("appMachine onboarding step 1 project selection", () => {
+  const repo = (name: string) => ({
+    name,
+    path: `/repos/${name}`,
+    defaultBranch: "main",
+    currentBranch: "main",
+    remoteUrl: null,
+    githubSlug: null,
+  });
+
+  it("registers exactly the ticked repositories, then advances to GitHub", async () => {
+    const registered: string[] = [];
+    const machine = unconfigured().provide({
+      actors: {
+        chooseDir: fromPromise<ChosenRepositoryDirectory | null>(async () => ({
+          reposDir: "/repos",
+          repos: [repo("a"), repo("b"), repo("c")],
+        })),
+        registerProjects: fromPromise<void, ReadonlyArray<string>>(
+          async ({ input }) => {
+            registered.push(...input);
+          },
+        ),
+      },
+    });
+    const actor = createActor(machine).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/a" });
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/b" });
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/c" });
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/c" });
+    actor.send({ type: "ADD_PROJECTS" });
+    await waitFor(actor, (snapshot) => snapshot.matches({ setup: "github" }));
+    expect(registered).toEqual(["/repos/a", "/repos/b"]);
+    actor.stop();
+  });
+
+  it("toggles all repositories and ignores ADD_PROJECTS with nothing ticked", async () => {
+    const machine = unconfigured().provide({
+      actors: {
+        chooseDir: fromPromise<ChosenRepositoryDirectory | null>(async () => ({
+          reposDir: "/repos",
+          repos: [repo("a"), repo("b")],
+        })),
+      },
+    });
+    const actor = createActor(machine).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    actor.send({ type: "ADD_PROJECTS" });
+    expect(actor.getSnapshot().matches({ setup: { workspace: "idle" } })).toBe(true);
+    actor.send({ type: "TOGGLE_ALL_REPOS" });
+    expect(actor.getSnapshot().context.selectedRepoPaths).toEqual(["/repos/a", "/repos/b"]);
+    actor.send({ type: "TOGGLE_ALL_REPOS" });
+    expect(actor.getSnapshot().context.selectedRepoPaths).toEqual([]);
+    actor.stop();
+  });
+
+  it("stays on step 1 with an error when registration fails", async () => {
+    const machine = unconfigured().provide({
+      actors: {
+        chooseDir: fromPromise<ChosenRepositoryDirectory | null>(async () => ({
+          reposDir: "/repos",
+          repos: [repo("a")],
+        })),
+        registerProjects: fromPromise<void, ReadonlyArray<string>>(async () => {
+          throw new Error("disk full");
+        }),
+      },
+    });
+    const actor = createActor(machine).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/a" });
+    actor.send({ type: "ADD_PROJECTS" });
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ setup: { workspace: "idle" } }) &&
+        snapshot.context.error !== null,
+    );
+    expect(actor.getSnapshot().context.error).toContain("disk full");
+    actor.stop();
+  });
+});
+
+describe("appMachine boot failure retry", () => {
+  it("retries from failure back to loading", async () => {
+    const machine = appMachine.provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => {
+          throw new Error("Network unavailable");
+        }),
+      },
+    });
+    const actor = createActor(machine).start();
+
+    await waitFor(actor, (snapshot) => snapshot.matches("failure"));
+    expect(actor.getSnapshot().context.error).toBe("Network unavailable");
+
+    actor.send({ type: "RETRY" });
+
+    await waitFor(actor, (snapshot) => snapshot.matches("loading"));
+    actor.stop();
+  });
+
+  it("succeeds after retry from a transient boot failure", async () => {
+    let attempts = 0;
+    const machine = appMachine.provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("Transient failure");
+          return {
+            configured: true,
+            providerReady: true,
+            reposDir: "/repos",
+            repos: [],
+            sessions: [],
+            providerCatalog,
+          };
+        }),
+      },
+    });
+    const actor = createActor(machine).start();
+
+    await waitFor(actor, (snapshot) => snapshot.matches("failure"));
+    expect(actor.getSnapshot().context.error).toBe("Transient failure");
+
+    actor.send({ type: "RETRY" });
+
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"));
+    expect(attempts).toBe(2);
     actor.stop();
   });
 });

@@ -10,6 +10,7 @@ import type {
   McpRemoteAuth,
   McpServer,
   PermissionMode,
+  WorkMode,
   PlanDocument,
   ProviderCatalog,
   ProviderCatalogModel,
@@ -31,6 +32,7 @@ import {
   ImagePlus,
   ListChecks,
   Maximize2,
+  Mic,
   Minimize2,
   Monitor,
   MousePointer2,
@@ -41,11 +43,14 @@ import {
   Square,
 } from "lucide-react";
 import { Spin } from "../components/spin.js";
+import { SegmentedControl, type SegmentItem } from "../components/segmented-control.js";
 import { cn } from "../lib/cn.js";
 import { downscaleImage } from "../lib/image-downscale.js";
 import { atLeast, useWidthTier } from "../hooks/width-tier.js";
 import { AttachmentThumb } from "../components/attachment-thumb.js";
 import { Button } from "../components/button.js";
+import { Tooltip } from "../components/tooltip.js";
+import { ContextMeter, type ContextMeterProps } from "./context-meter.js";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/beui/select.js";
 import { CodeChip } from "../components/code-chip.js";
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from "../components/beui/popover-morph.js";
@@ -54,7 +59,7 @@ import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
 import { McpApiKeyDialog, McpAuthSetupDialog, McpBrand, McpServerDialog } from "./mcp-settings.js";
-import { planTaskCounts, PlanTaskList } from "./plan-progress-dock.js";
+import { planTaskCounts, PlanTaskList, type PlanStageActionHandler } from "./plan-progress-dock.js";
 import { PromptInputSurface } from "./beui/work.js";
 import {
   ProviderModelBrowser,
@@ -111,6 +116,19 @@ const MODE_OPTIONS: ReadonlyArray<ComposerOption<PermissionMode>> = [
   { value: "accept-edits", label: "Accept Edits" },
   { value: "auto", label: "Auto" },
 ];
+type WorkModeSegment = WorkMode | "auto";
+const WORK_MODE_ITEMS: ReadonlyArray<SegmentItem<WorkModeSegment>> = [
+  { value: "plan", label: "Plan" },
+  { value: "build", label: "Build" },
+  { value: "auto", label: "Auto" },
+];
+const surfaceMode = (workMode: WorkMode | undefined, mode: PermissionMode) => (workMode === "plan" ? "plan" : mode);
+function WorkModeToggle({ workMode = "build", autoSwitch = false, onSetWorkMode }: { workMode?: WorkMode; autoSwitch?: boolean; onSetWorkMode?: (workMode: WorkMode, autoSwitch?: boolean) => void }) {
+  if (!onSetWorkMode) return null;
+  // Auto keeps the current Plan/Build and lets the agent flip it; Plan/Build turn Auto off.
+  const choose = (next: WorkModeSegment) => (next === "auto" ? onSetWorkMode(workMode, true) : autoSwitch ? onSetWorkMode(next, false) : onSetWorkMode(next));
+  return <SegmentedControl size="sm" aria-label="Work mode" items={WORK_MODE_ITEMS} value={autoSwitch ? "auto" : workMode} onChange={choose} />;
+}
 type ReasoningChoice = "default" | ReasoningEffort;
 /**
  * Filled bars for a reasoning choice — its rung on the PROVIDER'S ladder, not a
@@ -237,7 +255,71 @@ function ComposerSelect<T extends string>({
  * Shift+Enter newline, plus two typeahead palettes: `/` surfaces the harness's
  * skills (harness-agnostic) and `@` references worktree files as code chips.
  */
+export interface ComposerVoiceInput {
+  status: "idle" | "starting" | "recording" | "transcribing" | "error" | "noModel";
+  /** Failure detail shown beside the mic in `error`. */
+  message?: string;
+  /** Input loudness 0–1 while recording. */
+  level?: number;
+  /** Time recorded so far. */
+  elapsedMs?: number;
+  /** Start recording, or stop and transcribe. The transcript lands in the draft, never sent. */
+  onToggle: () => void;
+  onCancel: () => void;
+  onDismiss: () => void;
+}
+
+const VOICE_LABEL: Record<ComposerVoiceInput["status"], string> = {
+  idle: "Voice input", starting: "Voice input", recording: "Stop recording",
+  transcribing: "Transcribing", error: "Voice input", noModel: "Voice input"
+}
+const NO_MODEL_NOTE = "No speech model installed. Add whisper.cpp and a .bin model under ~/jingler/models/whisper."
+
+function voiceIcon(status: ComposerVoiceInput["status"]) {
+  if (status === "starting" || status === "transcribing") return <Spin><LoaderCircle size={14} aria-hidden="true" /></Spin>
+  if (status === "recording") return <Square size={12} fill="currentColor" />
+  return <Mic size={14} />
+}
+
+const formatElapsed = (ms: number): string => {
+  const seconds = Math.floor(ms / 1000)
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+}
+
+/** Live input level bar (CSS only, --sb-* tokens via the theme classes) beside the elapsed time. */
+export function VoiceLevelMeter({ level, elapsedMs }: { level: number; elapsedMs: number }) {
+  return (
+    <span className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums text-muted-foreground" role="status" aria-label="Recording level">
+      <span className="h-1.5 w-12 overflow-hidden rounded-full bg-panel">
+        <span className="block h-full w-full origin-left rounded-full bg-purple transition-transform duration-100" style={{ transform: `scaleX(${Math.min(1, Math.max(0, level))})` }} />
+      </span>
+      {formatElapsed(elapsedMs)}
+    </span>
+  )
+}
+
+/** Mic toggle plus its Cancel and failure note; the transcript lands in the draft, never sent. */
+function ComposerVoiceControl({ voice }: { voice: ComposerVoiceInput }) {
+  const { status } = voice
+  const busyVoice = status === "starting" || status === "transcribing"
+  const recording = status === "recording"
+  const note = status === "error" ? (voice.message ?? "Voice input failed") : status === "noModel" ? NO_MODEL_NOTE : null
+  const label = VOICE_LABEL[status]
+  return (<>
+    {note && <Button type="button" variant="ghost" size="sm" onClick={voice.onDismiss} title="Dismiss" className="max-w-[200px] truncate text-state-failed">{note}</Button>}
+    {recording && <VoiceLevelMeter level={voice.level ?? 0} elapsedMs={voice.elapsedMs ?? 0} />}
+    {recording && <Button type="button" variant="ghost" size="sm" aria-label="Cancel recording" onClick={voice.onCancel}>Cancel</Button>}
+    <Tooltip label={label}>
+      <Button type="button" variant={recording ? "primary" : "ghost"} size="icon" className="size-7 rounded-full"
+        aria-label={label} aria-pressed={recording} aria-busy={busyVoice || undefined} disabled={busyVoice} onClick={voice.onToggle}>
+        {voiceIcon(status)}
+      </Button>
+    </Tooltip>
+  </>)
+}
+
 type ComposerProps =  {
+  voiceInput?: ComposerVoiceInput;
   skills?: ReadonlyArray<Skill>;
   files?: ReadonlyArray<string>;
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>;
@@ -291,8 +373,12 @@ type ComposerProps =  {
   planDocument?: PlanDocument;
   /** Open Plan Review at a selected canonical stage. */
   onOpenPlanStage?: (stageId: string) => void;
+  /** Retry / Ask agent / Resume on a failed, interrupted or blocked plan row. */
+  onPlanStageAction?: PlanStageActionHandler;
   /** New-session-only controls rendered instead of static repository metadata. */
   contextControls?: ReactNode;
+  /** Context-usage ring drawn around the send/stop button; omit for no ring. */
+  contextMeter?: Omit<ContextMeterProps, "children" | "className">;
   /** Canonical certified model surface. */
   providerCatalog?: ProviderCatalog | null;
   agentEndpointCatalog?: AgentEndpointCatalog | null;
@@ -312,8 +398,11 @@ type ComposerProps =  {
   reasoningEffort?: ReasoningEffort;
   thinkingEnabled?: boolean;
   onSetReasoning?: (reasoning?: ReasoningSetting) => void;
-  /** Offer the Jingler-owned read-only planning mode. */
-  allowPlan?: boolean;
+  /** Persisted Plan/Build work mode, separate from the approval `mode`; the toggle shows when `onSetWorkMode` is given. */
+  workMode?: WorkMode;
+  /** Auto lets the agent switch Plan/Build itself; the toggle shows it as a third segment. */
+  autoSwitch?: boolean;
+  onSetWorkMode?: (workMode: WorkMode, autoSwitch?: boolean) => void;
   paused?: boolean;
   /** Disable composing without disabling the model picker used to recover. */
   disabledReason?: string;
@@ -324,6 +413,8 @@ type ComposerProps =  {
   busy?: boolean;
   /** Overrides the default "Message <harness>…" prompt. */
   placeholder?: string;
+  /** Accessible name for the draft textarea, when the placeholder is not enough. */
+  inputLabel?: string;
   /**
    * Take the caret when this composer becomes the one on screen. The host passes
    * the focused pane's flag, so a split never has two composers fighting for it.
@@ -513,12 +604,13 @@ const selectedComposerModel = ({ agentEndpointCatalog, providerCatalog, endpoint
 
 export function Composer(props: ComposerProps) {
          function renderAutocomplete() {
-           return (menu && count > 0 && (
+           return (menu && (count > 0 || menu.query !== "") && (
         <div className="absolute inset-x-0 bottom-full z-10 mb-2">
           {menu.kind === "slash" ? (
             <CommandMenu
               skills={skillMatches}
               activeIndex={activeIndex}
+              query={menu.query}
               onSelect={(skill) => replaceToken(skillInsertion(skill))}
               onHover={setActiveIndex}
             />
@@ -526,6 +618,7 @@ export function Composer(props: ComposerProps) {
             <MentionMenu
               files={fileMatches}
               activeIndex={activeIndex}
+              query={menu.query}
               onSelect={(p) => replaceToken(`@${p}`)}
               onHover={setActiveIndex}
             />
@@ -637,7 +730,8 @@ export function Composer(props: ComposerProps) {
               together decide what a squeeze does: the row wraps the chips above
               it and the primary action keeps its full size on the trailing line,
               rather than being the thing pushed past the border. */}
-          <span className="flex-none">
+          <span className="flex flex-none items-center gap-1.5">
+            {voiceInput && <ComposerVoiceControl voice={voiceInput} />}
             {getDisabledReason()}
           </span>
         </div>)
@@ -682,12 +776,31 @@ export function Composer(props: ComposerProps) {
   }
 
   function renderInlineSettings() {
+    const noModel = modelCatalog !== undefined && !selectedModel
     return (<>
-              {onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
-              {modelCatalog && <ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} placement="top" className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
+              {modelCatalog && <MorphPopover open={settingsOpen} onOpenChange={setSettingsOpen}>
+                <MorphPopoverTrigger>
+                  {noModel
+                    ? <Button type="button" variant="ghost" size="sm" aria-label="Select model" className="gap-1.5 px-2 text-muted-foreground"><span>Choose a model to start</span><span className="text-text-bright">Select model</span></Button>
+                    : <Button type="button" variant="ghost" size="sm" aria-label="Model settings" className={cn("min-w-0 gap-1.5 px-2 text-muted-foreground", roomy ? "max-w-[220px]" : "max-w-[132px]")}><span className="truncate">{selectedModel?.label}</span>{reasoningEfforts.length > 0 && <SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />}</Button>}
+                </MorphPopoverTrigger>
+                <MorphPopoverContent side="top" align="start" sideOffset={8} radius={12} className="w-80 max-w-[calc(100vw-24px)] p-2">
+                  {modelPopoverBody()}
+                </MorphPopoverContent>
+              </MorphPopover>}
+              {!modelCatalog && onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
+              <WorkModeToggle workMode={workMode} autoSwitch={autoSwitch} onSetWorkMode={onSetWorkMode} />
               <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
-              {(!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
+              {!modelCatalog && (!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
             </>)
+  }
+
+  function modelPopoverBody() {
+    return (<div className="space-y-1.5">
+      {modelCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
+      {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} inlineContent className="w-full max-w-none" /></div>}
+      {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
+    </div>)
   }
 
   function renderCompactSettings() {
@@ -702,14 +815,15 @@ export function Composer(props: ComposerProps) {
                 <div className="space-y-1.5">
                   {modelCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
                   {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
+                  {onSetWorkMode && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Work mode</div><WorkModeToggle workMode={workMode} autoSwitch={autoSwitch} onSetWorkMode={onSetWorkMode} /></div>}
                   <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Permission</div><ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} inlineContent className="w-full max-w-none" /></div>
-                  {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" inlineContent className="w-full max-w-none" /></div>}
+                  {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} inlineContent className="w-full max-w-none" /></div>}
                 </div>
               </MorphPopoverContent>
             </MorphPopover>)
   }
 
-  const { submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
+  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, workMode, autoSwitch, onSetWorkMode, paused, disabledReason, busy, placeholder, inputLabel, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -721,7 +835,6 @@ export function Composer(props: ComposerProps) {
     modelId: null,
     mode: "auto",
     followAgent: false,
-    allowPlan: false,
     paused: false,
     busy: false,
     autoFocus: false,
@@ -733,6 +846,7 @@ export function Composer(props: ComposerProps) {
           ref={ref}
           {...actionSearchProps(actionsOpen, actionsListId, actionResults[actionsIndex])}
           value={value}
+          aria-label={inputLabel}
           disabled={paused || disabledReason !== undefined}
           placeholder={composerPlaceholder(actionsOpen, disabledReason, paused, busy, placeholder, prompt)}
           onChange={(e) =>
@@ -782,29 +896,29 @@ export function Composer(props: ComposerProps) {
               />
               <span className="flex-1" />
               {drawerOpen && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  className="my-auto size-6 rounded-[6px] p-0 text-dim"
                   aria-label={planExtended ? "Collapse plan overview" : "Extend to plan overview"}
                   aria-pressed={planExtended}
                   onClick={() => setPlanExtended((value) => !value)}
-                  className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {planExtended ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                className="my-auto size-6 rounded-[6px] p-0 text-dim"
                 aria-label={drawerOpen ? "Collapse drawer" : "Expand drawer"}
                 aria-expanded={drawerOpen}
                 onClick={() => setDrawerOpen((open) => !open)}
-                className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <ChevronDown className={cn("size-3.5 transition-transform", !drawerOpen && "-rotate-90")} />
-              </button>
+              </Button>
             </div>
             {drawerOpen && (
               <div className="max-h-[280px] overflow-y-auto">
-                <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} />
+                <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} onStageAction={onPlanStageAction} />
               </div>
             )}
           </div>
@@ -826,6 +940,10 @@ export function Composer(props: ComposerProps) {
             </Button>)
   }
 
+  function withContextRing(button: ReactNode) {
+    return contextMeter ? <ContextMeter {...contextMeter}>{button}</ContextMeter> : button
+  }
+
   function getDisabledReason() {
            if (disabledReason !== undefined) return (<Pill tone="yellow" dot>
                 {roomy ? disabledReason : "unavailable"}
@@ -833,8 +951,8 @@ export function Composer(props: ComposerProps) {
            if (paused) return (<Pill tone="yellow" dot>
               {roomy ? "paused for approval" : "paused"}
             </Pill>)
-           if (submitting) return renderSendButton()
-           if (busy && onStop) return (<Button
+           if (submitting) return withContextRing(renderSendButton())
+           if (busy && onStop) return withContextRing(<Button
               variant="primary"
               size="icon"
               className="size-7 rounded-full"
@@ -844,32 +962,12 @@ export function Composer(props: ComposerProps) {
             >
               <Square size={12} fill="currentColor" />
             </Button>)
-           return renderSendButton()
+           return withContextRing(renderSendButton())
          }
 
   const modelCatalog = agentEndpointCatalog ?? providerCatalog
   const selectedModel = selectedComposerModel({ agentEndpointCatalog, providerCatalog, endpointId, providerId, modelId })
-  const canonicalModes: ReadonlyArray<{
-    readonly id: PermissionMode;
-    readonly label: string;
-    readonly kind: "execute" | "plan";
-    readonly description?: string;
-  }> = [
-    ...MODE_OPTIONS.map((option) => ({
-      id: option.value,
-      label: String(option.label),
-      kind: "execute" as const,
-    })),
-    { id: "plan" as const, label: "Plan", kind: "plan" as const },
-  ];
-  const modeOptions: ReadonlyArray<ComposerOption<PermissionMode>> = canonicalModes
-    .filter((option) => allowPlan || option.kind !== "plan")
-    .map((option) => ({
-      value: option.id,
-      label:
-        option.label,
-      description: option.description,
-    }));
+  const modeOptions = MODE_OPTIONS;
   const { reasoningEfforts, reasoningOptions } = composerReasoningOptions(selectedModel)
   // The chip's value and its bar count are the same fact; deriving it once keeps
   // the glyph from drifting out of step with the label beside it.
@@ -1061,18 +1159,17 @@ export function Composer(props: ComposerProps) {
   const skillMatches = useMemo(
     () =>
       menu?.kind === "slash"
-        ? skills.filter((s) =>
-            s.name.toLowerCase().includes(menu.query.toLowerCase()),
-  )
+        ? skills
+            .filter((s) => s.name.toLowerCase().includes(menu.query.toLowerCase()))
+            // Commands list before skills, matching the menu's group order.
+            .sort((a, b) => Number(a.source === "skill") - Number(b.source === "skill"))
         : [],
     [menu, skills],
   );
   const fileMatches = useMemo(
     () =>
       menu?.kind === "mention"
-        ? files
-            .filter((f) => f.toLowerCase().includes(menu.query.toLowerCase()))
-            .slice(0, 50)
+        ? files.filter((f) => f.toLowerCase().includes(menu.query.toLowerCase()))
         : [],
     [menu, files],
   );
@@ -1172,43 +1269,36 @@ export function Composer(props: ComposerProps) {
     return true
   }
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (handleActionsKeyDown(e)) return
-    if (menu && count > 0) {
-      switch (e.key) {
-case "ArrowDown": {
-
-        e.preventDefault();
-        setActiveIndex((i) => (i + 1) % count);
-        return;
-
-}
-case "ArrowUp": {
-
-        e.preventDefault();
-        setActiveIndex((i) => (i - 1 + count) % count);
-        return;
-
-}
-case "Enter":
-case "Tab": {
-
-        e.preventDefault();
-        if (menu.kind === "slash") {
-          replaceToken(skillInsertion(skillMatches[activeIndex]!));
-        } else replaceToken(`@${fileMatches[activeIndex]!}`);
-        return;
-
-}
-case "Escape": {
-
-        e.preventDefault();
-        setMenu(null);
-        return;
-
-}
-}
+  /** Drives the open `@` / `/` menu; returns true when the key was consumed. */
+  const handleMenuKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!menu) return false
+    if (e.key === "Escape") {
+      e.preventDefault()
+      setMenu(null)
+      return true
     }
+    if (count === 0) return false
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault()
+        setActiveIndex((i) => (i + 1) % count)
+        return true
+      case "ArrowUp":
+        e.preventDefault()
+        setActiveIndex((i) => (i - 1 + count) % count)
+        return true
+      case "Enter":
+      case "Tab":
+        e.preventDefault()
+        replaceToken(menu.kind === "slash" ? skillInsertion(skillMatches[activeIndex]!) : `@${fileMatches[activeIndex]!}`)
+        return true
+      default:
+        return false
+    }
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (handleActionsKeyDown(e) || handleMenuKeyDown(e)) return
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -1229,7 +1319,7 @@ case "Escape": {
       <PromptInputSurface
         // Keep the mode available to tests and integrations without tinting the
         // composer chrome. The selected menu item carries the state.
-        data-mode={mode}
+        data-mode={surfaceMode(workMode, mode)}
         onDragOver={(e) => {
           if (paused || disabledReason !== undefined) return;
           e.preventDefault();
@@ -1292,15 +1382,15 @@ case "Escape": {
               />
             ))}
             {attachments.length < MAX_ATTACHMENTS && (
-              <button
-                type="button"
+              <Button
+                variant="outline"
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach image"
-                className="flex size-[58px] flex-none flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-line text-dim outline-none transition-colors hover:border-line-strong hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="size-[58px] flex-none flex-col gap-0.5 border-dashed p-0 text-dim"
               >
                 <Plus size={15} />
-                <span className="text-[8.5px]">Add</span>
-              </button>
+                <span className="text-[11px]">Add</span>
+              </Button>
             )}
           </div>
         )}

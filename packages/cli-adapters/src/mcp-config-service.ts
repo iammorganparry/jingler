@@ -64,7 +64,8 @@ const redact = (name: string, entry: McpConfigEntry): McpServer =>
         target: entry.url,
         envKeys: [],
         headerKeys: Object.keys(entry.headers).sort(),
-        enabled: entry.enabled
+        enabled: entry.enabled,
+        disabledTools: entry.disabledTools ?? []
       }
     : {
         name,
@@ -77,7 +78,8 @@ const redact = (name: string, entry: McpConfigEntry): McpServer =>
         target: entry.command.join(" "),
         envKeys: Object.keys(entry.environment).sort(),
         headerKeys: [],
-        enabled: entry.enabled
+        enabled: entry.enabled,
+        disabledTools: entry.disabledTools ?? []
       }
 
 /** Interpolate `{env:VAR}` and produce the secret-bearing runtime attachment. */
@@ -91,7 +93,8 @@ const toRuntime = (
         name,
         ...(entry.transport === "sse" ? { transport: "sse" as const } : {}),
         url: entry.url,
-        headers: interpolateEnvRecord(entry.headers, env)
+        headers: interpolateEnvRecord(entry.headers, env),
+        ...(entry.disabledTools === undefined || entry.disabledTools.length === 0 ? {} : { disabledTools: entry.disabledTools })
       }
     : {
         name,
@@ -99,7 +102,8 @@ const toRuntime = (
         command: entry.command[0] ?? "",
         args: entry.command.slice(1),
         env: interpolateEnvRecord(entry.environment, env),
-        ...(entry.cwd === undefined ? {} : { cwd: entry.cwd })
+        ...(entry.cwd === undefined ? {} : { cwd: entry.cwd }),
+        ...(entry.disabledTools === undefined || entry.disabledTools.length === 0 ? {} : { disabledTools: entry.disabledTools })
       }
 
 const authState = (
@@ -475,6 +479,49 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           )
         })
 
+      /** Persist the set of tool names disabled for one server. */
+      const setDisabledTools = (
+        name: string,
+        disabledTools: ReadonlyArray<string>
+      ): Effect.Effect<void, McpConfigError, Env> =>
+        mutate((current, rawMcp) => {
+          const entry = current[name]
+          if (entry === undefined) {
+            return Effect.fail(new McpConfigError({ message: `MCP server "${name}" does not exist` }))
+          }
+          return Effect.succeed({
+            ...rawMcp,
+            [name]: {
+              ...Option.getOrElse(decodeRawEntry(rawMcp[name]), () => entry),
+              disabledTools: [...disabledTools]
+            }
+          })
+        })
+
+      /**
+       * Clear a server's stored OAuth credential only — the config entry and
+       * other servers are untouched, so the row reverts to "needs sign-in"
+       * without disabling or removing the server.
+       */
+      const signOut = (
+        name: string,
+        secretStore: SecretStoreShape
+      ): Effect.Effect<void, McpConfigError, Env> =>
+        entries().pipe(
+          Effect.flatMap((current) => {
+            const entry = current[name]
+            if (entry?.type !== "remote" || entry.auth?.type !== "oauth") {
+              return Effect.fail(new McpConfigError({ message: `MCP server "${name}" does not use OAuth` }))
+            }
+            const identity = credentialIdentity(entry)
+            if (identity === undefined) {
+              return Effect.fail(new McpConfigError({ message: `MCP server "${name}" has no credential identity` }))
+            }
+            const auth = new McpAuthStore(secretStore)
+            return auth.deleteIf(name, (credential) => credential.identity === identity)
+          })
+        )
+
       return {
         list,
         listAuthenticated,
@@ -486,7 +533,9 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
         writeAll,
         remove,
         setEnabled,
-        setAuth
+        setAuth,
+        setDisabledTools,
+        signOut
       }
     }
   }

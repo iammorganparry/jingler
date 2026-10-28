@@ -18,6 +18,11 @@ const runGetSession = (token: string | null) =>
     AuthService.getSession().pipe(Effect.provide(AuthService.Default), Effect.provide(withStore(token)))
   )
 
+const runCheckSession = (token: string | null) =>
+  Effect.runPromise(
+    AuthService.checkSession().pipe(Effect.provide(AuthService.Default), Effect.provide(withStore(token)))
+  )
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -115,6 +120,15 @@ describe("AuthService.getSession", () => {
     )
 
     expect(error.message).toBe("GitHub sign-in is unavailable. Use email instead.")
+  })
+
+  it("fails with AuthError (not null) when the server can't be reached or errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline") }))
+    await expect(runCheckSession("tok_valid")).rejects.toThrow(/reach/)
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })))
+    await expect(runCheckSession("tok_valid")).rejects.toThrow(/reach/)
+    // getSession still reads unreachable as signed out for the routine fence.
+    expect(await runGetSession("tok_valid")).toBeNull()
   })
 
   it("clears a dead token (401) and returns null", async () => {

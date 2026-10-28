@@ -10,6 +10,9 @@ import {
   GitHubSessionRelayGrantResponse,
   GitHubSessionRoute,
   GithubConfig,
+  HEADER_VIEWS_DEFAULT,
+  HEADER_VIEWS_MAX,
+  normalizeHeaderViews,
   IssueDetail,
   IssueReference,
   issueReferenceForProvider,
@@ -18,6 +21,7 @@ import {
   persistentOf,
   Repo,
   Session,
+  sessionsLinkedToIssue,
   workspaceModeOf,
   WorkspaceConfig,
 } from "./domain.js";
@@ -583,6 +587,47 @@ describe("provider-neutral issue schemas", () => {
     expect(issue.identifier).toBe("ENG-123");
     expect("number" in issue).toBe(false);
   });
+
+  it("decodes IssueDetail without linkedPrs", () => {
+    const issue = Schema.decodeUnknownSync(IssueDetail)({
+      providerId: "github",
+      id: "1",
+      identifier: "owner/repo#1",
+      url: "https://github.com/owner/repo/issues/1",
+      title: "Bug",
+      labels: [],
+      state: "open",
+      body: "body",
+      author: null,
+      assignees: [],
+      updatedAt: "2026-08-08T10:00:00.000Z",
+      createdAt: "2026-08-07T10:00:00.000Z",
+      comments: [],
+    });
+    expect(issue.linkedPrs).toBeUndefined();
+  });
+
+  it("decodes IssueDetail with linkedPrs", () => {
+    const issue = Schema.decodeUnknownSync(IssueDetail)({
+      providerId: "github",
+      id: "1",
+      identifier: "owner/repo#1",
+      url: "https://github.com/owner/repo/issues/1",
+      title: "Bug",
+      labels: [],
+      state: "open",
+      body: "body",
+      author: null,
+      assignees: [],
+      updatedAt: "2026-08-08T10:00:00.000Z",
+      createdAt: "2026-08-07T10:00:00.000Z",
+      comments: [],
+      linkedPrs: [{ number: 42, state: "open", url: "https://github.com/owner/repo/pull/42" }],
+    });
+    expect(issue.linkedPrs).toEqual([
+      { number: 42, state: "open", url: "https://github.com/owner/repo/pull/42" },
+    ]);
+  });
 });
 
 describe("Repo", () => {
@@ -669,5 +714,72 @@ describe("defaultModeFor", () => {
   it("honours the operator's configured default over the auto fallback", () => {
     expect(defaultModeFor("accept-edits")).toBe("accept-edits");
     expect(defaultModeFor("ask")).toBe("ask");
+  });
+});
+
+describe("normalizeHeaderViews", () => {
+  it("falls back to the default when nothing was saved", () => {
+    expect(normalizeHeaderViews(undefined)).toEqual(HEADER_VIEWS_DEFAULT);
+    expect(normalizeHeaderViews(null)).toEqual(HEADER_VIEWS_DEFAULT);
+  });
+
+  it("drops unknown ids and repeats but keeps order and plugin views", () => {
+    expect(normalizeHeaderViews(["terminal", "nope", "changes", "terminal", "linear.issues"])).toEqual([
+      "terminal",
+      "changes",
+      "linear.issues"
+    ]);
+  });
+
+  it("clamps to the header maximum", () => {
+    const six = ["changes", "checks", "terminal", "browser", "files", "plan"];
+    expect(normalizeHeaderViews(six)).toEqual(six.slice(0, HEADER_VIEWS_MAX));
+  });
+
+  it("keeps an explicitly emptied list empty", () => {
+    expect(normalizeHeaderViews([])).toEqual([]);
+  });
+});
+
+describe("sessionsLinkedToIssue", () => {
+  const issue: IssueReference = {
+    providerId: "github",
+    id: "42",
+    identifier: "#42",
+    url: "https://github.com/acme/widgets/issues/42",
+    title: "Fix it",
+    labels: [],
+  };
+  const id = { providerId: "github", id: "42" };
+  const session = (
+    name: string,
+    extra: Partial<
+      Pick<Session, "linkedIssue" | "linkedIssues" | "archived">
+    > = {},
+  ) => ({ name, ...extra });
+
+  it("returns the session linked to the issue", () => {
+    const linked = session("a", { linkedIssues: [issue] });
+    expect(sessionsLinkedToIssue([linked, session("b")], id)).toStrictEqual([
+      linked,
+    ]);
+  });
+
+  it("excludes archived sessions", () => {
+    const archived = session("a", { linkedIssues: [issue], archived: true });
+    expect(sessionsLinkedToIssue([archived], id)).toStrictEqual([]);
+  });
+
+  it("returns empty for an unlinked issue, even when ids match across providers", () => {
+    const other = session("a", {
+      linkedIssues: [{ ...issue, providerId: "linear" }],
+    });
+    expect(sessionsLinkedToIssue([other, session("b")], id)).toStrictEqual([]);
+  });
+
+  it("returns every session linked to the same issue", () => {
+    const one = session("a", { linkedIssue: issue });
+    const two = session("b", { linkedIssues: [issue] });
+    expect(sessionsLinkedToIssue([one, two], id)).toStrictEqual([one, two]);
   });
 });

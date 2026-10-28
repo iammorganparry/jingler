@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { fetchIssue, fetchIssueWithCli, resolveRepository } from "./main.js"
+import { closeIssue, commentIssue, reopenIssue, fetchIssue, fetchIssueWithCli, resolveRepository } from "./main.js"
 
 const session = {
   accessToken: "ghs_installation_secret",
@@ -174,5 +174,60 @@ describe("resolveRepository", () => {
     await expect(resolveRepository("widgets", "/worktree", exec)).rejects.toThrow(
       "origin is not a GitHub repository"
     )
+  })
+})
+
+describe("updatedAt and closeIssue", () => {
+  it("carries updatedAt through the CLI payload", async () => {
+    const exec = vi.fn()
+      .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout: JSON.stringify({
+          number: 1, title: "T", body: "", state: "OPEN", url: "https://github.com/a/b/issues/1",
+          createdAt: "2030-01-01T00:00:00Z", updatedAt: "2030-01-03T00:00:00Z"
+        }),
+        stderr: ""
+      })
+    await expect(fetchIssueWithCli({ repo: "acme/widgets", issueNumber: 1 }, exec))
+      .resolves.toMatchObject({ updatedAt: "2030-01-03T00:00:00Z" })
+    expect(exec.mock.calls[1]?.[1]?.at(-1)).toContain("updatedAt")
+  })
+
+  it("closes through gh and surfaces failures", async () => {
+    const ok = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" })
+    await closeIssue({ repo: "acme/widgets", issueNumber: 7 }, ok)
+    expect(ok.mock.calls[0]?.[1]).toEqual(["issue", "close", "7", "--repo", "acme/widgets"])
+    const bad = vi.fn().mockResolvedValue({ code: 1, stdout: "", stderr: "denied" })
+    await expect(closeIssue({ repo: "acme/widgets", issueNumber: 7 }, bad)).rejects.toThrow("denied")
+    await expect(closeIssue({ repo: "acme/widgets", issueNumber: 0 }, ok)).rejects.toThrow("invalid")
+  })
+})
+
+describe("commentIssue", () => {
+  it("reopens through gh and surfaces failures", async () => {
+    const ok = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" })
+    await reopenIssue({ repo: "acme/widgets", issueNumber: 7 }, ok)
+    expect(ok.mock.calls[0]?.[1]).toEqual(["issue", "reopen", "7", "--repo", "acme/widgets"])
+    const bad = vi.fn().mockResolvedValue({ code: 1, stdout: "", stderr: "denied" })
+    await expect(reopenIssue({ repo: "acme/widgets", issueNumber: 7 }, bad)).rejects.toThrow("denied")
+    await expect(reopenIssue({ repo: "acme/widgets", issueNumber: 0 }, ok)).rejects.toThrow("invalid")
+  })
+
+  it("comments, or closes with the comment, through gh", async () => {
+    const ok = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" })
+    await commentIssue({ repo: "acme/widgets", issueNumber: 7, body: "Looking" }, ok)
+    expect(ok.mock.calls[0]?.[1]).toEqual(["issue", "comment", "7", "--repo", "acme/widgets", "--body", "Looking"])
+    await commentIssue({ repo: "acme/widgets", issueNumber: 7, body: "Done", close: true }, ok)
+    expect(ok.mock.calls[1]?.[1]).toEqual(["issue", "close", "7", "--repo", "acme/widgets", "--comment", "Done"])
+  })
+
+  it("surfaces gh failures and rejects invalid input before running gh", async () => {
+    const bad = vi.fn().mockResolvedValue({ code: 1, stdout: "", stderr: "denied" })
+    await expect(commentIssue({ repo: "acme/widgets", issueNumber: 7, body: "x" }, bad)).rejects.toThrow("denied")
+    const exec = vi.fn()
+    await expect(commentIssue({ repo: "acme/widgets", issueNumber: 7, body: "  " }, exec)).rejects.toThrow("empty")
+    await expect(commentIssue({ repo: "acme/widgets", issueNumber: 0, body: "x" }, exec)).rejects.toThrow("invalid")
+    expect(exec).not.toHaveBeenCalled()
   })
 })

@@ -5,8 +5,8 @@
  * machine lives above the Conversation ↔ Plan switch, so opening Plannotator
  * does not unmount the agent stream.
  */
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   AgentEndpointCatalog,
   Environment,
@@ -15,14 +15,17 @@ import type {
   McpServer,
   Message,
   ProviderCatalog,
+  ProviderConnectionId,
   Session,
   SubagentFleetControlAction,
   SubagentFleetControlOutcome,
   SubagentFleetNode
 } from "@jingler/core"
+import type { ToastInput } from "@jingler/ui"
 import {
   agentFileActivityOf,
   clampFontScale,
+  countNodesAwaitingAttention,
   piEndpointId,
   plannotatorProjectionToPlanDocument
 } from "@jingler/core"
@@ -32,16 +35,34 @@ import {
   BackgroundTaskDock,
   BackgroundTaskOutput,
   Composer,
+  type ComposerVoiceInput,
   ConversationView,
+  SubagentEntryContext,
+  SubagentReadOnlyBar,
   FleetAgentView,
   McpApiKeyDialog,
   McpBrand,
   ResizeHandle,
   RuntimeRecoveryCard,
+  ProviderSignedOutCard,
+  ProviderResumeCard,
+  ProviderLimitBanner,
+  ProviderAccountChoice,
+  ProviderConnectSheet,
   PlanReview,
-  useContainerWidth
+  useContainerWidth,
+  OPEN_THREAD_SWITCHER_EVENT
 } from "@jingler/ui"
+import { mcpSignInPhase, type McpSignInAttempt } from "./mcp-sign-in-card.js"
+import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, mcpRecoveryKey } from "./mcp-recovery-dismissals.js"
+import { handoffEachQueued } from "./handoff-each-queued.js"
+import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
+import { useConnectivity } from "./connectivity.js"
+import { DeviceOfflineBanner } from "@jingler/ui"
+import { useTurnCheckpointIds } from "./use-turn-checkpoints.js"
+import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js"
+import { clearInterruptedChat, useInterruptedChats } from "./interrupted-chats.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import {
   publishFleetAgentFileActivity,
@@ -54,6 +75,7 @@ import {
   disposeChatActor,
   getConversationActor
 } from "./conversation-registry.js"
+import { useVoiceInput } from "./use-voice-input.js"
 import { clearDraft, getDraft, markDraftSeeded, seedDraftOnce, setDraft, useDraft, type Draft } from "./draft-store.js"
 import { useSessionDiffs, type LiveDiffStat } from "./diff-presence.js"
 import { takeFirstMessage } from "./first-message-store.js"
@@ -62,29 +84,35 @@ import {
   serializeCodeReferences
 } from "./code-reference.js"
 import { useConversation, type Conversation } from "./use-conversation.js"
+import { useSessionSubagentEntry } from "./session-chat-tabs.js"
 import { MAIN_FLEET_AGENT, useSubagentFleet, type SubagentFleetController } from "./use-subagent-fleet.js"
 import {
+  activeOrchestratorNodes,
   publishSubagentTabs,
   recentSubagentNodes,
+  registerMainViewReader,
   releaseSubagentTabController,
   retainSubagentTabController,
-  useSubagentTabSelection
+  selectSubagentTab
 } from "./subagent-tab-store.js"
+import { useSubagentView } from "./use-subagent-view.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
-import { useFileBrowser, type FileBrowserController } from "./use-file-browser.js"
+import { openSessionFileDiff, useFileBrowser, type FileBrowserController } from "./use-file-browser.js"
+import { useFollowAgentFiles } from "./use-follow-agent-files.js"
 import {
   clampedPlanSplitRatio,
   DEFAULT_PLAN_SPLIT_RATIO,
   PLAN_SPLIT_HANDLE_WIDTH,
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
-import { claimPlanAutoPresentation } from "./plan-presence.js"
+import { claimPlanAutoPresentation, usePlanDisconnected } from "./plan-presence.js"
 import {
   rpcFailureMessage,
   rpcFailureReason,
   rpcFailureTag
 } from "./rpc-failure.js"
-import { providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
+import type { ProviderRecovery } from "./provider-recovery.js"
+import { providerLimitOf, providerRebindCandidatesOf, providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
 
@@ -110,17 +138,6 @@ const localMcp = (
   ? { servers: servers ?? [], add, setApiKey, setAuth, authorize }
   : { servers: [], add: undefined, setApiKey: undefined, setAuth: undefined, authorize: undefined }
 
-/**
- * MCP recovery cards the operator has dismissed, for the life of the app run.
- * Module scope rather than component state: the pane remounts on every session
- * switch, and a dismissed "Reconnect runpod" reappearing on each one is the
- * nagging this exists to stop. A restart shows it again — the server still
- * needs auth, and that should not be silently forgotten forever.
- */
-const dismissedMcpRecovery = new Set<string>()
-
-const mcpRecoveryKey = (server: McpServer) => `${server.name}:${server.authKind}`
-
 function McpRecoveryCards({
   servers,
   setApiKey,
@@ -131,41 +148,77 @@ function McpRecoveryCards({
   readonly authorize?: (name: string) => Promise<void>
 }) {
   const [apiKeyServer, setApiKeyServer] = useState<McpServer | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [attempts, setAttempts] = useState<Readonly<Record<string, { attempt: McpSignInAttempt; error?: string }>>>({})
   const [, setDismissed] = useState(0)
-  const needsAuth = servers.filter((server) =>
-    server.enabled && server.authState === "needs-auth" && !dismissedMcpRecovery.has(mcpRecoveryKey(server))
-  )
+  const setAttempt = (name: string, attempt: McpSignInAttempt | undefined, error?: string) =>
+    setAttempts((current) => {
+      const { [name]: _removed, ...rest } = current
+      return attempt === undefined ? rest : { ...rest, [name]: { attempt, error } }
+    })
+  // A healthy server drops its dismissal, so the next failure shows the card again.
+  useEffect(() => {
+    for (const server of servers) {
+      if (!server.enabled || (server.authState !== "needs-auth" && server.authState !== "authorizing")) {
+        clearMcpRecoveryDismissal(mcpRecoveryKey(server))
+      }
+    }
+  }, [servers])
+  const phaseOf = (server: McpServer) => mcpSignInPhase(server.authState, attempts[server.name]?.attempt)
+  // "Connected" confirms briefly, then the card goes away.
+  const connectedNames = servers.filter((server) => phaseOf(server) === "connected").map((server) => server.name).join("\n")
+  useEffect(() => {
+    if (connectedNames === "") return
+    const timer = setTimeout(() => { for (const name of connectedNames.split("\n")) setAttempt(name, undefined) }, 2_500)
+    return () => clearTimeout(timer)
+  }, [connectedNames])
+  const visible = servers.filter((server) => {
+    if (!server.enabled) return false
+    const phase = phaseOf(server)
+    return phase !== "hidden" && (phase !== "needs-sign-in" || !isMcpRecoveryDismissed(mcpRecoveryKey(server)))
+  })
+  const connect = (server: McpServer) => {
+    setAttempt(server.name, "waiting")
+    void authorize?.(server.name).catch((cause) =>
+      setAttempt(server.name, "failed", cause instanceof Error ? cause.message : "MCP authorization failed")
+    )
+  }
   return (
     <>
-      {error !== null && (
-        <div role="alert" className="border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red">{error}</div>
-      )}
-      {needsAuth.map((server) => (
-        <RuntimeRecoveryCard
-          key={server.name}
-          icon={<McpBrand server={server} />}
-          label="MCP server recovery"
-          kind="MCP server"
-          title={`Reconnect ${server.displayName}`}
-          message={`The ${server.displayName} MCP server needs ${server.authKind === "oauth" ? "authorization" : "a new API key"} before its tools can run. Other tools keep working.`}
-          onDismiss={() => {
-            dismissedMcpRecovery.add(mcpRecoveryKey(server))
-            setDismissed((count) => count + 1)
-          }}
-          actionLabel={server.authKind === "oauth" ? "Authorize" : "Add API key"}
-          actionDisabled={server.authKind === "oauth" ? authorize === undefined : setApiKey === undefined}
-          onAction={() => {
-            if (server.authKind === "api-key") setApiKeyServer(server)
-            else {
-              setError(null)
-              void authorize?.(server.name).catch((cause) =>
-                setError(cause instanceof Error ? cause.message : "MCP authorization failed")
-              )
-            }
-          }}
-        />
-      ))}
+      {visible.map((server) => {
+        const phase = phaseOf(server)
+        const oauth = server.authKind === "oauth"
+        const copy = {
+          "needs-sign-in": { message: `Needs sign-in. The ${server.displayName} MCP server needs ${oauth ? "authorization" : "a new API key"} before its tools can run. Other tools keep working.`, action: oauth ? "Authorize" : "Add API key" },
+          waiting: { message: "Waiting for browser… Finish signing in there, or cancel.", action: "Cancel" },
+          connected: { message: `Connected. ${server.displayName} tools are available.`, action: "Done" },
+          failed: { message: "Sign-in failed. Check the browser sign-in and try again.", action: "Retry" },
+          hidden: { message: "", action: "" }
+        }[phase]
+        return (
+          <RuntimeRecoveryCard
+            key={server.name}
+            icon={<McpBrand server={server} />}
+            label="MCP server recovery"
+            kind="MCP server"
+            title={`Reconnect ${server.displayName}`}
+            message={copy.message}
+            detail={attempts[server.name]?.error}
+            failed={phase === "failed"}
+            onDismiss={phase === "needs-sign-in" ? () => {
+              dismissMcpRecovery(mcpRecoveryKey(server))
+              setDismissed((count) => count + 1)
+            } : undefined}
+            actionLabel={copy.action}
+            actionDisabled={phase === "needs-sign-in" || phase === "failed" ? (oauth ? authorize === undefined : setApiKey === undefined) : false}
+            onAction={() => {
+              if (phase === "waiting") setAttempt(server.name, "cancelled")
+              else if (phase === "connected") setAttempt(server.name, undefined)
+              else if (!oauth) setApiKeyServer(server)
+              else connect(server)
+            }}
+          />
+        )
+      })}
       {setApiKey !== undefined && (
         <McpApiKeyDialog
           server={apiKeyServer}
@@ -233,6 +286,187 @@ const useEnvironmentHandoff = (sessionId: string, busy: boolean) => {
   return { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation }
 }
 
+/** Resume card for a chat whose last run was cut off by a restart (#520). */
+/** Signed-out recovery: Reconnect opens the Connect sheet in place; Resume run follows once the catalog shows the account signed in again. */
+function ProviderSignedOutRecovery({
+  session,
+  chatId,
+  recovery
+}: {
+  session: Session
+  chatId: string
+  recovery: ProviderRecovery | undefined
+}) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
+  const signedOut = recovery?.kind === "signed-out" ? recovery : undefined
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["provider-catalog"] })
+  if (signedOut === undefined && reconnecting) {
+    return (
+      <ProviderResumeCard
+        onResume={() => {
+          setReconnecting(false)
+          getConversationActor(session, chatId).send({ type: "SEND", text: "Continue" })
+        }}
+      />
+    )
+  }
+  if (signedOut?.connectionId === undefined || signedOut.providerId === undefined) return null
+  const connectionId = signedOut.connectionId
+  const providerId = signedOut.providerId
+  return (
+    <>
+      <ProviderSignedOutCard
+        title={signedOut.title}
+        message={signedOut.message}
+        onReconnect={() => {
+          setReconnecting(true)
+          setOpen(true)
+        }}
+      />
+      <ProviderConnectSheet
+        open={open}
+        onOpenChange={setOpen}
+        providerId={providerId}
+        providerLabel={signedOut.title.replace(/ signed out.*$/u, "")}
+        onStartOauth={async () => {
+          await rpc.providerStartCodexLogin({ id: connectionId, targetId: "desktop", method: "browser" })
+          void refresh()
+          return connectionId
+        }}
+        onStartDeviceCode={async () => {
+          await rpc.providerStartCodexLogin({ id: connectionId, targetId: "desktop", method: "device-code" })
+          void refresh()
+          return connectionId
+        }}
+        onCancelLogin={async () => {
+          await rpc.providerCancelLogin(connectionId)
+          void refresh()
+        }}
+        onReopenBrowser={() => {}}
+        onSaveApiKey={async (apiKey) => {
+          try {
+            await rpc.providerSetApiKey({ id: connectionId, providerId, apiKey, targetId: "desktop" })
+            void refresh()
+            return { ok: true as const }
+          } catch (error) {
+            return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+          }
+        }}
+      />
+    </>
+  )
+}
+
+function ProviderRecoveryLane({
+  session,
+  chatId,
+  recovery,
+  limit,
+  candidates,
+  onOpenProviderSettings,
+  onUseAccount
+}: {
+  session: Session
+  chatId: string
+  recovery: ProviderRecovery | undefined
+  limit: string | undefined
+  candidates: ReadonlyArray<{ id: ProviderConnectionId; account: { displayLabel: string | null } | null }>
+  onOpenProviderSettings?: () => void
+  onUseAccount: (id: ProviderConnectionId) => void
+}) {
+  return (
+    <>
+      {recovery !== undefined && recovery.kind !== "signed-out" && (
+        <RuntimeRecoveryCard
+          title={recovery.title}
+          message={recovery.message}
+          actionLabel="Open providers"
+          onAction={() => onOpenProviderSettings?.()}
+        />
+      )}
+      <ProviderSignedOutRecovery session={session} chatId={chatId} recovery={recovery} />
+      {limit !== undefined && (
+        <ProviderLimitBanner
+          limit={limit}
+          onSwitchModel={() => onOpenProviderSettings?.()}
+          onSwitchAccount={() => onOpenProviderSettings?.()}
+        />
+      )}
+      {candidates.length > 1 && (
+        <ProviderAccountChoice
+          accounts={candidates.map(({ id, account }) => ({ id, label: account?.displayLabel ?? id }))}
+          onUse={(id) => onUseAccount(id as ProviderConnectionId)}
+        />
+      )}
+    </>
+  )
+}
+
+function InterruptedRunCard({ session, chatId, busy }: { session: Session; chatId: string; busy: boolean }) {
+  const interrupted = useInterruptedChats().some((c) => c.sessionId === session.id && c.chatId === chatId)
+  if (!interrupted || busy) return null
+  return (
+    <RuntimeRecoveryCard
+      label="Interrupted run"
+      title="Interrupted"
+      message="This run stopped when Jingler closed."
+      actionLabel="Resume"
+      onAction={() => {
+        clearInterruptedChat(session.id, chatId)
+        getConversationActor(session, chatId).send({ type: "SEND", text: "Continue" })
+      }}
+    />
+  )
+}
+
+/** Rail "Revert to here": maps a turn number to its checkpoint and owns the direct-revert dialog. */
+function useTurnRevert(session: Session, busy: boolean) {
+  const ids = useTurnCheckpointIds(session, busy)
+  const [checkpointId, setCheckpointId] = useState<string | null>(null)
+  return {
+    checkpointCount: ids.length,
+    onRevertToTurn: (turn: number) => setCheckpointId(ids[turn - 1] ?? null),
+    dialog: checkpointId === null ? null : (
+      <WorkspaceCheckpointsView
+        key={checkpointId}
+        session={session}
+        revertTo={checkpointId}
+        returnFocus={null}
+        onSession={() => {}}
+        onClosed={() => setCheckpointId(null)}
+      />
+    )
+  }
+}
+
+type PromptImages = ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }> | undefined
+type WaitingSend = { readonly id: string; readonly text: string; readonly images: PromptImages; readonly agentContext: string }
+
+/** Holds provider sends while offline and replays them, in order, on reconnect. */
+function useOfflineSendQueue(send: (text: string, images?: PromptImages, agentContext?: string) => void) {
+  const { offline } = useConnectivity()
+  const [waiting, setWaiting] = useState<ReadonlyArray<WaitingSend>>([])
+  useEffect(() => {
+    if (offline || waiting.length === 0) return
+    setWaiting([])
+    for (const w of waiting) send(w.text, w.images, w.agentContext)
+  }, [offline, waiting, send])
+  const hold = (text: string, images?: PromptImages, agentContext = "") =>
+    setWaiting((w) => [...w, { id: `w_${Date.now()}_${w.length}`, text, images, agentContext }])
+  return { offline, waiting, setWaiting, hold }
+}
+
+function offlineDeviceOf(
+  environments: ReadonlyArray<{ readonly id: string; readonly name: string; readonly state: string }>,
+  environmentId: string | null | undefined,
+  continueLocally: () => void
+): { name: string; continueLocally: () => void } | null {
+  const env = environments.find((e) => e.id === environmentId)
+  return env?.state === "offline" ? { name: env.name, continueLocally } : null
+}
+
 export function ConversationPane({
   session,
   view = "conversation",
@@ -246,14 +480,16 @@ export function ConversationPane({
   environments,
   providerCatalog,
   agentEndpointCatalog,
-  onSelectFiles,
   onSelectChanges,
+  onOpenPullRequest,
+  onSelectBrowser,
   onOpenProviderSettings,
   onAddMcp,
   mcpServers,
   onSetMcpApiKey,
   onSetMcpAuth,
   onAuthorizeMcp,
+  onPushToast,
   paneFocused = true
 }: {
   session: Session
@@ -288,10 +524,12 @@ export function ConversationPane({
    * Storybook and the component tests want.
    */
   onOpenFile?: (sessionId: string, path: string) => void
-  /** Present Files beside the conversation when follow mode is enabled here. */
-  onSelectFiles?: () => void
-  /** Open the canonical Changes view from uncertain-mutation recovery. */
+/** Open the canonical Changes view from uncertain-mutation recovery. */
   onSelectChanges?: () => void
+  /** Open the session's PR view from a subagent's PR chip. */
+  onOpenPullRequest?: () => void
+  /** Open the Browser view; the `Preview ready · Open browser` chip's path. */
+  onSelectBrowser?: () => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
   onOpenProviderSettings?: () => void
   /** Add or repair global MCP connections from the composer/chat. */
@@ -300,6 +538,7 @@ export function ConversationPane({
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>
   onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>
   onAuthorizeMcp?: (name: string) => Promise<void>
+  onPushToast?: (toast: ToastInput) => void
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -307,6 +546,15 @@ export function ConversationPane({
   paneFocused?: boolean
 }) {
   const activeChat = activeChatFor(session)
+  // An agent drove the embedded browser for THIS chat: offer the transcript link.
+  const [previewRevealed, setPreviewRevealed] = useState(false)
+  useEffect(
+    () =>
+      window.jingler?.onPreviewReveal?.(({ sessionId, chatId }) => {
+        if (sessionId === session.id && chatId === activeChat.id) setPreviewRevealed(true)
+      }),
+    [session.id, activeChat.id]
+  )
   const localMcpConfig = localMcp(
     session.environmentId,
     mcpServers,
@@ -316,19 +564,32 @@ export function ConversationPane({
     onAuthorizeMcp
   )
   const convo = useConversation(session, activeChat.id)
+  const turnRevert = useTurnRevert(session, convo.busy)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
+  const offlineDevice = offlineDeviceOf(environments, session.environmentId, () => continueEnvironmentMutation.mutate(undefined))
   const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   const toggleFollowAgent = useCallback(
     (enabled: boolean) => {
       if (enabled) {
         fileBrowser.enableFollow()
-        onSelectFiles?.()
       } else {
         fileBrowser.disableFollow()
       }
     },
-    [fileBrowser.disableFollow, fileBrowser.enableFollow, onSelectFiles]
+    [fileBrowser.disableFollow, fileBrowser.enableFollow]
   )
+  // Follow opens each edited file as a file tab; the viewed subagent's edits win.
+  useFollowAgentFiles({
+    sessionId: session.id,
+    chatId: activeChat.id,
+    worktreePath: session.worktreePath,
+    enabled: fileBrowser.followEnabled,
+    onFollow: ({ path, eventId, preview, completed }) => {
+      fileBrowser.followAgentTarget(path, eventId, preview, completed)
+      openSessionFileDiff(session.id, session.worktreePath, path, { eventId, preview, completed })
+      onOpenFile?.(session.id, path)
+    }
+  })
   const presentedPlannotatorReview = useRef<string | null>(null)
   useEffect(() => {
     const reviewId = plannotatorReviewId(convo.plannotator)
@@ -346,6 +607,11 @@ export function ConversationPane({
       onPlanDraftAvailable()
     }
   }, [activeChat.id, plannotatorReviewId(convo.plannotator), onPlanDraftAvailable, onPlanDraftUnavailable])
+  // An interrupted review has no live review to auto-present, so open the Plan tab for its Reopen card.
+  const planDisconnected = usePlanDisconnected(activeChat.id)
+  useEffect(() => {
+    if (planDisconnected) onPlanDraftAvailable?.()
+  }, [planDisconnected, onPlanDraftAvailable])
   // Branch-drift recovery (the `BranchDrift` banner). Stable per session so the
   // memoised transcript turns don't re-render while a turn streams. Adopt updates
   // this session in place; fork publishes a NEW worktree session into the sidebar
@@ -387,7 +653,7 @@ export function ConversationPane({
   const sessionEndpointCatalog = endpointCatalogForSession(session, environments, agentEndpointCatalog)
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
-  const { providerRecovery, rebindConnectionId, composerDisabledReason } = conversationProviderRecovery(
+  const { providerRecovery, rebindConnectionId, rebindCandidates, providerLimit, composerDisabledReason } = conversationProviderRecovery(
     session,
     convo,
     providerCatalog,
@@ -483,6 +749,7 @@ export function ConversationPane({
   // mounted keyed by session id, so switching sessions unmounts it and any local
   // state goes with it. See `draft-store`.
   const draft = useDraft(activeChat.id)
+  const voiceInput = useVoiceInput(activeChat.id, rpc, providersQuery.data)
   const draftCodeReferences = useMemo(
     () =>
       draft.references.map((reference) => ({
@@ -546,6 +813,7 @@ export function ConversationPane({
   }, [activeChat.id, session.id, session.initialPrompt])
 
   const pendingReviewId = plannotatorReviewId(convo.plannotator)
+  const { offline, waiting, setWaiting, hold } = useOfflineSendQueue(convo.sendPrompt)
   const sendPrompt: typeof convo.sendPrompt = (text, images) => {
     // Structured ranges stay out of the editable textarea, but every harness
     // receives the same deterministic plain-text context at the turn boundary.
@@ -574,7 +842,7 @@ export function ConversationPane({
       })
       return
     }
-    return convo.sendPrompt(text, images, agentContext)
+    return (offline ? hold : convo.sendPrompt)(text, images, agentContext)
   }
 
   const createChat = () => {
@@ -597,7 +865,7 @@ export function ConversationPane({
    * `createChat` left the operator's text deleted with nothing on screen to say
    * so. Nothing is dropped until there is somewhere for it to land.
    */
-  const handoffQueued = (id: string) => {
+  const handoffQueued = (id: string, onHandedOff?: () => void) => {
     if (!convo.queued.some((queued) => queued.id === id)) return
     queueSessionChatMutation(
       session.id,
@@ -617,9 +885,20 @@ export function ConversationPane({
           agentContext: item.agentContext
         })
         convo.unqueue(id)
+        onHandedOff?.()
       }
     )
   }
+  /** Hand off the whole queue, one fresh chat each, then offer to open the thread switcher. */
+  const handoffAllQueued = (ids: ReadonlyArray<string>) =>
+    handoffEachQueued(ids, handoffQueued, (count) =>
+      onPushToast?.({
+        key: `handoff-all-${session.id}`,
+        variant: "success",
+        title: `${count} ${count === 1 ? "message" : "messages"} handed off`,
+        action: { label: "View", onAction: () => window.dispatchEvent(new Event(OPEN_THREAD_SWITCHER_EVENT)) }
+      })
+    )
   const selectChat = (chatId: string) => {
     queueSessionChatMutation(session.id, () => rpc.sessionsSelectChat(session.id, chatId))
   }
@@ -670,7 +949,14 @@ export function ConversationPane({
     chatId: activeChat.id,
     continuation: activeChat.continuation?.id ?? null,
     events: convo.subagentFleetEvents,
-    legacyAgents: legacyFleetAgents
+    legacyAgents: legacyFleetAgents,
+    onChildFinished: (node) =>
+      onPushToast?.({
+        key: `subagent-finished-${node.id}`,
+        variant: node.status === "failed" ? "error" : "success",
+        title: `${node.agent} ${node.status === "failed" ? "failed" : "finished"}`,
+        action: { label: "View", onAction: () => selectSubagentTab(session.id, activeChat.id, node.id) }
+      })
   })
   const [subagentControlOutcome, setSubagentControlOutcome] = useState<
     SubagentFleetControlOutcome | null
@@ -728,6 +1014,10 @@ export function ConversationPane({
     ),
     [fleet.nodes]
   )
+  const orchestratorFleetNodes = useMemo(
+    () => activeOrchestratorNodes(fleet.nodes),
+    [fleet.nodes]
+  )
   const completedFleetNodes = useMemo(() => {
     const completed = new Map(fleet.completedNodes.map((node) => [node.id, node]))
     for (const node of fleet.nodes) {
@@ -743,21 +1033,43 @@ export function ConversationPane({
       chatId: activeChat.id,
       active: activeFleetNodes,
       completed: completedFleetNodes,
+      orchestrators: orchestratorFleetNodes,
       selectedId: fleet.selectedId
     })
-  }, [activeChat.id, activeFleetNodes, completedFleetNodes, fleet.selectedId, session.id])
+  }, [activeChat.id, activeFleetNodes, completedFleetNodes, orchestratorFleetNodes, fleet.selectedId, session.id])
   useEffect(() => {
     retainSubagentTabController(session.id, activeChat.id)
     return () => releaseSubagentTabController(session.id, activeChat.id)
   }, [activeChat.id, session.id])
-  const subagentTabSelection = useSubagentTabSelection(session.id)
+  const subagentEntry = useSessionSubagentEntry(session)
+  // The chat lane's view machine owns which transcript this lane shows; the fleet follows it.
+  const subagentView = useSubagentView(activeChat.id)
+  const mainColumnRef = useRef<HTMLDivElement>(null)
   const selectFleetRef = useRef(fleet.select)
   selectFleetRef.current = fleet.select
+  const fleetSelectedIdRef = useRef(fleet.selectedId)
+  fleetSelectedIdRef.current = fleet.selectedId
+  useEffect(() => registerMainViewReader(activeChat.id, () => ({
+    draft: getDraft(activeChat.id).text,
+    scrollTop: mainColumnRef.current?.querySelector<HTMLElement>('[data-testid="conversation-scroll"]')?.scrollTop ?? 0
+  })), [activeChat.id])
+  const wasSubagentViewRef = useRef(false)
   useEffect(() => {
-    if (subagentTabSelection?.chatId === activeChat.id) {
-      selectFleetRef.current(subagentTabSelection.nodeId)
+    if (subagentView.selectedId !== null) {
+      wasSubagentViewRef.current = true
+      selectFleetRef.current(subagentView.selectedId)
+      return
     }
-  }, [activeChat.id, subagentTabSelection?.chatId, subagentTabSelection?.nodeId, subagentTabSelection?.nonce])
+    if (fleetSelectedIdRef.current !== MAIN_FLEET_AGENT) selectFleetRef.current(MAIN_FLEET_AGENT)
+    if (!wasSubagentViewRef.current) return
+    wasSubagentViewRef.current = false
+    // The main transcript remounts on return; put it back where the operator left it.
+    const frame = requestAnimationFrame(() => {
+      const viewport = mainColumnRef.current?.querySelector<HTMLElement>('[data-testid="conversation-scroll"]')
+      if (viewport) viewport.scrollTop = subagentView.mainScrollTop
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [subagentView.selectedId, subagentView.mainScrollTop, fleet.selectedId])
 
   // Live agent status + Plan-tab presence are published by the conversation
   // registry (from the actor's own subscription), so they stay correct even
@@ -794,7 +1106,18 @@ export function ConversationPane({
   )
   // The plan surface persists for as long as a plan exists. Plannotator owns
   // review actions while pending, then stays read-only as the checklist advances.
-  const planSurface = renderPlanSurface(plannotatorDocument, pendingReviewId, decideReview)
+  const planSurface = renderPlanSurface(
+    plannotatorDocument,
+    decideReview,
+    <PlanReviewerDisconnectedCard
+      sessionId={session.id}
+      chatId={activeChat.id}
+      onResume={() => {
+        convo.setMode("plan")
+        convo.sendPrompt("/plannotator-resume-review")
+      }}
+    />
+  )
 
   if (view === "plan") {
     return (
@@ -829,7 +1152,8 @@ export function ConversationPane({
         the strip's own `overflow-x-auto` take over. The inner column already had
         it; this outer row did not, so the constraint stopped one level short. */}
     <div ref={planSplitRowRef} className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={mainColumnRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {offlineDevice && <DeviceOfflineBanner device={offlineDevice.name} onContinueLocally={offlineDevice.continueLocally} />}
       {renderEnvironmentNotices({
               convo,
               continuationEnvironmentId,
@@ -839,14 +1163,19 @@ export function ConversationPane({
               setHandoffAfterStop,
               setContinuationEnvironmentId
             })}
-      {typeof providerRecovery !== "string" && providerRecovery !== undefined && (
-        <RuntimeRecoveryCard
-          title={providerRecovery.title}
-          message={providerRecovery.message}
-          actionLabel="Open providers"
-          onAction={() => onOpenProviderSettings?.()}
-        />
-      )}
+      <ProviderRecoveryLane
+        session={session}
+        chatId={activeChat.id}
+        recovery={typeof providerRecovery === "string" ? undefined : providerRecovery}
+        limit={providerLimit}
+        candidates={rebindCandidates}
+        onOpenProviderSettings={onOpenProviderSettings}
+        onUseAccount={(connectionId) => {
+          if (convoProviderId == null || convoModelId == null) return
+          setModel("pi", piEndpointId(sessionTargetId, connectionId), connectionId, convoProviderId, convoModelId)
+        }}
+      />
+      <InterruptedRunCard session={session} chatId={activeChat.id} busy={convo.busy} />
       <McpRecoveryCards
         servers={localMcpConfig.servers}
         setApiKey={localMcpConfig.setApiKey}
@@ -891,31 +1220,26 @@ export function ConversationPane({
         // mode, and environment pickers are omitted — those are main-turn
         // choices — and the composer's follow toggle points at this agent.
         <>
-          {renderFleetAgent(fleet, childTranscriptQuery, session, subagentControlOutcome, onOpenFile)}
+          {renderFleetAgent(fleet, childTranscriptQuery, session, subagentControlOutcome, onOpenFile, onOpenPullRequest, controlSubagent)}
           {/* Same gutter + centered max-width as the transcript column above —
               a full-bleed composer read as a different surface entirely. */}
           <div className="flex-none px-[30px] pb-[18px] pt-[11px]">
           <div className="mx-auto w-full max-w-[760px]">
-          {renderFleetComposer({
-                      session,
-                      addLocalMcp: localMcpConfig.add,
-                      mcpServers: localMcpConfig.servers,
-                      onSetMcpApiKey: localMcpConfig.setApiKey,
-                      onSetMcpAuth: localMcpConfig.setAuth,
-                      onAuthorizeMcp: localMcpConfig.authorize,
+          {renderFleetReadOnlyBar({
+                      mainTitle: activeChat.title ?? session.title,
                       fleet,
                       controlSubagent,
                       convo,
-                      fileBrowser,
-                      toggleFollowAgent,
-                      paneFocused
+                      onPushToast
                     })}
           </div>
           </div>
         </>
       ) : (
-        renderMainConversation({
+        <SubagentEntryContext.Provider value={subagentEntry}>
+        {renderMainConversation({
                 convo,
+                subagentNeedsAttention: countNodesAwaitingAttention(fleet.nodes) > 0,
                 addLocalMcp: localMcpConfig.add,
                 mcpServers: localMcpConfig.servers,
                 onSetMcpApiKey: localMcpConfig.setApiKey,
@@ -933,24 +1257,35 @@ export function ConversationPane({
                 setRequested,
                 activeChat,
                 handoffQueued,
+                handoffAllQueued,
                 handoffModel,
                 providerCatalog,
                 agentEndpointCatalog: sessionEndpointCatalog,
                 composerDisabledReason: effectiveComposerDisabledReason,
                 sendPrompt,
+                waiting,
+                setWaiting,
+                offlineDevice,
                 onOpenPlanReview,
+                previewReady: previewRevealed && onSelectBrowser ? { onOpen: onSelectBrowser } : null,
                 onForkOntoBranchStable,
                 onAdoptBranchStable,
                 plannotatorDocument,
                 draft,
+                voiceInput,
                 draftCodeReferences,
                 paneFocused,
                 fileBrowser,
                 toggleFollowAgent,
                 onRestore,
-                onDelete
-              })
+                onDelete,
+                checkpointCount: turnRevert.checkpointCount,
+                onRevertToTurn: turnRevert.onRevertToTurn,
+                onFilterChanges: onSelectChanges
+              })}
+        </SubagentEntryContext.Provider>
       )}
+      {turnRevert.dialog}
       {/*
         Background tasks dock — runtime work that OUTLIVES this turn. Sits below
         the conversation (not in the sub-agent tab bar, which is per-run and
@@ -1008,16 +1343,22 @@ export function ConversationPane({
   )
 }
 
-function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: ReturnType<typeof useFleetChildTranscript>, session: Session, subagentControlOutcome: SubagentFleetControlOutcome | null, onOpenFile: ((sessionId: string, path: string) => void) | undefined) {
+function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: ReturnType<typeof useFleetChildTranscript>, session: Session, subagentControlOutcome: SubagentFleetControlOutcome | null, onOpenFile: ((sessionId: string, path: string) => void) | undefined, onOpenPullRequest: (() => void) | undefined, controlSubagent: (node: SubagentFleetNode, action: SubagentFleetControlAction, message?: string, replyTo?: string) => Promise<SubagentFleetControlOutcome>) {
+  const node = fleet.selectedNode!
   return <FleetAgentView
-    node={fleet.selectedNode!}
+    node={node}
     messages={fleet.selectedLegacyAgent === null
       ? (childTranscriptQuery.data ?? [])
       : [fleet.selectedLegacyAgent.message]}
     providerId={session.providerId}
     controlOutcome={subagentControlOutcome}
     onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
+    onOpenPullRequest={onOpenPullRequest}
     loading={fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading}
+    onRetry={() => void childTranscriptQuery.refetch()}
+    onReply={(text) => {
+      if (node.attention) void controlSubagent(node, "reply", text, node.attention.requestId)
+    }}
     error={fleet.selectedLegacyAgent === null && childTranscriptQuery.error
       ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
       : null} />
@@ -1029,82 +1370,46 @@ function handoffModelLabel(providerCatalog: ProviderCatalog | null | undefined, 
     .find(({ id }) => id === convo.modelId)?.label ?? null
 }
 
-function renderFleetComposer({
-  session,
-  addLocalMcp,
-  mcpServers,
-  onSetMcpApiKey,
-  onSetMcpAuth,
-  onAuthorizeMcp,
+function renderFleetReadOnlyBar({
+  mainTitle,
   fleet,
   controlSubagent,
   convo,
-  fileBrowser,
-  toggleFollowAgent,
-  paneFocused
+  onPushToast
 }: {
-  session: Session;
-  addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
-  mcpServers: ReadonlyArray<McpServer>;
-  onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
-  onSetMcpAuth: ((name: string, auth: McpRemoteAuth) => Promise<void>) | undefined;
-  onAuthorizeMcp: ((name: string) => Promise<void>) | undefined;
+  mainTitle: string;
   fleet: SubagentFleetController;
   controlSubagent: (node: SubagentFleetNode, action: SubagentFleetControlAction, message?: string, replyTo?: string) => Promise<SubagentFleetControlOutcome>;
   convo: Conversation;
-  fileBrowser: FileBrowserController;
-  toggleFollowAgent: (enabled: boolean) => void;
-  paneFocused: boolean;
+  onPushToast?: (toast: ToastInput) => void;
 }) {
-  return <Composer
-    repo={session.repo}
-    branch={session.branch}
-    onAddMcp={addLocalMcp}
-    mcpServers={mcpServers}
-    onSetMcpApiKey={onSetMcpApiKey}
-    onSetMcpAuth={onSetMcpAuth}
-    onAuthorizeMcp={onAuthorizeMcp}
-    branchPending={session.semanticBranchPending === true}
-    busy={fleet.selectedNode!.status === "queued" ||
-      fleet.selectedNode!.status === "running" ||
-      fleet.selectedNode!.status === "paused" ||
-      fleet.selectedNode!.status === "needs-attention"}
-    placeholder={fleet.selectedNode!.status === "paused"
-      ? `Resume ${fleet.selectedNode!.agent} with a continuation…`
-      : fleet.selectedNode!.attention
-        ? `Reply to ${fleet.selectedNode!.agent}…`
-        : `Steer ${fleet.selectedNode!.agent}…`}
-    disabledReason={fleet.selectedLegacyAgent !== null
-      ? "Inline agents are watch-only — steer them through the main chat."
-      : undefined}
-    onSend={(text) => {
-      const node = fleet.selectedNode
-      if (node === null || fleet.selectedLegacyAgent !== null) return
-      controlSubagent(
-        node,
-        node.status === "paused"
-          ? "resume"
-          : node.attention
-            ? "reply"
-            : "steer",
-        text,
-        node.attention?.requestId
-      ).catch(() => { })
+  const node = fleet.selectedNode!
+  const stop = async () => {
+    const legacy = fleet.legacyAgentFor(node)
+    if (legacy !== null) {
+      if (legacy.status === "working") convo.stopSubagent(legacy.id)
+      return { acknowledged: true }
+    }
+    const outcome = await controlSubagent(node, "stop")
+    if (!outcome.acknowledged) {
+      onPushToast?.({
+        key: `stop-failed-${node.id}`,
+        variant: "error",
+        title: `Couldn't stop ${node.agent}`,
+        action: { label: "Retry", onAction: () => { void controlSubagent(node, "stop") } }
+      })
+    }
+    return outcome
+  }
+  return <SubagentReadOnlyBar
+    node={node}
+    mainTitle={mainTitle}
+    onStop={stop}
+    onReply={(text) => {
+      if (node.attention) void controlSubagent(node, "reply", text, node.attention.requestId)
     }}
-    onStop={() => {
-      const node = fleet.selectedNode
-      if (node === null) return
-      const legacy = fleet.legacyAgentFor(node)
-      if (legacy !== null) {
-        if (legacy.status === "working") convo.stopSubagent(legacy.id)
-        return
-      }
-      controlSubagent(node, "stop").catch(() => { })
-    }}
-    followAgent={fileBrowser.followEnabled}
-    onToggleFollowAgent={toggleFollowAgent}
-    autoFocus={paneFocused}
-    focusKey={fleet.selectedNode!.id} />
+    // Restart = resume the child with its original task as the continuation.
+    onRetry={() => { void controlSubagent(node, "resume", node.task) }} />
 }
 
 const availableRetryPrompt = (
@@ -1116,6 +1421,7 @@ const availableRetryPrompt = (
 
 function renderMainConversation({
   convo,
+  subagentNeedsAttention,
   addLocalMcp,
   mcpServers,
   onSetMcpApiKey,
@@ -1133,24 +1439,35 @@ function renderMainConversation({
   setRequested,
   activeChat,
   handoffQueued,
+  handoffAllQueued,
   handoffModel,
   providerCatalog,
   agentEndpointCatalog,
   composerDisabledReason,
   sendPrompt,
+  waiting,
+  setWaiting,
+  offlineDevice,
   onOpenPlanReview,
+  previewReady,
   onForkOntoBranchStable,
   onAdoptBranchStable,
   plannotatorDocument,
   draft,
+  voiceInput,
   draftCodeReferences,
   paneFocused,
   fileBrowser,
   toggleFollowAgent,
   onRestore,
-  onDelete
+  onDelete,
+  checkpointCount,
+  onRevertToTurn,
+  onFilterChanges
 }: {
   convo: Conversation;
+  /** The active chat's subagent fleet has a pending attention request — lights the latest turn's rail tick amber. */
+  subagentNeedsAttention: boolean;
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
   mcpServers: ReadonlyArray<McpServer>;
   onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
@@ -1168,29 +1485,39 @@ function renderMainConversation({
   setRequested: (value: boolean) => void;
   activeChat: Session["chats"][number];
   handoffQueued: (id: string) => void;
+  handoffAllQueued: (ids: ReadonlyArray<string>) => void;
   handoffModel: string | null;
   providerCatalog: ProviderCatalog | null | undefined;
   agentEndpointCatalog: AgentEndpointCatalog | null | undefined;
   composerDisabledReason: string | undefined;
+  waiting: ReadonlyArray<WaitingSend>;
+  setWaiting: (value: ReadonlyArray<WaitingSend>) => void;
+  offlineDevice: { name: string; continueLocally: () => void } | null;
   sendPrompt: (text: string, images?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }>, agentContext?: string) => void;
   onOpenPlanReview: ((stepId?: string) => void) | undefined;
+  previewReady: { readonly onOpen: () => void } | null;
   onForkOntoBranchStable: () => Promise<void>;
   onAdoptBranchStable: () => Promise<void>;
   plannotatorDocument: import("@jingler/core").PlanDocument | null;
   draft: Draft;
+  voiceInput: ComposerVoiceInput;
   draftCodeReferences: { path: string; startLine: number; endLine: number; label: string }[];
   paneFocused: boolean;
   fileBrowser: FileBrowserController;
   toggleFollowAgent: (enabled: boolean) => void;
   onRestore: ((sessionId: string) => void) | undefined;
   onDelete: ((sessionId: string) => void) | undefined;
+  checkpointCount: number;
+  onRevertToTurn: (turn: number) => void;
+  onFilterChanges: (() => void) | undefined;
 }) {
   return <ConversationView
     messages={convo.messages}
     hasMoreHistory={convo.hasMoreHistory}
     loadingHistory={convo.loadingHistory}
     onLoadEarlier={convo.loadOlder}
-    mode={convo.mode}
+    mode={convo.approvalMode}
+    subagentNeedsAttention={subagentNeedsAttention}
     skills={convo.skills}
     files={convo.files}
     onAddMcp={addLocalMcp}
@@ -1234,15 +1561,17 @@ function renderMainConversation({
         .catch(() => setRequested(false))
     }}
     runStartedAt={convo.runStartedAt}
-    queued={convo.queued}
-    onUnqueue={convo.unqueue}
+    queued={[...convo.queued, ...waiting.map((w) => ({ id: w.id, text: w.text, images: w.images ?? [] }))]}
+    waitingIds={waiting.map((w) => w.id)}
+    onUnqueue={(id) => (waiting.some((w) => w.id === id) ? setWaiting(waiting.filter((w) => w.id !== id)) : convo.unqueue(id))}
     onSendNow={convo.sendNow}
     onEditQueued={convo.editQueued}
     onHandoffQueued={handoffQueued}
+    onHandoffAllQueued={handoffAllQueued}
     steeringId={convo.steeringId}
     handoffHint={handoffModel
-      ? `Hand off — run this in a new chat on ${handoffModel}`
-      : "Hand off — run this in a new chat"}
+      ? `Hand off, run this in a new chat on ${handoffModel}`
+      : "Hand off, run this in a new chat"}
     providerCatalog={providerCatalog}
     agentEndpointCatalog={agentEndpointCatalog}
     endpointId={convo.endpointId}
@@ -1257,16 +1586,22 @@ function renderMainConversation({
     onStop={convo.stop}
     onDecideGate={convo.decideGate}
     onSetMode={convo.setMode}
+    workMode={convo.workMode}
+    autoSwitch={convo.autoSwitch}
+    onSetWorkMode={convo.setWorkMode}
+    onSwitchToAuto={() => convo.setMode("auto")}
     reasoningEffort={convo.reasoning?.effort}
     thinkingEnabled={convo.reasoning?.enabled}
     onSetReasoning={convo.setReasoning}
     question={convo.question}
     onAnswerQuestion={convo.answerQuestion}
     onOpenPlanReview={onOpenPlanReview}
+    previewReady={previewReady}
     onForkOntoBranch={onForkOntoBranchStable}
     onAdoptBranch={onAdoptBranchStable}
     planDocument={plannotatorDocument}
     draft={draft.text}
+    voiceInput={voiceInput}
     // Merge against the LIVE draft, never the render-time `draft` closure:
     // on send the composer fires onSend → setValue("") → setAttachments([])
     // in one go, so a stale spread would resurrect the text it just sent.
@@ -1288,6 +1623,9 @@ function renderMainConversation({
     focusKey={activeChat.id}
     followAgent={fileBrowser.followEnabled}
     onToggleFollowAgent={toggleFollowAgent}
+    checkpointCount={checkpointCount}
+    onRevertToTurn={onRevertToTurn}
+    onFilterChanges={onFilterChanges}
     archived={session.archived
       ? {
         reason: session.archiveReason ?? "merged",
@@ -1498,7 +1836,7 @@ function conversationProviderRecovery(
       models.some((model) => model.id === convo.modelId && model.providerId === convo.providerId && model.selectable)
   ) === true
   if (nativeReady) {
-    return { providerRecovery: undefined, rebindConnectionId: undefined, composerDisabledReason: undefined }
+    return { providerRecovery: undefined, rebindConnectionId: undefined, rebindCandidates: [], providerLimit: undefined, composerDisabledReason: undefined }
   }
   const providerSelection = {
     ...convo,
@@ -1517,10 +1855,12 @@ function conversationProviderRecovery(
   const rebindConnectionId = providerCatalog
     ? providerRebindOf(providerCatalog, providerSelection)
     : undefined
+  const rebindCandidates = providerCatalog ? providerRebindCandidatesOf(providerCatalog, providerSelection) : []
+  const providerLimit = providerCatalog ? providerLimitOf(providerCatalog, convo.connectionId) : undefined
   const composerDisabledReason = typeof providerRecovery === "string"
     ? providerRecovery
     : providerRecovery?.message
-  return { providerRecovery, rebindConnectionId, composerDisabledReason }
+  return { providerRecovery, rebindConnectionId, rebindCandidates, providerLimit, composerDisabledReason }
 }
 
 function contextReadiness(context: Awaited<ReturnType<typeof rpc.contextState>> | undefined) {
@@ -1533,18 +1873,20 @@ function configuredFontScale(config: Awaited<ReturnType<typeof rpc.configGet>> |
 
 function renderPlanSurface(
   plannotatorDocument: import("@jingler/core").PlanDocument | null,
-  pendingReviewId: string | null,
-  decideReview: (approved: boolean, feedback?: string) => Promise<void>
+  decideReview: (approved: boolean, feedback?: string) => Promise<void>,
+  disconnectedCard: ReactNode
 ) {
-  return plannotatorDocument !== null
-    ? (
-      <PlanReview
-        key={`${plannotatorDocument.sessionId}:${plannotatorDocument.producingChatId}:${plannotatorDocument.id}:${pendingReviewId ?? "plan"}`}
-        document={plannotatorDocument}
-        canApprove={pendingReviewId !== null}
-        onApprove={() => decideReview(true)}
-        onRevise={(feedback) => decideReview(false, feedback)}
-      />
-    )
-    : null
+  return (
+    <>
+      {disconnectedCard}
+      {plannotatorDocument !== null && (
+        <PlanReview
+          key={`${plannotatorDocument.sessionId}:${plannotatorDocument.producingChatId}:${plannotatorDocument.id}`}
+          document={plannotatorDocument}
+          onApprove={() => decideReview(true)}
+          onRevise={(feedback) => decideReview(false, feedback)}
+        />
+      )}
+    </>
+  )
 }

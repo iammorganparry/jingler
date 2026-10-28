@@ -11,7 +11,10 @@ import { executeRegistryTool } from "./registry-tool-bridge.js"
 import { makeSharedPlanningRuntime, sharedPlanReviewPending } from "./shared-planning.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import { childExecutionProfile } from "../subagents/subagent-capability-broker.js"
+import { stagedPlan } from "./fixtures/staged-plan.js"
 
+const PLAN = stagedPlan("first $&")
+const FLAT = "# Work\n- [ ] first\n- [ ] second\n"
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
 const done: StreamEvent = { _tag: "Done", tokens: 0, costUsd: 0 }
@@ -24,7 +27,7 @@ const ownerFor = (spec: AgentRunSpec) => ({ runtimeId: spec.runtimeId, endpointI
 type Script = (registry: ToolRegistry, spec: AgentRunSpec, context: AgentRuntimeContext) => AsyncGenerator<StreamEvent>
 const setup = async () => {
   const root = await mkdtemp(join(tmpdir(), "jingler-shared-planning-")); roots.push(root)
-  await writeFile(join(root, "plan.md"), "# Work\n- [ ] first $&\n- [ ] second\n")
+  await writeFile(join(root, "plan.md"), PLAN)
   const events: StreamEvent[] = []
   const permitted = vi.fn(() => Effect.succeed("allow" as const))
   const observed = vi.fn(() => Effect.succeed({ cwd: root, tree: "before" }))
@@ -140,7 +143,7 @@ describe("shared harness planning", () => {
     const runtime = f.wrap(async function* (registry, spec, context) {
       await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
       await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
-      await writeFile(join(f.root, "plan.md"), "# Work\n- [ ] first revised\n")
+      await writeFile(join(f.root, "plan.md"), stagedPlan("first revised"))
       await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
       yield done
     })
@@ -156,8 +159,8 @@ describe("shared harness planning", () => {
     // Unchanged resubmission: nothing to compare against.
     expect((await decide(false))?.previousPlanContent).toBeUndefined()
     const revised = await decide(true)
-    expect(revised?.planContent).toBe("# Work\n- [ ] first revised\n")
-    expect(revised?.previousPlanContent).toBe("# Work\n- [ ] first $&\n- [ ] second\n")
+    expect(revised?.planContent).toBe(stagedPlan("first revised"))
+    expect(revised?.previousPlanContent).toBe(PLAN)
     await running
   })
 
@@ -179,6 +182,23 @@ describe("shared harness planning", () => {
     await Effect.runPromise(next.decidePlanReview(ownerFor(input), "s", "a", { reviewId, approved: true }))
     await resumed
     expect(await sharedPlanReviewPending(join(f.root, "state"), "s", "a")).toBe(false)
+  })
+
+  it("update_plan accepts a flat plan with warnings while submit_plan rejects it", async () => {
+    const f = await setup()
+    await writeFile(join(f.root, "flat.md"), FLAT)
+    const runtime = f.wrap(async function* (registry, spec, context) {
+      const update = await call(registry, spec, context, "plannotator_update_plan", { filePath: "flat.md" })
+      expect(update.details.status).toBe("success")
+      expect(JSON.stringify(update.details.value)).toContain("Before submitting, fix:")
+      const clean = await call(registry, spec, context, "plannotator_update_plan", { filePath: "plan.md" })
+      expect(JSON.stringify(clean.details.value)).not.toContain("Before submitting")
+      const submit = await call(registry, spec, context, "plannotator_submit_plan", { filePath: "flat.md" })
+      expect(submit.details.status).toBe("error")
+      expect(JSON.stringify(submit.details)).toContain("<!-- id: stable-id -->")
+      yield done
+    })
+    await f.run(runtime)
   })
 
   it("publishes parsed sections without stages", async () => {
@@ -301,7 +321,21 @@ describe("shared harness planning", () => {
     const nextEvents: StreamEvent[] = []
     const nextContext = { ...f.context, publishEvent: (event: StreamEvent) => Effect.sync(() => { nextEvents.push(event) }) }
     await Effect.runPromise(Stream.runDrain(runtime.run(specFor(f.root, "pi"), nextContext)))
-    expect(nextEvents).toContainEqual(expect.objectContaining({ _tag: "PlannotatorStateChanged", state: expect.objectContaining({ checklist: [{ step: 1, text: "first $&", completed: true }, { step: 2, text: "second", completed: true }] }) }))
+    expect(nextEvents).toContainEqual(expect.objectContaining({ _tag: "PlannotatorStateChanged", state: expect.objectContaining({ checklist: [{ step: 1, text: "first $&", completed: true }, { step: 2, text: "second (test: a.test.ts::works)", completed: true }] }) }))
+  })
+
+  it("approval sets build", async () => {
+    const f = await setup(); const spec = { ...specFor(f.root), mode: "auto" as const }
+    const runtime = f.wrap(async function* (registry, spec, context) {
+      await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
+      yield done
+    })
+    const running = f.run(runtime, spec)
+    const reviewId = await f.review()
+    expect(f.events).not.toContainEqual({ _tag: "WorkModeChanged", workMode: "build" })
+    await Effect.runPromise(runtime.decidePlanReview(ownerFor(spec), "s", "a", { reviewId, approved: true }))
+    await running
+    expect(f.events).toContainEqual({ _tag: "WorkModeChanged", workMode: "build" })
   })
 
   it("enters planning when an existing chat switches modes without resetting approved plan turns", async () => {
@@ -325,10 +359,10 @@ describe("shared harness planning", () => {
     expect(f.projections().at(-1)?.phase).toBe("executing")
   })
 
-  it("preserves Pi child plan permissions while the parent retains planning tools", async () => {
+  it("forces read-only child permissions from a plan parent while the parent retains planning tools", async () => {
     const f = await setup()
     const runtime = f.wrap(async function* (registry, spec, context) {
-      expect(childExecutionProfile(spec, "worker")).toEqual({ role: "plan", mode: "plan" })
+      expect(childExecutionProfile(spec, "worker")).toEqual({ role: "review", mode: "read-only" })
       const result = await call(registry, spec, context, "plannotator_update_plan", { filePath: "plan.md" })
       expect(result.details.status).toBe("success")
       yield done
@@ -382,6 +416,19 @@ describe("shared harness planning", () => {
     expect([...output]).toContainEqual({ _tag: "Assistant", text: "Turn continued" })
     expect(f.events.some((event) => event._tag === "Failed")).toBe(false)
     expect(f.projections().at(-1)).toMatchObject({ planFilePath: null, checklist: [] })
+  })
+
+  it("accepts a follow-up turn in another checkout attached to the same session, but not an unrelated workspace", async () => {
+    const f = await setup()
+    const other = await mkdtemp(join(tmpdir(), "jingler-shared-planning-b-")); roots.push(other)
+    const stranger = await mkdtemp(join(tmpdir(), "jingler-shared-planning-c-")); roots.push(stranger)
+    const checkout = (id: string, worktreePath: string) => ({ id, repo: id, branch: "main", worktreePath })
+    const checkouts = { session: () => ({ id: "s", checkouts: [checkout("a", f.root), checkout("b", other)], activeCheckoutId: "b" }) } as never
+    const runtime = f.wrap(async function* () { yield done })
+    const turn = (cwd: string) => Effect.runPromise(Stream.runCollect(runtime.run(specFor(cwd), { ...f.context, checkouts })))
+    await turn(f.root)
+    await turn(other)
+    await expect(turn(stranger)).rejects.toThrow("Plan belongs to a different workspace")
   })
 
 })

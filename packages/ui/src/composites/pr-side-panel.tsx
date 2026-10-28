@@ -1,5 +1,6 @@
-import { type KeyboardEvent, useState } from "react"
-import type { PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@jingler/core"
+import { useState, type ReactNode } from "react"
+import type { IssueReference, PrLabel, PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@jingler/core"
+import { conflictResolutionPrompt } from "@jingler/core"
 import type { BadgeProps } from "../components/badge.js"
 import { cn } from "../lib/cn.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
@@ -8,8 +9,10 @@ import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { Spinner } from "../components/loading.js"
-import { PrCheckRow } from "./pr-check-row.js"
+import { MergeSplitButton } from "./merge-split-button.js"
+import type { PrStackNav } from "./pr-stack-rail.js"
 import { ReviewFindings, type ReviewFindingsProps } from "./review-findings.js"
+import { WorkflowSection, type WorkflowSectionProps } from "./workflow-section.js"
 
 /** Reviewer state → Badge tone + label. */
 const reviewerBadge: Record<PrReviewKind, { tone: BadgeProps["tone"]; label: string }> = {
@@ -19,39 +22,49 @@ const reviewerBadge: Record<PrReviewKind, { tone: BadgeProps["tone"]; label: str
   pending: { tone: "count", label: "pending" }
 }
 
-/**
- * The three merge strategies, with the button label each one arms.
- *
- * The label changes with the choice rather than staying "Merge pull request":
- * these are not interchangeable — squash rewrites the branch into one commit and
- * rebase discards the merge commit — so the button has to say which is about to
- * happen. GitHub does the same, for the same reason.
- */
-const MERGE_METHODS: ReadonlyArray<{
-  method: PrMergeMethod
-  label: string
-  action: string
-  hint: string
-}> = [
-  {
-    method: "merge",
-    label: "Merge",
-    action: "Merge pull request",
-    hint: "Keep all commits and add a merge commit"
-  },
-  {
-    method: "squash",
-    label: "Squash",
-    action: "Squash and merge",
-    hint: "Combine every commit into one on the base branch"
-  },
-  {
-    method: "rebase",
-    label: "Rebase",
-    action: "Rebase and merge",
-    hint: "Replay each commit onto the base, with no merge commit"
+/** The one blocker the operator can clear from the rail (see `collectMergeBlockers`). */
+const BEHIND_BLOCKER = "Branch is out of date with the base"
+/** Matches `collectMergeBlockers`'s "Merge conflicts" string in `github-mappers.ts`. */
+const CONFLICTS_BLOCKER = "Merge conflicts"
+
+/** A single PR label chip, tinted with the label's own colour when known. */
+export function LabelChip({ label }: { label: PrLabel }) {
+  if (!label.color) {
+    return (
+      <Badge tone="neutral" size="sm">
+        {label.name}
+      </Badge>
+    )
   }
-]
+  return (
+    <Badge tone="neutral" size="sm">
+      <span aria-hidden className="size-1.5 flex-none rounded-full" style={{ backgroundColor: `#${label.color.replace(/^#/, "")}` }} />
+      {label.name}
+    </Badge>
+  )
+}
+
+function RailSection({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex flex-none flex-col gap-2 border-b border-hairline px-4 py-3">
+      <div className="flex items-center gap-2">
+        <Eyebrow className="flex-1">{title}</Eyebrow>
+        {aside}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function BlockerRow({ blocker, action }: { blocker: string; action?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 text-[12px] text-text">
+      <span className="text-red">✗</span>
+      <span className="min-w-0 flex-1">{blocker}</span>
+      {action}
+    </div>
+  )
+}
 
 function ReviewerRow({ reviewer }: { reviewer: PrReviewer }) {
   const meta = reviewerBadge[reviewer.state]
@@ -92,6 +105,10 @@ export interface PrSidePanelProps {
   onUpdateBranch?: () => void
   updatingBranch?: boolean
   updateBranchError?: string | null
+  /** The files with merge conflicts — named in the "Ask agent to resolve conflicts" prompt. */
+  conflictedFiles?: ReadonlyArray<string>
+  /** Post a conflict-resolution prompt into the session's chat. */
+  onResolveConflicts?: (prompt: string) => void
   /**
    * The adversarial review panel's state + actions. Omitted in contexts that
    * don't offer a review (e.g. a story showing the bare PR rail). `canRun` is
@@ -99,11 +116,17 @@ export interface PrSidePanelProps {
    * merged/closed PR by accident.
    */
   review?: Omit<ReviewFindingsProps, "canRun">
+  /** The workspace setup/run lifecycle — collapsed by default; omitted hides the section. */
+  workflow?: WorkflowSectionProps
   /**
    * The rail's width in px. Was a hard `w-[352px]` — which, in a 500px pane,
    * left the PR body about 88px of reading column after its own 60px gutters.
    */
   width?: number
+  /** The issue this PR closes — the section is hidden without one. */
+  linkedIssue?: IssueReference
+  /** The session PR stack — the section is hidden unless there are two or more layers. */
+  stack?: Pick<PrStackNav, "layers" | "selected" | "onSelect">
   /** Hide session-bound lifecycle and merge controls. */
   readOnly?: boolean
   /** Extra classes — how the caller turns the rail into a floating sheet. */
@@ -125,11 +148,17 @@ export function PrSidePanel({
   onUpdateBranch,
   updatingBranch = false,
   updateBranchError,
+  conflictedFiles = [],
+  onResolveConflicts,
   review,
-  width = 352,
+  workflow,
+  width = 280,
+  linkedIssue,
+  stack,
   readOnly = false,
   className
 }: PrSidePanelProps) {
+  const [resolving, setResolving] = useState(false)
          function renderAdversarialReview() {
            return (review && (
         <div className="flex flex-none flex-col gap-3 border-b border-hairline p-4">
@@ -154,12 +183,13 @@ function renderDraftActions() {
             <Callout tone="blue">This pull request is a draft.</Callout>
             {onMarkReady && (
               <Button
+                variant="secondary"
                 className="w-full justify-center gap-2"
                 disabled={!connected || markingReady}
                 onClick={onMarkReady}
               >
                 {markingReady && <Spinner size={13} />}
-                {markingReady ? "Marking ready…" : "Ready for review"}
+                {markingReady ? "Marking ready…" : "Mark ready for review"}
               </Button>
             )}
             {markReadyError && (
@@ -171,51 +201,86 @@ function renderDraftActions() {
            }
 
 function renderConflictActions() {
-             return (<div className="overflow-hidden rounded-lg border border-red/30">
-            <div className="flex items-center gap-[9px] border-b border-hairline bg-red/[0.06] px-[13px] py-[10px]">
-              <span className="flex size-5 flex-none items-center justify-center rounded-full bg-red/20 text-[12px] text-red">
-                !
-              </span>
-              <span className="text-[13px] font-semibold text-text-bright">Merging blocked</span>
-            </div>
-            <div className="flex flex-col gap-1.5 px-[13px] py-[11px]">
-              {pr.mergeBlockers.map((blocker) => (
-                <span key={blocker} className="flex items-center gap-2 text-[12px] text-text">
-                  <span className="text-red">✗</span>
-                  {blocker}
+  const hasConflicts = pr.mergeBlockers.includes(CONFLICTS_BLOCKER)
+             return (<div className="flex flex-col gap-3">
+            <div className="overflow-hidden rounded-lg border border-red/30">
+              <div className="flex items-center gap-[9px] border-b border-hairline bg-red/[0.06] px-[13px] py-[10px]">
+                <span className="flex size-5 flex-none items-center justify-center rounded-full bg-red/20 text-[12px] text-red">
+                  !
                 </span>
-              ))}
-            </div>
-            <div className="flex flex-col gap-2 px-[13px] pb-[13px]">
-              {/*
-                "Out of date" is the ONE blocker the operator can clear from here
-                — conflicts need the code, branch protection needs a reviewer,
-                failing checks need a fix. `mergeStateStatus` was fetched all
-                along and only ever collapsed into a blocker STRING, so the box
-                stated the problem and offered nothing. This updates the remote
-                head only; the worktree is left alone, since the agent may be
-                mid-turn with uncommitted work.
-              */}
-              {behind && onUpdateBranch && (
-                <Button
-                  variant="secondary"
-                  className="w-full justify-center gap-2"
-                  disabled={!connected || updatingBranch}
-                  onClick={onUpdateBranch}
-                >
-                  {updatingBranch && <Spinner size={13} />}
-                  {updatingBranch ? "Updating…" : "Update branch"}
-                </Button>
+                <span className="text-[13px] font-semibold text-text-bright">Merging blocked</span>
+              </div>
+              <div className="flex flex-col gap-1.5 px-[13px] py-[11px]">
+                {/*
+                  "Out of date" is the ONE blocker the operator can clear from here
+                  with a direct GitHub mutation; branch protection needs a reviewer,
+                  failing checks need a fix. Conflicts route to the session's own
+                  agent instead, below. This updates the remote head only; the
+                  worktree is left alone, since the agent may be mid-turn with
+                  uncommitted work.
+                */}
+                {pr.mergeBlockers.map((blocker) => (
+                  <BlockerRow
+                    key={blocker}
+                    blocker={blocker}
+                    action={
+                      behind && blocker === BEHIND_BLOCKER && onUpdateBranch ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="gap-2"
+                          disabled={!connected || updatingBranch}
+                          onClick={onUpdateBranch}
+                        >
+                          {updatingBranch && <Spinner size={13} />}
+                          {updatingBranch ? "Updating…" : "Update branch"}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                ))}
+              </div>
+              {hasConflicts && onResolveConflicts && (
+                <div className="flex flex-col gap-1.5 border-t border-hairline px-[13px] py-[11px]">
+                  {resolving ? (
+                    <div className="flex items-center gap-2 text-[12px] text-text">
+                      <Spinner size={13} />
+                      <span>
+                        Agent is resolving…{" "}
+                        <span className="text-dim">{conflictedFiles.join(", ")}</span>
+                      </span>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="w-full justify-center gap-2"
+                      disabled={!connected || conflictedFiles.length === 0}
+                      onClick={() => {
+                        onResolveConflicts(conflictResolutionPrompt(conflictedFiles))
+                        setResolving(true)
+                      }}
+                    >
+                      Ask agent to resolve conflicts
+                    </Button>
+                  )}
+                </div>
               )}
               {updateBranchError && (
-                <Callout tone="red" className="items-start">
-                  {updateBranchError}
-                </Callout>
+                <div className="px-[13px] pb-[13px]">
+                  <Callout tone="red" className="items-start">
+                    {updateBranchError}
+                  </Callout>
+                </div>
               )}
-              <Button variant="secondary" className="w-full justify-center" disabled>
-                Merge pull request
-              </Button>
             </div>
+            <MergeSplitButton
+              connected={connected}
+              onMerge={onMerge}
+              merging={merging}
+              blockedReason={pr.mergeBlockers[0]}
+              mergeError={mergeError}
+            />
           </div>)
            }
 
@@ -229,73 +294,16 @@ function renderConflictActions() {
            if (draft) return (renderDraftActions())
            if (blocked) return (renderConflictActions())
            return (<div className="flex flex-col gap-3">
-            <Callout tone="green">This branch has no conflicts and can be merged.</Callout>
-            {/*
-              The strategy picker. `PrMergeMethod` and the GitHub API value
-              supported all three from the start; only the UI didn't, so every
-              merge from here was a merge commit. Squash is most teams' default,
-              which made this the likeliest reason to give up and open the
-              browser. Segmented rather than a dropdown: three options, and which
-              one is armed must be readable without opening anything.
-            */}
-            <div
-              role="radiogroup"
-              aria-label="Merge method"
-              className="flex overflow-hidden rounded-md border border-line"
-            >
-              {MERGE_METHODS.map((m, index) => (
-                <button
-                  key={m.method}
-                  type="button"
-                  role="radio"
-                  aria-checked={method === m.method}
-                  tabIndex={method === m.method ? 0 : -1}
-                  data-merge-method={m.method}
-                  title={m.hint}
-                  disabled={merging}
-                  onClick={() => setMethod(m.method)}
-                  onKeyDown={(event) => moveMethod(event, index)}
-                  className={cn(
-                    "flex-1 px-2 py-[5px] text-[11.5px] transition-colors disabled:pointer-events-none",
-                    method === m.method
-                      ? "bg-surface text-text-bright"
-                      : "text-dim hover:bg-surface/50 hover:text-text"
-                  )}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <Button
-              className="w-full justify-center gap-2"
-              disabled={!connected || merging || !onMerge}
-              onClick={() => void Promise.resolve(onMerge?.(method)).catch(() => {})}
-            >
-              {merging && <Spinner size={13} />}
-              {merging ? "Merging…" : MERGE_METHODS.find((m) => m.method === method)!.action}
-            </Button>
-            {mergeError && (
-              <Callout tone="red" className="items-start">
-                {mergeError}
-              </Callout>
-            )}
+            <Callout tone="blue">This branch has no conflicts and can be merged.</Callout>
+            <MergeSplitButton
+              connected={connected}
+              onMerge={onMerge}
+              merging={merging}
+              mergeError={mergeError}
+            />
           </div>)
          }
 
-  // Merge-commit default, matching GitHub and the previous hardcoded
-  // behaviour — a picker that silently changed what the button did would be a
-  // worse regression than not having one.
-  const [method, setMethod] = useState<PrMergeMethod>("merge")
-  const moveMethod = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return
-    event.preventDefault()
-    const delta = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1
-    const next = (index + delta + MERGE_METHODS.length) % MERGE_METHODS.length
-    const value = MERGE_METHODS[next]!.method
-    setMethod(value)
-    document.querySelector<HTMLButtonElement>(`[data-merge-method="${value}"]`)?.focus()
-  }
-  const failing = pr.checks.filter((c) => c.status === "fail").length
   const blocked = pr.mergeBlockers.length > 0
   const behind = pr.mergeStateStatus === "BEHIND"
   const merged = pr.state === "merged"
@@ -315,30 +323,10 @@ function renderConflictActions() {
       )}
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-      {/* Reviewers */}
-      <div className="flex flex-none flex-col gap-[11px] border-b border-hairline p-4">
-        <Eyebrow>Reviewers</Eyebrow>
-        {pr.reviewers.length === 0 ? (
-          <span className="text-[12px] text-dim">No reviewers yet</span>
-        ) : (
-          pr.reviewers.map((r) => <ReviewerRow key={r.login} reviewer={r} />)
-        )}
-      </div>
+      <RailInfoSections pr={pr} linkedIssue={linkedIssue} stack={stack} />
 
-      {/* Checks */}
-      <div className="flex flex-none flex-col gap-3 border-b border-hairline p-4">
-        <div className="flex items-center gap-2">
-          <Eyebrow className="flex-1">Checks</Eyebrow>
-          {failing > 0 && (
-            <span className="font-mono text-[10.5px] text-red">{failing} failing</span>
-          )}
-        </div>
-        {pr.checks.length === 0 ? (
-          <span className="text-[12px] text-dim">No checks reported</span>
-        ) : (
-          pr.checks.map((c) => <PrCheckRow key={c.name} check={c} />)
-        )}
-      </div>
+      {/* Workflow — collapsed by default; omitted entirely when there's nothing to show. */}
+      {workflow && <WorkflowSection {...workflow} />}
 
       {/* Adversarial review */}
       {renderAdversarialReview()}
@@ -363,5 +351,72 @@ function renderConflictActions() {
         )}
       </div>}
     </div>
+  )
+}
+
+/** The data sections above the merge box; each is hidden when it has nothing to show. */
+function RailInfoSections({
+  pr,
+  linkedIssue,
+  stack
+}: Pick<PrSidePanelProps, "pr" | "linkedIssue" | "stack">) {
+  const failing = pr.checks.filter((c) => c.status === "fail").length
+  return (
+    <>
+      {pr.reviewers.length > 0 && (
+        <RailSection title="Reviewers">
+          {pr.reviewers.map((r) => <ReviewerRow key={r.login} reviewer={r} />)}
+        </RailSection>
+      )}
+
+      {pr.labels.length > 0 && (
+        <RailSection title="Labels">
+          <div className="flex flex-nowrap gap-1.5 overflow-hidden">
+            {pr.labels.map((label) => <LabelChip key={label.name} label={label} />)}
+          </div>
+        </RailSection>
+      )}
+
+      {pr.checks.length > 0 && (
+        <RailSection
+          title="Checks"
+          aside={failing > 0 && <span className="font-mono text-[10.5px] text-red">{failing} failing</span>}
+        >
+          <span className="text-[12px] text-text">
+            {pr.checks.filter((c) => c.status === "pass").length}/{pr.checks.length} passing
+          </span>
+        </RailSection>
+      )}
+
+      {linkedIssue && (
+        <RailSection title="Linked issue">
+          <a
+            href={linkedIssue.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[12px] text-text hover:text-text-bright"
+          >
+            <span className="font-mono text-dim">{linkedIssue.identifier}</span> {linkedIssue.title}
+          </a>
+        </RailSection>
+      )}
+
+      {stack && stack.layers.length > 1 && (
+        <RailSection title="Stack">
+          {stack.layers.map((layer) => (
+            <Button
+              key={layer.number}
+              variant={layer.number === stack.selected ? "secondary" : "ghost"}
+              size="sm"
+              className="justify-start"
+              onClick={() => stack.onSelect(layer.number)}
+            >
+              #{layer.number}
+              {layer.title ? ` ${layer.title}` : ""}
+            </Button>
+          ))}
+        </RailSection>
+      )}
+    </>
   )
 }

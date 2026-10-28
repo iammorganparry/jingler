@@ -10,6 +10,10 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 
+/** A one-line-added unified diff per file, or undefined when the PR lists none. */
+const filesDiff = (files: ReadonlyArray<string> | undefined): string | undefined =>
+  files?.map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1,2 @@\n one\n+two\n`).join("");
+
 export interface FakeGitHubPr {
   readonly number: number;
   readonly title: string;
@@ -20,6 +24,8 @@ export interface FakeGitHubPr {
   readonly isDraft?: boolean;
   readonly additions?: number;
   readonly deletions?: number;
+  /** Files this PR changes (default: one `src/auth.ts`); each serves `/files` and the diff. */
+  readonly files?: ReadonlyArray<string>;
   readonly updatedAt?: string;
   readonly body?: string;
   readonly labels?: ReadonlyArray<{
@@ -81,6 +87,8 @@ export interface FakeGitHubServer {
   readonly requests: ReadonlyArray<{ method: string; path: string }>;
   /** Semantic write operations for assertions such as selected merge method. */
   readonly operations: ReadonlyArray<string>;
+  /** Bodies of submitted pull request reviews (inline comments included). */
+  readonly reviews: ReadonlyArray<Record<string, unknown>>;
   /** Requested installation permissions, excluding the repository qualifier. */
   readonly credentialRequests: ReadonlyArray<{
     readonly repository: string;
@@ -95,7 +103,7 @@ export interface FakeGitHubServer {
     readonly state: "active" | "archived";
   } | null;
   /** Fail exactly the next matching mutation, then recover for retry/restart tests. */
-  readonly failNext: (operation: "create-pr" | "update-pr") => void;
+  readonly failNext: (operation: "create-pr" | "update-pr" | "merge-pr") => void;
   readonly status: () => GitHubAppConnectionStatus;
   readonly publishedPr: () => {
     readonly number: number;
@@ -201,6 +209,7 @@ export const startFakeGitHubServer = async (
   const issues = [...(options.issues ?? [])];
   const requests: Array<{ method: string; path: string }> = [];
   const operations: string[] = [];
+  const reviews: Record<string, unknown>[] = [];
   const credentialRequests: Array<{
     repository: string;
     permissions: ReadonlyArray<string>;
@@ -219,7 +228,7 @@ export const startFakeGitHubServer = async (
       updatedAt: string;
     }
   >();
-  const failures = new Set<"create-pr" | "update-pr">();
+  const failures = new Set<"create-pr" | "update-pr" | "merge-pr">();
   const grant = options.relayGrant ?? "e2e-short-lived-github-grant";
   let publishedPr: PublishedPull | null = null;
 
@@ -649,7 +658,7 @@ export const startFakeGitHubServer = async (
       return false;
     };
     if (requestUrl.pathname === "/graphql" && method === "POST") {
-      return handleGraphql(req, res, requirePermissions, operations);
+      return handleGraphql(req, res, requirePermissions, operations, prs);
     }
 
     const repository = repositoryRequest(requestUrl, installation, res);
@@ -745,6 +754,7 @@ export const startFakeGitHubServer = async (
                   text(
                     res,
                     200,
+                    filesDiff(pr.files) ??
                     options.diff ??
                     "diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1 +1,2 @@\n one\n+two\n",
                   );
@@ -790,14 +800,12 @@ export const startFakeGitHubServer = async (
               matches: () => (tail === "/files" && method === "GET"),
               handle: function listPullFiles() {
                 if (!requirePermissions("pull_requests:read")) return;
-                json(res, 200, [
-                  {
-                    filename: "src/auth.ts",
-                    additions: pr.additions ?? 0,
-                    deletions: pr.deletions ?? 0,
-                    patch: "@@ -1 +1,2 @@\n one\n+two",
-                  },
-                ]);
+                json(res, 200, (pr.files ?? ["src/auth.ts"]).map((filename) => ({
+                  filename,
+                  additions: pr.additions ?? 0,
+                  deletions: pr.deletions ?? 0,
+                  patch: "@@ -1 +1,2 @@\n one\n+two",
+                })));
                 return;
               }
             },
@@ -819,8 +827,9 @@ export const startFakeGitHubServer = async (
             },
             {
               matches: () => (tail === "/reviews" && method === "POST"),
-              handle: function submitPullReview() {
+              handle: async function submitPullReview() {
                 if (!requirePermissions("pull_requests:write")) return;
+                reviews.push(await requestBody(req));
                 operations.push(`pr review ${number}`);
                 json(res, 200, {});
                 return;
@@ -839,6 +848,11 @@ export const startFakeGitHubServer = async (
               handle: async function mergePull() {
                 if (!requirePermissions("contents:write")) return;
                 const body = await requestBody(req);
+                if (failures.delete("merge-pr")) {
+                  operations.push(`fail pr merge ${number}`);
+                  json(res, 405, { message: "Merge conflict" });
+                  return;
+                }
                 operations.push(
                   `pr merge ${number} --${String(body.merge_method ?? "merge")}`,
                 );
@@ -979,6 +993,7 @@ export const startFakeGitHubServer = async (
     url,
     requests,
     operations,
+    reviews,
     credentialRequests,
     connect: () => {
       connected = true;
@@ -1027,7 +1042,7 @@ function pullHeadRepository(pr: FakeGitHubPr, login: string, cloneUrl: string | 
   };
 }
 
-async function handleGraphql(req: IncomingMessage, res: ServerResponse, requirePermissions: (...permissions: readonly string[]) => boolean, operations: string[]) {
+async function handleGraphql(req: IncomingMessage, res: ServerResponse, requirePermissions: (...permissions: readonly string[]) => boolean, operations: string[], prs: FakeGitHubPr[]) {
   const body = await requestBody(req);
   const query = String(body.query ?? "");
   const writesPullRequest =
@@ -1041,8 +1056,11 @@ async function handleGraphql(req: IncomingMessage, res: ServerResponse, requireP
   ) {
     return;
   }
-  if (query.includes("markPullRequestReadyForReview"))
+  if (query.includes("markPullRequestReadyForReview")) {
     operations.push("pr ready");
+    const index = prs.findIndex((pr) => `PR_${pr.number}` === (body.variables as { id?: string } | undefined)?.id);
+    if (index >= 0) prs[index] = { ...prs[index]!, isDraft: false };
+  }
   if (query.includes("resolveReviewThread"))
     operations.push("review thread resolve");
   if (query.includes("unresolveReviewThread"))

@@ -7,6 +7,7 @@ import type {
   PullRequestListItem,
   PullRequest,
   Repo,
+  ReviewComment,
   Session,
   GitHubTeamQueue
 } from "@jingler/core"
@@ -155,6 +156,12 @@ export function usePullRequestInbox(_connected: boolean) {
       : Promise.reject(new Error("Select a pull request first.")),
     onSuccess: refresh,
   })
+  const inlineReviewMutation = useMutation({
+    mutationFn: (input: { body: string; comments: ReadonlyArray<ReviewComment> }) => selected && !teamMode
+      ? rpc.githubSubmitReviewBySlug(selected.repository, selected.number, input.comments, input.body)
+      : Promise.reject(new Error("Inline comments need a selected pull request.")),
+    onSuccess: refresh,
+  })
   const resetActionErrors = () => {
     commentMutation.reset()
     closeMutation.reset()
@@ -193,6 +200,7 @@ export function usePullRequestInbox(_connected: boolean) {
     loading: listLoading(),
     detailLoading: detail.isPending && selected !== null,
     detailError: message(detail.error),
+    submitInlineReview: teamMode ? undefined : (input: { body: string; comments: ReadonlyArray<ReviewComment> }) => { resetActionErrors(); return inlineReviewMutation.mutateAsync(input).then(() => undefined) },
     comment: (body: string) => { resetActionErrors(); return commentMutation.mutateAsync(body) },
     close: () => { resetActionErrors(); return closeMutation.mutateAsync() },
     merge: (method: PrMergeMethod) => { resetActionErrors(); return mergeMutation.mutateAsync(method) },

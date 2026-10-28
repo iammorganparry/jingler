@@ -64,7 +64,7 @@ export const MAX_TEXT_PART_CHARS = 16 * 1024
  * inside rendered markdown.
  */
 const ELIDED_TEXT_SUFFIX =
-  "released from memory — full text is in the session transcript]"
+  "released from memory, full text is in the session transcript]"
 
 const elideText = (text: string): string => {
   const released = text.length - MAX_TEXT_PART_CHARS

@@ -8,6 +8,7 @@ export * from "./plugin-secret-store.js"
 export * from "./auth.js"
 export * from "./config.js"
 export * from "./mcp-config-service.js"
+export * from "./mcp-log.js"
 export * from "./mcp-probe.js"
 export * from "./mcp-import.js"
 export * from "./mcp-migration.js"
@@ -32,6 +33,7 @@ export * from "./creative-name.js"
 export * from "./sessions.js"
 export * from "./session-title-service.js"
 export * from "./transcripts.js"
+export * from "./interrupted-chats.js"
 export * from "./context-digest.js"
 export * from "./context-manager.js"
 export * from "./explanation-store.js"
@@ -125,3 +127,13 @@ export { configureAnchoredFsProcess, anchoredFs } from "./anchored-fs.js"
 export type { AnchoredProcess } from "./anchored-fs.js"
 
 export * from "./project-config.js"
+
+// Session import scanners
+export {
+  scanClaudeCodeSessions,
+  scanCodexSessions,
+} from "./session-import-scanners.js";
+export {
+  scanConductorSessions,
+  scanT3CodeSessions,
+} from "./session-import-scanners-sqlite.js";

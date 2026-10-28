@@ -9,6 +9,7 @@ import { useMachine } from "@xstate/react"
 import { useState, type ReactNode } from "react"
 import { JinglerApp } from "../../app/jingler-app.js"
 import { ConversationView } from "../../app/conversation-view.js"
+import type { ResourceKindFilter, ResourceSourceFilter } from "../../composites/agents-resource-list.js"
 import { RuntimeRecoveryCard } from "../../composites/runtime-recovery-card.js"
 import {
   SettingsView,
@@ -92,7 +93,9 @@ const useProviderSettings = (): NonNullable<SettingsViewProps["providerConnectio
     onLogout: noop,
     onConnectClaude: noop,
     onStartCodex: noop,
-    onSetApiKey: noop
+    onSetApiKey: noop,
+    onCancelLogin: async () => {},
+    onSaveApiKey: async () => ({ ok: true })
   }
 }
 
@@ -100,6 +103,9 @@ const useAgentSettings = (
   reviewing = false
 ): NonNullable<SettingsViewProps["agents"]> => {
   const [resources, setResources] = useState<ReadonlyArray<ManagedResource>>(FLOW_RESOURCES)
+  const [query, onQueryChange] = useState("")
+  const [kind, onKindChange] = useState<ResourceKindFilter>("all")
+  const [source, onSourceChange] = useState<ResourceSourceFilter>("all")
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<ReadonlySet<string>>(
     () => new Set(FLOW_RESOURCE_DETECTION.candidates.map(({ id }) => id))
   )
@@ -113,6 +119,12 @@ const useAgentSettings = (
     selectedCandidateIds,
     loading: false,
     reviewing,
+    query,
+    kind,
+    source,
+    onQueryChange,
+    onKindChange,
+    onSourceChange,
     onDetect: noop,
     onSetDelegationEnabled: noop,
     onSetModel: noop,
@@ -251,6 +263,8 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
         onGithub={() => send({ type: "AUTHENTICATE" })}
         onGoogle={() => send({ type: "AUTHENTICATE" })}
         onSendMagicLink={() => send({ type: "AUTHENTICATE" })}
+        onCancel={noop}
+        onRetry={noop}
         onReset={noop}
       />
     )
@@ -260,7 +274,7 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
 
   const step = snapshot.matches("providerConnecting")
     ? "provider"
-    : snapshot.value as "workspace" | "github" | "provider" | "resources"
+    : snapshot.value as "workspace" | "github" | "provider"
   return (
     <SetupScreen
       step={step}
@@ -270,9 +284,12 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
       providerCatalog={catalog}
       providerPendingAuthKind={snapshot.context.providerPendingAuthKind}
       busy={snapshot.matches("providerConnecting")}
-      resourceDetection={FLOW_RESOURCE_DETECTION}
       onChooseDir={() => send({ type: "CHOOSE_WORKSPACE" })}
       onContinue={() => send({ type: "CONTINUE" })}
+      onToggleRepo={noop}
+      onToggleAllRepos={noop}
+      onAddProjects={() => send({ type: "CONTINUE" })}
+      onCloneRepository={noop}
       onConnectGithub={() => send({ type: "CONNECT_GITHUB" })}
       onSkipGithub={() => send({ type: "SKIP_GITHUB" })}
       onConnectClaude={() => send({
@@ -291,10 +308,8 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
       onSkipProvider={() => send({ type: "SKIP_PROVIDER" })}
       onCancelAuth={noop}
       onRetryProvider={noop}
-      onImportResources={() => send({ type: "IMPORT_RESOURCES" })}
-      onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
-      onCancelResourceImport={noop}
-      onRetryResources={noop}
+      onSkipImportSessions={noop}
+      onContinueImportSessions={noop}
     />
   )
 }
@@ -328,12 +343,128 @@ export const CompleteJourney: Story = {
   render: () => frame(<ProductFlow startAt="auth" />)
 }
 
-export const ProviderOnboarding: Story = {
-  render: () => frame(<ProductFlow startAt="provider" />)
+/** A failed folder scan keeps onboarding on step 1 with the error and a way to pick another folder. */
+export const WorkspaceScanFailed: Story = {
+  render: () => frame(
+    <SetupScreen
+      step="workspace"
+      github={disconnectedGithub}
+      error="Couldn't read ~/code, permission denied"
+      reposDir="~/code"
+      onChooseDir={noop}
+      onContinue={noop}
+      onToggleRepo={noop}
+      onToggleAllRepos={noop}
+      onAddProjects={noop}
+      onCloneRepository={noop}
+      onConnectGithub={noop}
+      onSkipGithub={noop}
+      onConnectClaude={noop}
+      onStartCodex={noop}
+      onConnectApi={noop}
+      onContinueProvider={noop}
+      onSkipProvider={noop}
+      onCancelAuth={noop}
+      onRetryProvider={noop}
+      onSkipImportSessions={noop}
+      onContinueImportSessions={noop}
+    />
+  )
 }
 
-export const ResourceImport: Story = {
-  render: () => frame(<ProductFlow startAt="resources" />)
+const githubStep = (github: typeof FLOW_GITHUB) => frame(
+  <SetupScreen
+    step="github"
+    github={github}
+    onChooseDir={noop}
+    onContinue={noop}
+    onToggleRepo={noop}
+    onToggleAllRepos={noop}
+    onAddProjects={noop}
+    onCloneRepository={noop}
+    onConnectGithub={noop}
+    onSkipGithub={noop}
+    onRetryGithub={noop}
+    onConnectClaude={noop}
+    onStartCodex={noop}
+    onConnectApi={noop}
+    onContinueProvider={noop}
+    onSkipProvider={noop}
+    onCancelAuth={noop}
+    onRetryProvider={noop}
+    onSkipImportSessions={noop}
+    onContinueImportSessions={noop}
+  />
+)
+
+/** Step 2 connected: avatar, @login and installation count. */
+export const GithubConnected: Story = { render: () => githubStep(FLOW_GITHUB) }
+
+/** Step 2 error: "GitHub didn't respond" with Try again and Skip for now. */
+export const GithubError: Story = {
+  render: () => githubStep({ ...FLOW_GITHUB, mode: "error", error: "Request timed out" })
+}
+
+/** A scanned folder with no git repositories offers cloning one. */
+export const WorkspaceEmpty: Story = {
+  render: () => frame(
+    <SetupScreen
+      step="workspace"
+      github={disconnectedGithub}
+      reposDir="~/code"
+      onChooseDir={noop}
+      onContinue={noop}
+      onToggleRepo={noop}
+      onToggleAllRepos={noop}
+      onAddProjects={noop}
+      onCloneRepository={noop}
+      onConnectGithub={noop}
+      onSkipGithub={noop}
+      onConnectClaude={noop}
+      onStartCodex={noop}
+      onConnectApi={noop}
+      onContinueProvider={noop}
+      onSkipProvider={noop}
+      onCancelAuth={noop}
+      onRetryProvider={noop}
+      onSkipImportSessions={noop}
+      onContinueImportSessions={noop}
+    />
+  )
+}
+
+/** A scanned folder lists its repositories with checkboxes and an "Add N projects" action. */
+export const WorkspaceRepoList: Story = {
+  render: () => frame(
+    <SetupScreen
+      step="workspace"
+      github={disconnectedGithub}
+      reposDir="/Users/morgan/Code"
+      repos={FLOW_REPOS}
+      selectedRepoPaths={[FLOW_REPOS[0]!.path]}
+      onChooseDir={noop}
+      onContinue={noop}
+      onToggleRepo={noop}
+      onToggleAllRepos={noop}
+      onAddProjects={noop}
+      onCloneRepository={noop}
+      onConnectGithub={noop}
+      onSkipGithub={noop}
+      onConnectClaude={noop}
+      onStartCodex={noop}
+      onConnectApi={noop}
+      onContinueProvider={noop}
+      onSkipProvider={noop}
+      onCancelAuth={noop}
+      onRetryProvider={noop}
+      onSkipImportSessions={noop}
+      onContinueImportSessions={noop}
+    />
+  )
+}
+
+export const ProviderOnboarding: Story = {
+  render: () => frame(<ProductFlow startAt="provider" />)
 }
 
 export const ActivePiSession: Story = {
@@ -367,4 +498,53 @@ export const MutationRecovery: Story = {
       </div>
     </div>
   )
+}
+
+const providerStep = (props: Partial<React.ComponentProps<typeof SetupScreen>>) => frame(
+  <SetupScreen
+    step="provider"
+    github={disconnectedGithub}
+    onChooseDir={noop}
+    onContinue={noop}
+    onToggleRepo={noop}
+    onToggleAllRepos={noop}
+    onAddProjects={noop}
+    onCloneRepository={noop}
+    onConnectGithub={noop}
+    onSkipGithub={noop}
+    onConnectClaude={noop}
+    onStartCodex={noop}
+    onConnectApi={noop}
+    onContinueProvider={noop}
+    onSkipProvider={noop}
+    onCancelAuth={noop}
+    onRetryProvider={noop}
+    onSkipImportSessions={noop}
+    onContinueImportSessions={noop}
+    {...props}
+  />
+)
+
+/** Step 3 with no provider: Continue is disabled and says why. */
+export const ProviderContinueDisabled: Story = {
+  render: () => providerStep({ providerCatalog: null })
+}
+
+/** Step 3 connected: HarnessCard with logo and Ready pill. */
+export const ProviderHarnessReady: Story = {
+  render: () => providerStep({ providerCatalog: FLOW_PROVIDER_CATALOG })
+}
+
+/** `loadFailed`: "Couldn't load providers · Retry". */
+export const ProviderLoadFailed: Story = {
+  render: () => providerStep({ providerFailure: "loadFailed", error: "rpc timeout" })
+}
+
+/** `completionFailed`: "Couldn't save setup · Retry". */
+export const ProviderCompletionFailed: Story = {
+  render: () => providerStep({
+    providerCatalog: FLOW_PROVIDER_CATALOG,
+    providerFailure: "completionFailed",
+    error: "Config unavailable"
+  })
 }

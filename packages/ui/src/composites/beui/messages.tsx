@@ -69,6 +69,8 @@ export interface MessageScrollerProps extends ComponentPropsWithoutRef<"div"> {
   navigationItems?: ReadonlyArray<PreviewRailItem>
   navigationActiveId?: string
   onNavigationSelect?: (item: PreviewRailItem) => void
+  /** Interactive hover-card controls for each rail item. */
+  renderNavigationActions?: (item: PreviewRailItem) => ReactNode
   viewportClassName?: string
   contentClassName?: string
   railClassName?: string
@@ -94,7 +96,7 @@ function scrollRailViewport(viewport: HTMLElement, top: number, behavior: Scroll
   else viewport.scrollTop = top
 }
 
-export function MessageScroller({ followOutput = true, followThreshold = 56, smooth = true, onFollowChange, label = "Conversation", busy, navigation, navigationLabel = "Message navigation", navigationItems, navigationActiveId, onNavigationSelect, viewportClassName, contentClassName, railClassName, viewportTestId, viewportRef: externalViewportRef, viewportProps, contentProps, className, children, ...props }: MessageScrollerProps) {
+export function MessageScroller({ followOutput = true, followThreshold = 56, smooth = true, onFollowChange, label = "Conversation", busy, navigation, navigationLabel = "Message navigation", navigationItems, navigationActiveId, onNavigationSelect, renderNavigationActions, viewportClassName, contentClassName, railClassName, viewportTestId, viewportRef: externalViewportRef, viewportProps, contentProps, className, children, ...props }: MessageScrollerProps) {
   const reduce = useReducedMotion() ?? false
   const viewportRef = useRef<HTMLElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -281,7 +283,7 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
     <div ref={contentRef} role="log" aria-live="polite" aria-relevant="additions text" aria-busy={busy} className={contentClassName} {...contentProps}>{children}</div>
   </section>
 
-  return <div data-slot="message-scroller" className={cn("min-h-0", className)} {...props}>{navigation === "rail" ? <PreviewRail items={railVisible ? visibleRailItems : []} label={navigationLabel} activeId={navigationActiveId ?? activeRailId} onItemSelect={onNavigationSelect ?? scrollToRailItem} previewSide="before" highlightActive itemSize={14} className="h-full min-h-0 overflow-hidden" previewContainerClassName="right-8 left-3" previewClassName="mr-1 w-64 max-w-full [&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-2 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4" railClassName={cn("absolute inset-y-3 right-1 w-7 content-center py-1 [&_[data-slot=preview-rail-item]]:w-7 [&_[data-slot=preview-rail-item]]:justify-end [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-right", railVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0", railClassName)}>{viewport}</PreviewRail> : viewport}</div>
+  return <div data-slot="message-scroller" className={cn("min-h-0", className)} {...props}>{navigation === "rail" ? <PreviewRail renderActions={renderNavigationActions} maxItems={10} items={railVisible ? visibleRailItems : []} label={navigationLabel} activeId={navigationActiveId ?? activeRailId} onItemSelect={onNavigationSelect ?? scrollToRailItem} previewSide="before" highlightActive itemSize={14} className="h-full min-h-0 overflow-hidden" previewContainerClassName="right-8 left-3" previewClassName="w-64 max-w-full pr-1 [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-2 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4" railClassName={cn("absolute inset-y-3 right-1 w-7 content-center py-1 [&_[data-slot=preview-rail-item]]:w-7 [&_[data-slot=preview-rail-item]]:justify-end [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-right", railVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0", railClassName)}>{viewport}</PreviewRail> : viewport}</div>
 }
 
 export function StreamingResponse({ children, streaming = false, sources, onCopy, actions, className }: { children: ReactNode; streaming?: boolean; sources?: ReactNode; onCopy?: () => void; actions?: ReactNode; className?: string }) {

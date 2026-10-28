@@ -358,7 +358,7 @@ describe("AgentRunner HITL gating", () => {
       })
     )
 
-  const probe = (mode: PermissionMode) => {
+  const probe = (mode: PermissionMode, workMode?: "plan" | "build") => {
     const out: { command: PermissionDecision | null; edit: PermissionDecision | null } = {
       command: null,
       edit: null
@@ -379,6 +379,7 @@ describe("AgentRunner HITL gating", () => {
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, mode)
+        if (workMode) yield* runner.setWorkMode(SESSION, SESSION, workMode)
         yield* runner.prompt(SESSION, SESSION, "how does auth work?").pipe(
           // Deny anything that does gate, so a gate is visible as a denial rather
           // than a hang.
@@ -391,8 +392,12 @@ describe("AgentRunner HITL gating", () => {
     ).then(() => out)
   }
 
-  it("plan: commands and edits run unattended like auto", async () => {
-    expect(await probe("plan")).toStrictEqual({ command: "allow", edit: "allow" })
+  it("plan: commands and edits are denied without gating", async () => {
+    expect(await probe("plan")).toStrictEqual({ command: "deny", edit: "deny" })
+  })
+
+  it("workMode plan with approval auto still denies writes", async () => {
+    expect(await probe("auto", "plan")).toStrictEqual({ command: "deny", edit: "deny" })
   })
 
   it("ask: the same command still gates", async () => {

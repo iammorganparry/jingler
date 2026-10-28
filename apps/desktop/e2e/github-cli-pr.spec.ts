@@ -74,9 +74,20 @@ test("links and shows a pull request through authenticated gh without a GitHub A
 
     await expect(appShell(window)).toBeVisible()
     await expect(window.getByText("#42", { exact: true }).first()).toBeVisible({ timeout: 20_000 })
-    await window.getByTestId("view-tab-pr").first().click()
+    await window.getByTestId("header-view-checks").first().click()
     await expect(window.getByRole("heading", { name: "CLI-only pull request" })).toBeVisible()
     await expect(window.getByText("Loaded through authenticated GitHub CLI without an App installation.")).toBeVisible()
+    // Restyled Checks view (#428): readiness checklist + timeline section, no green/red fill for a PR with no failures.
+    const readiness = window.getByRole("region", { name: "Readiness" })
+    await expect(readiness).toBeVisible()
+    await expect(readiness.getByText("No conflicts with main")).toBeVisible()
+    await expect(readiness.getByText("No checks reported")).toBeVisible()
+    await expect(window.getByText("Timeline", { exact: true })).toBeVisible()
+    await expect(window.getByText("No reviews or comments yet")).toBeVisible()
+    // gh-only has no viewer identity, so the own-PR guard can't apply; the composer's three actions still render.
+    await expect(window.getByRole("button", { name: "Approve", exact: true })).toBeVisible()
+    await expect(window.getByRole("button", { name: "Request changes", exact: true })).toBeVisible()
+    await expect(window.getByRole("button", { name: "Comment", exact: true })).toBeVisible()
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

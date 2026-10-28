@@ -96,30 +96,26 @@ function Shell({
             sessions={SESSIONS}
             planSessions={new Set(["s1"])}
             liveActivity={ACTIVITY}
-            renderTerminalDock={
-              dock
-                ? () => (
-                    <TerminalDock
-                      dock={dock}
-                      onDockChange={() => {}}
-                      visible={terminalOpen}
-                      onToggle={() => setTerminalOpen((v) => !v)}
-                      tabs={[{ id: "t1", title: "zsh", status: "running" }]}
-                      activeId="t1"
-                      onSelect={() => {}}
-                      onNew={() => {}}
-                      onClose={() => {}}
-                      cwdLabel="~/jingler/worktrees/s1"
-                      renderTerminal={() => (
-                        <div className="flex flex-1 items-center justify-center font-mono text-[11px] text-dim">
-                          terminal
-                        </div>
-                      )}
-                    />
-                  )
-                : undefined
-            }
           />
+          {dock && (
+            <TerminalDock
+                        dock={dock}
+                        onDockChange={() => {}}
+                        visible={terminalOpen}
+                        onToggle={() => setTerminalOpen((v) => !v)}
+                        tabs={[{ id: "t1", title: "zsh", status: "running" }]}
+                        activeId="t1"
+                        onSelect={() => {}}
+                        onNew={() => {}}
+                        onClose={() => {}}
+                        cwdLabel="~/jingler/worktrees/s1"
+                        renderTerminal={() => (
+                          <div className="flex flex-1 items-center justify-center font-mono text-[11px] text-dim">
+                            terminal
+                          </div>
+                        )}
+                      />
+          )}
         </WidthTierProvider>
       </div>
     </div>

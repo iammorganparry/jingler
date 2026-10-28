@@ -1,21 +1,25 @@
 import { useMemo, useState } from "react"
 import { useMachine } from "@xstate/react"
-import type { IssueDetail, IssueListItem } from "@jingler/core"
+import type { IssueDetail, IssueListItem, PrState } from "@jingler/core"
 import { ArrowLeft, CircleDot, MessageSquare } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { AsyncButton } from "../components/async-button.js"
+import { Button } from "../components/button.js"
 import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
-import { Card } from "../components/card.js"
+import { Card, CardHeader } from "../components/card.js"
 import { Markdown } from "../components/markdown.js"
 import { Spinner } from "../components/loading.js"
-import { SearchInput } from "../components/search-input.js"
-import { MotionTabs } from "../components/beui/controls.js"
+import { SearchField } from "../components/search-input.js"
+import { FilterChips } from "../components/filter-chips.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
 import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { IssueLabelChip } from "./issue-picker-list.js"
+import { ClosedIssueBanner } from "./issue-rail.js"
+import { PrStatusGlyph } from "./pr-glyph.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { InboxFilterSelect, InboxMessage, filterOptions } from "./pull-request-inbox.js"
 import {
@@ -67,6 +71,8 @@ export interface IssueInboxProps {
   warnings?: ReadonlyArray<string>
   onActivate?: () => void
   onRefresh?: () => void
+  /** Re-runs the failed issue load; shown as Retry beside the load error. */
+  onRetry?: () => void
   refreshing?: boolean
   selected: { repository: string; number: number } | null
   detail: IssueDetail | null
@@ -74,6 +80,7 @@ export interface IssueInboxProps {
   onOpenOnGithub?: (url: string) => void
   onComment?: (body: string) => Promise<void> | void
   onCloseIssue?: () => Promise<void> | void
+  onReopenIssue?: () => Promise<void> | void
   closeError?: string | null
   sessionAction?: {
     readonly label: string
@@ -91,7 +98,7 @@ const hasActiveIssueFilters = (f: typeof initialIssueInboxFilters) =>
 
 /** Global GitHub issue list with a responsive detail pane, modelled on PullRequestInbox. */
 export function IssueInbox({
-  issues, viewerLogin, warnings = [], onActivate, onRefresh, refreshing = false, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, closeError,
+  issues, viewerLogin, warnings = [], onActivate, onRefresh, onRetry, refreshing = false, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, onReopenIssue, closeError,
   sessionAction, loading = false, detailLoading = false, detailError = null, error = null
 }: IssueInboxProps) {
   const [filterState, sendFilters] = useMachine(issueInboxFilterMachine)
@@ -116,9 +123,10 @@ export function IssueInbox({
   const change = (fields: Partial<typeof facets>) => sendFilters({ type: "CHANGE", fields })
 
   function renderList() {
-    if (loading) return <InboxMessage><Spinner size={18} />Loading issues…</InboxMessage>
-    if (error) return <InboxMessage>{error}</InboxMessage>
-    if (visible.length === 0) return <InboxMessage><CircleDot className="size-5 text-dim" />No issues match this view.</InboxMessage>
+    if (loading) return <ListSkeleton rows={6} rowHeight={72} className="p-4" />
+    if (error) return <InlineError message={error} onRetry={onRetry} className="m-4" />
+    if (visible.length === 0) return <EmptyState icon={<CircleDot className="size-5" />} title="No issues match this view." description={filtered ? "Clear the filters to see every loaded issue." : undefined}
+      action={filtered ? <Button variant="secondary" size="sm" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</Button> : undefined} />
     return visible.map((issue) => (
       <button
         key={keyOf(issue)}
@@ -134,7 +142,7 @@ export function IssueInbox({
         )}
       >
         <div className="flex min-w-0 items-start gap-2">
-          <CircleDot className="mt-0.5 size-4 flex-none text-green" />
+          <CircleDot className="mt-0.5 size-4 flex-none text-muted-foreground" />
           <span className="min-w-0 flex-1 text-[13px] font-semibold leading-[1.35] text-text-bright">{issue.title}</span>
         </div>
         <div className="flex min-w-0 items-center gap-2 pl-6 font-mono text-[10.5px] text-muted-foreground">
@@ -172,6 +180,7 @@ export function IssueInbox({
         onOpenOnGithub={onOpenOnGithub}
         onComment={onComment}
         onCloseIssue={onCloseIssue}
+        onReopenIssue={onReopenIssue}
       />
     )
   }
@@ -182,7 +191,7 @@ export function IssueInbox({
         <section className={cn("flex min-h-0 min-w-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "w-1/3 min-w-[280px] max-w-[430px]")}>
           <header className="flex flex-none flex-col gap-3 border-b border-line px-4 py-3.5">
             <div className="flex items-center gap-2">
-              <CircleDot className="size-4 text-green" />
+              <CircleDot className="size-4 text-muted-foreground" />
               <h1 className="text-[14px] font-semibold text-text-bright">Issues</h1>
               <Badge tone="count" size="xs">{visible.length}</Badge>
               <div className="flex-1" />
@@ -192,8 +201,8 @@ export function IssueInbox({
                 </button>
               )}
             </div>
-            <SearchInput value={query} onChange={(next) => change({ query: next })} placeholder="Search issues" />
-            <MotionTabs items={FILTERS} value={filter} onChange={(next) => change({ filter: next })} variant="segment" />
+            <SearchField value={query} onChange={(next) => change({ query: next })} placeholder="Search issues" />
+            <FilterChips options={FILTERS} value={filter} onChange={(next) => change({ filter: next })} ariaLabel="Issue relationship" />
             <div className="grid min-w-0 grid-cols-2 gap-2">
               {(["repository", "author", "assignee", "label"] as const).map((kind) => <InboxFilterSelect
                 key={kind} label={kind[0]!.toUpperCase() + kind.slice(1)}
@@ -205,7 +214,7 @@ export function IssueInbox({
               <span>{visible.length} of {issues.length} loaded issues</span>
               {filtered && <button type="button" className="shrink-0 text-brand hover:underline" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</button>}
             </div>
-            {warnings.length > 0 && <div role="status" className="text-xs text-yellow">
+            {warnings.length > 0 && <div role="status" className="text-xs text-muted-foreground">
               <strong>Partial results</strong>
               {warnings.map((warning) => <p key={warning}>{warning}</p>)}
               <p>Use Refresh to retry missing results.</p>
@@ -228,7 +237,21 @@ export function IssueInbox({
   )
 }
 
-function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAction, onOpenOnGithub, onComment, onCloseIssue }: {
+function ReopenBanner({ onReopen, closed }: { onReopen?: () => Promise<void> | void; closed: boolean }) {
+  const [reopening, setReopening] = useState(false)
+  if (!(closed && onReopen)) return null
+  return (
+    <ClosedIssueBanner
+      reopening={reopening}
+      onReopen={() => {
+        setReopening(true)
+        Promise.resolve(onReopen()).catch(() => {}).finally(() => setReopening(false))
+      }}
+    />
+  )
+}
+
+function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAction, onOpenOnGithub, onComment, onCloseIssue, onReopenIssue }: {
   issue: IssueDetail
   repository: string
   busy: boolean
@@ -238,6 +261,7 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
   onOpenOnGithub?: (url: string) => void
   onComment?: (body: string) => Promise<void> | void
   onCloseIssue?: () => Promise<void> | void
+  onReopenIssue?: () => Promise<void> | void
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5" aria-busy={busy}>
@@ -269,9 +293,31 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
           )}
         </div>
         {sessionAction?.disabledReason && <p className="self-end text-xs text-muted-foreground">{sessionAction.disabledReason}</p>}
+        <ReopenBanner onReopen={onReopenIssue} closed={issue.state !== "open"} />
         {closeError && <Callout tone="red">{closeError}</Callout>}
         {error && <p role="alert" className="text-xs text-red">{error}</p>}
       </div>
+      {issue.linkedPrs && issue.linkedPrs.length > 0 && (
+        <Card className="flex-none">
+          <CardHeader title="Linked pull requests" />
+          <div className="divide-y divide-hairline">
+            {issue.linkedPrs.map((pr) => (
+              <button
+                key={pr.url}
+                type="button"
+                onClick={() => onOpenOnGithub?.(pr.url)}
+                className="flex w-full items-center gap-2 px-[14px] py-[9px] text-left outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <PrStatusGlyph pr={{ state: pr.state as PrState, checks: null }} />
+                <span className="font-mono text-[11.5px] text-muted-foreground">#{pr.number}</span>
+                <span className="text-[12.5px] text-text">{pr.state.charAt(0).toUpperCase() + pr.state.slice(1)}</span>
+                <div className="flex-1" />
+                <span className="font-mono text-[11px] text-dim">↗</span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
       {issue.body.trim() && (
         <Card className="flex-none">
           <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-[11px]">

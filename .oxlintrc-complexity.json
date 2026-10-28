@@ -20,9 +20,13 @@
     "**/.turbo/**",
     "**/.next/**",
     "**/coverage/**",
-    "**/storybook-static/**"
+    "**/storybook-static/**",
+    "**/.dagger/**"
   ],
   "rules": {
-    "complexity": ["error", 20]
+    "complexity": [
+      "error",
+      20
+    ]
   }
 }

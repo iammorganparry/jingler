@@ -288,6 +288,14 @@ export const PermissionMode = Schema.Literal(
 );
 export type PermissionMode = Schema.Schema.Type<typeof PermissionMode>;
 
+/** Whether a chat is investigating (`plan`, read-only) or doing work (`build`). Independent of approval level. */
+export const WorkMode = Schema.Literal("plan", "build");
+export type WorkMode = Schema.Schema.Type<typeof WorkMode>;
+
+/** How often a chat pauses for approval. `PermissionMode` keeps `plan` only as a legacy decode value. */
+export const ApprovalLevel = Schema.Literal("ask", "accept-edits", "auto");
+export type ApprovalLevel = Schema.Schema.Type<typeof ApprovalLevel>;
+
 /** Claude's provider-native adaptive-thinking effort values. */
 export const ClaudeReasoningEffort = Schema.Literal(
   "low",
@@ -393,6 +401,10 @@ export const Chat = Schema.Struct({
   updatedAt: Schema.String,
   /** Permission choices are restored independently for each chat. */
   mode: Schema.optional(PermissionMode),
+  /** Plan/Build, persisted per chat; absent means build. */
+  workMode: Schema.optional(WorkMode),
+  /** The agent may switch Plan/Build itself via `jingler_set_work_mode`; absent means off. */
+  autoSwitch: Schema.optional(Schema.Boolean),
   reasoning: Schema.optional(ReasoningSetting),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   contextTokens: Schema.optional(Schema.Number),
@@ -543,6 +555,48 @@ export const PublishMetadata = Schema.Struct({
 });
 export type PublishMetadata = Schema.Schema.Type<typeof PublishMetadata>;
 
+/** Overall state of a pull request. "draft" is synthesized from `isDraft`. */
+export const PrState = Schema.Literal("open", "closed", "merged", "draft");
+export type PrState = Schema.Schema.Type<typeof PrState>;
+
+/** Normalized CI check status (mapped from GitHub checks and commit statuses). */
+export const PrCheckStatus = Schema.Literal(
+  "pass",
+  "fail",
+  "running",
+  "pending",
+);
+export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>;
+
+/**
+ * One PR in a session's stack. `prs` is ordered bottom of the stack first, so
+ * the last entry is the top layer (and is mirrored into `Session.prNumber`).
+ * Only `number` is always known: sessions persisted before stacks existed carry
+ * just their single `prNumber`, and `state`/`checks` are live reads filled in
+ * later rather than guessed here.
+ */
+export const SessionPr = Schema.Struct({
+  number: Schema.Number,
+  /** Display repo of the checkout this PR lives in; set for multi-checkout sessions so same-numbered PRs stay distinct. */
+  repo: Schema.optional(Schema.String),
+  /** Head branch of this layer. */
+  branch: Schema.optional(Schema.String),
+  /** Base this layer targets: the trunk, or the branch of the layer below. */
+  base: Schema.optional(Schema.String),
+  state: Schema.optional(PrState),
+  checks: Schema.optional(Schema.NullOr(PrCheckStatus)),
+});
+export type SessionPr = Schema.Schema.Type<typeof SessionPr>;
+
+/** One stack layer that `Github.restack` rebased and retargeted. */
+export const RestackedLayer = Schema.Struct({
+  number: Schema.Number,
+  branch: Schema.String,
+  /** The base the layer now targets. */
+  base: Schema.String,
+});
+export type RestackedLayer = Schema.Schema.Type<typeof RestackedLayer>;
+
 /** Durable checkpoint for the deterministic session publishing workflow. */
 export const PublishCheckpoint = Schema.Struct({
   step: PublishStep,
@@ -637,8 +691,13 @@ export const Session = Schema.Struct({
    */
   executionLocation: Schema.optional(Schema.Literal("local", "cloud")),
   diff: DiffStat,
-  /** Optional linked pull-request number. */
+  /** Optional linked pull-request number: always the top of `prs` when that is set. */
   prNumber: Schema.NullOr(Schema.Number),
+  /**
+   * The session's PR stack, bottom layer first. Optional so older sessions
+   * decode; the session store fills it from `prNumber` on read.
+   */
+  prs: Schema.optional(Schema.Array(SessionPr)),
   /** Immutable GitHub App installation owning the linked repository. */
   githubInstallationId: Schema.optional(Schema.String),
   /** Immutable GitHub repository database id used for webhook/session routing. */
@@ -761,6 +820,13 @@ export const Session = Schema.Struct({
   archiveReason: Schema.optional(Schema.Literal("merged", "closed")),
   /** ISO-8601 timestamp the session was archived (for the "2d ago" label). */
   archivedAt: Schema.optional(Schema.String),
+  /** Set when imported from another app; identifies the native session to resume. */
+  importedFrom: Schema.optional(
+    Schema.Struct({
+      source: Schema.Literal("claude-code", "codex", "conductor", "t3code"),
+      nativeSessionId: Schema.String
+    })
+  ),
   /** Why archiving kept the worktree on disk (uncommitted or unpushed work). */
   worktreeKeptReason: Schema.optional(Schema.String),
 });
@@ -835,6 +901,26 @@ export const issueReferenceForProvider = (
   providerId: string,
 ): IssueReference | undefined =>
   issueReferencesOf(session).find((issue) => issue.providerId === providerId);
+
+/**
+ * Live (non-archived) sessions already linked to an issue, for the New workspace
+ * "Already open in '<title>'" warning. A pure scan over the session list the
+ * renderer already holds, so it needs no RPC. Matches any canonical or legacy
+ * link, not just the selected one.
+ */
+export const sessionsLinkedToIssue = <
+  S extends SessionIssueLinks & Pick<Session, "archived">,
+>(
+  sessions: ReadonlyArray<S>,
+  issue: Pick<IssueIdentity, "providerId" | "id">,
+): ReadonlyArray<S> =>
+  sessions.filter(
+    (session) =>
+      !session.archived &&
+      issueReferencesOf(session).some((linked) =>
+        sameIssueIdentity(linked, issue),
+      ),
+  );
 
 /** A missing environment id is deliberately the local desktop. */
 export const executionTargetOf = (
@@ -930,6 +1016,22 @@ export const NotificationKind = Schema.Literal(
 export type NotificationKind = Schema.Schema.Type<typeof NotificationKind>;
 
 /**
+ * Whether the OS will show Jingler's notifications. Electron's `Notification`
+ * exposes only `isSupported()` (no permission query), so main reports
+ * `unsupported` or `unknown`. `granted`/`denied` are reserved for a platform
+ * probe that can actually observe them; never emit them without one.
+ */
+export const NotificationPermission = Schema.Literal(
+  "granted",
+  "denied",
+  "unsupported",
+  "unknown",
+);
+export type NotificationPermission = Schema.Schema.Type<
+  typeof NotificationPermission
+>;
+
+/**
  * Desktop-notification preferences. Persisted inside `WorkspaceConfig`.
  *
  * Per-kind toggles rather than one switch: the kinds differ sharply in how
@@ -951,6 +1053,16 @@ export const NotificationsConfig = Schema.Struct({
 export type NotificationsConfig = Schema.Schema.Type<
   typeof NotificationsConfig
 >;
+
+/** Voice input prefs; every field absent means auto language, any installed model, F9 hold-to-talk. */
+export const VoiceConfig = Schema.Struct({
+  /** whisper-cli `-l` code, or "auto". */
+  language: Schema.optional(Schema.String),
+  modelId: Schema.optional(Schema.String),
+  /** `KeyboardEvent.code` held to dictate, or "none". */
+  holdKey: Schema.optional(Schema.String),
+});
+export type VoiceConfig = Schema.Schema.Type<typeof VoiceConfig>;
 
 /**
  * What notifications do when the operator has never chosen.
@@ -1024,6 +1136,13 @@ export const WorkspaceConfig = Schema.Struct({
    */
   starredRepos: Schema.optional(Schema.Array(Schema.String)),
   /**
+   * The views pinned to the workspace header, in display order (max
+   * `HEADER_VIEWS_MAX`). Absent on older configs; read it through
+   * `normalizeHeaderViews`, which drops unknown ids and falls back to
+   * `HEADER_VIEWS_DEFAULT`.
+   */
+  headerViews: Schema.optional(Schema.Array(Schema.String)),
+  /**
    * Absolute paths of the repos the user has collapsed in the sidebar (their
    * sessions hidden). The reserved sentinel `"__archived__"` collapses the
    * Archived group. Absent on older configs (treated as an empty list).
@@ -1063,6 +1182,10 @@ export const WorkspaceConfig = Schema.Struct({
    * the compaction primer), but explicitly applies only when the task is done.
    */
   adhdMode: Schema.optional(Schema.Boolean),
+  /** Voice input prefs (language, model, hold-to-talk key). */
+  voice: Schema.optional(VoiceConfig),
+  /** The operator dismissed the Home MCP-import card; it never shows again. */
+  mcpImportDismissed: Schema.optional(Schema.Boolean),
   /**
    * Multiplier applied to conversation + code text size. Absent means 1
    * (`FONT_SCALE_DEFAULT`) — the unscaled default.
@@ -1134,6 +1257,36 @@ export const clampFontScale = (value: number | null | undefined): number =>
     ? Math.min(FONT_SCALE_RANGE.max, Math.max(FONT_SCALE_RANGE.min, value))
     : FONT_SCALE_DEFAULT;
 
+/** The views pinned to the header until the operator changes them (spec §3c). */
+export const HEADER_VIEWS_DEFAULT: ReadonlyArray<string> = ["changes", "checks", "terminal", "browser"];
+
+/** The header holds at most this many pinned views; the rest overflow. */
+export const HEADER_VIEWS_MAX = 5;
+
+/** Built-in view ids that can be pinned. Plugin views are `<pluginId>.<local>`. */
+export const HEADER_VIEW_BUILTIN_IDS: ReadonlyArray<string> = [
+  "changes", "checks", "terminal", "browser", "files", "plan", "explanation", "issue"
+];
+
+const PLUGIN_VIEW_ID = /^[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * Coerce a stored/incoming pinned-view list into a valid one: unknown ids and
+ * repeats are dropped, order is kept, and the list is clamped to
+ * `HEADER_VIEWS_MAX`. Absent (never saved) yields the default. The read path
+ * uses it because a hand-edited `config.json` can carry anything.
+ */
+export const normalizeHeaderViews = (
+  views: ReadonlyArray<string> | null | undefined
+): ReadonlyArray<string> => {
+  if (views === null || views === undefined) return HEADER_VIEWS_DEFAULT;
+  const known = views.filter(
+    (id, index) =>
+      (HEADER_VIEW_BUILTIN_IDS.includes(id) || PLUGIN_VIEW_ID.test(id)) && views.indexOf(id) === index
+  );
+  return known.slice(0, HEADER_VIEWS_MAX);
+};
+
 /** A git repository discovered under the configured repos directory. */
 export const Repo = Schema.Struct({
   /** Folder name, used as the sidebar group label (e.g. "trigify-app"). */
@@ -1166,19 +1319,6 @@ export type Worktree = Schema.Schema.Type<typeof Worktree>;
 
 // ── Pull requests / code review ──────────────────────────────────────────────
 
-/** Overall state of a pull request. "draft" is synthesized from `isDraft`. */
-export const PrState = Schema.Literal("open", "closed", "merged", "draft");
-export type PrState = Schema.Schema.Type<typeof PrState>;
-
-/** Normalized CI check status (mapped from GitHub checks and commit statuses). */
-export const PrCheckStatus = Schema.Literal(
-  "pass",
-  "fail",
-  "running",
-  "pending",
-);
-export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>;
-
 /**
  * A session's linked PR, reduced to the two facts a sidebar row can show in one
  * glyph: where the PR is in its life, and whether CI is happy.
@@ -1200,6 +1340,8 @@ export const SessionPrStatus = Schema.Struct({
    * with no CI look permanently mid-build.
    */
   checks: Schema.NullOr(PrCheckStatus),
+  /** Passing/total individual checks for the header `a/b` badge; absent when there are none. */
+  checkCounts: Schema.optional(Schema.Struct({ passing: Schema.Number, total: Schema.Number })),
 });
 export type SessionPrStatus = Schema.Schema.Type<typeof SessionPrStatus>;
 
@@ -1845,10 +1987,18 @@ export const IssueComment = Schema.Struct({
 export type IssueComment = Schema.Schema.Type<typeof IssueComment>;
 
 /** The normalized rich issue payload returned by any issue provider. */
+export const IssueLinkedPr = Schema.Struct({
+  number: Schema.Number,
+  state: Schema.String,
+  url: Schema.String,
+});
+export type IssueLinkedPr = Schema.Schema.Type<typeof IssueLinkedPr>;
+
 export const IssueDetail = Schema.Struct({
   ...IssueSummaryFields,
   createdAt: Schema.String,
   comments: Schema.Array(IssueComment),
+  linkedPrs: Schema.optional(Schema.Array(IssueLinkedPr)),
 });
 export type IssueDetail = Schema.Schema.Type<typeof IssueDetail>;
 
@@ -2038,10 +2188,14 @@ export const CreateSessionInput = Schema.Struct({
   environmentId: Schema.optional(Schema.String),
   /** Registered project to resolve at the execution boundary. */
   projectId: Schema.optional(Schema.String),
-  /** Absolute path to the origin repo. */
-  repoPath: Schema.String,
-  /** The repo's folder name, used for grouping + the worktree directory. */
-  repoName: Schema.String,
+  /**
+   * Absolute path to the origin repo. Absent means Auto: the session starts in
+   * a scratch folder with no checkout until the agent attaches one via
+   * `switch_checkout`.
+   */
+  repoPath: Schema.optional(Schema.String),
+  /** The repo's folder name, used for grouping + the worktree directory. Absent for Auto. */
+  repoName: Schema.optional(Schema.String),
   /** Canonical owner/repository identity when known at creation time. */
   githubSlug: Schema.optional(Schema.String),
   /**
@@ -2067,11 +2221,15 @@ export const CreateSessionInput = Schema.Struct({
    * callers that expect the configured provider default to be applied.
    */
   reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
-  /** The branch to fork the worktree from, or check out for a direct session. */
-  baseBranch: Schema.String,
+  /**
+   * The branch to fork the worktree from, or check out for a direct session.
+   * Absent for Auto, which starts with no checkout at all.
+   */
+  baseBranch: Schema.optional(Schema.String),
   /**
    * Whether to create an isolated linked worktree. Omitted defaults to true so
    * existing callers and persisted RPC requests retain the current behaviour.
+   * Ignored for Auto (no `repoPath`), which never creates a worktree.
    */
   useWorktree: Schema.optional(Schema.Boolean),
   /** Continue the selected branch instead of creating a fresh semantic task branch. */
@@ -2218,6 +2376,39 @@ export const BrowserBounds = Schema.Struct({
   height: Schema.Number,
 });
 export type BrowserBounds = Schema.Schema.Type<typeof BrowserBounds>;
+
+// ── Session import ─────────────────────────────────────────────────────────
+
+/**
+ * A session discovered in another app's store (Claude Code, Codex, Conductor,
+ * T3 Code) that can be imported into Jingler. The `nativeSessionId` allows
+ * resuming the original harness session (`claude --resume <id>`, `codex resume
+ * <id>`), not just copying the transcript.
+ */
+export const ImportableSession = Schema.Struct({
+  /** Which app's store this session came from. */
+  source: Schema.Literal("claude-code", "codex", "conductor", "t3code"),
+  /** The native session id used to resume the harness session. */
+  nativeSessionId: Schema.String,
+  /** Which harness the session ran on. */
+  harness: Schema.Literal("claude", "codex"),
+  /** Working directory the session ran in. */
+  cwd: Schema.String,
+  /** Git branch the session was on (optional, derived from transcript). */
+  branch: Schema.optional(Schema.String),
+  /** Session title (derived from first user message). */
+  title: Schema.String,
+  /** Last update timestamp (ISO 8601 string). */
+  updatedAt: Schema.String,
+  /** Number of messages in the transcript. */
+  messageCount: Schema.Number,
+  /** Whether the session's working directory still exists on disk. */
+  folderExists: Schema.Boolean,
+  /** True when a Jingler session already imports this native session. */
+  alreadyImported: Schema.optional(Schema.Boolean),
+});
+export type ImportableSession = Schema.Schema.Type<typeof ImportableSession>;
+
 
 // The conversation/transcript model (Message, ToolCall, ApprovalGate) and the
 // normalized StreamEvent seam live in ./conversation.ts.

@@ -1,5 +1,6 @@
 import type { PrFileChange } from "@jingler/core"
 import { EyeOff, MessageSquare, Search } from "lucide-react"
+import { Button } from "../components/button.js"
 import { DiffStat } from "../components/diff-stat.js"
 import type { JinglerFileStatus } from "../diff/pierre-model.js"
 import {
@@ -37,7 +38,8 @@ export function ReviewFileRail({
   removed,
   viewed,
   controls,
-  onSelectFile
+  onSelectFile,
+  onDiscardFile
 }: {
   readonly files: readonly PrFileChange[]
   readonly totalFiles: number
@@ -50,6 +52,7 @@ export function ReviewFileRail({
   readonly viewed: number
   readonly controls: ReturnType<typeof useCodeReviewView>
   readonly onSelectFile: (path: string) => void
+  readonly onDiscardFile?: (path: string) => void
 }) {
   return (
     <>
@@ -94,45 +97,33 @@ export function ReviewFileRail({
               ))}
             </SelectContent>
           </Select>
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="icon"
             aria-pressed={controls.hideViewed}
             aria-label="Hide viewed files"
             title={controls.hideViewed ? "Show viewed files" : "Hide viewed files"}
             onClick={controls.toggleHideViewed}
-            className={cn(
-              "flex size-[30px] flex-none items-center justify-center rounded-lg border bg-sunken transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
-              controls.hideViewed
-                ? "border-blue/40 bg-blue/[0.12] text-blue"
-                : "border-line text-dim hover:border-line-strong hover:text-text"
-            )}
+            className={cn("size-[30px] flex-none rounded-lg", controls.hideViewed && "border-line-strong bg-surface text-text-bright")}
           >
             <EyeOff size={14} />
-          </button>
+          </Button>
         </div>
         {feedbackAny && (
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="sm"
             aria-pressed={controls.feedbackOnly}
-            title={
-              controls.feedbackOnly
-                ? "Show all files"
-                : "Show only files with feedback"
-            }
+            title={controls.feedbackOnly ? "Show all files" : "Show only files with feedback"}
             onClick={controls.toggleFeedback}
-            className={cn(
-              "flex min-h-[30px] items-center justify-center gap-1.5 rounded-lg border bg-sunken px-2.5 text-[11px] transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
-              controls.feedbackOnly
-                ? "border-blue/40 bg-blue/[0.14] text-blue"
-                : "border-line text-dim hover:border-line-strong hover:text-text"
-            )}
+            className={cn("h-[30px] gap-1.5 rounded-lg text-[11px]", controls.feedbackOnly && "border-line-strong bg-surface")}
           >
             <MessageSquare size={12} strokeWidth={2.25} />
             With feedback
             <span className="font-mono text-[10px] tabular-nums leading-none">
               {feedback.size}
             </span>
-          </button>
+          </Button>
         )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col p-1.5">
@@ -142,6 +133,7 @@ export function ReviewFileRail({
           statusByPath={statusByPath}
           query={controls.query}
           onSelectFile={onSelectFile}
+          onDiscardFile={onDiscardFile}
         />
       </div>
       <div className="flex h-11 flex-none items-center gap-1.5 border-t border-hairline px-[14px] font-mono text-[10.5px] text-dim">

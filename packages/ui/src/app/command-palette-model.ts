@@ -47,6 +47,8 @@ export interface PaletteItem {
   readonly detail?: string
   /** The heading this row sits under. Groups render in first-seen order. */
   readonly group: string
+  /** A status word (e.g. "Idle") shown after the label with a neutral dot. Display only. */
+  readonly status?: string
   /** A chord to show right-aligned, e.g. `"⌘N"`. Display only. */
   readonly hint?: string
   /**
@@ -57,6 +59,17 @@ export interface PaletteItem {
    * A type-only import, same as `TabContribution.icon` — nothing here renders.
    */
   readonly icon?: LucideIcon
+  /**
+   * Which `PaletteScope` this row belongs to. Absent means **workspace** —
+   * the default for every row that is not specific to the active chat.
+   *
+   * Explicit rather than inferred from `group`: a group NAME is display text,
+   * not an identity, and matching against a fixed set of known headings (the
+   * old approach) silently drops any row — a plugin's, a future built-in's —
+   * whose group was never added to that set. Marking the row itself is the
+   * one place this can't drift out of sync with what the row actually is.
+   */
+  readonly scope?: PaletteScope
   readonly run: () => void
 }
 
@@ -218,12 +231,163 @@ export interface PluginPaletteCommand {
  * name stops being reserved.
  */
 export const PALETTE_GROUP = {
-  sessions: "Sessions",
+  sessions: "Workspaces",
   actions: "Actions",
   tabs: "Go to tab",
+  views: "Open view…",
+  subagents: "Go to subagent…",
   files: "Files",
   archived: "Archived sessions"
 } as const
+
+/** "Go to subagent…" rows for the active session; `open` is the chip rows' open path. */
+export const subagentPaletteItems = (
+  subagents: ReadonlyArray<{ readonly id: string; readonly agent: string; readonly task: string }>,
+  open: (nodeId: string) => void
+): ReadonlyArray<PaletteItem> =>
+  subagents.map((subagent) => ({
+    id: `subagent:${subagent.id}`,
+    kind: "action",
+    label: subagent.agent,
+    detail: subagent.task,
+    group: PALETTE_GROUP.subagents,
+    scope: "chat",
+    run: () => open(subagent.id)
+  }))
+
+/** "Open view…" rows: every view the active session can show, opened through the header buttons' path. */
+export const viewPaletteItems = (
+  views: ReadonlyArray<{ readonly id: string; readonly label: string; readonly icon: PaletteItem["icon"] }>,
+  open: (viewId: string) => void
+): ReadonlyArray<PaletteItem> =>
+  views.map((view) => ({
+    id: `view:${view.id}`,
+    kind: "tab",
+    label: view.label,
+    group: PALETTE_GROUP.views,
+    scope: "chat",
+    icon: view.icon,
+    run: () => open(view.id)
+  }))
+
+/**
+ * A blocked workspace, as the palette needs to know it: enough to list and
+ * jump to it.
+ */
+export interface NeedsYouSession {
+  readonly id: string
+  readonly title: string
+}
+
+/** The "Needs you" heading, count baked in — the one group name that isn't fixed, because it's the first thing a person reads. */
+export const needsYouGroupName = (count: number): string => `Needs you (${count})`
+
+/**
+ * The blocked workspace to jump to after `currentId`, wrapping — visits every
+ * blocked session in list order before repeating. `currentId` absent from
+ * `blocked` (no active session, or the active one just stopped being
+ * blocked) starts the cycle from the first rather than erroring.
+ */
+export const nextNeedsYouSession = (
+  blocked: ReadonlyArray<NeedsYouSession>,
+  currentId: string | null
+): string | null => {
+  if (blocked.length === 0) return null
+  const index = blocked.findIndex((s) => s.id === currentId)
+  return blocked[(index + 1) % blocked.length]!.id
+}
+
+/**
+ * "Needs you (N)" rows: one per blocked workspace plus the cycling action.
+ * Pinned first in the palette by being pushed first — `groupPaletteItems`
+ * keeps first-seen order. Empty when nothing is blocked, same posture as every
+ * other capability here: no blocked workspaces is no section, not an empty one.
+ */
+export const needsYouPaletteItems = (
+  blocked: ReadonlyArray<NeedsYouSession>,
+  currentId: string | null,
+  open: (sessionId: string) => void
+): ReadonlyArray<PaletteItem> => {
+  if (blocked.length === 0) return []
+  const group = needsYouGroupName(blocked.length)
+  return [
+    ...blocked.map((session) => ({
+      id: `needs-you:${session.id}`,
+      kind: "session" as const,
+      label: session.title,
+      group,
+      run: () => open(session.id)
+    })),
+    {
+      id: "action:next-needs-you",
+      kind: "action" as const,
+      label: "Go to next workspace that needs you",
+      group,
+      hint: "⌘J",
+      run: () => {
+        const next = nextNeedsYouSession(blocked, currentId)
+        if (next) open(next)
+      }
+    }
+  ]
+}
+
+/**
+ * The palette's scope switch: **Workspace** is every row, **Chat** is the
+ * subset about the active chat (its tabs, views and subagents) — narrowed by
+ * an explicit `item.scope`, never by the row's group NAME. A group heading is
+ * display text a plugin is free to choose; matching against it is how a
+ * plugin's own tabs/views used to leak into or out of Chat depending on what
+ * it happened to call its heading. `commands`/`files`/`sessions` are the `>`
+ * `@` `#` prefix-chip scopes: typing the prefix as the first character of the
+ * query narrows to that row KIND, independent of the Workspace/Chat switch.
+ */
+export type PaletteScope = "workspace" | "chat" | "commands" | "files" | "sessions"
+
+export const PALETTE_SCOPES: ReadonlyArray<PaletteScope> = ["workspace", "chat"]
+
+export const itemsInScope = (
+  items: ReadonlyArray<PaletteItem>,
+  scope: PaletteScope
+): ReadonlyArray<PaletteItem> => {
+  switch (scope) {
+    case "workspace":
+      return items
+    case "chat":
+      return items.filter((item) => item.scope === "chat")
+    case "commands":
+      return items.filter((item) => item.kind === "action" || item.kind === "plugin")
+    case "files":
+      return items.filter((item) => item.kind === "file")
+    case "sessions":
+      return items.filter((item) => item.kind === "session")
+  }
+}
+
+/** Tab cycles the Workspace/Chat switch, wrapping; a prefix scope is not in this cycle. */
+export const nextScope = (scope: PaletteScope): PaletteScope =>
+  PALETTE_SCOPES[(PALETTE_SCOPES.indexOf(scope) + 1) % PALETTE_SCOPES.length] ?? "workspace"
+
+/** One `>` / `@` / `#` prefix chip: the character typed, the scope it switches to, and its chip label. */
+export interface PalettePrefixScope {
+  readonly prefix: string
+  readonly scope: PaletteScope
+  readonly label: string
+}
+
+export const PALETTE_PREFIX_SCOPES: ReadonlyArray<PalettePrefixScope> = [
+  { prefix: ">", scope: "commands", label: "Commands" },
+  { prefix: "@", scope: "files", label: "Files" },
+  { prefix: "#", scope: "sessions", label: "Workspaces" }
+]
+
+/** The scope a typed prefix character switches to, or `null` for any other character. */
+export const scopeForPrefix = (char: string): PaletteScope | null =>
+  PALETTE_PREFIX_SCOPES.find((p) => p.prefix === char)?.scope ?? null
+
+/** The chip to show for a prefix scope, or `null` when `scope` is Workspace/Chat. */
+export const prefixChipFor = (scope: PaletteScope): PalettePrefixScope | null =>
+  PALETTE_PREFIX_SCOPES.find((p) => p.scope === scope) ?? null
 
 const BUILTIN_GROUP_NAMES: ReadonlySet<string> = new Set(Object.values(PALETTE_GROUP))
 
@@ -304,7 +468,7 @@ const isMacPlatform = (): boolean => {
 }
 
 /**
- * Does this keypress ask for the palette? **⌘K/⌘P on macOS, Ctrl+K/Ctrl+P
+ * Does this keypress ask for the palette? **⌘K on macOS, Ctrl+K
  * elsewhere** — not either-or.
  *
  * ## Why this one chord breaks the app's `meta || ctrl` rule
@@ -313,7 +477,7 @@ const isMacPlatform = (): boolean => {
  * the same physical gesture should work on macOS and elsewhere. That holds for
  * ITS chords because they are all ⌃⇧-something, and nothing else wants those.
  *
- * K and P are different. On macOS, Ctrl+K and Ctrl+P are Cocoa caret bindings
+ * K is different. On macOS, Ctrl+K (and Ctrl+P, now the file picker) are Cocoa caret bindings
  * that Chromium implements in every text field — kill-line and previous-line —
  * so accepting bare Ctrl here would take both away from the composer and pop a
  * modal instead, on the platform where ⌘ is already the palette chord and the
@@ -331,10 +495,9 @@ const isMacPlatform = (): boolean => {
  *
  * Both `code` and `key` are checked for the same reason `matchSplitShortcut`
  * does it: `code` names the physical key and survives layouts, `key` covers a
- * layout that puts K or P somewhere else.
+ * layout that puts K somewhere else.
  *
- * Shift and Alt must be ABSENT. ⌘⇧P is VS Code's palette, but here it is free
- * for something else, and a chord that fires on any modifier combination is a
+ * Shift and Alt must be ABSENT. ⌘⇧P opens Checks and ⌘P the file picker, and a chord that fires on any modifier combination is a
  * chord that fires when you meant something adjacent to it.
  *
  * @param isMac - defaults to the running platform; injected by the tests, which
@@ -351,15 +514,35 @@ export const matchPaletteChord = (
   if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
   if (e.shiftKey || e.altKey) return false
   const key = e.key.toLowerCase()
-  return e.code === "KeyK" || key === "k" || e.code === "KeyP" || key === "p"
+  return e.code === "KeyK" || key === "k"
 }
 
-/** Focused-session file picker: ⌘⇧P (Ctrl+Shift+P elsewhere). */
+/** Open Settings: ⌘, on macOS, Ctrl+, elsewhere. */
+export const matchSettingsChord = (
+  e: PaletteChord,
+  isMac: boolean = isMacPlatform()
+): boolean => {
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return false
+  if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
+  return e.code === "Comma" || e.key === ","
+}
+
+/** Focused-session file picker: ⌘P (Ctrl+P elsewhere). ⌘⇧P opens Checks. */
 export const matchFileQuickOpenChord = (
   e: PaletteChord,
   isMac: boolean = isMacPlatform()
 ): boolean => {
-  if (e.defaultPrevented || e.altKey || !e.shiftKey) return false
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return false
   if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
   return e.code === "KeyP" || e.key.toLowerCase() === "p"
+}
+
+/** Global binding for "Go to next workspace that needs you" — ⌘J on macOS, Ctrl+J elsewhere (#507). */
+export const matchNeedsYouChord = (
+  e: PaletteChord,
+  isMac: boolean = isMacPlatform()
+): boolean => {
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return false
+  if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
+  return e.code === "KeyJ" || e.key.toLowerCase() === "j"
 }

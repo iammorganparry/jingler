@@ -20,7 +20,7 @@ afterEach(() => localStorage.clear())
 describe("useReleaseNotes", () => {
   it("records the first launch without announcing anything", () => {
     const { result } = renderHook(() => useReleaseNotes("0.3.0", CHANGELOG))
-    expect(result.current).toBeUndefined()
+    expect(result.current.announcement).toBeUndefined()
     expect(localStorage.getItem(LAST_RUN_VERSION_KEY)).toBe("0.3.0")
   })
 
@@ -28,21 +28,43 @@ describe("useReleaseNotes", () => {
     localStorage.setItem(LAST_RUN_VERSION_KEY, "0.2.1")
     const { result } = renderHook(() => useReleaseNotes("0.3.0", CHANGELOG))
 
-    expect(result.current?.version).toBe("0.3.0")
-    expect(result.current?.notes).toEqual([
+    expect(result.current.announcement?.version).toBe("0.3.0")
+    expect(result.current.announcement?.notes).toEqual([
       "Review changes in the Explorer.",
       "Send review comments with their code."
     ])
 
-    act(() => result.current?.onDismiss())
-    expect(result.current).toBeUndefined()
+    act(() => result.current.announcement?.onDismiss())
+    expect(result.current.announcement).toBeUndefined()
     expect(localStorage.getItem(LAST_RUN_VERSION_KEY)).toBe("0.3.0")
   })
 
-  it("stays quiet on the same version and on a downgrade", () => {
+  it("lists every skipped version in What's new, and still does after dismissal", () => {
+    localStorage.setItem(LAST_RUN_VERSION_KEY, "0.2.1")
+    const { result } = renderHook(() => useReleaseNotes("0.3.0", CHANGELOG))
+    const skipped = [
+      { version: "0.3.0", notes: ["Review changes in the Explorer."] },
+      { version: "0.2.2", notes: ["Send review comments with their code."] }
+    ]
+    expect(result.current.whatsNew).toEqual(skipped)
+
+    act(() => result.current.announcement?.onDismiss())
+    expect(result.current.announcement).toBeUndefined()
+    expect(result.current.whatsNew).toEqual(skipped)
+  })
+
+  it("shows the current version's notes when nothing was skipped", () => {
     localStorage.setItem(LAST_RUN_VERSION_KEY, "0.3.0")
-    expect(renderHook(() => useReleaseNotes("0.3.0", CHANGELOG)).result.current).toBeUndefined()
-    expect(renderHook(() => useReleaseNotes("0.2.2", CHANGELOG)).result.current).toBeUndefined()
+    const { result } = renderHook(() => useReleaseNotes("0.3.0", CHANGELOG))
+    expect(result.current.announcement).toBeUndefined()
+    expect(result.current.whatsNew).toEqual([
+      { version: "0.3.0", notes: ["Review changes in the Explorer."] }
+    ])
+  })
+
+  it("stays quiet on a downgrade", () => {
+    localStorage.setItem(LAST_RUN_VERSION_KEY, "0.3.0")
+    expect(renderHook(() => useReleaseNotes("0.2.2", CHANGELOG)).result.current.announcement).toBeUndefined()
     expect(localStorage.getItem(LAST_RUN_VERSION_KEY)).toBe("0.2.2")
   })
 })

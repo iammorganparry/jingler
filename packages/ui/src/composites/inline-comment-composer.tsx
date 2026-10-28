@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SendHorizontal, Undo2, X } from "lucide-react"
+import { SendHorizontal, X } from "lucide-react"
 import { Button } from "../components/button.js"
 import type { JinglerDiffSide } from "../diff/pierre-selection.js"
 
@@ -19,8 +19,7 @@ export function InlineCommentComposer({
   initialBody = "",
   onCancel,
   onAddToReview,
-  onCommentAndSend,
-  onRevert
+  onCommentAndSend
 }: {
   path: string
   side?: JinglerDiffSide
@@ -35,8 +34,6 @@ export function InlineCommentComposer({
   onAddToReview: (draft: { body: string; routeToAgent: boolean }) => void
   /** Send the comment to the agent immediately. */
   onCommentAndSend: (draft: { body: string; routeToAgent: boolean }) => void
-  /** Revert the selected lines (only wired for a session's uncommitted diff). */
-  onRevert?: () => void
 }) {
   const [body, setBody] = React.useState(initialBody)
   const name = path.split("/").pop() ?? path
@@ -80,17 +77,6 @@ export function InlineCommentComposer({
         className="w-full resize-none bg-transparent px-[13px] py-[10px] text-[13px] text-text-body outline-none placeholder:text-dim"
       />
       <div className="flex items-center gap-1.5 border-t border-hairline px-2 py-1.5">
-        {onRevert && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 px-2 text-[11px] text-red hover:bg-red/10"
-            onClick={onRevert}
-          >
-            <Undo2 size={12} />
-            Revert {range}
-          </Button>
-        )}
         <div className="flex-1" />
         <Button
           variant="ghost"

@@ -30,8 +30,10 @@ export interface IssuePayload {
   readonly author?: GitHubUser
   readonly labels: ReadonlyArray<{ readonly name: string; readonly color?: string }>
   readonly assignees: ReadonlyArray<GitHubUser>
+  readonly linkedPrs?: ReadonlyArray<{ readonly number: number; readonly state: string; readonly url: string }>
   readonly comments: ReadonlyArray<IssueComment>
   readonly createdAt: string
+  readonly updatedAt?: string
 }
 
 type Request = (input: string | URL | globalThis.Request, init?: RequestInit) => Promise<Response>
@@ -90,6 +92,19 @@ const user = (value: unknown): GitHubUser | undefined => {
   return login ? { login } : undefined
 }
 
+/** gh reports `closedByPullRequestsReferences` (no state); fixtures/other sources may send `linkedPrs`. */
+const linkedPullRequests = (issue: Record<string, unknown>) => {
+  const raw = issue.linkedPrs ?? issue.closedByPullRequestsReferences
+  if (!Array.isArray(raw)) return {}
+  const linkedPrs = raw.flatMap((value) => {
+    const pr = record(value)
+    const number = pr?.number
+    const url = string(pr?.url)
+    return typeof number === "number" && url ? [{ number, url, state: string(pr?.state) ?? "linked" }] : []
+  })
+  return linkedPrs.length > 0 ? { linkedPrs } : {}
+}
+
 const normalizeIssue = async (
   value: unknown,
   loadComments?: () => Promise<ReadonlyArray<IssueComment>>
@@ -124,6 +139,7 @@ const normalizeIssue = async (
           return assignee ? [assignee] : []
         })
       : [],
+    ...linkedPullRequests(issue),
     comments: loadComments ? await loadComments() : Array.isArray(issue.comments)
       ? issue.comments.flatMap((value) => {
           const comment = record(value)
@@ -135,6 +151,7 @@ const normalizeIssue = async (
         })
       : [],
     createdAt,
+    ...(string(issue.updatedAt) ? { updatedAt: string(issue.updatedAt) as string } : {}),
     ...(author ? { author } : {})
   }
 }
@@ -237,7 +254,8 @@ export const fetchIssue = async (
     ...issue,
     url: issue.html_url,
     author: issue.user,
-    createdAt: issue.created_at
+    createdAt: issue.created_at,
+    updatedAt: issue.updated_at
   }, () => comments(
     request,
     `${base}/issues/${input.issueNumber}/comments?per_page=100`,
@@ -248,7 +266,7 @@ export const fetchIssue = async (
 }
 
 const CLI_FIELDS = [
-  "number", "title", "body", "state", "url", "author", "labels", "assignees", "comments", "createdAt"
+  "number", "title", "body", "state", "url", "author", "labels", "assignees", "closedByPullRequestsReferences", "comments", "createdAt", "updatedAt"
 ].join(",")
 
 /** Prefer the operator's authenticated GitHub CLI without exposing its token. */
@@ -285,6 +303,55 @@ export const fetchIssueWithCli = async (
   return normalizeIssue(raw)
 }
 
+type Exec = (
+  command: string,
+  args?: readonly string[],
+  options?: { readonly cwd?: string; readonly timeoutMs?: number }
+) => Promise<ExecResult>
+
+const setIssueState = async (verb: "close" | "reopen", input: FetchArgs, exec: Exec): Promise<void> => {
+  repositoryParts(input.repo)
+  if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber <= 0) {
+    throw new Error("The linked GitHub issue number is invalid.")
+  }
+  const result = await exec("gh", ["issue", verb, String(input.issueNumber), "--repo", input.repo], {
+    ...(input.worktreePath ? { cwd: input.worktreePath } : {}),
+    timeoutMs: 10_000
+  })
+  if (result.code !== 0) throw new Error(result.stderr.trim() || `GitHub could not ${verb} this issue.`)
+}
+
+/** Close one issue through the authenticated GitHub CLI; the renderer cannot reach the network. */
+export const closeIssue = (input: FetchArgs, exec: Exec): Promise<void> => setIssueState("close", input, exec)
+
+/** Reopen one closed issue through the authenticated GitHub CLI. */
+export const reopenIssue = (input: FetchArgs, exec: Exec): Promise<void> => setIssueState("reopen", input, exec)
+
+/** Post one comment (optionally closing the issue with it) through the authenticated GitHub CLI. */
+export const commentIssue = async (
+  input: FetchArgs & { readonly body: string; readonly close?: boolean },
+  exec: (
+    command: string,
+    args?: readonly string[],
+    options?: { readonly cwd?: string; readonly timeoutMs?: number }
+  ) => Promise<ExecResult>
+): Promise<void> => {
+  repositoryParts(input.repo)
+  if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber <= 0) {
+    throw new Error("The linked GitHub issue number is invalid.")
+  }
+  if (input.body.trim().length === 0) throw new Error("A comment cannot be empty.")
+  const target = [String(input.issueNumber), "--repo", input.repo]
+  const args = input.close
+    ? ["issue", "close", ...target, "--comment", input.body]
+    : ["issue", "comment", ...target, "--body", input.body]
+  const result = await exec("gh", args, {
+    ...(input.worktreePath ? { cwd: input.worktreePath } : {}),
+    timeoutMs: 10_000
+  })
+  if (result.code !== 0) throw new Error(result.stderr.trim() || "GitHub could not post this comment.")
+}
+
 export const activate: Activate = (ctx) => {
   ctx.subscriptions.push(
     ctx.commands.register("github-issues.fetch", async (input) => {
@@ -298,6 +365,21 @@ export const activate: Activate = (ctx) => {
         `repository:${repo}`
       ])
       return fetchIssue(resolved, session)
+    }),
+    ctx.commands.register("github-issues.close", async (input) => {
+      const args = input as FetchArgs
+      const repo = await resolveRepository(args.repo, args.worktreePath, ctx.exec)
+      await closeIssue({ ...args, repo }, ctx.exec)
+    }),
+    ctx.commands.register("github-issues.reopen", async (input) => {
+      const args = input as FetchArgs
+      const repo = await resolveRepository(args.repo, args.worktreePath, ctx.exec)
+      await reopenIssue({ ...args, repo }, ctx.exec)
+    }),
+    ctx.commands.register("github-issues.comment", async (input) => {
+      const args = input as FetchArgs & { body: string; close?: boolean }
+      const repo = await resolveRepository(args.repo, args.worktreePath, ctx.exec)
+      await commentIssue({ ...args, repo }, ctx.exec)
     })
   )
 

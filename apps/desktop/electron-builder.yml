@@ -64,6 +64,12 @@ extraResources:
   # twice on purpose. See `windowIcon()` in src/main/index.ts.
   - from: build-resources/icon.png
     to: icon.png
+  # whisper.cpp `whisper-cli` for voice input, built per platform/arch by
+  # scripts/distribution/build-whisper.mjs (`${os}`: mac|linux|win). On macOS
+  # electron-builder's signing pass signs every Mach-O under Resources with
+  # the hardened runtime, so no extra `binaries` entry is needed.
+  - from: resources/whisper/${os}-${arch}
+    to: whisper
   - from: ../../THIRD-PARTY-LICENSES
     to: THIRD-PARTY-LICENSES
   - from: ../device-agent/dist/runtime-payload/runtime-assets/jingler-child-tools.mjs
@@ -142,6 +148,8 @@ mac:
     - dmg
     - zip
   hardenedRuntime: true
+  extendInfo:
+    NSMicrophoneUsageDescription: Jingler records your voice to dictate prompts. Audio is transcribed locally and never leaves your Mac.
   gatekeeperAssess: false
   entitlements: build-resources/entitlements.mac.plist
   entitlementsInherit: build-resources/entitlements.mac.plist

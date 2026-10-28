@@ -59,20 +59,21 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
   })
 
   // ── The meter reads a live snapshot across the RPC boundary ──
-  const meter = window.getByRole("button", { name: "Compact now" })
-  await expect(meter).toBeVisible({ timeout: 20_000 })
-  // The scripted provider reports a non-zero context reading. Seeing it here proves
-  // the Usage event reached the renderer AND that `Context.state` resolved a
-  // trigger point — the meter renders nothing without one.
-  await expect(meter).toContainText(/\d+(?:\.\d)?k/)
-  await meter.hover()
+  // The ring around the send button carries the usage percentage; a percentage
+  // proves the Usage event reached the renderer AND that `Context.state`
+  // resolved a trigger point — the ring renders nothing without a reading.
+  const ring = window.getByRole("button", { name: /^Context usage \d+%$/ })
+  await expect(ring).toBeVisible({ timeout: 20_000 })
+  // The send button fills the ring's centre; the click lands on the 6px band around it.
+  await ring.click({ position: { x: 3, y: 20 } })
   const breakdown = window.getByTestId("context-breakdown").first()
   await expect(breakdown).toBeVisible()
   await expect(breakdown.getByText("System prompt")).toBeVisible()
   await expect(breakdown.getByText("MCPs")).toBeVisible()
+  await expect(breakdown.getByText("Compaction target")).toBeVisible()
 
   // ── Compact ──
-  await meter.click()
+  await breakdown.getByRole("button", { name: "Compact now" }).click()
 
   // The widget must SAY a compaction is happening — the state the user cannot
   // cause themselves and previously had no word for. It resolves to "compacts
@@ -145,9 +146,11 @@ test("reassembles a digest that arrives as streamed deltas", async ({ launchApp 
     timeout: 20_000
   })
 
-  const meter = window.getByRole("button", { name: "Compact now" })
-  await expect(meter).toBeVisible({ timeout: 20_000 })
-  await meter.click()
+  const ring = window.getByRole("button", { name: /^Context usage/ })
+  await expect(ring).toBeVisible({ timeout: 20_000 })
+  // The send button fills the ring's centre; the click lands on the 6px band around it.
+  await ring.click({ position: { x: 3, y: 20 } })
+  await window.getByRole("button", { name: "Compact now" }).click()
 
   // The digest PARSED. With the "\n" join this never happens: the reply is
   // invalid JSON, the manager fails, and the meter reads "compaction failed".
@@ -187,7 +190,7 @@ test("exposes the token levers in Settings", async ({ launchApp }) => {
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Measure this conversation before opening settings.")
   await composer.press("Enter")
-  await expect(window.getByRole("button", { name: "Compact now" })).toBeVisible({
+  await expect(window.getByRole("button", { name: /^Context usage/ })).toBeVisible({
     timeout: 20_000
   })
 
@@ -203,4 +206,20 @@ test("exposes the token levers in Settings", async ({ launchApp }) => {
   await expect(sessionsPanel).toBeVisible()
   await expect(sessionsPanel.getByText("Long running session")).toBeVisible()
   await expect(sessionsPanel.getByText(/\d+(?:\.\d+)?k context/)).toBeVisible()
+
+  // The levers sit on cataloged SettingsRows and persist via Config.setContext.
+  await expect(window.getByTestId("settings-row")).toHaveCount(3)
+  const auto = window.getByRole("switch", { name: "Compact sessions automatically" })
+  await expect(auto).toBeChecked()
+  await auto.click()
+  await expect(auto).not.toBeChecked()
+  await expect(window.getByRole("slider", { name: "Working-set budget" })).toBeDisabled()
+
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: /Context/ }).click()
+  await expect(
+    window.getByRole("switch", { name: "Compact sessions automatically" })
+  ).not.toBeChecked()
 })

@@ -24,6 +24,7 @@ import {
   EMPTY_REVIEW_DIFF,
   agentWakes,
   AgentRunner,
+  findInterruptedChats,
   AgentRuntime,
   runtimeOwnerForSession,
   AppPaths,
@@ -100,6 +101,7 @@ import {
   AgentResourceService,
   McpConfigService,
   probeAll,
+  mcpLogTail,
   discoverClaudeConnectors,
   parseClaudeMcp,
   managedMcpPaths,
@@ -113,14 +115,21 @@ import {
   checkoutWorkspaceHandoffBase,
   importWorkspaceHandoff,
   branchAt,
+  scanClaudeCodeSessions,
+  scanCodexSessions,
+  scanConductorSessions,
+  scanT3CodeSessions,
+  runString
 } from "@jingler/cli-adapters";
-import { appendFileSync } from "node:fs";
+
+import { appendFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   AssetUnsupportedError,
+  prEventMessage,
   AuthError,
   ConfigError,
   GitHubApiError,
@@ -137,6 +146,8 @@ import {
   SessionNotFoundError,
   workspaceModeOf,
   reduceCheckouts,
+  activeCheckoutOf,
+  checkoutsOf,
   sessionForCheckout,
   createWorkspaceProvisioningPlan,
   defaultModeFor,
@@ -152,13 +163,18 @@ import {
   ProviderConnectionError,
   type AgentEndpointId,
   type ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   piEndpointId,
   providerConnectionIdForPiEndpoint,
   AgentResourceRpcError,
   WEB_SEARCH_CONFIG_DEFAULT,
   type WebSearchConfig,
   type McpConfigEntry,
+  entryNeedsSecrets,
   WebSearchError,
+  applyImportResolutions,
+  type McpImportResolution,
 } from "@jingler/core";
 import type {
   BrowserBounds,
@@ -178,11 +194,14 @@ import type {
   SettingContribution,
   PrMergeMethod,
   PublishCheckpoint,
+  RestackedLayer,
+  SessionPr,
   Project,
   ReviewComment,
   ReviewSubmitKind,
   ReasoningSetting,
   Session,
+  SessionCheckout,
   GitHubAppConnectionStatus,
   GitHubSessionRoute,
   GitHubRelayDelivery,
@@ -205,6 +224,7 @@ import {
   SessionReviewDiff,
   type SessionCreationPhase,
   type SessionCreationUpdate,
+  VoiceError,
 } from "@jingler/contracts";
 import { FileSystem, Path } from "@effect/platform";
 import type { CommandExecutor } from "@effect/platform";
@@ -225,8 +245,14 @@ import {
   Stream,
 } from "effect";
 import type { WebContents } from "electron";
-import { BrowserWindow, ipcMain, shell } from "electron";
-import { showNotification, shouldNotify } from "./notifications.js";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
+import {
+  notificationPermission,
+  openNotificationSystemSettings,
+  showNotification,
+  shouldNotify,
+} from "./notifications.js";
+import { downloadVoiceModel, removeVoiceModel, requestMicrophone, transcribeWav, voiceModels } from "./voice.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
 import { primeOffloadSessions } from "./offload-session-primer.js";
@@ -243,7 +269,7 @@ import {
 } from "./github-relay.js";
 
 /** The single IPC channel both directions of the RPC transport ride on. */
-export const authenticatedSession = () => AuthService.getSession().pipe(Effect.tap(session => RoutinesService.pipe(Effect.flatMap(service => session ? service.start : service.stop), Effect.catchAll(cause => Effect.logError(cause.message)))))
+export const authenticatedSession = () => AuthService.checkSession().pipe(Effect.tap(session => RoutinesService.pipe(Effect.flatMap(service => session ? service.start : service.stop), Effect.catchAll(cause => Effect.logError(cause.message)))))
 
 export const RPC_CHANNEL = "jingler/rpc";
 
@@ -545,6 +571,7 @@ const mcpStartAuthorization = (name: string) =>
 const mcpApplyImport = (
   source: "claude" | "codex" | "opencode",
   names: ReadonlyArray<string>,
+  resolutions: Readonly<Record<string, McpImportResolution>>,
   connectors: boolean,
 ) =>
   Effect.gen(function* () {
@@ -555,12 +582,13 @@ const mcpApplyImport = (
     );
     const selected = candidates.filter(
       (candidate): candidate is McpImportCandidate & { entry: McpConfigEntry } =>
-        requested.has(candidate.name) && candidate.entry !== null && !existing.has(candidate.name),
+        requested.has(candidate.name) && candidate.entry !== null,
     );
+    const resolved = applyImportResolutions(selected, existing, resolutions);
     yield* McpConfigService.writeAll(
-      Object.fromEntries(selected.map((candidate) => [candidate.name, candidate.entry])),
+      Object.fromEntries(resolved.map((candidate) => [candidate.name, candidate.entry])),
     ).pipe(Effect.mapError((cause) => mcpError(cause.message, cause)));
-    return selected.map((candidate) => candidate.name);
+    return resolved.map((candidate) => candidate.name);
   });
 
 const mcpReveal = () =>
@@ -592,11 +620,32 @@ const mcpReveal = () =>
  * a broken worktree for a clean one.
  * Exported for tests.
  */
-export const sessionDiff = (id: string, checkoutId?: string) =>
+export const sessionDiff = (id: string, checkoutId?: string, workspacePath?: string) =>
   Effect.gen(function* () {
     const session = yield* resolveCheckoutSession(id, checkoutId);
+    // A subagent worktree: only one git lists as a worktree of this session's
+    // repo, so the renderer can't ask for a diff of an arbitrary directory.
+    if (workspacePath !== undefined) {
+      const anchor = session?.worktreePath ?? session?.repoPath;
+      if (!anchor || !isAbsolute(workspacePath)) return EMPTY_REVIEW_DIFF;
+      const porcelain = yield* runString("git", "-C", anchor, "worktree", "list", "--porcelain");
+      // Real paths: macOS tmp dirs are symlinks (/var → /private/var) and git reports the real one.
+      const real = (p: string) => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return resolve(p);
+        }
+      };
+      const target = real(workspacePath);
+      const known = (porcelain ?? "")
+        .split("\n")
+        .some((line) => line.startsWith("worktree ") && real(line.slice(9)) === target);
+      if (!known) return EMPTY_REVIEW_DIFF;
+      return yield* WorkspaceService.diff(target, session?.baseBranch);
+    }
     if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
-    return yield* WorkspaceService.diff(session.worktreePath);
+    return yield* WorkspaceService.diff(session.worktreePath, session.baseBranch);
   });
 
 export const sessionDiffStat = (id: string) =>
@@ -605,7 +654,7 @@ export const sessionDiffStat = (id: string) =>
       Effect.orElseSucceed(() => null),
     );
     if (!session?.worktreePath) return { added: 0, removed: 0, files: 0 };
-    return yield* WorkspaceService.diffStat(session.worktreePath);
+    return yield* WorkspaceService.diffStat(session.worktreePath, session.baseBranch);
   });
 
 export const sessionFileDiff = (id: string, path: string) =>
@@ -614,7 +663,7 @@ export const sessionFileDiff = (id: string, path: string) =>
       Effect.orElseSucceed(() => null),
     );
     if (!session?.worktreePath) return { kind: "patch" as const, patch: "" };
-    return yield* WorkspaceService.boundedFileDiff(session.worktreePath, path);
+    return yield* WorkspaceService.boundedFileDiff(session.worktreePath, path, session.baseBranch);
   });
 
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
@@ -1010,11 +1059,13 @@ const provisionRemoteSession = (
       yield* reportSessionCreation(progress, "resolving-repository");
       const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
       managedSessionId = sessionId;
-      const repository = yield* managedRepositoryIdentity(input.repoPath);
+      // Auto (no `repoPath`) never reaches a managed/remote environment in
+      // this PR — choosing a repo up front is still required there.
+      const repository = yield* managedRepositoryIdentity(input.repoPath!);
       const { branch, baseBranch, source } = remoteProvisioningSource(operation, input);
-      const headSha = yield* GitService.revision(input.repoPath, branch).pipe(
+      const headSha = yield* GitService.revision(input.repoPath!, branch).pipe(
         Effect.orElse(() =>
-          GitService.revision(input.repoPath, `origin/${branch}`),
+          GitService.revision(input.repoPath!, `origin/${branch}`),
         ),
       );
       const plan = createWorkspaceProvisioningPlan({
@@ -1644,36 +1695,6 @@ export const workspaceRevertFile = (input: {
   });
 
 /**
- * `Workspace.revertLines` handler — revert just the uncommitted changes in a
- * line range of `path` in the session's worktree. No-op for an unknown session.
- */
-export const workspaceRevertLines = (input: {
-  sessionId: string;
-  path: string;
-  startLine: number;
-  endLine: number;
-}) =>
-  Effect.gen(function* () {
-    const session = yield* resolveSession(input.sessionId);
-    if (!session?.worktreePath) return;
-    if (session.checkpointSafeMode) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in checkpoint-safe mode. Use the checkpoint restore preview." }));
-    if (workspaceModeOf(session) === "direct") {
-      return yield* Effect.fail(
-        new GitError({
-          message:
-            "Revert is disabled for direct sessions because this checkout may contain unrelated developer edits.",
-        }),
-      );
-    }
-    yield* WorkspaceService.revertRange(
-      session.worktreePath,
-      input.path,
-      input.startLine,
-      input.endLine,
-    );
-  });
-
-/**
  * `Github.pr` handler. Returns the linked PR via GitHub APIs or null when the
  * session has no worktree or no linked PR. Exported for tests.
  */
@@ -1706,23 +1727,32 @@ export const githubIssueCommentBySlug = (input: {
         }),
       );
 
-export const githubPr = (sessionId: string, checkoutId?: string) =>
+/** A layer must belong to the session's stack; anything else is not ours to read. */
+const ownsPr = (
+  session: { prNumber: number | null; prs?: ReadonlyArray<{ number: number }> },
+  number: number,
+): boolean => number === session.prNumber || (session.prs ?? []).some((pr) => pr.number === number);
+
+export const githubPr = (sessionId: string, number?: number, checkoutId?: string) =>
   Effect.gen(function* () {
     const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath || session.prNumber === null) return null;
-    return yield* GitHubApi.prView(session.worktreePath, session.prNumber);
+    if (number !== undefined && !ownsPr(session, number)) return null;
+    return yield* GitHubApi.prView(session.worktreePath, number ?? session.prNumber);
   });
 
 /**
  * `Github.prState` handler — the lifecycle state of a session's linked PR (or
- * null when there's no worktree / linked PR). Drives the archive sweep. Exported
+ * null when there's no worktree / linked PR). `number` selects one layer of the
+ * session's PR stack. Drives the PR sweep. Exported
  * for tests.
  */
-export const githubPrState = (sessionId: string, checkoutId?: string) =>
+export const githubPrState = (sessionId: string, number?: number, checkoutId?: string) =>
   Effect.gen(function* () {
     const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath || session.prNumber === null) return null;
-    return yield* GitHubApi.prState(session.worktreePath, session.prNumber);
+    if (number !== undefined && !ownsPr(session, number)) return null;
+    return yield* GitHubApi.prState(session.worktreePath, number ?? session.prNumber);
   });
 
 /**
@@ -1980,6 +2010,24 @@ export const restoreSession = (sessionId: string) =>
   );
 
 /** `Sessions.rename` handler — pin a manual title and return the updated record. */
+/** Append the PR lifecycle card unless one for this (kind, PR) is already in the transcript. */
+export const recordPrEvent = (sessionId: string, kind: "opened" | "merged", number: number) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId);
+    const existing = yield* TranscriptStore.list(session.activeChatId);
+    const message = prEventMessage({
+      kind,
+      number,
+      prs: session.prs ?? [],
+      now: new Date().toISOString(),
+    });
+    if (existing.some((m) => m.id === message.id)) return null;
+    yield* TranscriptStore.append(session.activeChatId, message);
+    return message;
+  }).pipe(
+    Effect.mapError((cause) => new GitError({ message: "Could not record the PR event", cause })),
+  );
+
 export const renameSession = (sessionId: string, title: string) =>
   Effect.gen(function* () {
     yield* SessionStore.renameTitle(sessionId, title);
@@ -1997,6 +2045,15 @@ export const setSessionStatus = (
 ) =>
   Effect.gen(function* () {
     yield* SessionStore.setStatus(sessionId, status);
+    // A settled turn may have moved a worktree off its recorded branch; labels read
+    // the stored checkout branch, so re-sync before the record is published.
+    // Direct checkouts are excluded: their drift is surfaced by BranchDriftError.
+    const session = yield* SessionStore.get(sessionId);
+    yield* Effect.forEach(
+      checkoutsOf(session).filter((c) => c.worktreePath !== undefined && c.workspaceMode !== "direct"),
+      (checkout) => syncCheckoutBranch(sessionId, checkout),
+      { discard: true },
+    );
     return yield* SessionStore.get(sessionId);
   }).pipe(
     Effect.catchTag("SessionNotFoundError", () =>
@@ -2012,20 +2069,32 @@ export const setSessionPersistent = (sessionId: string, persistent: boolean) =>
     ),
   );
 
-/** `Github.files` handler — the PR's changed files (empty without a linked PR). */
-export const githubFiles = (sessionId: string, checkoutId?: string) =>
+/** The PR a files/diff read targets: the requested stack layer, else the top PR; null if not in the stack. */
+const layerPrNumber = (session: Session, requested: number | undefined): number | null => {
+  if (requested === undefined) return session.prNumber;
+  return session.prNumber === requested || session.prs?.some((pr) => pr.number === requested) === true
+    ? requested
+    : null;
+};
+
+/** `Github.files` handler — a PR layer's changed files (empty without a linked PR). */
+export const githubFiles = (sessionId: string, prNumber?: number, checkoutId?: string) =>
   Effect.gen(function* () {
     const session = yield* resolveCheckoutSession(sessionId, checkoutId);
-    if (!session?.worktreePath || session.prNumber === null) return [];
-    return yield* GitHubApi.prFiles(session.worktreePath, session.prNumber);
+    if (!session?.worktreePath) return [];
+    const number = layerPrNumber(session, prNumber);
+    if (number === null) return [];
+    return yield* GitHubApi.prFiles(session.worktreePath, number);
   });
 
-/** `Github.diff` handler — the PR's unified diff (empty without a linked PR). */
-export const githubDiff = (sessionId: string, checkoutId?: string) =>
+/** `Github.diff` handler — a PR layer's unified diff (empty without a linked PR). */
+export const githubDiff = (sessionId: string, prNumber?: number, checkoutId?: string) =>
   Effect.gen(function* () {
     const session = yield* resolveCheckoutSession(sessionId, checkoutId);
-    if (!session?.worktreePath || session.prNumber === null) return "";
-    return yield* GitHubApi.prDiff(session.worktreePath, session.prNumber);
+    if (!session?.worktreePath) return "";
+    const number = layerPrNumber(session, prNumber);
+    if (number === null) return "";
+    return yield* GitHubApi.prDiff(session.worktreePath, number);
   });
 
 /** `Review.get` handler — the stored review for the active PR, or null. */
@@ -2292,6 +2361,57 @@ export const reviewRun = (sessionId: string, force: boolean) =>
   }).pipe(Effect.scoped);
 
 /**
+ * `Review.draftPr` handler — a read-only review of an inbox PR with no session.
+ * Deliberately skips `postReviewToPr` and `ReviewStore.set`: drafts stay local
+ * until the operator submits them.
+ *
+ * Exported for tests.
+ */
+export const reviewDraftPr = (repository: string, number: number) =>
+  Effect.gen(function* () {
+    const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null));
+    const configured = config?.github?.adversarialReviewModel;
+    const runtime = configured === undefined ? null : configuredReviewRuntime(configured);
+    if (runtime === null) {
+      return yield* Effect.fail(
+        new ReviewError({
+          message: "Choose an adversarial review model in GitHub settings before running a review.",
+        }),
+      );
+    }
+    const githubTarget = `github-slug:${repository}`;
+    const headSha = yield* GitHubApi.prHeadSha(githubTarget, number);
+    if (headSha === null) {
+      return yield* Effect.fail(
+        new ReviewError({ message: "Could not resolve the pull request's head commit." }),
+      );
+    }
+    const diff = yield* GitHubApi.prDiff(githubTarget, number);
+    const cwd = yield* Effect.acquireRelease(
+      Effect.promise(() => mkdtemp(resolve(tmpdir(), "jingler-adversarial-review-"))),
+      (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })).pipe(
+        Effect.orElseSucceed(() => undefined),
+      ),
+    );
+    return yield* ReviewService.run({
+      sessionId: `pr-draft-${repository.replace("/", "-")}-${number}`,
+      prNumber: number,
+      headSha,
+      cwd,
+      repo: repository,
+      branch: "",
+      baseBranch: null,
+      runtimeId: runtime.runtimeId,
+      endpointId: runtime.endpointId,
+      ...(runtime.connectionId === undefined ? {} : { connectionId: runtime.connectionId }),
+      providerId: runtime.providerId,
+      modelId: runtime.modelId,
+      targetId: runtime.targetId,
+      diff,
+    });
+  }).pipe(Effect.scoped);
+
+/**
  * Post a review's low-severity findings to the PR, returning the review stamped
  * with the outcome.
  *
@@ -2335,6 +2455,33 @@ const postReviewToPr = (
     );
   });
 
+/** Store a checkout's live worktree branch when the agent moved it off the recorded one. */
+const syncCheckoutBranch = (sessionId: string, checkout: SessionCheckout) =>
+  GitService.branchAt(checkout.worktreePath!).pipe(
+    Effect.flatMap((live) =>
+      live === null || live === checkout.branch ? Effect.void : SessionStore.setCheckoutBranch(sessionId, checkout.id, live),
+    ),
+    Effect.ignore,
+  );
+
+/** Detect a PR in every non-active checkout's own worktree and store it on that checkout. */
+const detectOtherCheckoutPrs = (session: Session) =>
+  Effect.forEach(
+    checkoutsOf(session).filter(
+      (c) => c.id !== activeCheckoutOf(session).id && c.worktreePath !== undefined,
+    ),
+    (checkout) =>
+      syncCheckoutBranch(session.id, checkout).pipe(Effect.zipRight(GitHubApi.prForWorktree(checkout.worktreePath!)),
+        Effect.orElseSucceed(() => null),
+        Effect.flatMap((found) =>
+          found === null || found === checkout.prNumber
+            ? Effect.void
+            : SessionStore.setCheckoutPr(session.id, checkout.id, found).pipe(Effect.ignore),
+        ),
+      ),
+    { discard: true },
+  );
+
 /**
  * `Github.detectPr` handler. Looks up a PR open on the session's branch and, when
  * found, links it (persists `prNumber`). Returns the number, or null. Exported for tests.
@@ -2343,13 +2490,20 @@ export const githubDetectPr = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
     if (!session?.worktreePath) return null;
+    // Every other checkout has its own branch/PR: detect each in its own worktree.
+    yield* detectOtherCheckoutPrs(session);
     // Resolve against the worktree's live branch — the stored `session.branch`
     // drifts once the agent checks out / creates a different branch there.
     const [n, liveBranch] = yield* Effect.all([
       GitHubApi.prForWorktree(session.worktreePath),
       GitService.branchAt(session.worktreePath),
     ]);
-    if (n === null) return null;
+    if (n === null) {
+      if (liveBranch !== null && liveBranch !== session.branch) {
+        yield* SessionStore.setBranch(session.id, liveBranch).pipe(Effect.ignore);
+      }
+      return null;
+    }
     const persistLink = SessionStore.setPrNumber(session.id, n).pipe(
       Effect.zipRight(
         liveBranch === null ? Effect.void : SessionStore.setBranch(session.id, liveBranch),
@@ -2800,11 +2954,78 @@ export const resolvePublishSessionBranch = async (
 };
 
 /**
+ * Append a freshly created PR on top of the session's stack when its `base` is the
+ * head branch of a PR already in the stack. Returns false (and writes nothing) when
+ * `base` is not a stack layer, so the caller falls back to the single-PR link.
+ */
+export const appendStackedPr = (
+  sessionId: string,
+  pr: { readonly number: number; readonly branch: string; readonly base: string },
+) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId);
+    if (!(session.prs ?? []).some((layer) => layer.branch === pr.base)) return false;
+    yield* SessionStore.appendPr(sessionId, pr);
+    return true;
+  });
+
+/** Upsert the GitHub relay route for a PR when the repository is App-installed. */
+const upsertPrRoute = (
+  sessionId: string,
+  repository: { readonly id: string; readonly installationId?: string },
+  number: number,
+) =>
+  repository.installationId === undefined
+    ? Effect.void
+    : GitHubAuth.upsertSessionRoute({
+        sessionId,
+        installationId: repository.installationId,
+        repositoryId: repository.id,
+        pullRequestNumber: number,
+      });
+
+/**
+ * Link a just-published PR to its session. A PR whose `base` is another stack
+ * layer's head branch is appended to the stack; any other PR replaces the single
+ * link and is recorded as the stack's first layer.
+ */
+export const linkPublishedPr = (input: {
+  readonly sessionId: string;
+  readonly number: number;
+  readonly repository: { readonly id: string; readonly installationId?: string };
+  readonly base: string | undefined;
+  readonly branch: string | null;
+  readonly defaultBase: string;
+}) =>
+  Effect.gen(function* () {
+    const { sessionId, number, repository, branch } = input;
+    if (input.base !== undefined && branch !== null) {
+      const stacked = yield* appendStackedPr(sessionId, { number, branch, base: input.base });
+      if (stacked) {
+        yield* upsertPrRoute(sessionId, repository, number);
+        return;
+      }
+    }
+    yield* SessionStore.setPrNumber(sessionId, number);
+    if (repository.installationId !== undefined) {
+      yield* SessionStore.setGitHubLink(sessionId, {
+        installationId: repository.installationId,
+        repositoryId: repository.id,
+        prNumber: number,
+      });
+      yield* upsertPrRoute(sessionId, repository, number);
+    }
+    if (branch !== null) {
+      yield* SessionStore.appendPr(sessionId, { number, branch, base: input.base ?? input.defaultBase });
+    }
+  });
+
+/**
  * `Github.publish` is the sole mutation owner for publishing session work.
  * Installation credentials are captured only in this main-process scope and
  * cleared immediately after the authenticated push.
  */
-export const githubPublish = (sessionId: string) =>
+export const githubPublish = (sessionId: string, base?: string) =>
   Stream.unwrapScoped(
     Effect.gen(function* () {
       const mailbox = yield* Mailbox.make<PublishCheckpoint>();
@@ -2847,6 +3068,7 @@ export const githubPublish = (sessionId: string) =>
               readonly fullName: string;
             } | null = null;
             let pushCredential: { readonly token: string } | null = null;
+            let publishedBranch: string | null = null;
             let pushPermissions: ReadonlyArray<string> = ["contents:write"];
             const messages = await run(
               TranscriptStore.list(session.activeChatId),
@@ -2856,12 +3078,13 @@ export const githubPublish = (sessionId: string) =>
                 session.id,
                 session.publish,
                 {
-                  knownPrNumber: session.prNumber,
+                  // A stacked layer is a new PR on a new branch: never adopt the lower layer's PR.
+                  knownPrNumber: base === undefined ? session.prNumber : null,
                   inspect: async () => {
                     const inspection = await run(
                       GitService.publishInspection(
                         cwd,
-                        session.baseBranch ?? "main",
+                        base ?? session.baseBranch ?? "main",
                       ),
                     );
                     pushPermissions = githubPushPermissions(
@@ -2876,6 +3099,7 @@ export const githubPublish = (sessionId: string) =>
                       () => run(SessionStore.get(sessionId)),
                     );
                     session = resolved.session;
+                    publishedBranch = resolved.branch;
                     return resolved.branch;
                   },
                   generateMetadata: (inspection) =>
@@ -2946,7 +3170,7 @@ export const githubPublish = (sessionId: string) =>
                       GitHubApi.prCreate(cwd, {
                         title: metadata.prTitle,
                         body: metadata.prBody,
-                        base: session.baseBranch ?? "main",
+                        base: base ?? session.baseBranch ?? "main",
                         draft: false,
                       }),
                     );
@@ -2958,29 +3182,19 @@ export const githubPublish = (sessionId: string) =>
                         body: metadata.prBody,
                       }),
                     ),
-                  link: async (number) => {
-                    const repository =
-                      repositoryIdentity ??
-                      (await run(GitHubApi.repository(cwd)));
-                    await run(SessionStore.setPrNumber(session.id, number));
-                    if (repository.installationId !== undefined) {
-                      await run(
-                        SessionStore.setGitHubLink(session.id, {
-                          installationId: repository.installationId,
-                          repositoryId: repository.id,
-                          prNumber: number,
-                        }),
-                      );
-                      await run(
-                        GitHubAuth.upsertSessionRoute({
-                          sessionId: session.id,
-                          installationId: repository.installationId,
-                          repositoryId: repository.id,
-                          pullRequestNumber: number,
-                        }),
-                      );
-                    }
-                  },
+                  link: async (number) =>
+                    run(
+                      linkPublishedPr({
+                        sessionId: session.id,
+                        number,
+                        repository:
+                          repositoryIdentity ??
+                          (await run(GitHubApi.repository(cwd))),
+                        base,
+                        branch: publishedBranch,
+                        defaultBase: session.baseBranch ?? "main",
+                      }),
+                    ),
                 },
                 async (checkpoint) => {
                   await run(
@@ -3011,7 +3225,7 @@ export const githubPublish = (sessionId: string) =>
     }),
   );
 
-export const githubPublishRouted = (sessionId: string) =>
+export const githubPublishRouted = (sessionId: string, base?: string) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
@@ -3020,7 +3234,7 @@ export const githubPublishRouted = (sessionId: string) =>
         session,
         "Github.createPr",
         {},
-        { execute: () => Effect.succeed(githubPublish(sessionId)) },
+        { execute: () => Effect.succeed(githubPublish(sessionId, base)) },
         {
           execute: () =>
             Effect.succeed(
@@ -3273,43 +3487,65 @@ export const githubMergeBySlug = (input: {
  *
  * Returns the unanchored count so the renderer can say so.
  */
+const reviewApiFor = (
+  target: { repository: string; number: number } | { cwd: string; number: number },
+) =>
+  "repository" in target
+    ? {
+        headSha: GitHubApi.prHeadShaBySlug(target.repository, target.number),
+        diff: GitHubApi.prDiffBySlug(target.repository, target.number),
+        post: (review: Parameters<typeof GitHubApi.prReviewCommentsBySlug>[2]) =>
+          GitHubApi.prReviewCommentsBySlug(target.repository, target.number, review),
+      }
+    : {
+        headSha: GitHubApi.prHeadSha(target.cwd, target.number),
+        diff: GitHubApi.prDiff(target.cwd, target.number),
+        post: (review: Parameters<typeof GitHubApi.prReviewComments>[2]) =>
+          GitHubApi.prReviewComments(target.cwd, target.number, review),
+      };
+
+/** The PR a review targets: a session's worktree, or an inbox PR by slug. */
+const resolveReviewTarget = (input: {
+  sessionId?: string | undefined;
+  repository?: string | undefined;
+  number?: number | undefined;
+}) =>
+  Effect.gen(function* () {
+    if (input.sessionId === undefined) {
+      return input.repository && input.number
+        ? { repository: input.repository, number: input.number }
+        : null;
+    }
+    const session = yield* resolveSession(input.sessionId);
+    return session?.worktreePath && session.prNumber !== null
+      ? { cwd: session.worktreePath, number: session.prNumber }
+      : null;
+  });
+
 export const githubSubmitReview = (input: {
-  sessionId: string;
+  sessionId?: string | undefined;
+  repository?: string | undefined;
+  number?: number | undefined;
+  body?: string | undefined;
   comments: ReadonlyArray<ReviewComment>;
 }) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(input.sessionId);
-    if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(
-        new GitHubApiError({
-          reason: "validation",
-          message: "No linked pull request to review",
-        }),
-      );
-    }
-    const headSha = yield* GitHubApi.prHeadSha(
-      session.worktreePath,
-      session.prNumber,
-    );
+    const invalid = (message: string) =>
+      Effect.fail(new GitHubApiError({ reason: "validation", message }));
+    const target = yield* resolveReviewTarget(input);
+    if (target === null) return yield* invalid("No linked pull request to review");
+    const api = reviewApiFor(target);
+    const headSha = yield* api.headSha;
     if (headSha === null) {
-      return yield* Effect.fail(
-        new GitHubApiError({
-          reason: "validation",
-          message:
-            "Couldn't resolve the pull request's head commit to anchor comments against",
-        }),
+      return yield* invalid(
+        "Couldn't resolve the pull request's head commit to anchor comments against",
       );
     }
-    const diff = yield* GitHubApi.prDiff(
-      session.worktreePath,
-      session.prNumber,
-    );
-    const plan = planDraftPost(input.comments, diff);
+    const plan = planDraftPost(input.comments, yield* api.diff);
     if (plan === null) return 0;
-
-    yield* GitHubApi.prReviewComments(session.worktreePath, session.prNumber, {
+    yield* api.post({
       commitSha: headSha,
-      body: plan.body,
+      body: [input.body?.trim(), plan.body].filter(Boolean).join("\n\n"),
       comments: plan.comments,
     });
     return plan.unanchoredCount;
@@ -3436,6 +3672,100 @@ export const githubUpdateBranch = (input: { sessionId: string }) =>
       );
     }
     yield* GitHubApi.prUpdateBranch(session.worktreePath, session.prNumber);
+  });
+
+/** Pick the merged layer and the layers above it, or fail when the stack cannot be restacked. */
+const restackSelection = (
+  session: Session,
+  mergedPr: number,
+): Effect.Effect<{ merged: SessionPr; above: ReadonlyArray<SessionPr> }, GitHubApiError> => {
+  const prs = session.prs ?? [];
+  const at = prs.findIndex((layer) => layer.number === mergedPr);
+  const merged = prs[at];
+  const invalid = (message: string) =>
+    Effect.fail(new GitHubApiError({ reason: "validation", message }));
+  if (!session.worktreePath) return invalid("This session has no worktree to restack from.");
+  if (merged === undefined) return invalid(`PR #${mergedPr} is not in this session's stack.`);
+  const above = prs.slice(at + 1);
+  const unrecorded = above.length === 0 ? undefined : [merged, ...above].find((layer) => !layer.branch);
+  if (unrecorded) return invalid(`PR #${unrecorded.number} has no recorded branch to restack.`);
+  return Effect.succeed({ merged, above });
+};
+
+/**
+ * Rebase one stack layer onto `onto`, retarget its PR when it now sits directly on
+ * the merged layer's base, and force-push it with a lease on the old tip.
+ */
+const restackLayer = (
+  ctx: {
+    readonly sessionId: string;
+    readonly cwd: string;
+    readonly repository: { readonly fullName: string };
+    readonly token: string | null;
+  },
+  step: {
+    readonly layer: SessionPr;
+    readonly base: string;
+    readonly retarget: boolean;
+    readonly upstream: string;
+    readonly onto: string;
+  },
+) =>
+  Effect.gen(function* () {
+    const branch = step.layer.branch!;
+    const rebased = yield* GitService.rebaseRemoteBranchOnto(ctx.cwd, {
+      branch,
+      onto: step.onto,
+      upstream: step.upstream,
+    });
+    if (step.retarget) yield* GitHubApi.prSetBase(ctx.cwd, step.layer.number, step.base);
+    const options = { source: rebased.newSha, leaseSha: rebased.oldSha };
+    yield* ctx.token === null
+      ? GitService.pushConfigured(ctx.cwd, branch, options)
+      : GitService.pushWithInstallationToken(ctx.cwd, branch, ctx.repository.fullName, ctx.token, options);
+    yield* SessionStore.appendPr(ctx.sessionId, { number: step.layer.number, base: step.base });
+    return rebased;
+  });
+
+/**
+ * `Github.restack` handler. After the stack layer `mergedPr` merged, rebase each
+ * layer above it onto the merged layer's base, retarget the first one's PR base on
+ * GitHub, force-push with `--force-with-lease`, and record the new bases. The
+ * rebase runs against `origin/*` refs in a throwaway worktree, so the session's
+ * own worktree (the agent may be mid-turn) is never touched. A conflict fails the
+ * call before any remote write for that layer.
+ */
+export const githubRestack = (input: { sessionId: string; mergedPr: number }) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(input.sessionId);
+    const { merged, above } = yield* restackSelection(session, input.mergedPr);
+    if (above.length === 0) return [];
+    const cwd = session.worktreePath!;
+    const mergedBase = merged.base ?? session.baseBranch ?? "main";
+    const repository = yield* GitHubApi.repository(cwd);
+    const credential =
+      repository.installationId === undefined
+        ? null
+        : yield* GitHubAuth.credentialsForInstallation(repository.installationId, repository.fullName, ["contents:write"]);
+    yield* GitService.fetchRemoteBranches(
+      cwd,
+      [mergedBase, merged.branch!, ...above.map((layer) => layer.branch!)],
+      credential ? { fullName: repository.fullName, token: credential.token } : undefined,
+    );
+    const ctx = { sessionId: session.id, cwd, repository, token: credential?.token ?? null };
+    let upstream = `refs/remotes/origin/${merged.branch}`;
+    let onto = `refs/remotes/origin/${mergedBase}`;
+    const restacked: Array<RestackedLayer> = [];
+    for (const [index, layer] of above.entries()) {
+      // Only the layer directly above the merged one changes base; the rest still sit on their parent branch.
+      const base = index === 0 ? mergedBase : (layer.base ?? above[index - 1]!.branch!);
+      const rebased = yield* restackLayer(ctx, { layer, base, retarget: index === 0, upstream, onto });
+      restacked.push({ number: layer.number, branch: layer.branch!, base });
+      upstream = rebased.oldSha;
+      onto = rebased.newSha;
+    }
+    yield* SessionStore.appendPr(session.id, { number: merged.number, state: "merged" });
+    return restacked;
   });
 
 /**
@@ -4334,6 +4664,102 @@ export const updateWebSearchAtomically = <A, E, R>(
   );
 });
 
+/** Scan all four CLI stores and return merged, sorted importable sessions. */
+export const scanImportableSessions = () =>
+  Effect.gen(function* () {
+    const home = homedir();
+    const [claudeCode, codex, conductor, t3code] = yield* Effect.all([
+      Effect.promise(() => scanClaudeCodeSessions({ homeDir: home })),
+      Effect.promise(() => scanCodexSessions({ homeDir: home })),
+      Effect.promise(() => scanConductorSessions({ homeDir: home })),
+      Effect.promise(() => scanT3CodeSessions({ homeDir: home })),
+    ]);
+    
+    const merged = [...claudeCode, ...codex, ...conductor, ...t3code];
+    merged.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    
+    const imported = new Set(
+      (yield* SessionStore.list()).flatMap((s) =>
+        s.importedFrom ? [`${s.importedFrom.source}:${s.importedFrom.nativeSessionId}`] : []
+      )
+    );
+    return merged.map((s) => ({ ...s, alreadyImported: imported.has(`${s.source}:${s.nativeSessionId}`) }));
+  });
+
+const selectScanner = (source: "claude-code" | "codex" | "conductor" | "t3code") =>
+  source === "claude-code" ? scanClaudeCodeSessions :
+  source === "codex" ? scanCodexSessions :
+  source === "conductor" ? scanConductorSessions :
+  scanT3CodeSessions;
+
+const ensureProjectForPath = (cwd: string, name: string) =>
+  Effect.gen(function* () {
+    const projects = yield* ProjectService;
+    const allProjects = yield* projects.list();
+    const existing = allProjects.find(p => resolve(p.path) === resolve(cwd));
+    if (existing) return existing;
+    return yield* projects.register({ path: cwd, name });
+  });
+
+/** Import one session from a native CLI store. */
+export const importSession = (
+  source: "claude-code" | "codex" | "conductor" | "t3code",
+  nativeSessionId: string,
+) =>
+  Effect.gen(function* () {
+    const home = homedir();
+    const scanner = selectScanner(source);
+    const sessions = yield* Effect.promise(() => scanner({ homeDir: home }));
+    const session = sessions.find(s => s.nativeSessionId === nativeSessionId);
+    
+    if (!session) {
+      return yield* Effect.fail(
+        new GitError({ message: `Session ${nativeSessionId} not found in ${source} store` })
+      );
+    }
+    
+    if (!session.folderExists) {
+      return yield* Effect.fail(
+        new GitError({ message: `Session folder ${session.cwd} no longer exists` })
+      );
+    }
+    
+    const existing = yield* SessionStore.list();
+    const imported = existing.find(
+      (s) => s.importedFrom?.source === source && s.importedFrom.nativeSessionId === nativeSessionId
+    );
+    if (imported) return imported;
+    
+    const project = yield* ensureProjectForPath(
+      session.cwd,
+      session.cwd.split("/").pop() ?? "imported"
+    );
+    
+    const created = yield* SessionStore.create(
+      {
+        repoPath: session.cwd,
+        repoName: project.name,
+        projectId: project.id,
+        baseBranch: session.branch ?? "main",
+        title: session.title,
+        useWorktree: false,
+        providerId: ProviderId.make("anthropic"),
+        modelId: ProviderModelId.make("anthropic/claude-sonnet-4"),
+      },
+      {}
+    );
+    
+    return yield* SessionStore.setImportedFrom(created.id, { source, nativeSessionId });
+  }).pipe(
+    Effect.catchTag("SessionNotFoundError", (error) =>
+      Effect.fail(new GitError({ message: error.message, cause: error }))
+    )
+  );
+
+// Resolved per call: importing the window from ./index.js pulls Electron's app bootstrap into every rpc.ts importer (and its tests).
+const appWindow = (): BrowserWindow | undefined =>
+  BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
   "RuntimeDiagnostics.latest": () => RuntimeDiagnostics.latest(),
@@ -4795,7 +5221,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         )
       : WorkspaceService.files(repoPath),
   "Workspace.revertFile": (input) => workspaceRevertFile(input),
-  "Workspace.revertLines": (input) => workspaceRevertLines(input),
   // Migrated sessions whose runtime identity could not be resolved at
   // migration time adopt one here, the moment an authenticated connection can
   // satisfy them — so a pre-PI conversation continues without the operator
@@ -4804,6 +5229,14 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     Effect.andThen(SessionStore.reconcileInterruptedWorkspaceLifecycles().pipe(Effect.ignore)),
     Effect.andThen(SessionStore.list()),
   ),
+  "Sessions.interruptedChats": () =>
+    Effect.gen(function* () {
+      const runner = yield* AgentRunner;
+      return yield* findInterruptedChats(
+        yield* SessionStore.list(),
+        runner.chatBusy,
+      );
+    }),
   "Sessions.get": ({ id }) => SessionStore.get(id),
   "Sessions.create": ({ requestedSessionId: _internalSessionId, ...input }) =>
     createSessionRouted(input),
@@ -4952,6 +5385,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         Effect.fail(new GitError({ message: "Session not found", cause })),
       ),
     ),
+  "Sessions.scanImportable": () => scanImportableSessions(),
+  "Sessions.import": ({ source, nativeSessionId }) =>
+    importSession(source, nativeSessionId),
   // The windowed read the renderer opens sessions with — only the tail loads,
   // older turns page in on demand. Same attachment-stripping as the whole read.
   "Sessions.transcriptPage": ({ sessionId, chatId, before, limit }) =>
@@ -5030,7 +5466,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }
       return null;
     }).pipe(Effect.orElseSucceed(() => null)),
-  "Sessions.diff": ({ id, checkoutId }) =>
+  "Sessions.diff": ({ id, checkoutId, workspacePath }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(id);
       const remote = yield* RemoteSessionService;
@@ -5038,7 +5474,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Sessions.diff",
         {},
-        { execute: () => sessionDiff(id, checkoutId) },
+        { execute: () => sessionDiff(id, checkoutId, workspacePath) },
         {
           execute: () =>
             remote
@@ -5272,6 +5708,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     Effect.flatMap(AgentRunner, (runner) =>
       runner.setMode(sessionId, chatId, mode),
     ),
+  "Agent.setWorkMode": ({ sessionId, chatId, workMode, autoSwitch }) =>
+    Effect.flatMap(AgentRunner, (runner) =>
+      runner.setWorkMode(sessionId, chatId, workMode, autoSwitch),
+    ),
   "Agent.setReasoning": ({ sessionId, chatId, reasoning }) =>
     setReasoning(sessionId, chatId, reasoning),
   "Agent.setModel": ({
@@ -5500,45 +5940,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       ),
     ),
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
-  "Mcp.list": () => mcpList(),
-  "Mcp.status": () => mcpStatus(),
-  "Mcp.write": ({ name, entry }) =>
-    McpConfigService.write(name, entry).pipe(
-      Effect.mapError((cause) => mcpError(cause.message, cause)),
-    ),
-  "Mcp.remove": ({ name }) =>
-    Effect.gen(function* () {
-      yield* McpConfigService.remove(name).pipe(
-        Effect.mapError((cause) => mcpError(cause.message, cause)),
-      );
-      const secretStore = yield* SecretStore;
-      yield* new McpAuthStore(secretStore).delete(name);
-    }),
-  "Mcp.setEnabled": ({ name, enabled }) =>
-    McpConfigService.setEnabled(name, enabled).pipe(
-      Effect.mapError((cause) => mcpError(cause.message, cause)),
-    ),
-  "Mcp.setAuth": ({ name, auth }) =>
-    McpConfigService.setAuth(name, auth).pipe(
-      Effect.mapError((cause) => mcpError(cause.message, cause)),
-    ),
-  "Mcp.setApiKey": ({ name, apiKey }) => mcpSetApiKey(name, apiKey),
-  "Mcp.startAuthorization": ({ name }) => mcpStartAuthorization(name),
-  "Mcp.importCandidates": ({ source, connectors }) =>
-    mcpImportParse(source, connectors === true).pipe(
-      Effect.map((candidates) =>
-        candidates.map((candidate) => ({
-          name: candidate.name,
-          source: candidate.source,
-          origin: candidate.origin ?? "user",
-          target: mcpCandidateTarget(candidate),
-          problem: candidate.problem,
-        })),
-      ),
-    ),
-  "Mcp.applyImport": ({ source, names, connectors }) =>
-    mcpApplyImport(source, names, connectors === true),
-  "Mcp.reveal": () => mcpReveal(),
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via
   // the absolute path discovery found.
@@ -5641,6 +6042,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ConfigService.setSubagentModel(providerId, agent, modelId),
   "Config.setPlanAutoRun": ({ planAutoRun }) =>
     ConfigService.setPlanAutoRun(planAutoRun),
+  "Config.setVoice": (voice) => ConfigService.setVoice(voice),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
   "Config.setFontScale": ({ fontScale }) =>
     ConfigService.setFontScale(fontScale),
@@ -5695,7 +6097,11 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         }),
       ),
     ),
+  "Notify.permission": () => Effect.sync(() => notificationPermission()),
+  "Notify.openSystemSettings": () =>
+    Effect.sync(() => openNotificationSystemSettings()),
   "Config.setStarredRepos": ({ paths }) => ConfigService.setStarredRepos(paths),
+  "Config.setHeaderViews": ({ views }) => ConfigService.setHeaderViews(views),
   "Config.setCollapsedRepos": ({ paths }) =>
     ConfigService.setCollapsedRepos(paths),
   "Config.setLastRepoPath": ({ path }) => ConfigService.setLastRepoPath(path),
@@ -5729,6 +6135,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
 });
 
 const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
+  "Github.recordPrEvent": ({ sessionId, kind, number }) => recordPrEvent(sessionId, kind, number),
   "Github.inbox": () => githubPrInbox(),
   "Github.teams": () => GitHubApi.teams(),
   "Github.teamPrs": (input) => GitHubApi.teamPrs(input),
@@ -5741,8 +6148,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.issueBySlug": ({ repository, number }) => githubIssueBySlug(repository, number),
   "Github.issueCommentBySlug": (input) => githubIssueCommentBySlug(input),
   "Github.issueCloseBySlug": ({ repository, number }) => GitHubApi.issueCloseBySlug(repository, number),
-  "Github.pr": ({ sessionId, checkoutId }) => githubPr(sessionId, checkoutId),
-  "Github.prState": ({ sessionId, checkoutId }) => githubPrState(sessionId, checkoutId),
+  "Github.pr": ({ sessionId, number, checkoutId }) => githubPr(sessionId, number, checkoutId),
+  "Github.prState": ({ sessionId, number, checkoutId }) => githubPrState(sessionId, number, checkoutId),
   "Github.listPrs": ({ repoPath, githubSlug, mine, search }) =>
     githubSlug
       ? GitHubApi.listPrsBySlug(githubSlug, { mine, search })
@@ -5753,8 +6160,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       : GitHubApi.listIssues(repoPath, { mine, search }),
   "Github.closeIssue": ({ sessionId }) => githubCloseIssue(sessionId),
   "Github.issue": ({ sessionId }) => githubIssue(sessionId),
-  "Github.files": ({ sessionId, checkoutId }) => githubFiles(sessionId, checkoutId),
-  "Github.diff": ({ sessionId, checkoutId }) => githubDiff(sessionId, checkoutId),
+  "Github.files": ({ sessionId, prNumber, checkoutId }) => githubFiles(sessionId, prNumber, checkoutId),
+  "Github.diff": ({ sessionId, prNumber, checkoutId }) => githubDiff(sessionId, prNumber, checkoutId),
   "Github.detectPr": ({ sessionId }) => githubDetectPr(sessionId),
   "Explanation.current": ({ sessionId }) =>
     SessionStore.get(sessionId).pipe(
@@ -5781,7 +6188,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Review.get": ({ sessionId }) => reviewGet(sessionId),
   "Review.markRouted": ({ sessionId }) => reviewMarkRouted(sessionId),
   "Review.reconcile": ({ sessionId }) => reviewReconcile(sessionId),
-  "Github.createPr": ({ sessionId }) => githubPublishRouted(sessionId),
+  "Github.createPr": ({ sessionId, base }) => githubPublishRouted(sessionId, base),
   "Github.comment": (input) => githubComment(input),
   "Github.commentBySlug": (input) => githubCommentBySlug(input),
   "Github.closeBySlug": (input) => githubCloseBySlug(input),
@@ -5793,6 +6200,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.merge": (input) => githubMerge(input),
   "Github.markReady": (input) => githubMarkReady(input),
   "Github.updateBranch": (input) => githubUpdateBranch(input),
+  "Github.restack": (input) => githubRestack(input),
 
   // Terminal — PTY lifecycle is unary; the coalesced output path is a stream,
   // unwrapped from the service like `Agent.run`.
@@ -5832,6 +6240,10 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     Effect.flatMap(PreviewViewService, (b) => b.navigate(sessionId, chatId, url)),
   "BrowserPreview.reload": ({ sessionId, chatId }) =>
     Effect.flatMap(PreviewViewService, (b) => b.reload(sessionId, chatId)),
+  "BrowserPreview.goBack": ({ sessionId, chatId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.goBack(sessionId, chatId)),
+  "BrowserPreview.goForward": ({ sessionId, chatId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.goForward(sessionId, chatId)),
   "BrowserPreview.setVisible": ({ sessionId, chatId, visible }) =>
     Effect.flatMap(PreviewViewService, (b) => b.setVisible(sessionId, chatId, visible)),
   "BrowserPreview.close": ({ sessionId, chatId }) =>
@@ -6134,7 +6546,95 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
 const AssetListHandlersLayer = AssetListRpcs.toLayer({
   "Asset.list": (input) => assetList(input),
+  "Review.draftPr": ({ repository, number }) => reviewDraftPr(repository, number),
+  "Voice.models": () => Effect.promise(() => voiceModels()),
+  "Voice.downloadModel": ({ id }) =>
+    Effect.tryPromise({
+      try: () => downloadVoiceModel(id),
+      catch: (cause) => new VoiceError({ reason: "failed", message: cause instanceof Error ? cause.message : String(cause) }),
+    }),
+  "Voice.removeModel": ({ id }) => Effect.promise(() => removeVoiceModel(id)),
+  "Voice.transcribe": ({ wavBase64, language, modelId }) =>
+    Effect.promise(() => transcribeWav(wavBase64, language, modelId)).pipe(
+      Effect.flatMap((result) =>
+        "text" in result ? Effect.succeed(result) : Effect.fail(new VoiceError(result)),
+      ),
+    ),
+  "Voice.requestMicrophone": () => Effect.promise(() => requestMicrophone()),
+  "Mcp.importDismissed": () =>
+    ConfigService.get().pipe(Effect.map((config) => config?.mcpImportDismissed === true)),
+  "Mcp.dismissImport": () => ConfigService.setMcpImportDismissed(true).pipe(Effect.asVoid),
+  "Mcp.list": () => mcpList(),
+  "Mcp.status": () => mcpStatus(),
+  "Mcp.logTail": ({ server, lines }) =>
+    Effect.succeed({ lines: mcpLogTail(server, lines) }),
+  "Mcp.write": ({ name, entry }) =>
+    McpConfigService.write(name, entry).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.remove": ({ name }) =>
+    Effect.gen(function* () {
+      yield* McpConfigService.remove(name).pipe(
+        Effect.mapError((cause) => mcpError(cause.message, cause)),
+      );
+      const secretStore = yield* SecretStore;
+      yield* new McpAuthStore(secretStore).delete(name);
+    }),
+  "Mcp.setEnabled": ({ name, enabled }) =>
+    McpConfigService.setEnabled(name, enabled).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.setAuth": ({ name, auth }) =>
+    McpConfigService.setAuth(name, auth).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.setDisabledTools": ({ name, disabledTools }) =>
+    McpConfigService.setDisabledTools(name, disabledTools).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.signOut": ({ name }) =>
+    Effect.gen(function* () {
+      const secretStore = yield* SecretStore;
+      yield* McpConfigService.signOut(name, secretStore).pipe(
+        Effect.mapError((cause) => mcpError(cause.message, cause)),
+      );
+    }),
+  "Mcp.setApiKey": ({ name, apiKey }) => mcpSetApiKey(name, apiKey),
+  "Mcp.startAuthorization": ({ name }) => mcpStartAuthorization(name),
+  "Mcp.importCandidates": ({ source, connectors }) =>
+    mcpImportParse(source, connectors === true).pipe(
+      Effect.map((candidates) =>
+        candidates.map((candidate) => ({
+          name: candidate.name,
+          source: candidate.source,
+          origin: candidate.origin ?? "user",
+          target: mcpCandidateTarget(candidate),
+          problem: candidate.problem,
+          needsSignIn:
+            candidate.entry?.type === "remote" && candidate.entry.auth?.type === "oauth",
+          needsSecrets:
+            candidate.entry !== null && entryNeedsSecrets(candidate.entry, process.env),
+        })),
+      ),
+    ),
+  "Mcp.applyImport": ({ source, names, resolutions, connectors }) =>
+    mcpApplyImport(source, names, resolutions ?? {}, connectors === true),
+  "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
+
+  "Window.minimize": () => Effect.sync(() => appWindow()?.minimize()),
+  "Window.toggleMaximize": () =>
+    Effect.sync(() => {
+      const window = appWindow()
+      if (!window) return
+      if (window.isMaximized()) window.unmaximize()
+      else window.maximize()
+    }),
+  "Window.close": () => Effect.sync(() => appWindow()?.close()),
+  "Window.isMaximized": () => Effect.sync(() => appWindow()?.isMaximized() ?? false),
+  "Mcp.reveal": () => mcpReveal(),
+  "Github.reopenIssue": ({ repository, number }) => GitHubApi.issueReopenBySlug(repository, number)
 });
+
 
 const HandlersLayer = Layer.mergeAll(
   CoreHandlersLayer,
@@ -6758,8 +7258,10 @@ function remoteProvisioningSource(
     const { pr } = input as CreateSessionFromPrInput;
     return { branch: pr.headRefName, baseBranch: pr.baseRefName, source: { kind: "pull-request" as const, pullRequestNumber: pr.number } };
   }
+  // Auto (no `repoPath`) never reaches a managed/remote environment in this
+  // PR, so `baseBranch` is always supplied by the time provisioning runs.
   const { baseBranch } = input as CreateSessionInput | CreateSessionFromIssueInput;
-  return { branch: baseBranch, baseBranch, source: { kind: "new" as const } };
+  return { branch: baseBranch!, baseBranch: baseBranch!, source: { kind: "new" as const } };
 }
 
 const resolveContinuationTarget = (source: Session, checkpoint: WorkspaceTransferCheckpoint, target: string | undefined, environments: EnvironmentService) => Effect.gen(function* () {

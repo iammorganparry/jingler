@@ -60,3 +60,9 @@ next-env.d.ts
 /.design-sync/
 /.ds-sync/
 /ds-bundle/
+
+# Built by scripts/distribution/build-whisper.mjs
+/apps/desktop/resources/whisper/
+/.cache/whisper.cpp/
+.superdesign/*
+!.superdesign/design-system.md

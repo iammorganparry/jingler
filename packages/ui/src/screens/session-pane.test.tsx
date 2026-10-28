@@ -3,7 +3,8 @@ import { useEffect, useState } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Boxes } from "lucide-react"
 import type { Session } from "@jingler/core"
-import { SessionPane } from "./session-pane.js"
+import { SessionPane as BareSessionPane } from "./session-pane.js"
+import { SessionPaneWithHeaderViews as SessionPane } from "./session-pane-header-views-host.js"
 import { LinearMark } from "../components/linear-mark.js"
 import {
   builtinTabContributions,
@@ -14,6 +15,7 @@ import {
 import { testSession as session } from "../test-support.js"
 import { SESSION_SURFACE_COMMAND_EVENT } from "../app/session-surface-layout.js"
 import { editorTabMime } from "../app/editor-groups.js"
+import { planDraftKey, setPlanDraftCount } from "../composites/plan-comment-drafts.js"
 import { resetEditorLayouts } from "../app/editor-layout-machine.js"
 
 beforeEach(() => {
@@ -72,6 +74,25 @@ const mockPaneWidth = (width: number) =>
 
 
 
+
+
+
+/** 
+ * Click a chat tab or thread option, handling both ChatLaneHeader (chat-only) 
+ * and normal tab strip (mixed surfaces).
+ */
+const clickChat = (chatId: string, title: string = "Chat 1") => {
+  // Try normal tab first (mixed surfaces)
+  const tab = screen.queryByRole("tab", { name: title })
+  if (tab) {
+    fireEvent.click(tab)
+    return
+  }
+  // Fall back to thread switcher (chat-only)
+  fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+  fireEvent.click(screen.getByTestId(`chat-option-${chatId}`))
+}
+
 describe("visibleTabs", () => {
   it("shows only Conversation for a bare session", () => {
     expect(idsFor(session({ id: "a", worktreePath: undefined }))).toEqual([
@@ -111,8 +132,8 @@ describe("visibleTabs", () => {
     expect(idsFor(s, { hasExplanation: true })).toContain("explanation")
   })
 
-  it("shows Files only for worktree-backed sessions", () => {
-    expect(idsFor(session({ id: "a" }))).toContain("files")
+  it("never offers a Files tab: files open from the Explorer and ⌘P", () => {
+    expect(idsFor(session({ id: "a" }))).not.toContain("files")
     expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("files")
   })
 
@@ -121,14 +142,15 @@ describe("visibleTabs", () => {
     expect(idsFor(session({ id: "a", prNumber: 12 }))).toContain("changes")
     // Code Review merged into the Explorer's changed-files filter.
     expect(idsFor(session({ id: "a", prNumber: 12 }))).not.toContain("review")
+    // One tab, never two: Changes appears exactly once.
+    expect(idsFor(session({ id: "a", prNumber: 12 })).filter((id) => id === "changes")).toHaveLength(1)
   })
 
   it("keeps the built-in order the operator already knows", () => {
     expect(idsFor(session({ id: "a", issueNumber: 7 }), { hasPlan: true })).toEqual([
       "conversation",
-      "files",
       "plan",
-      "pr",
+      "checks",
       "changes"
     ])
   })
@@ -193,23 +215,6 @@ describe("visibleTabs", () => {
  * so querying by it is both what a screen-reader user does and the only spelling
  * that is stable across tiers.
  */
-describe("debug source following", () => {
-  it("opens Files for every new debugger stop sequence", () => {
-    const props = {
-      session: session({ id: "debug", worktreePath: "/repo" }),
-      renderConversation: () => <div>transcript</div>,
-      renderFiles: () => <div>debug source</div>
-    }
-    const view = render(<SessionPane {...props} debugStopSequence={0} />)
-    expect(screen.getByText("transcript")).toBeTruthy()
-    view.rerender(<SessionPane {...props} debugStopSequence={1} />)
-    expect(screen.getByText("debug source")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
-    view.rerender(<SessionPane {...props} debugStopSequence={2} />)
-    expect(screen.getByText("debug source")).toBeTruthy()
-  })
-})
-
 describe("plugin tab contributions", () => {
   it("renders a plugin tab body through the same path as a built-in", () => {
     render(
@@ -223,28 +228,29 @@ describe("plugin tab contributions", () => {
     expect(screen.getByText("linear.issues body")).toBeTruthy()
   })
 
-  it("passes a right-rail picker through to a plugin tab", () => {
+  it("passes a header picker through to a plugin tab", () => {
     const onSelect = vi.fn()
     render(
       <SessionPane
         session={session({ id: "linear-menu" })}
         renderConversation={() => <div>transcript</div>}
         tabContributions={[pluginTab("linear.issue", { label: "Linear", icon: LinearMark })]}
-        viewRailMenus={{
+        issueMenus={{
           "linear.issue": {
             value: "issue-1",
             ariaLabel: "Select linked Linear issue",
             onSelect,
-            options: [
-              { value: "issue-1", label: "ENG-1", description: "First issue", ariaLabel: "ENG-1 First issue" },
-              { value: "issue-2", label: "ENG-2", description: "Second issue", ariaLabel: "ENG-2 Second issue" }
+            items: [
+              { value: "issue-1", identifier: "ENG-1", title: "First issue" },
+              { value: "issue-2", identifier: "ENG-2", title: "Second issue" }
             ]
           }
         }}
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Select linked Linear issue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Select linked Linear issue/ }))
     fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
     expect(onSelect).toHaveBeenCalledWith("issue-2")
     expect(screen.getByText("linear.issue body")).toBeTruthy()
@@ -290,13 +296,53 @@ describe("plugin tab contributions", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Select linked Linear issue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Select linked Linear issue/ }))
     fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
     expect(onSelectIssue).toHaveBeenCalledWith("linear-derived-menu", {
       providerId: "linear",
       providerAccountId: "personal",
       id: "issue-2"
     })
+    expect(screen.getByText("linear.issue body")).toBeTruthy()
+  })
+
+  it("opens the PR view from the header PR chip without duplicating the tab", () => {
+    render(
+      <>
+        <div id="session-header-identity-portal" />
+        <SessionPane
+          session={session({ id: "chip-pr", prNumber: 482 })}
+          renderConversation={() => <div>transcript</div>}
+          renderPullRequest={() => <div>pr body</div>}
+        />
+      </>
+    )
+    const chip = within(document.getElementById("session-header-identity-portal")!).getByTestId("header-link-pr")
+    expect(chip.textContent).toBe("PR #482")
+    fireEvent.click(chip)
+    fireEvent.click(chip)
+    expect(screen.getAllByText("pr body")).toHaveLength(1)
+  })
+
+  it("opens the linked issue view from the header issue chip", () => {
+    render(
+      <>
+        <div id="session-header-identity-portal" />
+        <SessionPane
+          session={session({
+            id: "chip-issue",
+            linkedIssues: [{ providerId: "linear", id: "issue-1", identifier: "LIN-482", title: "Only issue", url: "https://linear.app/issue/LIN-482", labels: [] }],
+            selectedIssue: { providerId: "linear", id: "issue-1" }
+          })}
+          renderConversation={() => <div>transcript</div>}
+          tabContributions={[pluginTab("linear.issue", { label: "Linear", icon: LinearMark, issueProviderId: "linear" })]}
+        />
+      </>
+    )
+    const chip = within(document.getElementById("session-header-identity-portal")!).getByTestId("header-link-issue")
+    expect(chip.textContent).toBe("LIN-482")
+    fireEvent.click(chip)
     expect(screen.getByText("linear.issue body")).toBeTruthy()
   })
 
@@ -410,7 +456,7 @@ describe("session browser tab", () => {
     render(<BrowserHarness />)
     fireEvent.click(screen.getByRole("button", { name: "Browser" }))
     expect(screen.getByText("browser for browser-owner")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
+    clickChat("c_browser-owner_1", "Chat 1")
     expect(screen.getByText("owner transcript")).toBeTruthy()
     expect(toggled).toEqual(["browser-owner"])
   })
@@ -555,6 +601,48 @@ describe("mount groups", () => {
     expect(within(focusedGroup).getByRole("tab", { selected: true }).textContent).toContain("Plan")
   })
 
+  describe("closing a Plan tab with unsaved comments", () => {
+    const renderPlanTab = () => {
+      localStorage.setItem(
+        "sb.session-surfaces.v1:a",
+        JSON.stringify({
+          panes: [
+            { surface: { kind: "chat", id: "c_a_1" }, ratio: 0.5 },
+            { surface: { kind: "view", id: "plan", chatId: "c_a_1" }, ratio: 0.5 }
+          ],
+          focused: 1,
+          openViews: [{ kind: "view", id: "plan", chatId: "c_a_1" }]
+        })
+      )
+      render(<SessionPane session={session({ id: "a" })} planSessions={new Set(["c_a_1"])} />)
+    }
+
+    it("asks first, and Keep editing leaves the tab open", () => {
+      setPlanDraftCount(planDraftKey("a", "c_a_1"), 2)
+      renderPlanTab()
+      fireEvent.click(screen.getByRole("button", { name: "Close Plan" }))
+      expect(screen.getByText("Discard 2 unsaved comments?")).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "Keep editing" }))
+      expect(screen.getByRole("button", { name: "Close Plan" })).toBeTruthy()
+    })
+
+    it("Discard closes the tab, and zero drafts close it without asking", () => {
+      setPlanDraftCount(planDraftKey("a", "c_a_1"), 1)
+      renderPlanTab()
+      fireEvent.click(screen.getByRole("button", { name: "Close Plan" }))
+      fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+      expect(screen.queryByRole("button", { name: "Close Plan" })).toBeNull()
+    })
+
+    it("closes immediately with no drafts", () => {
+      setPlanDraftCount(planDraftKey("a", "c_a_1"), 0)
+      renderPlanTab()
+      fireEvent.click(screen.getByRole("button", { name: "Close Plan" }))
+      expect(screen.queryByText(/unsaved comment/)).toBeNull()
+      expect(screen.queryByRole("button", { name: "Close Plan" })).toBeNull()
+    })
+  })
+
   it("hides Plan Review when no embedded review is active", () => {
     render(
       <SessionPane
@@ -680,11 +768,11 @@ describe("mount groups", () => {
         renderPullRequest={() => <Body />}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Checks/ }))
     expect(onMount).toHaveBeenCalledTimes(1)
 
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }))
-    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Checks/ }))
     expect(onMount).toHaveBeenCalledTimes(1)
   })
 })
@@ -731,24 +819,71 @@ describe("SessionPane", () => {
     )
 
     expect(document.getElementById("session-tab-bar-portal")!.childElementCount).toBe(0)
-    expect(within(screen.getByTestId("editor-group")).getAllByRole("tab")).toHaveLength(1)
+    // With ChatLaneHeader, chat-only groups use a dropdown instead of tabs
+    expect(screen.getByTestId("chat-lane-header")).toBeTruthy()
   })
 
-  it("moves the focused session view rail into the main frame", () => {
+  it("renders no right view rail", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={() => <div>transcript</div>}
+      />
+    )
+
+    expect(screen.queryByTestId("view-rail")).toBeNull()
+  })
+
+  it("portals pinned header view buttons and the overflow menu into the title bar", () => {
+    const onHeaderViewsChange = vi.fn()
     render(
       <>
-        <div id="session-view-rail-portal" />
+        <div id="session-header-views-portal" />
         <SessionPane
-          session={session({ id: "a" })}
+          session={session({ id: "a", worktreePath: "/tmp/a" })}
           renderConversation={() => <div>transcript</div>}
+          headerViews={["browser"]}
+          onHeaderViewsChange={onHeaderViewsChange}
         />
       </>
     )
 
-    expect(
-      within(document.getElementById("session-view-rail-portal")!).getByTestId("view-rail")
-    ).toBeTruthy()
-    expect(within(screen.getByTestId("editor-groups")).queryByTestId("view-rail")).toBeNull()
+    const slot = within(document.getElementById("session-header-views-portal")!)
+    expect(slot.getByTestId("header-view-browser")).toBeTruthy()
+    expect(slot.queryByTestId("header-view-terminal")).toBeNull()
+    expect(slot.getByTestId("view-overflow-trigger")).toBeTruthy()
+  })
+
+  it("opens pinned header views on ⌥N and Changes on ⌘⇧D through the button path", () => {
+    const onRevealChanges = vi.fn()
+    render(
+      <SessionPane
+        session={session({ id: "a", worktreePath: "/tmp/a" })}
+        renderConversation={() => <div>transcript</div>}
+        headerViews={["browser", "terminal"]}
+        onHeaderViewsChange={vi.fn()}
+        onRevealChanges={onRevealChanges}
+        onToggleBrowser={vi.fn()}
+      />
+    )
+    fireEvent.keyDown(window, { key: "d", code: "KeyD", metaKey: true, shiftKey: true })
+    expect(onRevealChanges).toHaveBeenCalledWith("a")
+    const onToggleBrowser = vi.fn()
+    cleanup()
+    render(
+      <SessionPane
+        session={session({ id: "a", worktreePath: "/tmp/a" })}
+        renderConversation={() => <div>transcript</div>}
+        headerViews={["browser", "terminal"]}
+        onHeaderViewsChange={vi.fn()}
+        onToggleBrowser={onToggleBrowser}
+      />
+    )
+    fireEvent.keyDown(window, { key: "¡", code: "Digit1", altKey: true })
+    expect(onToggleBrowser).toHaveBeenCalledTimes(1)
+    onToggleBrowser.mockClear()
+    fireEvent.keyDown(window, { key: "£", code: "Digit3", altKey: true })
+    expect(onToggleBrowser).not.toHaveBeenCalled()
   })
 
   it("moves group focus on mousedown", () => {
@@ -789,8 +924,8 @@ describe("SessionPane", () => {
     const s = { ...base, chats: [...base.chats, { ...base.chats[0]!, id: "b" }], activeChatId: "b" }
     render(<SessionPane session={s} renderConversation={(owner) => <div>chat {owner.activeChatId}</div>} />)
     const stored = () => JSON.parse(localStorage.getItem("sb.editor-layout.v1:reopen")!)
-    const mainTab = screen.getByTestId(`editor-tab-chat-${mainId}`)
-    fireEvent.click(within(mainTab).getByRole("button", { name: /^Close / }))
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByTestId(`chat-close-${mainId}`))
     await waitFor(() => expect(stored().mainChatId).toBeNull())
     fireEvent.drop(screen.getByTestId("editor-group"), {
       dataTransfer: {
@@ -849,53 +984,6 @@ describe("SessionPane", () => {
     expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
     command("close")
     expect(screen.queryByTestId("editor-tab-view-explanation")).toBeNull()
-  })
-
-  it("renders the Files built-in through the host renderer", () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={() => <div>transcript</div>}
-        renderFiles={(s) => <div>files for {s.id}</div>}
-      />
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    expect(screen.getByText("files for a")).toBeTruthy()
-  })
-
-  it("opens Files as a tab while the transcript stays mounted", async () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={(s) => <div>transcript for {s.id}</div>}
-        renderFiles={(s) => <div>files for {s.id}</div>}
-      />
-    )
-
-    await screen.findByRole("button", { name: "Files" })
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    expect(screen.getByText("files for a")).toBeTruthy()
-    expect(screen.getByText("transcript for a")).toBeTruthy()
-    expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
-  })
-
-  it("routes a Files code reference to Conversation in the same session pane", () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={(s) => <div>transcript for {s.id}</div>}
-        renderFiles={(s, ctx) => (
-          <button type="button" onClick={ctx.onSelectConversation}>
-            forward reference for {s.id}
-          </button>
-        )}
-      />
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    fireEvent.click(screen.getByRole("button", { name: "forward reference for a" }))
-
-    expect(screen.getByText("transcript for a")).toBeTruthy()
   })
 
   it("hydrates restored file panes into the host's file tab actor", async () => {
@@ -965,7 +1053,7 @@ describe("SessionPane", () => {
           />
         </div>
         <div data-testid="pane-b">
-          <SessionPane
+          <BareSessionPane
             session={session({ id: "b", prNumber: 2 })}
             renderConversation={(s) => <div>transcript {s.id}</div>}
             renderPullRequest={(s) => <div>pr view {s.id}</div>}
@@ -976,7 +1064,7 @@ describe("SessionPane", () => {
 
     // Move pane A to its Pull Request tab; pane B must stay on Conversation.
     const paneA = screen.getByTestId("pane-a")
-    fireEvent.click(within(paneA).getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(within(paneA).getByRole("button", { name: /^Checks/ }))
 
     expect(within(paneA).getByText("pr view a")).toBeTruthy()
     expect(within(screen.getByTestId("pane-b")).getByText("transcript b")).toBeTruthy()
@@ -995,7 +1083,7 @@ describe("SessionPane", () => {
     it("switches to the requested tab and reports it handled", () => {
       const onTabRequestHandled = vi.fn()
       render(
-        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "checks", nonce: 1 }, onTabRequestHandled })
       )
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(1)
@@ -1017,7 +1105,7 @@ describe("SessionPane", () => {
     it("does not replay a request into another session", () => {
       const onTabRequestHandled = vi.fn()
       const { unmount } = render(
-        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "checks", nonce: 1 }, onTabRequestHandled })
       )
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(1)
@@ -1037,19 +1125,19 @@ describe("SessionPane", () => {
       expect(screen.getByText("transcript b")).toBeTruthy()
     })
 
-    it("fires again for the same tab when the nonce moves", () => {
+    it("fires again for the same tab when the nonce moves", async () => {
       const onTabRequestHandled = vi.fn()
       const { rerender } = render(
-        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "checks", nonce: 1 }, onTabRequestHandled })
       )
       rerender(pane({ selectTabRequest: null, onTabRequestHandled }))
       expect(screen.queryByRole("button", { name: "Conversation" })).toBeNull()
-      fireEvent.click(screen.getByRole("tab", { name: /Chat 1/ }))
+      clickChat("c_a_1", "Chat 1")
       expect(screen.getByText("transcript a")).toBeTruthy()
 
       // Asking for the SAME tab a second time has to work — that is what the
       // nonce is for, over and above the clearing.
-      rerender(pane({ selectTabRequest: { tabId: "pr", nonce: 2 }, onTabRequestHandled }))
+      rerender(pane({ selectTabRequest: { tabId: "checks", nonce: 2 }, onTabRequestHandled }))
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(2)
     })
@@ -1062,6 +1150,19 @@ describe("SessionPane", () => {
     })
   })
 
+  it("⌘⇧P opens Checks without duplicating the tab", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a", prNumber: 5 })}
+        renderConversation={(s) => <div>transcript {s.id}</div>}
+        renderPullRequest={() => <div>review view</div>}
+      />
+    )
+    for (let i = 0; i < 2; i++) fireEvent.keyDown(window, { key: "P", code: "KeyP", metaKey: true, shiftKey: true })
+    expect(screen.getByText("review view")).toBeTruthy()
+    expect(screen.getAllByTestId("editor-tab-view-checks")).toHaveLength(1)
+  })
+
   it("falls back to Conversation when the selected tab stops being available", async () => {
     const { rerender } = render(
       <SessionPane
@@ -1070,7 +1171,7 @@ describe("SessionPane", () => {
         renderPullRequest={() => <div>review view</div>}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Checks/ }))
     expect(screen.getByText("review view")).toBeTruthy()
 
     // The PR goes away (merged and unlinked, no worktree) — the tab is no longer visible,
@@ -1095,11 +1196,11 @@ describe("SessionPane", () => {
       />
     )
     const { rerender } = render(pane("a", 1))
-    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Checks/ }))
     expect(screen.getByText("pr view a")).toBeTruthy()
 
     rerender(pane("b", 2))
-    expect(screen.queryByTestId("editor-tab-view-pr")).toBeNull()
+    expect(screen.queryByTestId("editor-tab-view-checks")).toBeNull()
     rerender(pane("a", 1))
     expect(screen.getByText("pr view a")).toBeTruthy()
   })

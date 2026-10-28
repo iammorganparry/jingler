@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
-import type { AssetPayload, DebugViewSnapshot, PrFileChange, Session } from "@jingler/core"
+import { createPortal } from "react-dom"
+import { useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
+import { workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
 import { isLanguageHoverPath } from "@jingler/contracts"
 import {
   AssetBrowser,
   AssetRepositoryTree,
+  type AssetAgentActivity,
   AssetCanvas,
+  AssetBinary,
   AssetError,
   AssetTooLarge,
   AssetUnsupported,
+  Badge,
   Button,
   Callout,
   ContextMenu,
@@ -16,31 +20,37 @@ import {
   createPierreFileContents,
   DiffView,
   ExplorerPanel,
+  FileHeaderSlotContext,
   FileQuickOpen,
   parsePierreFileDiffs,
   PierreEditor,
-  ReviewFileDiff
+  narrowToTurn,
+  ReviewFileDiff,
+  SegmentedControl
 } from "@jingler/ui"
-import type { PierreAnnotationMetadata } from "@jingler/ui"
+import type { AgentEdit, PierreAnnotationMetadata, ReviewTurn } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
-import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, FileWarning, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
+import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, Maximize2, MessageSquarePlus, Minimize2, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { openSessionFileDiff, useFileBrowser } from "./use-file-browser.js"
 import { setReviewFilter, useSessionReviewState } from "./review-store.js"
 import { useReview } from "./use-review.js"
-import { ChangesExplorerPanel, useChangesReview } from "./changes-review.js"
+import { ChangesExplorerPanel, useChangesReview, useReviewTurns } from "./changes-review.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
 import { captureCodeReference, type CodeReference } from "./code-reference.js"
 import {
+  getAgentTouchedFiles,
   normalizeAgentFileTarget,
   useAgentFileActivity
 } from "./agent-file-activity.js"
 import { useDebugSessionModel, type DebugSessionModel } from "./debug-session.js"
 import {
+  agentEditAnnotations,
   agentFollowDiffSelection,
   captureDiffCodeReference
 } from "./file-diff-context.js"
+import { useAgentEdits, useJumpToAgentEditTurn } from "./file-agent-edits.js"
 
 const DEBUG_HOVER_IDENTIFIER = /^[\p{ID_Start}_$][\p{ID_Continue}_$\u200C\u200D]*$/u
 type BrowserToken = TokenEventBase & { readonly side?: "additions" | "deletions" }
@@ -171,12 +181,28 @@ export interface FileBrowserExplorerProps {
   readonly onOpenPath: (path: string) => void
 }
 
+/** Files the agent edited this session; the one still being written pulses until the run ends. */
+function useExplorerAgentActivity(session: Session): AssetAgentActivity {
+  const activity = useAgentFileActivity(session.id, session.activeChatId)
+  const { id, activeChatId, worktreePath, status } = session
+  return useMemo(() => {
+    const normalize = (raw: string) => normalizeAgentFileTarget(raw, worktreePath)
+    const editedPaths = getAgentTouchedFiles(id, activeChatId)
+      .map(normalize)
+      .filter((path): path is string => path !== null)
+    const current = activity?.phase === "editing" && status === "running" ? normalize(activity.path) : null
+    return { editedPaths, editingPath: current }
+    // `activity` (a new object per event) is the signal that the touched list changed.
+  }, [activity, id, activeChatId, worktreePath, status])
+}
+
 export function FileBrowserExplorer({ session, connected = false, onOpenPath }: FileBrowserExplorerProps) {
   const browser = useFileBrowser(session.id, session.worktreePath)
+  const agentActivity = useExplorerAgentActivity(session)
   const { filter } = useSessionReviewState(session.id, session.prNumber)
   // Show the diff actually listed: a PR with nothing fetchable (GitHub offline)
   // falls back to the uncommitted changes, and the control must not claim "PR".
-  const { source } = useReview(session)
+  const { source, files } = useReview(session)
   const shownFilter = filter === "all" ? "all" : source
   useEffect(() => browser.activate(), [browser.activate])
   // A changed file opens on its diff: that is the point of filtering to it.
@@ -187,6 +213,16 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
     onOpenPath(path)
   }
 
+  const discardFile =
+    workspaceModeOf(session) === "worktree"
+      ? (path: string) => {
+          void rpc.workspaceRevertFile(session.id, path).then(browser.refreshTree).catch(() => {})
+        }
+      : undefined
+
+  const localCount = source === "local" ? files.length : undefined
+  const prCount = source === "pr" ? files.length : undefined
+
   return (
     <ExplorerPanel
       branch={session.branch}
@@ -195,6 +231,9 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
       onFilterChange={(next) => setReviewFilter(session.id, session.prNumber, next)}
       localAvailable={session.worktreePath != null}
       prAvailable={session.prNumber != null}
+      localCount={localCount}
+      prCount={prCount}
+      prNumber={session.prNumber ?? undefined}
     >
         {filter !== "all" ? (
           <ChangesExplorerPanel
@@ -214,6 +253,8 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
             browser.open(path)
             onOpenPath(path)
           }}
+          onDiscardFile={discardFile}
+          agentActivity={agentActivity}
         />
         )}
     </ExplorerPanel>
@@ -250,36 +291,35 @@ export function FileBrowserQuickOpen({
   )
 }
 
-function FileBrowserToolbar({ browser }: { browser: FileBrowserController }) {
-  const path = browser.selectedPath
+/** Renders into the file tab's single header row (the breadcrumb's right slot); `order-*` fixes the controls' sequence across independent portals. */
+function FileHeaderPortal({ order, children }: { readonly order: string; readonly children: ReactNode }) {
+  const slot = useContext(FileHeaderSlotContext)
+  return slot === null ? null : createPortal(<div className={`flex items-center gap-2 ${order}`}>{children}</div>, slot)
+}
+
+// Labels collapse to icon-only below the breadcrumb row's container width (`@container` on the Breadcrumb).
+const COLLAPSING_LABEL = "hidden @[560px]:inline"
+
+function FollowAgentToggle({ session }: { session: Session }) {
+  // Follow is session state: file tabs own per-file actors, but the toggle mirrors the composer's.
+  const sessionBrowser = useFileBrowser(session.id, session.worktreePath)
+  const followEnabled = sessionBrowser.followEnabled
   return (
-    <>
-      {path === null ? (
-        <span className="flex-1" />
-      ) : (
-        <span className="flex min-w-0 flex-1 items-baseline font-mono text-[10.5px]" title={path}>
-          {path.includes("/") ? (
-            <span className="truncate text-dim">{path.slice(0, path.lastIndexOf("/") + 1)}</span>
-          ) : null}
-          <span className="flex-none text-text">{path.slice(path.lastIndexOf("/") + 1)}</span>
-        </span>
-      )}
-      <div className="ml-auto flex min-w-0 flex-none items-center gap-2">
-        <button
-          type="button"
-          className={[
-            "jingler-mode-toggle inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none transition-colors active:scale-[0.96]",
-            browser.followEnabled ? "is-active" : "text-muted-foreground hover:text-text"
-          ].join(" ")}
-          aria-pressed={browser.followEnabled}
-          onClick={browser.followEnabled ? browser.disableFollow : browser.enableFollow}
-          title="Follow files edited by the active chat's agent"
-        >
-          <MousePointer2 className="jingler-mode-toggle__mark size-3" aria-hidden />
-          <span className="jingler-mode-toggle__label">Follow agent</span>
-        </button>
-      </div>
-    </>
+    <FileHeaderPortal order="order-3">
+      <Button
+        type="button"
+        variant={followEnabled ? "secondary" : "ghost"}
+        size="sm"
+        aria-pressed={followEnabled}
+        aria-label="Follow agent"
+        onClick={followEnabled ? sessionBrowser.disableFollow : sessionBrowser.enableFollow}
+        title="Follow files edited by the active chat's agent"
+        className="h-6 gap-1 px-1.5 text-[11px]"
+      >
+        <MousePointer2 size={12} aria-hidden />
+        <span className={COLLAPSING_LABEL}>Follow agent</span>
+      </Button>
+    </FileHeaderPortal>
   )
 }
 
@@ -301,6 +341,9 @@ export function FileBrowserView({
   )
   const debug = useDebugSessionModel(session.id, debugSnapshot)
   const changes = useChangesReview(session, connected)
+  const { turn } = useReviewTurns(session)
+  const agentEdits = useAgentEdits(session, browser.selectedPath)
+  const jumpToAgentEditTurn = useJumpToAgentEditTurn(session)
   const debugFrame = debug.snapshot.session?.status === "stopped"
     ? (debug.snapshot.session.frame ?? null)
     : null
@@ -427,16 +470,19 @@ export function FileBrowserView({
         treeLoading={browser.treeLoading}
         treeError={browser.treeError}
         hideTree
-        toolbar={<FileBrowserToolbar browser={browser} />}
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}
         renderCanvas={(nativeAvailable) => (
           <div className="flex h-full min-h-0 min-w-0">
+            <FollowAgentToggle session={session} />
             <div className="min-w-0 flex-1">
               <FileCanvas
                 sessionId={session.id}
                 sessionTitle={session.title}
                 changes={changes}
+                turn={turn}
+                agentEdits={agentEdits}
+                onAgentEditSelect={jumpToAgentEditTurn}
                 connected={connected}
                 browser={browser}
                 nativeAvailable={nativeAvailable}
@@ -465,9 +511,11 @@ function fileBrowserShortcut(rootRef: import("react").RefObject<HTMLDivElement |
     if (!containsFileShortcutTarget(root, event.target)) return
     if (!isFileShortcutModifier(event)) return
     if (!event.shiftKey &&
-      isFileShortcutKey(event, "j") &&
+      (isFileShortcutKey(event, "j") || isFileShortcutKey(event, "l")) &&
       canSendSelection) {
       event.preventDefault()
+      // ⌘L also toggles the chat lane in the session pane; stop that when a selection is sent.
+      event.stopPropagation()
       sendSelectionToChat()
       return
     }
@@ -508,6 +556,9 @@ function FileCanvas({
   sessionId,
   sessionTitle,
   changes,
+  turn,
+  agentEdits,
+  onAgentEditSelect,
   connected,
   browser,
   nativeAvailable,
@@ -524,6 +575,9 @@ function FileCanvas({
   readonly sessionId: string
   readonly sessionTitle: string
   readonly changes: ChangesReview
+  readonly turn: ReviewTurn | null
+  readonly agentEdits: readonly AgentEdit[]
+  readonly onAgentEditSelect: (turnId: string) => void
   readonly connected: boolean
   readonly browser: FileBrowserController
   readonly nativeAvailable: boolean
@@ -593,7 +647,7 @@ function FileCanvas({
   if (browser.selectedPath === null) {
     return <AssetCanvas selectedPath={null} />
   }
-  const reviewFile = reviewFileFor(browser, changes)
+  const reviewFile = reviewFileFor(browser, changes, turn)
   if (reviewFile !== null) {
     return renderDiffContainer(
       browser,
@@ -632,6 +686,8 @@ function FileCanvas({
       <FileDiffCanvas
         sessionId={sessionId}
         fileDiff={shownFileDiff}
+        agentEdits={agentEdits}
+        onAgentEditSelect={onAgentEditSelect}
         browser={browser}
         selection={selection}
         onSelectionChange={onSelectionChange}
@@ -690,7 +746,7 @@ function FileCanvas({
       editor
     ) : (
       <div className="flex h-full min-h-0 flex-col bg-canvas">
-        <FileModeBar path={browser.selectedPath} mode="edit" browser={browser} />
+        <FileModeControl path={browser.selectedPath} mode="edit" browser={browser} />
         <div className="min-h-0 flex-1">{editor}</div>
       </div>
     )
@@ -722,6 +778,8 @@ function FileCanvas({
 function FileDiffCanvas({
   sessionId,
   fileDiff,
+  agentEdits,
+  onAgentEditSelect,
   browser,
   selection,
   onSelectionChange,
@@ -733,6 +791,8 @@ function FileDiffCanvas({
 }: {
   sessionId: string;
   fileDiff: ReturnType<typeof parsePierreFileDiffs>[number];
+  agentEdits: readonly AgentEdit[];
+  onAgentEditSelect: (turnId: string) => void;
   browser: FileBrowserController;
   selection: JinglerLineSelection | null;
   onSelectionChange: (selection: JinglerLineSelection | null) => void;
@@ -749,10 +809,16 @@ function FileDiffCanvas({
     return semanticTokenHover(sessionId, path, symbol, token, undefined, signal)
   }, [path, sessionId])
   const tokenHover = useDelayedTokenHover(query)
+  const agentEditLabels = useMemo(
+    () => (browser.patch === null ? [] : agentEditAnnotations(browser.patch, path, agentEdits)),
+    [agentEdits, browser.patch, path]
+  )
   return (
     <div className="relative h-full min-h-0">
       <DiffView
         fileDiff={fileDiff}
+        agentEdits={agentEditLabels}
+        onAgentEditSelect={onAgentEditSelect}
     label={`${browser.selectedPath} changes`}
     className="h-full min-h-0"
     selection={selection}
@@ -797,10 +863,11 @@ type ChangesReview = ReturnType<typeof useChangesReview>
  */
 const reviewFileFor = (
   browser: FileBrowserController,
-  changes: ChangesReview
+  changes: ChangesReview,
+  turn: ReviewTurn | null
 ): PrFileChange | null =>
   browser.viewMode === "diff" && changes.review.filter !== "all"
-    ? (changes.review.files.find((file) => file.path === browser.selectedPath) ?? null)
+    ? (narrowToTurn(changes.review.files, turn).find((file) => file.path === browser.selectedPath) ?? null)
     : null
 
 function ReviewDiffCanvas({
@@ -829,9 +896,29 @@ function ReviewDiffCanvas({
   const { enter, leave } = tokenHover
   const onTokenEnter = useCallback((token: BrowserToken) => enter(token), [enter])
   const onTokenLeave = useCallback(() => leave(), [leave])
+  const focused = changes.focused
   return (
     <div className="relative h-full min-h-0">
+      <FileHeaderPortal order="order-2">
+        <Badge size="xs">{review.source === "local" ? "Uncommitted" : "Pull request"}</Badge>
+      </FileHeaderPortal>
+      <FileHeaderPortal order="order-4">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-pressed={focused}
+          aria-label={focused ? "Exit review focus" : "Focus diff"}
+          title={focused ? "Restore the review panels" : "Show only the diff"}
+          onClick={changes.toggleFocus}
+          className="h-6 gap-1 px-1.5 text-[11px]"
+        >
+          {focused ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          <span className={COLLAPSING_LABEL}>{focused ? "Exit focus" : "Focus"}</span>
+        </Button>
+      </FileHeaderPortal>
       <ReviewFileDiff
+        headerless
         file={file}
         diff={diff}
         source={review.source}
@@ -839,6 +926,8 @@ function ReviewDiffCanvas({
         reviewThreads={review.reviewThreads}
         review={review.source === "pr" ? adversarial.review : null}
         sentFindingIds={adversarial.sentFindingIds}
+        dismissedFindingIds={adversarial.dismissedFindingIds}
+        onDismissFinding={adversarial.dismissFinding}
         connected={connected}
         routeTargetSession={sessionTitle}
         focused={changes.focused}
@@ -847,8 +936,6 @@ function ReviewDiffCanvas({
         onSendComment={changes.sendComment}
         onRemoveDraft={review.removeDraft}
         onToggleViewed={review.toggleViewed}
-        onRevertLines={changes.revertLines}
-        onRevertFile={changes.revertFile}
         onDeslopFile={changes.deslopFile}
         onSendFindingToAgent={adversarial.sendFindingToAgent}
         onTokenEnter={onTokenEnter}
@@ -885,7 +972,7 @@ function SelectionContextMenu({
   )
 }
 
-function FileModeBar({
+function FileModeControl({
   path,
   mode,
   browser
@@ -895,28 +982,18 @@ function FileModeBar({
   readonly browser: FileBrowserController
 }) {
   return (
-    <div className="flex h-8 flex-none items-center justify-end gap-1 border-b border-hairline bg-panel px-2">
-      <Button
-        type="button"
-        variant={mode === "diff" ? "secondary" : "ghost"}
+    <FileHeaderPortal order="order-1">
+      <SegmentedControl
         size="sm"
-        aria-pressed={mode === "diff"}
-        aria-label={`Show diff for ${path}`}
-        onClick={browser.showDiff}
-      >
-        Diff
-      </Button>
-      <Button
-        type="button"
-        variant={mode === "edit" ? "secondary" : "ghost"}
-        size="sm"
-        aria-pressed={mode === "edit"}
-        aria-label={`Edit ${path}`}
-        onClick={browser.startEdit}
-      >
-        Edit
-      </Button>
-    </div>
+        aria-label="File view"
+        value={mode}
+        onChange={(next) => (next === "diff" ? browser.showDiff() : browser.startEdit())}
+        items={[
+          { value: "diff", label: <span aria-label={`Show diff for ${path}`}>Diff</span> },
+          { value: "edit", label: <span aria-label={`Edit ${path}`}>Edit</span> }
+        ]}
+      />
+    </FileHeaderPortal>
   )
 }
 
@@ -1112,33 +1189,6 @@ function DebugSection({ title, children }: { readonly title: string; readonly ch
   return <section className="border-b border-line p-2"><h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-dim">{title}</h3>{children}</section>
 }
 
-function FileNotice({
-  icon,
-  title,
-  detail,
-  onReveal
-}: {
-  readonly icon: ReactNode
-  readonly title: string
-  readonly detail: string
-  readonly onReveal?: () => void
-}) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-canvas px-6 text-center">
-      {icon}
-      <div className="space-y-1">
-        <p className="text-[13px] font-medium text-text-bright">{title}</p>
-        <p className="text-[12px] text-dim">{detail}</p>
-      </div>
-      {onReveal !== undefined ? (
-        <Button type="button" variant="secondary" size="sm" onClick={onReveal}>
-          Reveal in Finder
-        </Button>
-      ) : null}
-    </div>
-  )
-}
-
 function FilePdfBody({
   sessionId,
   path,
@@ -1182,12 +1232,7 @@ function fileStatusNotice(browser: FileBrowserController, sessionId: string): Re
   }
   if (browser.status === "binary") {
     return (
-      <FileNotice
-        icon={<FileWarning className="size-6 text-dim" aria-hidden />}
-        title="Binary file"
-        detail="This file is not valid UTF-8 text, so Jingler will not edit it."
-        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
-      />
+      <AssetBinary onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")} />
     )
   }
   if (browser.status === "too-large" && browser.failure?.type === "too-large") {
@@ -1216,6 +1261,8 @@ function fileStatusNotice(browser: FileBrowserController, sessionId: string): Re
             ? browser.failure.message
             : `Couldn't open ${browser.selectedPath}.`
         }
+        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
+        onRetry={browser.reload}
       />
     )
   }
@@ -1234,7 +1281,7 @@ function renderDiffContainer(browser: FileBrowserController, followedSelection: 
         followedSelection === null ? undefined : (browser.agentTargetEventId ?? undefined)
       }
     >
-      <FileModeBar path={browser.selectedPath!} mode="diff" browser={browser} />
+      <FileModeControl path={browser.selectedPath!} mode="diff" browser={browser} />
       <div className="min-h-0 flex-1">
         {children}
       </div>
@@ -1256,6 +1303,6 @@ function discardActionLabel(discard: NonNullable<FileBrowserController["pendingD
   return "reload this file"
 }
 
-function isFileShortcutKey(event: KeyboardEvent, key: "j" | "s"): boolean {
+function isFileShortcutKey(event: KeyboardEvent, key: "j" | "l" | "s"): boolean {
   return event.code === `Key${key.toUpperCase()}` || event.key.toLowerCase() === key
 }

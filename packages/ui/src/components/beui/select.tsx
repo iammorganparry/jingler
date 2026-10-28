@@ -244,7 +244,7 @@ export function SelectTrigger({
   });
   // edge facing the panel flattens then rounds; the far edge stays rounded.
   // All four corners are specified so none gets stranded when placement flips.
-  const kf = ctx.open ? [0, 0, 12] : [12, 0, 12];
+  const kf = ctx.open ? [0, 0, 8] : [8, 0, 8];
   const kfT: Transition = ctx.reduce
     ? { duration: 0 }
     : ctx.open
@@ -274,10 +274,10 @@ export function SelectTrigger({
       // back once the panel pulls away — the two pinch apart.
       initial={false}
       animate={{
-        borderTopLeftRadius: isTop ? kf : 12,
-        borderTopRightRadius: isTop ? kf : 12,
-        borderBottomLeftRadius: isTop ? 12 : kf,
-        borderBottomRightRadius: isTop ? 12 : kf,
+        borderTopLeftRadius: isTop ? kf : 8,
+        borderTopRightRadius: isTop ? kf : 8,
+        borderBottomLeftRadius: isTop ? 8 : kf,
+        borderBottomRightRadius: isTop ? 8 : kf,
       }}
       transition={{
         borderTopLeftRadius: isTop ? kfT : INSTANT_TRANSITION,
@@ -286,8 +286,8 @@ export function SelectTrigger({
         borderBottomRightRadius: isTop ? INSTANT_TRANSITION : kfT,
       }}
       className={cn(
-        "relative z-10 flex w-full items-center justify-between gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-text-bright outline-none transition-colors",
-        "hover:border-line-strong focus-visible:ring-2 focus-visible:ring-ring/20",
+        "relative z-10 flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-transparent px-3 h-8 text-[13px] leading-5 text-text-bright outline-none transition-colors duration-150",
+        "hover:border-line-strong focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
         "disabled:pointer-events-none disabled:opacity-50",
         className,
       )}
@@ -297,9 +297,9 @@ export function SelectTrigger({
         aria-hidden
         animate={{ rotate: ctx.open ? 180 : 0 }}
         transition={ctx.reduce ? { duration: 0 } : CHEVRON_TRANSITION}
-        className="text-muted-foreground"
+        className="text-dim"
       >
-        <ChevronDown className="h-4 w-4" />
+        <ChevronDown className="size-3" />
       </motion.span>
     </motion.button>
   );
@@ -579,7 +579,7 @@ return ({
       // flush against the trigger, then separates into its own rounded pill;
       // sits above or below depending on available space
       className={cn(
-        "z-20 rounded-xl border border-line bg-panel shadow-lg",
+        "z-20 rounded-lg border border-line bg-panel shadow-lg",
         inline ? "relative inset-auto" : "absolute left-0 right-0",
         !inline && (isTop ? "bottom-full" : "top-full"),
         className,
@@ -655,7 +655,7 @@ export function SelectItem({
           }
         }}
         className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm outline-none transition-colors",
+          "flex w-full items-center justify-between gap-2 rounded-md h-8 px-2.5 text-left text-[13px] outline-none transition-colors",
           selected
             ? "bg-surface text-text-bright"
             : "text-muted-foreground hover:bg-surface hover:text-text-bright focus-visible:bg-surface",

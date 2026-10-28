@@ -24,13 +24,22 @@ const ToolTarget = Schema.Struct({
   /** Browser tools target a URL, a CSS selector, or a JS expression. */
   url: Schema.optional(Schema.String),
   selector: Schema.optional(Schema.String),
-  expression: Schema.optional(Schema.String)
+  expression: Schema.optional(Schema.String),
+  /** `jingler_set_work_mode` arguments. */
+  mode: Schema.optional(Schema.Literal("plan", "build")),
+  reason: Schema.optional(Schema.String)
 })
 
 const decodeText = Schema.decodeUnknownOption(TextResultPart)
 const decodeContent = Schema.decodeUnknownOption(ToolContent)
 const decodeDetails = Schema.decodeUnknownOption(ToolDetails)
 const decodeTarget = Schema.decodeUnknownOption(ToolTarget)
+
+/** The agent-written `intent` argument (see tool-registry's INTENT_PROPERTY), when supplied. */
+const IntentArg = Schema.Struct({ intent: Schema.optional(Schema.String) })
+const decodeIntentArg = Schema.decodeUnknownOption(IntentArg)
+export const toolIntent = (args: unknown): string | null =>
+  Option.getOrUndefined(decodeIntentArg(args))?.intent ?? null
 const SupervisorAttention = Schema.Struct({
   role: Schema.Literal("custom"),
   customType: Schema.Literal("subagent_supervisor_request"),
@@ -130,6 +139,7 @@ type ToolResultEvent = Extract<
 
 export const toolTarget = (args: unknown): string | null => {
   const target = Option.getOrUndefined(decodeTarget(args))
+  if (target?.mode !== undefined) return `Switched to ${target.mode === "plan" ? "Plan" : "Build"}${target.reason ? `, ${target.reason}` : ""}`
   if (target?.path !== undefined) return target.path
   if (target?.command !== undefined) return target.command
   if (target?.url !== undefined) return target.url
@@ -328,7 +338,8 @@ export const normalizePiEvent = (
         _tag: "ToolStart",
         id: event.toolCallId,
         name: event.toolName,
-        target: toolTarget(event.args)
+        target: toolTarget(event.args),
+        intent: toolIntent(event.args) ?? undefined
       }
     case "tool_execution_update":
       return {

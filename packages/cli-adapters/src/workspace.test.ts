@@ -10,8 +10,7 @@ import {
   EMPTY_REVIEW_DIFF,
   FILE_DIFF_BYTE_LIMIT,
   FILE_DIFF_LINE_LIMIT,
-  WorkspaceService,
-  filterDiffHunks
+  WorkspaceService
 } from "./workspace.js"
 import { failureOf, initGitRepo, mkTemp, runExit, withTempRoot } from "./test-support.js"
 
@@ -328,6 +327,52 @@ describe("WorkspaceService", () => {
     expect(countObjects()).toBe(before)
   })
 
+  it("diffStat()/diff()/boundedFileDiff() with a base include committed branch work; without it only uncommitted", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "branch-work"))
+    execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoPath })
+    writeFileSync(join(repoPath, "committed.txt"), "committed\n")
+    execFileSync("git", ["add", "-A"], { cwd: repoPath })
+    execFileSync("git", ["commit", "-m", "work", "--no-gpg-sign"], { cwd: repoPath })
+    writeFileSync(join(repoPath, "uncommitted.txt"), "uncommitted\n")
+    const run = <A, E>(effect: Effect.Effect<A, E, WorkspaceService | ConfigService | AppPaths | NodeContext.NodeContext>) =>
+      runExit(effect.pipe(Effect.provide(services)), temp.layer)
+
+    const withBase = await run(
+      WorkspaceService.diffStat(repoPath, "main")
+    )
+    const withoutBase = await run(
+      WorkspaceService.diffStat(repoPath).pipe(Effect.provide(services))
+    )
+    const unresolvable = await run(
+      WorkspaceService.diffStat(repoPath, "no-such-branch").pipe(Effect.provide(services))
+    )
+    const review = await run(
+      WorkspaceService.diff(repoPath, "main").pipe(Effect.provide(services))
+    )
+    const file = await run(
+      WorkspaceService.boundedFileDiff(repoPath, "committed.txt", "main").pipe(
+        Effect.provide(services)
+      )
+    )
+    const fileNoBase = await run(
+      WorkspaceService.boundedFileDiff(repoPath, "committed.txt").pipe(
+        Effect.provide(services)
+      )
+    )
+
+    expect(withBase._tag === "Success" && withBase.value.files).toBe(2)
+    expect(withoutBase._tag === "Success" && withoutBase.value.files).toBe(1)
+    expect(unresolvable._tag === "Success" && unresolvable.value.files).toBe(1)
+    expect(review._tag === "Success" && review.value.files.map((f) => f.path).sort()).toStrictEqual([
+      "committed.txt",
+      "uncommitted.txt"
+    ])
+    expect(file._tag === "Success" && file.value.kind === "patch" && file.value.patch).toContain(
+      "+committed"
+    )
+    expect(fileNoBase._tag === "Success" && fileNoBase.value.kind === "patch" && fileNoBase.value.patch).toBe("")
+  })
+
   it("diff() is empty for a clean worktree", async () => {
     const repoPath = initGitRepo(join(repos.dir, "clean"))
     const exit = await runExit(
@@ -533,79 +578,5 @@ describe("WorkspaceService", () => {
     )
     expect(exit._tag).toBe("Success")
     expect(readFileSync(join(repoPath, "f.txt"), "utf-8")).toBe(lines(5))
-  })
-
-  it("revertRange reverts only the selected hunk, leaving other edits intact", async () => {
-    const repoPath = initGitRepo(join(repos.dir, "revert-range"))
-    commitFile(repoPath, "f.txt", lines(20))
-    // Two edits far enough apart (>2×context) that git emits two separate hunks.
-    const edited = lines(20).replace("line 2\n", "line 2 EDITED\n").replace("line 18\n", "line 18 EDITED\n")
-    writeFileSync(join(repoPath, "f.txt"), edited)
-
-    // Revert only the range around line 2.
-    const exit = await runExit(
-      WorkspaceService.revertRange(repoPath, "f.txt", 2, 2).pipe(Effect.provide(services)),
-      temp.layer
-    )
-    expect(exit._tag).toBe("Success")
-    const after = readFileSync(join(repoPath, "f.txt"), "utf-8")
-    expect(after).toContain("line 2\n") // reverted
-    expect(after).not.toContain("line 2 EDITED")
-    expect(after).toContain("line 18 EDITED") // untouched
-  })
-
-  it("revertRange is a no-op when nothing in the range changed", async () => {
-    const repoPath = initGitRepo(join(repos.dir, "revert-noop"))
-    commitFile(repoPath, "f.txt", lines(20))
-    const edited = lines(20).replace("line 2\n", "line 2 EDITED\n")
-    writeFileSync(join(repoPath, "f.txt"), edited)
-
-    // Range far from the only change → nothing reverted, no error.
-    const exit = await runExit(
-      WorkspaceService.revertRange(repoPath, "f.txt", 18, 20).pipe(Effect.provide(services)),
-      temp.layer
-    )
-    expect(exit._tag).toBe("Success")
-    expect(readFileSync(join(repoPath, "f.txt"), "utf-8")).toBe(edited)
-  })
-})
-
-describe("filterDiffHunks", () => {
-  const TWO_HUNK = [
-    "diff --git a/f.txt b/f.txt",
-    "index 111..222 100644",
-    "--- a/f.txt",
-    "+++ b/f.txt",
-    "@@ -1,3 +1,3 @@",
-    " line 1",
-    "-line 2",
-    "+line 2 EDITED",
-    " line 3",
-    "@@ -17,3 +17,3 @@",
-    " line 17",
-    "-line 18",
-    "+line 18 EDITED",
-    " line 19",
-    ""
-  ].join("\n")
-
-  it("keeps only the hunk whose new-side range overlaps the selection", () => {
-    const out = filterDiffHunks(TWO_HUNK, 2, 2)
-    expect(out).not.toBeNull()
-    expect(out).toContain("@@ -1,3 +1,3 @@")
-    expect(out).not.toContain("@@ -17,3 +17,3 @@")
-    // Header is preserved so the result stays a valid patch.
-    expect(out).toContain("--- a/f.txt")
-  })
-
-  it("keeps both hunks when the range spans them", () => {
-    const out = filterDiffHunks(TWO_HUNK, 1, 20)
-    expect(out).toContain("@@ -1,3 +1,3 @@")
-    expect(out).toContain("@@ -17,3 +17,3 @@")
-  })
-
-  it("returns null when no hunk overlaps or the diff is empty", () => {
-    expect(filterDiffHunks(TWO_HUNK, 8, 12)).toBeNull()
-    expect(filterDiffHunks("", 1, 1)).toBeNull()
   })
 })

@@ -1,6 +1,5 @@
 import type { PrTimelineItem } from "@jingler/core"
 import { Check, MessageSquare, X } from "lucide-react"
-import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Card } from "../components/card.js"
@@ -9,15 +8,11 @@ import { CodeChip } from "../components/code-chip.js"
 import { Markdown } from "../components/markdown.js"
 import { AsyncButton } from "../components/async-button.js"
 
+// Neutral icons for every kind (spec §6.3): the kind is carried by the icon shape and label, not colour.
 const kindMeta = {
-  commented: { Icon: MessageSquare, tone: "text-blue", label: "commented", rail: "bg-blue/12" },
-  approved: { Icon: Check, tone: "text-green", label: "approved", rail: "bg-green/12" },
-  changes_requested: {
-    Icon: X,
-    tone: "text-red",
-    label: "requested changes",
-    rail: "bg-red/10"
-  }
+  commented: { Icon: MessageSquare, label: "commented" },
+  approved: { Icon: Check, label: "approved" },
+  changes_requested: { Icon: X, label: "requested changes" }
 } as const
 
 /**
@@ -44,12 +39,9 @@ export function PrTimelineEntry({
   return (
     <div className="flex items-start gap-[11px]">
       <span
-        className={cn(
-          "mt-0.5 flex size-[26px] flex-none items-center justify-center rounded-full",
-          meta.rail
-        )}
+        className="mt-0.5 flex size-[26px] flex-none items-center justify-center rounded-full bg-surface"
       >
-        <meta.Icon size={13} className={meta.tone} />
+        <meta.Icon size={13} className="text-muted-foreground" />
       </span>
       <Card className="flex-1">
         <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-[11px]">
@@ -59,8 +51,8 @@ export function PrTimelineEntry({
             tone="orange"
             size={22}
           />
-          <span className="text-[13px] font-semibold text-text-bright">{item.author}</span>
-          <span className={cn("text-[11.5px] font-semibold", meta.tone)}>{meta.label}</span>
+          <span className="text-[13px] font-medium text-text-bright">{item.author}</span>
+          <span className="text-[12px] text-muted-foreground">{meta.label}</span>
           <div className="flex-1" />
           <span className="font-mono text-[11px] text-dim">{relativeTime(item.createdAt)}</span>
         </div>

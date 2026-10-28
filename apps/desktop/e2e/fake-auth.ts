@@ -111,6 +111,7 @@ export const startFakeAuthServer = async (
 ): Promise<FakeAuthServer> => {
   const options = normalizeOptions(input);
   const sentEmails: Array<string> = [];
+  const flakyFailed = new Set<string>();
   const managedRequests: Array<FakeManagedRequest> = [];
   const offloadRequests: Array<FakeOffloadRequest> = [];
   let offloadEventReads = 0;
@@ -451,6 +452,11 @@ export const startFakeAuthServer = async (
             const email = jsonBody(value).email;
             if (typeof email === "string" && email.includes("fail"))
               return json(400, { error: "rejected" });
+            // "flaky" addresses are rejected once, so a Retry can succeed.
+            if (typeof email === "string" && email.includes("flaky") && !flakyFailed.has(email)) {
+              flakyFailed.add(email);
+              return json(400, { error: "rejected" });
+            }
             if (typeof email === "string") sentEmails.push(email);
             return json(200, { status: true });
           });

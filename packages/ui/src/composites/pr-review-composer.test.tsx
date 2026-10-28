@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { PrReviewComposer } from "./pr-review-composer.js"
 
 afterEach(cleanup)
@@ -25,5 +25,26 @@ describe("PrReviewComposer draft preservation", () => {
     fireEvent.change(box, { target: { value: "done" } })
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Comment" })) })
     expect(box.value).toBe("")
+  })
+})
+
+describe("PrReviewComposer own-PR guard", () => {
+  it("disables Approve and Request changes on your own PR but keeps Comment and the agent toggle", () => {
+    render(<PrReviewComposer connected selfAuthored onSubmit={async () => {}} />)
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Request changes" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Comment" }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByText("Also send to agent")).toBeDefined()
+  })
+
+  it("sends added drawer findings with the review body and reports submission", async () => {
+    const onSubmit = vi.fn(async () => {})
+    const onSubmitted = vi.fn()
+    const pending = [{ id: "a", severity: "issue" as const, path: "src/a.ts", line: 4, body: "Null deref." }]
+    render(<PrReviewComposer connected pending={pending} onSubmitted={onSubmitted} onSubmit={onSubmit} />)
+    expect(screen.getByTestId("pr-pending-comments").textContent).toContain("src/a.ts:4")
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Comment" })) })
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ body: "- **Issue** `src/a.ts:4` — Null deref.", kind: "comment" }))
+    expect(onSubmitted).toHaveBeenCalledTimes(1)
   })
 })

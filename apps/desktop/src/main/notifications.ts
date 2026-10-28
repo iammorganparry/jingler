@@ -18,9 +18,13 @@
  * `shouldNotify` is pure so the suppression rules can be tested without
  * Electron, which is most of the behaviour worth defending.
  */
-import type { NotificationKind, NotificationsConfig } from "@jingler/core"
+import type {
+  NotificationKind,
+  NotificationPermission,
+  NotificationsConfig
+} from "@jingler/core"
 import { NOTIFICATIONS_DEFAULT } from "@jingler/core"
-import { BrowserWindow, Notification } from "electron"
+import { BrowserWindow, Notification, shell } from "electron"
 
 /** IPC channel main uses to tell the renderer which session to open. */
 export const NOTIFICATION_ACTIVATED_CHANNEL = "jingler/notification-activated"
@@ -71,6 +75,76 @@ export const shouldNotify = ({
 }
 
 /**
+ * Can the OS show notifications at all?
+ *
+ * Electron's `Notification` offers only `isSupported()` — no permission or
+ * authorization status on macOS, Windows or Linux — so a supported platform is
+ * `unknown`, not `granted`: the operator may still have blocked Jingler in
+ * System Settings and we cannot tell. Claiming otherwise would hide that.
+ * `isSupported` is injected so tests need no Electron.
+ */
+export const notificationPermission = (
+  isSupported: () => boolean = () => Notification.isSupported()
+): NotificationPermission => {
+  // E2E-only stub: Electron cannot report a blocked permission, so specs inject it.
+  if (process.env.JINGLER_E2E === "1" && process.env.JINGLER_E2E_NOTIFICATION_PERMISSION === "denied") {
+    return "denied"
+  }
+  try {
+    return isSupported() ? "unknown" : "unsupported"
+  } catch {
+    return "unknown"
+  }
+}
+
+/**
+ * Open the OS pane where the operator can un-block notifications.
+ *
+ * macOS only: `x-apple.systempreferences:` is the one URL scheme that opens
+ * System Settings straight to the Notifications pane, and it is meaningless on
+ * Windows or Linux — there is no platform-neutral equivalent, so this is a
+ * no-op there rather than opening something misleading. The `.extension` id is the
+ * macOS 13+ System Settings pane (Electron documents `shell.openExternal` for
+ * custom URL schemes: https://www.electronjs.org/docs/latest/api/shell#shellopenexternalurl-options;
+ * pane ids: https://github.com/bvanpeski/SystemPreferences/blob/main/macos_preferencepanes-Ventura.md).
+ */
+export const openNotificationSystemSettings = (
+  openExternal: (url: string) => Promise<void> = (url) => shell.openExternal(url),
+  platform: string = process.platform
+): void => {
+  if (platform !== "darwin") return
+  void openExternal("x-apple.systempreferences:com.apple.Notifications-Settings.extension").catch(() => {
+    // Best-effort: a failed hand-off to System Settings is not worth surfacing.
+  })
+}
+
+/** What a click on the notification sends the renderer, via `NOTIFICATION_ACTIVATED_CHANNEL`. */
+export interface NotificationClickPayload {
+  readonly sessionId: string
+  readonly kind: NotificationKind
+  /**
+   * The turn the notification was about, so the renderer can scroll straight to
+   * its blocked card instead of just opening the session. Null for a kind with
+   * no single turn to point at (e.g. a PR update).
+   */
+  readonly turnId: string | null
+}
+
+/**
+ * Builds the click payload. Pure so the shape can be tested without wiring up
+ * an `Electron.Notification` — see the module doc for why that matters here.
+ */
+export const notificationClickPayload = (input: {
+  readonly sessionId: string
+  readonly kind: NotificationKind
+  readonly turnId: string | null
+}): NotificationClickPayload => ({
+  sessionId: input.sessionId,
+  kind: input.kind,
+  turnId: input.turnId
+})
+
+/**
  * Raise the notification and wire its click to focus the app on that session.
  *
  * Every failure path here is swallowed: notifications are unavailable on an
@@ -83,6 +157,8 @@ export const showNotification = (
     readonly kind: NotificationKind
     readonly title: string
     readonly body: string
+    /** The turn this is about, for the click payload. Absent for kinds with none. */
+    readonly turnId?: string | null
   },
   config: NotificationsConfig | undefined,
   /** Injected in tests; defaults to the real focused-or-first window. */
@@ -108,7 +184,14 @@ export const showNotification = (
       if (win.isMinimized()) win.restore()
       win.show()
       win.focus()
-      win.webContents.send(NOTIFICATION_ACTIVATED_CHANNEL, { sessionId: input.sessionId })
+      win.webContents.send(
+        NOTIFICATION_ACTIVATED_CHANNEL,
+        notificationClickPayload({
+          sessionId: input.sessionId,
+          kind: input.kind,
+          turnId: input.turnId ?? null
+        })
+      )
     })
     notification.show()
   } catch {

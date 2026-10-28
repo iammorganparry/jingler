@@ -3,16 +3,24 @@
  * (keyed by session id) when the PR tab is active; owns its data via
  * `usePullRequest`.
  */
-import type { Session } from "@jingler/core"
+import type { Project, Session } from "@jingler/core"
 import { workspaceModeOf } from "@jingler/core"
 import { PullRequestView } from "@jingler/ui"
+import { PrFilesPanel } from "./pr-files-panel.js"
 import { CheckoutChecks } from "./checkout-checks.js"
 import { usePullRequest } from "./use-pull-request.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { usePublish } from "./use-publish.js"
+import { usePrStack } from "./use-pr-stack.js"
+import { clearSessionPrRequest, stepFromShownPr, useSessionPrRequest } from "./session-pr-request.js"
+import { scopedPrNumber } from "./subagent-scope.js"
+import { useViewedChild } from "./subagent-tab-store.js"
+import { useSubagentView } from "./use-subagent-view.js"
+import { useWorkspaceWorkflow } from "./use-workspace-workflow.js"
 
 export function PullRequestPane({
   session,
+  project,
   connected,
   autoDetect,
   viewerLogin,
@@ -21,9 +29,11 @@ export function PullRequestPane({
   onConnectGithub,
   onPrLinked,
   onPublishCheckpoint,
-  onOpenFiles
+  onOpenFiles,
+  onSession
 }: {
   session: Session
+  project?: Project
   connected: boolean
   autoDetect: boolean
   /** The authenticated GitHub login (to disable approving your own PR). */
@@ -34,10 +44,22 @@ export function PullRequestPane({
   onPrLinked: (sessionId: string, prNumber: number) => void
   onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<Session["publish"]>) => void
   onOpenFiles: () => void
+  /** Publishes a workspace lifecycle update (retry/skip setup) back to the session list. */
+  onSession: (session: Session) => void
 }) {
+  const stack = usePrStack(session, connected)
+  // Session-level writes (merge, review, close…) act on the session's own PR, so a lower layer is read-only.
+  const requestedPr = useSessionPrRequest(session.id)
+  const { changesScope } = useSubagentView(session.activeChatId)
+  // Viewing a child that opened a PR: show that PR, read-only like any non-session layer.
+  const childPr = scopedPrNumber(useViewedChild(session.id, session.activeChatId), changesScope)
+  const shownPr = childPr ?? requestedPr ?? stack.selected
+  const viewingLowerLayer = shownPr !== null && shownPr !== session.prNumber
   const {
     pr,
     busy,
+    loadError,
+    retryLoad,
     mergePr,
     merging,
     mergeError,
@@ -52,9 +74,12 @@ export function PullRequestPane({
     sentEntryIds,
     resolveThread,
     replyToThread,
-    openOnGithub
-  } = usePullRequest(session, { connected, autoDetect, onPrLinked })
+    openOnGithub,
+    conflictedFiles,
+    resolveConflicts
+  } = usePullRequest(session, { connected, autoDetect, onPrLinked, prNumber: shownPr })
   const publish = usePublish(session, onPrLinked, onPublishCheckpoint)
+  const workflow = useWorkspaceWorkflow(session, project, onSession)
 
   const {
     review,
@@ -64,7 +89,9 @@ export function PullRequestPane({
     error: reviewError,
     runReview,
     sendFindingToAgent,
-    sentFindingIds
+    sentFindingIds,
+    dismissedFindingIds,
+    dismissFinding
   } = useAdversarialReview(session, { connected })
 
   return (
@@ -76,10 +103,25 @@ export function PullRequestPane({
       connectionMessage={connectionMessage}
       connectionActionLabel={connectionActionLabel}
       busy={busy}
+      loadError={loadError}
+      onRetryLoad={retryLoad}
       viewerLogin={viewerLogin}
       publish={publish.checkpoint}
       publishing={publish.publishing}
       branch={session.branch}
+      baseBranch={session.baseBranch ?? pr?.baseRefName}
+      prs={session.prs}
+      stack={stack.nav && {
+        ...stack.nav,
+        selected: shownPr ?? stack.nav.selected,
+        onSelect: (number) => {
+          clearSessionPrRequest(session.id)
+          stack.nav?.onSelect(number)
+        },
+        // A chip-requested PR overrides the machine's selection, so step from the PR on screen, then drop the request.
+        onStep: (delta) => stepFromShownPr(session.id, shownPr, stack.nav, delta)
+      }}
+      readOnly={viewingLowerLayer}
       sessionTitle={session.title}
       onCreatePr={
         workspaceModeOf(session) === "worktree" ? publish.publish : undefined
@@ -102,6 +144,9 @@ export function PullRequestPane({
       onReplyToThread={replyToThread}
       onOpenOnGithub={openOnGithub}
       onOpenFiles={onOpenFiles}
+      filesPanel={<PrFilesPanel session={session} prNumber={stack.selected ?? session.prNumber} connected={connected} />}
+      conflictedFiles={conflictedFiles}
+      onResolveConflicts={resolveConflicts}
       review={{
         review,
         running: reviewRunning,
@@ -110,7 +155,20 @@ export function PullRequestPane({
         error: reviewError,
         onRun: runReview,
         onSendFindingToAgent: sendFindingToAgent,
-        sentFindingIds
+        sentFindingIds,
+        dismissedFindingIds,
+        onDismissFinding: dismissFinding
+      }}
+      workflow={{
+        lifecycle: workflow.lifecycle,
+        commands: workflow.commands,
+        runs: workflow.runs,
+        error: workflow.error,
+        onRetrySetup: workflow.retrySetup,
+        onSkipSetup: workflow.skipSetup,
+        onStartRun: workflow.startRun,
+        onStopRun: workflow.stopRun,
+        onArchiveWithoutCleanup: workflow.archiveWithoutCleanup
       }}
     />
     </div>

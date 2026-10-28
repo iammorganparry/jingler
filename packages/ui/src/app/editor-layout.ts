@@ -58,10 +58,65 @@ export const EDITOR_LAYOUT_STORAGE_PREFIX = "sb.editor-layout.v1:"
 
 const newId = (prefix: string): string => `${prefix}-${Math.random().toString(36).slice(2, 10)}`
 const keyOf = sessionSurfaceKey
+
+/** Chat lane pixel constraints (see chat-lane-machine.ts) */
+export const CHAT_LANE_MIN_PX = 360
+export const CHAT_LANE_MAX_PX = 560
+export const CHAT_LANE_COLLAPSE_PX = 320
+const CHAT_LANE_SNAP_RATIOS = [1 / 3, 1 / 2] as const
+const CHAT_LANE_SNAP_TOLERANCE_PX = 16
+
+/** Keep content readable when several groups are open. */
+export const MAX_GROUPS = 3
+/** Narrowest a group may be and still show content — below this it shows only its tab strip. */
+export const MIN_GROUP_PX = 240
+
 const CHAT_RATIO = 1 / 3
 const CONTENT_RATIO = 2 / 3
+
+/**
+ * Compute the initial chat lane ratio, clamped to 360-560px.
+ * Falls back to 1/3 when containerWidth is unknown (0 or negative).
+ */
+export const chatLaneRatio = (containerWidth: number): number => {
+  if (containerWidth <= 0) return 1 / 3
+  const idealPx = containerWidth / 3
+  const clampedPx = Math.min(CHAT_LANE_MAX_PX, Math.max(CHAT_LANE_MIN_PX, idealPx))
+  return clampedPx / containerWidth
+}
+
+/**
+ * Apply pixel-based resize to the chat lane: snap to 1/3 or 1/2, clamp to 360-560px,
+ * collapse (return null) below 320px.
+ */
+export const resizeChatLane = (
+  currentRatio: number,
+  delta: number,
+  containerWidth: number
+): number | null => {
+  if (containerWidth <= 0) return currentRatio + delta
+  const currentPx = currentRatio * containerWidth
+  const newPx = currentPx + delta * containerWidth
+
+  // Collapse below threshold
+  if (newPx < CHAT_LANE_COLLAPSE_PX) return null
+
+  // Snap to 1/3 or 1/2 if within tolerance
+  for (const snapRatio of CHAT_LANE_SNAP_RATIOS) {
+    const snapPx = snapRatio * containerWidth
+    if (Math.abs(newPx - snapPx) <= CHAT_LANE_SNAP_TOLERANCE_PX) {
+      return snapRatio
+    }
+  }
+
+  // Clamp to 360-560px
+  const clampedPx = Math.min(CHAT_LANE_MAX_PX, Math.max(CHAT_LANE_MIN_PX, newPx))
+  return clampedPx / containerWidth
+}
+
 const laneOf = (surface: SessionSurface): "chat" | "content" => surface.kind === "chat" ? "chat" : "content"
-const isBrowser = (surface: SessionSurface) => surface.kind === "view" && surface.id === "browser"
+const isSingleBody = (surface: SessionSurface) =>
+  surface.kind === "terminal" || (surface.kind === "view" && surface.id === "browser")
 const uniqueTabs = (tabs: ReadonlyArray<SessionSurface>): ReadonlyArray<SessionSurface> => {
   const seen = new Set<string>()
   return tabs.filter((tab) => {
@@ -230,6 +285,14 @@ export const focusAdjacentGroup = (layout: EditorLayout, direction: -1 | 1): Edi
   return next ? { ...layout, focusedGroupId: next.id } : layout
 }
 
+/** Count content groups in a row split. */
+const contentGroupCount = (node: EditorNode | null): number => {
+  if (!node) return 0
+  if (node.type === "group") return node.tabs.some((tab) => laneOf(tab) === "content") ? 1 : 0
+  if (node.axis !== "row") return 0
+  return node.children.reduce((sum, child) => sum + contentGroupCount(child), 0)
+}
+
 /**
  * Shows a surface: reveals it where it is already open, otherwise adds it to
  * the focused matching lane (or the first matching lane).
@@ -263,6 +326,7 @@ export const openTab = (
   if (!anchor) return commit(layout, groupOf([surface]))
   const added = groupOf([surface])
   const edge = lane === "chat" ? "left" : "right"
+  if (lane === "content" && contentGroupCount(layout.root) >= MAX_GROUPS) return layout
   return commit(
     layout,
     splitBeside(layout.root, anchor.id, edge, added, [CHAT_RATIO, CONTENT_RATIO]),
@@ -293,9 +357,9 @@ const dropActivationTarget = (
   edge: DropEdge
 ): TabGroup | undefined => {
   const holder = groups.find((group) => group.tabs.some((tab) => keyOf(tab) === keyOf(surface)))
-  // Browser bodies all control one native WebContentsView per session/chat, so
-  // they cannot be copied into competing groups.
-  if (isBrowser(surface) && holder && !move) return holder
+  // Browser bodies control one native WebContentsView per session/chat and a shell
+  // is one PTY stream, so neither can be copied into competing groups.
+  if (isSingleBody(surface) && holder && !move) return holder
   return move && from === target.id && (edge === "center" || target.tabs.length === 1)
     ? target
     : undefined
@@ -325,6 +389,7 @@ export const dropTab = (
   const move = from !== undefined && !copy
   const activationTarget = dropActivationTarget(groups, surface, move, from, dropTarget, edge)
   if (activationTarget) return activateTab(layout, activationTarget.id, key)
+  if (edge !== "center" && laneOf(surface) === "content" && contentGroupCount(layout.root) >= MAX_GROUPS) return layout
   const added = edge === "center" ? null : groupOf([surface])
   let root = added
     ? splitBeside(layout.root, dropTarget.id, edge as Exclude<DropEdge, "center">, added)
@@ -351,6 +416,21 @@ export const closeSurfaceEverywhere = (layout: EditorLayout, surface: SessionSur
 /** Closes every tab matching `match` in every group. */
 export const closeTabsWhere = (layout: EditorLayout, match: (surface: SessionSurface) => boolean): EditorLayout =>
   allTabs(layout).filter(match).reduce(closeSurfaceEverywhere, layout)
+
+/**
+ * Shells are their own `terminal` tabs now. A persisted Terminal `view` tab is
+ * swapped for the session's live shells that are not already open.
+ */
+export const replaceLegacyTerminalView = (
+  layout: EditorLayout,
+  terminals: ReadonlyArray<SessionSurface>
+): EditorLayout => {
+  const legacy = keyOf({ kind: "view", id: "terminal" })
+  if (!allTabs(layout).some((tab) => keyOf(tab) === legacy)) return layout
+  const closed = closeTabsWhere(layout, (tab) => keyOf(tab) === legacy)
+  const open = new Set(allTabs(closed).map(keyOf))
+  return terminals.filter((tab) => !open.has(keyOf(tab))).reduce((next, tab) => openTab(next, tab), closed)
+}
 
 /** Every distinct open surface, in reading order. */
 export const allTabs = (layout: EditorLayout): ReadonlyArray<SessionSurface> =>
@@ -380,16 +460,87 @@ export const resizedPair = (a: number, b: number, delta: number): readonly [numb
   return [next, total - next]
 }
 
-export const resizeSplit = (layout: EditorLayout, splitId: string, index: number, delta: number): EditorLayout => {
+/**
+ * Detect if a split is the chat/content lane split: a 2-child row split where
+ * the left is all chats and the right is all content.
+ */
+const isChatContentSplit = (node: EditorNode): boolean => {
+  if (node.type !== "split" || node.axis !== "row" || node.children.length !== 2) return false
+  const left = node.children[0]
+  const right = node.children[1]
+  if (!left || !right) return false
+  const leftGroups = groupsOf(left)
+  const rightGroups = groupsOf(right)
+  if (leftGroups.length === 0 || rightGroups.length === 0) return false
+  const leftAllChat = leftGroups.every((g) => g.tabs.every((t) => laneOf(t) === "chat"))
+  const rightAllContent = rightGroups.every((g) => g.tabs.every((t) => laneOf(t) === "content"))
+  return leftAllChat && rightAllContent
+}
+
+/** True when this drag would take the root chat lane below the collapse threshold. */
+export const wouldCollapseChatLane = (layout: EditorLayout, splitId: string, index: number, delta: number, containerWidth: number | undefined): boolean => {
+  const root = layout.root
+  if (!root || root.type !== "split" || root.id !== splitId || index !== 0 || !containerWidth || !isChatContentSplit(root)) return false
+  return resizeChatLane(root.ratios[0] ?? 0, delta, containerWidth) === null
+}
+
+/** The layout with the chat lane hidden (collapsed to the Ask pill); ratios are untouched so restore keeps the width. */
+export const withoutChatLane = (layout: EditorLayout): EditorLayout => {
+  const root = layout.root
+  if (!root || root.type !== "split" || !isChatContentSplit(root)) return layout
+  const content = root.children[1]
+  return content ? { ...layout, root: content } : layout
+}
+
+/** Just the chat lane of a chat/content split (what the narrow-window drawer shows), or null when the layout has no such split. */
+export const chatLaneOnly = (layout: EditorLayout): EditorLayout | null => {
+  const root = layout.root
+  if (!root || root.type !== "split" || !isChatContentSplit(root)) return null
+  const chat = root.children[0]
+  return chat ? { ...layout, root: chat } : null
+}
+
+/** Apply chat lane resize or generic pair resize based on split type. */
+const applyResize = (
+  node: EditorSplit,
+  index: number,
+  delta: number,
+  containerWidth: number | undefined
+): EditorSplit | null => {
+  const a = node.ratios[index]
+  const b = node.ratios[index + 1]
+  if (a === undefined || b === undefined) return null
+
+  // Apply chat lane pixel logic to the chat/content split
+  if (index === 0 && isChatContentSplit(node) && containerWidth !== undefined && containerWidth > 0) {
+    // The pane collapses to the Ask pill first (wouldCollapseChatLane); this pin only covers callers without that.
+    const nextChatRatio = resizeChatLane(a, delta, containerWidth) ?? CHAT_LANE_MIN_PX / containerWidth
+    return { ...node, ratios: [nextChatRatio, 1 - nextChatRatio] }
+  }
+
+  // Generic split resizing
+  const pair = resizedPair(a, b, delta)
+  if (!pair || (pair[0] === a && pair[1] === b)) return null
+  return { ...node, ratios: node.ratios.map((r, i) => (i === index ? pair[0] : i === index + 1 ? pair[1] : r)) }
+}
+
+/**
+ * Resize a split, applying pixel-based logic to the chat/content lane split.
+ * Pass containerWidth for pixel-aware chat lane resizing; omit for generic ratio resizing.
+ */
+export const resizeSplit = (
+  layout: EditorLayout,
+  splitId: string,
+  index: number,
+  delta: number,
+  containerWidth?: number
+): EditorLayout => {
   if (!layout.root) return layout
   const resize = (node: EditorNode): EditorNode => {
     if (node.type === "group") return node
     if (node.id !== splitId) return mapChildren(node, resize)
-    const a = node.ratios[index]
-    const b = node.ratios[index + 1]
-    const pair = a === undefined || b === undefined ? null : resizedPair(a, b, delta)
-    if (!pair || (pair[0] === a && pair[1] === b)) return node
-    return { ...node, ratios: node.ratios.map((r, i) => (i === index ? pair[0] : i === index + 1 ? pair[1] : r)) }
+    const resized = applyResize(node, index, delta, containerWidth)
+    return resized ?? node
   }
   const root = resize(layout.root)
   return root === layout.root ? layout : { ...layout, root }
@@ -483,6 +634,26 @@ const readJson = (key: string): unknown => {
   return raw === null ? undefined : JSON.parse(raw)
 }
 
+
+/** Filter out deprecated "files" view tabs from a restored layout. */
+const migrateFilesTab = (layout: EditorLayout): EditorLayout => {
+  const isFilesTab = (surface: SessionSurface) =>
+    surface.kind === "view" && surface.id === "files"
+  return closeTabsWhere(layout, isFilesTab)
+}
+
+/** The Pull Request view became Checks; a persisted `pr` view tab reopens as Checks. */
+const migratePrTab = (layout: EditorLayout): EditorLayout => {
+  const isPr = (surface: SessionSurface) => surface.kind === "view" && surface.id === "pr"
+  if (!layout.root) return layout
+  const root = mapGroups(layout.root, (group) => {
+    if (!group.tabs.some(isPr)) return group
+    const tabs = uniqueTabs(group.tabs.map((tab): SessionSurface => (isPr(tab) ? { kind: "view", id: "checks" } : tab)))
+    return { ...group, tabs, active: group.active === keyOf({ kind: "view", id: "pr" }) ? keyOf({ kind: "view", id: "checks" }) : group.active }
+  })
+  return commit(layout, root)
+}
+
 /**
  * Restores a session's layout, migrating the v1 surface list on first read.
  * A live main chat that is missing (and was not explicitly closed) is restored
@@ -493,11 +664,14 @@ export const loadEditorLayout = (sessionId: string, fallback: SessionSurface, ma
   const initial = createEditorLayout(main ? [main, fallback] : [fallback], mainChatId)
   try {
     const stored = readJson(`${EDITOR_LAYOUT_STORAGE_PREFIX}${sessionId}`)
-    const layout =
+    let layout =
       stored !== undefined
         ? parseLayout(stored)
         : migrateSurfaceLayout(readJson(`${SESSION_SURFACE_STORAGE_PREFIX}${sessionId}`))
-    if (!layout) return initial
+    // A persisted layout with every tab closed would mount as an empty editor no
+    // sidebar click can fill, so it reseeds the chat instead.
+    if (!layout || layout.root === null) return initial
+    layout = migratePrTab(migrateFilesTab(layout))
     if (layout.mainChatId === null || !main) return layout
     const withMain = { ...layout, mainChatId }
     const present = groupsOf(layout.root).some((group) =>

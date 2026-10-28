@@ -38,8 +38,10 @@ const finishProviderSetup = async (window: Page): Promise<void> => {
     window.getByRole("heading", { name: "Connect a model provider" })
   ).toBeVisible()
   await window.getByRole("button", { name: "Continue" }).click()
+  // #487 removed the standalone resources onboarding step; #613 added an
+  // optional "Import existing sessions?" step before the shell.
   await expect(
-    window.getByRole("heading", { name: "Import agent resources" })
+    window.getByRole("heading", { name: "Import existing sessions?" })
   ).toBeVisible()
   await window.getByRole("button", { name: "Skip for now" }).click()
   await expect(appShell(window)).toBeVisible()
@@ -80,6 +82,28 @@ test("first-run GitHub remains skippable when the browser flow is abandoned", as
 
   await expect(window.getByRole("button", { name: "Skip for now" })).toBeEnabled()
   await window.getByRole("button", { name: "Skip for now" }).click()
+  await finishProviderSetup(window)
+})
+
+test("first-run GitHub error offers Try again and Skip for now, and skip continues", async ({
+  launchApp
+}) => {
+  const { app, window, reposDir, githubServer } = await launchApp({
+    withRepo: true,
+    githubApp: { accountLogin: "acme" }
+  })
+  await chooseFixtureRepo(app, reposDir)
+  await window.getByRole("button", { name: "Choose repos folder" }).click()
+  await window.getByRole("button", { name: "Continue" }).click()
+  await expect(window.getByRole("heading", { name: "Connect GitHub" })).toBeVisible()
+  // GitHub stops responding before the install URL is requested.
+  await githubServer.close()
+  await window.getByRole("button", { name: "Install / Connect GitHub" }).click()
+  await expect(window.getByText("GitHub didn't respond")).toBeVisible()
+  await expect(window.getByRole("button", { name: "Try again", exact: true })).toBeVisible()
+  await window.getByRole("button", { name: "Try again", exact: true }).click()
+  await expect(window.getByText("GitHub didn't respond")).toBeVisible()
+  await window.getByRole("button", { name: "Skip for now", exact: true }).click()
   await finishProviderSetup(window)
 })
 
@@ -167,6 +191,10 @@ test("GitHub onboarding resumes after callback and Settings repairs live access"
   await expect(window.getByText("Connected as @octocat")).toBeVisible()
   await expect(window.getByText("@acme")).toBeVisible()
   await expect(window.getByText("All repositories")).toBeVisible()
+  // Restyled GitHub section: connection, installation and preference rows sit on SettingsRow.
+  await expect(window.getByTestId("settings-row").filter({ hasText: "Connected as @octocat" })).toBeVisible()
+  await expect(window.getByTestId("settings-row").filter({ hasText: "@acme" })).toBeVisible()
+  await expect(window.getByTestId("settings-row").filter({ hasText: "Enable pull-request features" })).toBeVisible()
   await expect(window.getByText(/GitHub CLI|gh auth|Recheck/i)).toHaveCount(0)
 
   // Manage goes through the same state-bound install endpoint and callback bridge.
@@ -186,7 +214,7 @@ test("GitHub onboarding resumes after callback and Settings repairs live access"
   await window.getByRole("button", { name: "Close settings" }).click()
 
   await sessionRow(window, "GitHub integration").click()
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await expect(window.getByText(/installation for @acme is suspended/i)).toBeVisible()
   await window.getByRole("button", { name: "Repair GitHub access" }).click()
   await expect(window.getByText("Connected as @octocat")).toBeVisible()
@@ -209,12 +237,19 @@ test("GitHub onboarding resumes after callback and Settings repairs live access"
     githubServer.requests.filter((request) => request.path.startsWith("/repos/acme/widget"))
   ).toHaveLength(inaccessibleRepositoryRequests)
   await window.getByRole("button", { name: "Close settings" }).click()
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await expect(window.getByText(/acme\/widget is outside the repositories/i)).toBeVisible()
   await expect(window.getByRole("button", { name: "Manage repositories" })).toBeVisible()
 
   await window.getByRole("button", { name: "Manage repositories" }).click()
+  // Disconnect is confirmed first (ConfirmDialog, destructive); Cancel keeps the connection.
   await window.getByRole("button", { name: "Disconnect" }).click()
+  const confirmDisconnect = window.getByRole("dialog")
+  await expect(confirmDisconnect.getByText("Disconnect GitHub?")).toBeVisible()
+  await confirmDisconnect.getByRole("button", { name: "Cancel" }).click()
+  await expect(window.getByText("Connected as @octocat")).toBeVisible()
+  await window.getByRole("button", { name: "Disconnect" }).click()
+  await window.getByRole("dialog").getByRole("button", { name: "Disconnect" }).click()
   await expect(window.getByText("GitHub is not connected")).toBeVisible()
   await expect(window.getByRole("button", { name: "Install / Connect GitHub" })).toBeVisible()
 })
@@ -241,7 +276,7 @@ test("selected repository changes update live feature access without a restart",
 
   await expect(appShell(window)).toBeVisible()
   await sessionRow(window, "GitHub integration").click()
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await expect.poll(() => githubServer.requests.filter(
     (request) => request.path === "/repos/acme/widget/pulls"
   ).length).toBeGreaterThan(0)
@@ -254,7 +289,7 @@ test("selected repository changes update live feature access without a restart",
   githubServer.setInstallation({ repositories: [] })
   await window.getByRole("button", { name: "Refresh" }).click()
   await window.getByRole("button", { name: "Close settings" }).click()
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await expect(window.getByText(/acme\/widget is not included/i)).toBeVisible()
   await expect(window.getByRole("button", { name: "Manage repositories" })).toBeVisible()
 
@@ -264,6 +299,6 @@ test("selected repository changes update live feature access without a restart",
   })
   await window.getByRole("button", { name: "Refresh" }).click()
   await window.getByRole("button", { name: "Close settings" }).click()
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await expect(window.getByText(/acme\/widget is not included/i)).toHaveCount(0)
 })

@@ -69,7 +69,7 @@ const ITEMS: ReadonlyArray<PaletteItem> = [
     kind: "action",
     label: "Toggle Browser",
     group: "Actions",
-    hint: "⌃⇧B",
+    hint: "⌘⇧B",
     icon: MonitorPlay,
     run: noop
   },
@@ -137,6 +137,15 @@ export const Default: Story = {
   args: { open: true, onOpenChange: noop, items: ITEMS }
 }
 
+/** Scope switch on Chat: only the active chat's tabs, views and subagents remain. */
+export const ChatScope: Story = {
+  args: { open: true, onOpenChange: noop, items: ITEMS },
+  play: async () => {
+    const chat = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find((tab) => tab.textContent === "Chat")
+    chat?.click()
+  }
+}
+
 /** Nothing but sessions, the state on a fresh install with no plugins. */
 export const SessionsOnly: Story = {
   args: {
@@ -149,6 +158,18 @@ export const SessionsOnly: Story = {
 /** No sessions at all — first launch, before anything has been created. */
 export const NothingToShow: Story = {
   args: { open: true, onOpenChange: noop, items: [] }
+}
+
+/** Typing `@` as the first character switches to the Files prefix scope and shows its chip. */
+export const PrefixScope: Story = {
+  args: { open: true, onOpenChange: noop, items: ITEMS },
+  play: async () => {
+    const input = document.querySelector<HTMLInputElement>("[cmdk-input]")
+    if (!input) return
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    setter?.call(input, "@")
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  }
 }
 
 /** Driven by a real toggle, so open/close and the query reset can be felt. */

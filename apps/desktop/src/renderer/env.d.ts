@@ -16,6 +16,10 @@ interface JinglerBridge {
    * when main had no answer — the fallback in `globals.css` then applies.
    */
   readonly initialThemeCss: string
+  /** True when running under e2e; gates test-only renderer hooks. */
+  readonly isE2E: boolean
+  /** The platform (darwin, win32, linux) for conditional UI (window controls). */
+  readonly platform: string
   /** Send one client→server RPC frame to the main process. */
   readonly send: (data: unknown) => void
   /** Subscribe to server→client RPC frames. Returns an unsubscribe fn. */
@@ -35,10 +39,16 @@ interface JinglerBridge {
   ) => () => void
   /**
    * Subscribe to notification clicks. Main has already focused the window; the
-   * payload names the session to select. Returns an unsubscribe fn.
+   * payload names the session to select, plus what it was about so the
+   * renderer can decide whether to focus a question — see
+   * `notification-target.ts`. Returns an unsubscribe fn.
    */
   readonly onNotificationActivated: (
-    cb: (payload: { readonly sessionId: string }) => void
+    cb: (payload: {
+      readonly sessionId: string
+      readonly kind: import("@jingler/core").NotificationKind
+      readonly turnId: string | null
+    }) => void
   ) => () => void
   /**
    * Subscribe to "an agent is driving the embedded browser — reveal the dock".
@@ -53,6 +63,17 @@ interface JinglerBridge {
    */
   readonly onPreviewUrlChanged: (
     cb: (payload: { readonly sessionId: string; readonly chatId: string; readonly url: string }) => void
+  ) => () => void
+  /** Subscribe to the embedded browser's history, loading and load-failure state. */
+  readonly onPreviewNavState: (
+    cb: (payload: {
+      readonly sessionId: string
+      readonly chatId: string
+      readonly canGoBack: boolean
+      readonly canGoForward: boolean
+      readonly loading: boolean
+      readonly error: string | null
+    }) => void
   ) => () => void
   /** Forward Cmd/Ctrl+W from the focused native Browser view. */
   readonly onPreviewCloseTab: (

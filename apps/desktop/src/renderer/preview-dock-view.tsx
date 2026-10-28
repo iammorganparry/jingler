@@ -26,8 +26,21 @@ export function PreviewDockView({ session, dock, active = true }: PreviewDockVie
       onToggle={browser.toggle}
       url={browser.url}
       onNavigate={browser.navigate}
+      canGoBack={browser.canGoBack}
+      canGoForward={browser.canGoForward}
+      loading={browser.loading}
+      error={browser.error}
       onReload={() => {
         if (session !== null) void rpc.browserPreviewReload(session.id, session.activeChatId)
+      }}
+      onBack={() => {
+        if (session !== null) void rpc.browserPreviewGoBack(session.id, session.activeChatId)
+      }}
+      onForward={() => {
+        if (session !== null) void rpc.browserPreviewGoForward(session.id, session.activeChatId)
+      }}
+      onOpenExternal={() => {
+        if (/^https?:\/\//i.test(browser.url)) void window.jingler.openExternal(browser.url)
       }}
       renderBrowser={(dockActive) => (
         <BrowserBody

@@ -1,10 +1,12 @@
-import type { ReactNode } from "react"
-import type { User } from "@jingler/core"
+import { useState, type ReactNode } from "react"
+import type { Usage, User } from "@jingler/core"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { ChevronsUpDown, Gauge, LogIn, LogOut, Settings } from "lucide-react"
+import { ChevronsUpDown, Gauge, LogIn, LogOut, Settings, Sparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Avatar } from "../components/avatar.js"
 import { StatusDot } from "../components/status-dot.js"
+import { UsageLimits } from "./usage-limits.js"
+import { WhatsNewDialog, type WhatsNewEntry } from "./whats-new-dialog.js"
 
 export interface UserMenuProps {
   /**
@@ -16,6 +18,10 @@ export interface UserMenuProps {
   onOpenSettings?: () => void
   /** Open the Usage & limits modal. */
   onOpenUsage?: () => void
+  /** Latest usage snapshot; its limit windows are summarised in the menu. */
+  usage?: Usage | null
+  /** Refresh usage; called each time the menu opens. Absent hides the limits summary. */
+  onLoadUsage?: () => Promise<void> | void
   /** Sign out of the app. */
   onSignOut?: () => void
   /** Open the optional sign-in dialog. Offered only while signed out. */
@@ -24,6 +30,8 @@ export interface UserMenuProps {
   ghConnected?: boolean
   /** App version, shown at the foot of the menu. */
   version?: string
+  /** Notes behind the "What's new" item; the item is hidden when absent. */
+  whatsNew?: readonly WhatsNewEntry[]
 }
 
 /** First letter of the display name (or email), for the monogram fallback. */
@@ -89,15 +97,20 @@ export function UserMenu({
   user,
   onOpenSettings,
   onOpenUsage,
+  usage,
+  onLoadUsage,
   onSignOut,
   onSignIn,
   ghConnected = false,
-  version
+  version,
+  whatsNew
 }: UserMenuProps) {
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
   const { name: displayName, detail, header, initial, image, tone } = identityOf(user, onSignIn !== undefined, version)
 
   return (
-    <DropdownMenu.Root>
+    <>
+    <DropdownMenu.Root onOpenChange={(open) => open && void onLoadUsage?.()}>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
@@ -129,6 +142,13 @@ export function UserMenu({
             </span>
           </div>
 
+          {onLoadUsage && (
+            <>
+              <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
+              <UsageLimits usage={usage} loading={usage == null} />
+            </>
+          )}
+
           {(onOpenSettings || onOpenUsage) && (
             <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
           )}
@@ -137,11 +157,19 @@ export function UserMenu({
               icon={<Settings size={14} />}
               label="Settings"
               onSelect={onOpenSettings}
-              trailing={ghConnected ? <StatusDot tone="bg-green" size={6} glow /> : undefined}
+              trailing={ghConnected ? <StatusDot tone="bg-line-strong" size={6} glow={false} /> : undefined}
             />
           )}
           {onOpenUsage && (
             <MenuItem icon={<Gauge size={14} />} label="Usage & limits" onSelect={onOpenUsage} />
+          )}
+
+          {whatsNew && (
+            <MenuItem
+              icon={<Sparkles size={14} />}
+              label={version ? `What's new (v${version})` : "What's new"}
+              onSelect={() => setWhatsNewOpen(true)}
+            />
           )}
 
           {user && onSignOut && (
@@ -166,5 +194,7 @@ export function UserMenu({
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
+    {whatsNew && <WhatsNewDialog open={whatsNewOpen} onOpenChange={setWhatsNewOpen} entries={whatsNew} />}
+    </>
   )
 }

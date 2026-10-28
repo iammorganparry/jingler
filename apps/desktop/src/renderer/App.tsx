@@ -1,6 +1,6 @@
 import { RoutinesSettings } from "./routines-settings.js"
 import { sessionArchiveMachine } from "./session-archive-machine.js"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMachine } from "@xstate/react";
 import {
   useMutation,
@@ -12,6 +12,7 @@ import type {
   AgentEndpointCatalog,
   Attachment,
   ContextConfig,
+  PlanTemplateConfig,
   VsCodeTheme,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -40,28 +41,48 @@ import type {
 import type { SessionCreationPhase } from "@jingler/contracts";
 import {
   clampFontScale,
+  countNodesAwaitingAttention,
   DEFAULT_THEME_ID,
+  normalizeHeaderViews,
+  pendingQuestion,
   workspaceModeOf,
 } from "@jingler/core";
 import {
-  ConfirmDialog,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogBody,
+  ImportSessionsList,
+    ConfirmDialog,
   ExplanationView,
   LoadingScreen,
   SignInDialog,
   SetupScreen,
-  JinglerApp,
+  AddProjectDialog,
+  ToastRegion,
+  toastMachine,
+    JinglerApp,
   PullRequestInbox,
   IssueInbox,
+  BootFailureCard,
+  UnreachableBanner,
+  OfflineBanner,
+  RelayQuotaBanner,
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
+  AgentEditsMarkerContext,
+  PrEventActionsContext,
   closeSurfaceEverywhere,
   forgetEditorLayout,
+  jumpToTurn,
   openTab,
   SESSION_SURFACE_COMMAND_EVENT,
   updateEditorLayout,
 } from "@jingler/ui";
 import { appMachine } from "./app-machine.js";
+import { useConnectivity } from "./connectivity.js";
 import { authMachine } from "./auth-machine.js";
 import { ConversationPane } from "./conversation-pane.js";
 import {
@@ -69,10 +90,14 @@ import {
   useExplanationSessions,
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
-import { SessionSubagentTabs } from "./session-chat-tabs.js";
-import { selectSubagentTab } from "./subagent-tab-store.js";
+import { SessionSubagentTabs, SubagentLaneViewProvider } from "./session-chat-tabs.js";
+import { useAgentEditsMarkerRenderer } from "./file-agent-edits.js";
+import { sessionPrRows } from "@jingler/ui";
+import { requestSessionPr } from "./session-pr-request.js";
+import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
+import { useReviewDrafts } from "./review-drafts-source.js";
 import {
   pullRequestSessionTarget,
   usePullRequestInbox,
@@ -81,22 +106,27 @@ import { issueSessionAction, issueSessionOpener, issueSessionTarget, useIssueInb
 import { ReviewTrayDock, revealSessionChanges } from "./changes-review.js";
 import { setReviewFocused, useReviewFocused } from "./review-store.js";
 import { FileBrowserExplorer, FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
-import { TerminalDockView } from "./terminal-dock-view.js";
+import { useDesktopSessionTerminals } from "./session-terminals.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
+import { clearInterruptedChat, useInterruptedChats, useInterruptedChatsLoader } from "./interrupted-chats.js";
 import { setSessionDiff, useSessionDiffs, useSessionFileDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
   disposeChatActor,
   disposeConversationActor,
   getConversationActor,
+  onSessionBlocked,
   isChatUntouched,
   useAllChatActivities,
+  allowPendingGate,
 } from "./conversation-registry.js";
+import { notificationTarget } from "./notification-target.js";
 import { addDraftCodeReference, clearDraft, getDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
 import { clearViewedPaths } from "./viewed-store.js";
+import { clearDismissedFindings } from "./dismissed-findings-store.js";
 import {
   closeSessionFile,
   disposeFileBrowserActor,
@@ -104,10 +134,20 @@ import {
   requestCloseFileSurface,
 } from "./use-file-browser.js";
 import { onSessionUpdate, publishSessionUpdate } from "./session-updates.js";
-import { setVisibleSessionIds } from "./active-session.js";
+import { isSessionVisible, setVisibleSessionIds } from "./active-session.js";
+import { onFindingDismissToast } from "./finding-dismiss-toast.js";
+import { needsYouToast } from "./needs-you-toast.js";
 import { prNotification } from "./notifier.js";
 import { completedSessionIds } from "./pr-refresh.js";
-import { issuesToCloseOnMerge, prsToNotify } from "./pr-sweep.js";
+import {
+  issuesToCloseOnMerge,
+  prNotifyKey,
+  prNumbersOf,
+  prsToNotify,
+  stackLifecycle,
+  worstPrStatus,
+  type PrLayer,
+} from "./pr-sweep.js";
 import { routeReviewToAgent } from "./auto-route.js";
 import { reviewQueryKey } from "./review-routing.js";
 import {
@@ -117,6 +157,7 @@ import {
 import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useMcpSettings } from "./use-mcp-settings.js";
+import { useVoiceSettings } from "./use-voice-settings.js";
 import { McpImportPrompt } from "./mcp-import-prompt.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useAgentsSettings } from "./use-agents-settings.js";
@@ -124,6 +165,7 @@ import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useEnvironments } from "./use-environments.js";
 import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
+import { useImportSessions } from "./use-import-sessions.js";
 import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js";
 import { CheckoutHeader } from "./checkout-header.js";
 import { WorkspaceWorkflowBar } from "./workspace-workflow-bar.js";
@@ -201,25 +243,111 @@ function ExplanationPane({ sessionId }: { readonly sessionId: string }) {
   )
 }
 
+
+/** Set up window control state and event listeners for Windows/Linux. */
+/**
+ * Notification permission + the one action it makes available. Split out of
+ * `AuthedApp` (not because the logic is complex, but because one more inline
+ * `useQuery` there pushes that function over the cognitive-complexity lint
+ * budget — see #490).
+ */
+function useNotificationPermission() {
+  const query = useQuery({
+    queryKey: ["notification-permission"],
+    queryFn: () => rpc.notifyPermission(),
+  });
+  return {
+    permission: query.data,
+    onOpenSystemSettings: () => rpc.notifyOpenSystemSettings(),
+  };
+}
+
+function useWindowControls() {
+  const [maximized, setMaximized] = useState(false)
+
+  useEffect(() => {
+    const platform = window.jingler.platform
+    if (platform === undefined || platform === "darwin") return
+    void rpc.windowIsMaximized().then(setMaximized)
+    
+    // Listen for maximize/unmaximize events
+    const handleMaximized = () => setMaximized(true)
+    const handleUnmaximized = () => setMaximized(false)
+    
+    window.addEventListener('jingler:window-maximized', handleMaximized)
+    window.addEventListener('jingler:window-unmaximized', handleUnmaximized)
+    
+    return () => {
+      window.removeEventListener('jingler:window-maximized', handleMaximized)
+      window.removeEventListener('jingler:window-unmaximized', handleUnmaximized)
+    }
+  }, [])
+
+  if (window.jingler.platform === undefined || window.jingler.platform === "darwin") {
+    return undefined
+  }
+
+  return {
+    maximized,
+    onMinimize: () => void rpc.windowMinimize(),
+    onToggleMaximize: () => {
+      void rpc.windowToggleMaximize().then(() => {
+        void rpc.windowIsMaximized().then(setMaximized)
+      })
+    },
+    onClose: () => void rpc.windowClose()
+  }
+}
+
+function McpImportCard({
+  mcp,
+  ignoreDismissal
+}: {
+  readonly mcp: ReturnType<typeof useMcpSettings>;
+  readonly ignoreDismissal?: boolean;
+}) {
+  return (
+    <McpImportPrompt
+      ready={!mcp.loading && mcp.parseError === null}
+      servers={mcp.servers}
+      load={mcp.importCandidates}
+      apply={mcp.applyImport}
+      probe={async () => rpc.mcpStatus()}
+      startAuthorization={mcp.startAuthorization}
+      logTail={mcp.logTail}
+      isDismissed={rpc.mcpImportDismissed}
+      persistDismissed={rpc.mcpDismissImport}
+      ignoreDismissal={ignoreDismissal}
+    />
+  );
+}
+
 function AuthedApp({
   user,
   onSignOut,
   onSignIn,
+  banner,
 }: {
   user?: User;
   onSignOut?: () => void;
   onSignIn?: () => void;
+  /** Notice under the title bar, e.g. while the auth server is unreachable. */
+  banner?: ReactNode;
 }) {
+  const windowControls = useWindowControls()
+
   const [state, send] = useMachine(appMachine);
+  const [toastSnapshot, sendToast] = useMachine(toastMachine, { input: undefined });
   const reviewFocused = useReviewFocused();
   const update = useAutoUpdate();
   // The build-time version: Changesets keys the CHANGELOG on it, and unlike
   // Electron's runtime version it is right in unpackaged builds too.
-  const releaseNotes = useReleaseNotes(__APP_VERSION__);
+  const { announcement: releaseNotes, whatsNew } = useReleaseNotes(__APP_VERSION__);
   const github = useGitHubConnection();
   const pullRequestInbox = usePullRequestInbox(
     github.connection.connected || github.connection.cliAvailable === true,
   );
+  const reviewDrafts = useReviewDrafts(pullRequestInbox.selected);
   const issueInbox = useIssueInbox();
   const [relayError, setRelayError] = useState<string | null>(null);
   const relayStatuses = useRef(
@@ -241,6 +369,16 @@ function AuthedApp({
   const plugins = usePlugins();
   const pluginCatalog = usePluginCatalog();
   const liveActivity = useSessionActivities();
+  useInterruptedChatsLoader();
+  const interruptedChats = useInterruptedChats();
+  const interruptedSessions = useMemo(
+    () => new Set(interruptedChats.map((c) => c.sessionId)),
+    [interruptedChats],
+  );
+  // A session that went live again is no longer interrupted.
+  useEffect(() => {
+    for (const id of Object.keys(liveActivity)) clearInterruptedChat(id);
+  }, [liveActivity]);
   const debugEnabled = hasEnabledDebugPlugin(pluginCatalog);
   const [visibleDebugSessionIds, setVisibleDebugSessionIds] = useState<ReadonlySet<string>>(new Set());
   const debugSessionIds = sessions.map((session) => session.id);
@@ -285,26 +423,64 @@ function AuthedApp({
     projectId: string;
     pr?: PrSummary;
     issue?: IssueSummary;
+    draft?: string;
     githubCliAccountId?: string;
     githubSlug?: string;
     tabId?: string;
     nonce: number;
   } | null>(null);
+  // A click can be about a still-pending question; if so, scroll the chat
+  // straight to it rather than just opening the session — see
+  // `notificationTarget`. `selectSessionRequest` already switches project (via
+  // `SessionConversation`'s activeSessionId effect), so nothing extra is
+  // needed for that half.
+  const landOnNotification = useCallback((sessionId: string, turnId: string | null) => {
+    setSelectRequest((prev) => ({
+      sessionId,
+      nonce: (prev?.nonce ?? 0) + 1,
+    }));
+    const session = sessionsRef.current.find((s) => s.id === sessionId);
+    if (!session) return;
+    const pending = pendingQuestion(
+      getConversationActor(session).getSnapshot().context.messages,
+    );
+    const target = notificationTarget({ sessionId, turnId }, pending?.id ?? null);
+    if (target.focusQuestion && turnId) jumpToTurn(session.activeChatId, turnId);
+  }, []);
   useEffect(
     () =>
-      window.jingler.onNotificationActivated(({ sessionId }) =>
-        setSelectRequest((prev) => ({
-          sessionId,
-          nonce: (prev?.nonce ?? 0) + 1,
-        })),
+      window.jingler.onNotificationActivated(({ sessionId, turnId }) =>
+        landOnNotification(sessionId, turnId),
       ),
-    [],
+    [landOnNotification],
+  );
+  // #508: a run blocking in a session the operator isn't looking at raises a
+  // "Needs you" toast whose Jump lands exactly like a notification click.
+  useEffect(
+    () =>
+      onSessionBlocked((blocked) => {
+        const session = sessionsRef.current.find((s) => s.id === blocked.sessionId);
+        const turnId = session
+          ? (pendingQuestion(getConversationActor(session).getSnapshot().context.messages)?.id ?? null)
+          : null;
+        const toast = needsYouToast(blocked, isSessionVisible(blocked.sessionId), () =>
+          landOnNotification(blocked.sessionId, turnId),
+        );
+        if (toast) sendToast({ type: "PUSH", toast });
+      }),
+    [landOnNotification, sendToast],
+  );
+  useEffect(
+    () => onFindingDismissToast((toast) => sendToast({ type: "PUSH", toast })),
+    [sendToast],
   );
   // Keep the module-level cell the conversation registry reads in sync. It can't
   // use a hook: it outlives every component. See `active-session.ts`.
+  const [visibleIds, setVisibleIds] = useState<ReadonlySet<string>>(new Set());
   const onVisibleSessionsChange = useCallback(
     (ids: ReadonlySet<string>) => {
       setVisibleSessionIds(ids);
+      setVisibleIds(ids);
       setVisibleDebugSessionIds(ids);
     },
     [],
@@ -337,6 +513,7 @@ function AuthedApp({
   const chatActivities = useAllChatActivities();
   const planSessions = usePlanSessions();
   const explanationSessions = useExplanationSessions(sessions);
+  const renderAgentEditsMarker = useAgentEditsMarkerRenderer(sessions);
   const browserDock = usePreviewDock();
   const sessionsLoaded = state.matches("ready");
   useEffect(() => {
@@ -358,6 +535,10 @@ function AuthedApp({
   );
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
   const mcp = useMcpSettings();
+  const voice = useVoiceSettings();
+  const decideGateAllowFor = allowPendingGate;
+  const homeImportCard = <McpImportCard mcp={mcp} />;
+  const settingsImportCard = <McpImportCard mcp={mcp} ignoreDismissal />;
   const environmentController = useEnvironments();
   const providerCatalog = useProviderCatalog(environmentController.environments);
   const agentsSettings = useAgentsSettings();
@@ -392,7 +573,12 @@ function AuthedApp({
     }
   }, [environmentController.environments, providerCatalog.endpointCatalog, providerCatalog.remoteCatalogs])
   const projectController = useProjects();
+  const importSessionsProps = useImportSessions(
+    () => setImportSessionsDialogOpen(false),
+    (session) => send({ type: "SESSION_UPDATED", session }),
+  );
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
+  const [importSessionsDialogOpen, setImportSessionsDialogOpen] = useState(false);
 
   // Provider capabilities are versioned by the auth Durable Object. Refresh the
   // unified inventory after every GitHub auth refresh so managed provider choices
@@ -411,6 +597,7 @@ function AuthedApp({
     queryKey: ["web-search-settings"],
     queryFn: () => rpc.webSearchGet(),
   });
+  const notificationPermission = useNotificationPermission();
   const webSearchSet = useMutation({
     mutationFn: ({ provider, apiKey }: { provider: "exa" | "firecrawl"; apiKey: string }) =>
       rpc.webSearchSetCredential(provider, apiKey),
@@ -453,7 +640,7 @@ function AuthedApp({
   }, [persistedOffloadCompute, sendOffloadSettings]);
   const offloadCompute = offloadSettingsState.context.settings;
   // Absent means Auto for configs written before this preference existed.
-  const { starredRepos, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig } = appDisplayPreferences(configQuery);
+  const { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, planTemplate, adhdMode, fontScale, contextConfig } = appDisplayPreferences(configQuery);
   const usage = usageQuery.data ?? null;
 
   const contextTargets = sessions.flatMap((session) => {
@@ -534,6 +721,10 @@ function AuthedApp({
     rpc.configSetPlanAutoRun(value).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
+  const savePlanTemplate = (template: PlanTemplateConfig) =>
+    rpc.configSetPlanTemplate(template).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
   const saveAdhdMode = (value: boolean) =>
     rpc.configSetAdhdMode(value).then((saved) => {
       qc.setQueryData(["config"], saved);
@@ -575,6 +766,10 @@ function AuthedApp({
       qc.setQueryData(["config"], saved);
     });
   };
+  const saveHeaderViews = (views: ReadonlyArray<string>) =>
+    rpc.configSetHeaderViews(views).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
   // Toggle a repo's collapsed state (path-keyed; "__archived__" collapses the
   // Archived group), persist the whole list, and update the cache.
   const toggleCollapsed = (repoPath: string) => {
@@ -597,7 +792,8 @@ function AuthedApp({
     onProgress?: (phase: SessionCreationPhase) => void,
   ) => {
     const session = await rpc.sessionsCreate(input, onProgress);
-    void rememberLastRepo(input.repoPath);
+    // Auto (no repo chosen yet) has nothing to preselect next time.
+    if (input.repoPath !== undefined) void rememberLastRepo(input.repoPath);
     // A first message (typed text and/or attachments) means the operator wants
     // the agent working now, not a pre-filled draft. Flag the session for
     // first-turn auto-send BEFORE it becomes active, so the ConversationPane
@@ -638,10 +834,27 @@ function AuthedApp({
       send({ type: "SESSION_PR_LINKED", sessionId, prNumber }),
     [send],
   );
+  // Persist the PR lifecycle card (idempotent per kind+PR in main) and show it live.
+  const recordPrEvent = useCallback(
+    (sessionId: string, kind: "opened" | "merged", number: number) => {
+      void rpc
+        .sessionsRecordPrEvent(sessionId, kind, number)
+        .then((message) => {
+          const session = sessionsRef.current.find((s) => s.id === sessionId);
+          if (message && session)
+            getConversationActor(session).send({ type: "PR_EVENT_RECORDED", message });
+        })
+        .catch(() => {});
+    },
+    [],
+  );
   const onPublishCheckpoint = useCallback(
-    (sessionId: string, checkpoint: PublishCheckpoint) =>
-      send({ type: "SESSION_PUBLISH_UPDATED", sessionId, checkpoint }),
-    [send],
+    (sessionId: string, checkpoint: PublishCheckpoint) => {
+      send({ type: "SESSION_PUBLISH_UPDATED", sessionId, checkpoint });
+      if (checkpoint.step === "complete" && checkpoint.prNumber !== undefined)
+        recordPrEvent(sessionId, "opened", checkpoint.prNumber);
+    },
+    [send, recordPrEvent],
   );
   const selectIssue = useCallback((sessionId: string, issue: IssueIdentity) => {
     void rpc.sessionsSelectIssue(sessionId, issue).then(publishSessionUpdate);
@@ -705,6 +918,7 @@ function AuthedApp({
     // nothing else would ever collect it (and it's persisted).
     for (const chatId of chatIds) clearDraft(chatId);
     clearViewedPaths(sessionId);
+    clearDismissedFindings(sessionId);
     forgetEditorLayout(sessionId);
     send({ type: "SESSION_DELETED", sessionId });
   };
@@ -1157,10 +1371,18 @@ function AuthedApp({
       ),
     [canUseGitHubForSession, sessions],
   );
-  const prStates = useQueries({
-    queries: sweepTargets.map((s) => ({
-      queryKey: ["pr-state", s.id, s.prNumber] as const,
-      queryFn: () => rpc.githubPrState(s.id),
+  // One query per PR in each session's stack (bottom first), not just the head PR.
+  const sweepLayers = useMemo(
+    () =>
+      sweepTargets.flatMap((s) =>
+        prNumbersOf(s).map((number) => ({ session: s, number })),
+      ),
+    [sweepTargets],
+  );
+  const prStacks = useQueries({
+    queries: sweepLayers.map(({ session: s, number }) => ({
+      queryKey: ["pr-state", s.id, number] as const,
+      queryFn: () => rpc.githubPrState(s.id, number),
       enabled: connected,
       staleTime: PR_STATE_STALE_MS,
       // Poll so a PR merged/closed on GitHub badges its session live instead of
@@ -1169,25 +1391,100 @@ function AuthedApp({
       refetchIntervalInBackground: true,
       refetchOnWindowFocus: true,
     })),
-    combine: (results) =>
+    combine: (results) => {
+      const stacks: Record<string, PrLayer[]> = {};
+      sweepLayers.forEach(({ session: s, number }, i) => {
+        const status = results[i]?.data;
+        if (!status) return;
+        const layers = stacks[s.id] ?? [];
+        layers.push({ number, status });
+        stacks[s.id] = layers;
+      });
+      return stacks;
+    },
+  });
+  const subagentTabs = useAllSessionSubagentTabs();
+  const subagentCounts = useMemo(
+    () =>
       Object.fromEntries(
-        sweepTargets.flatMap((s, i) => {
-          const state = results[i]?.data;
-          return state ? [[s.id, state] as const] : [];
+        Object.entries(subagentTabs).map(([id, chats]) => [
+          id,
+          chats.reduce((total, chat) => total + chat.active.length, 0),
+        ]),
+      ),
+    [subagentTabs],
+  );
+  // Fleet nodes with a pending attention request (e.g. a child asked a question) — feeds the
+  // rail/sidebar "needs you" count alongside NEEDS_YOU_KINDS.
+  const subagentAttentionCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(subagentTabs).map(([id, chats]) => [
+          id,
+          chats.reduce((total, chat) => total + countNodesAwaitingAttention(chat.active), 0),
+        ]),
+      ),
+    [subagentTabs],
+  );
+  const subagentPrNodes = useMemo(
+    () =>
+      Object.fromEntries(
+        sessions.map((s) => {
+          const chat = subagentTabs[s.id]?.find(({ chatId }) => chatId === s.activeChatId);
+          return [s.id, [...(chat?.active ?? []), ...(chat?.completed ?? [])]] as const;
         }),
       ),
-  });
-  // The lifecycle half of the same poll, for the pure sweep functions below.
-  //
-  // Those two ask exactly one question — "has this PR resolved?" — and the CI
-  // rollup would be noise in their signature and in their tests. Derived here
-  // rather than fetched twice: one poll, two shapes.
+    [sessions, subagentTabs],
+  );
+  const sessionPrKeys = useMemo(
+    () =>
+      new Set(
+        sessions.flatMap((s) =>
+          visibleIds.has(s.id) && s.githubSlug
+            ? sessionPrRows(prNumbersOf(s), subagentPrNodes[s.id] ?? []).map((row) => `${s.githubSlug}#${row.number}`.toLowerCase())
+            : [],
+        ),
+      ),
+    [sessions, visibleIds, subagentPrNodes],
+  );
+  const subagentEntries = useMemo(
+    () =>
+      Object.fromEntries(
+        sessions.map((s) => {
+          const chat = subagentTabs[s.id]?.find(({ chatId }) => chatId === s.activeChatId);
+          const nodes = [...(chat?.active ?? []), ...(chat?.completed ?? [])];
+          return [s.id, nodes.map(({ id, agent, task }) => ({ id, agent, task }))] as const;
+        }),
+      ),
+    [sessions, subagentTabs],
+  );
+  // What the sidebar shows per session: the worst layer of its stack.
+  const prStates = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(prStacks).flatMap(([id, layers]) => {
+          const worst = worstPrStatus(layers);
+          return worst ? [[id, worst] as const] : [];
+        }),
+      ),
+    [prStacks],
+  );
+  // The lifecycle half of the same poll, for the close-on-merge sweep. A stack is
+  // only resolved once every layer has loaded and resolved, so a merged bottom
+  // layer never closes the issue while upper layers are still open.
   const prLifecycle = useMemo(
     () =>
       Object.fromEntries(
-        Object.entries(prStates).map(([id, pr]) => [id, pr.state] as const),
+        sweepTargets.flatMap((s) => {
+          const layers = prStacks[s.id] ?? [];
+          const lifecycle =
+            layers.length === prNumbersOf(s).length
+              ? stackLifecycle(layers)
+              : undefined;
+          return lifecycle ? [[s.id, lifecycle] as const] : [];
+        }),
       ),
-    [prStates],
+    [prStacks, sweepTargets],
   );
 
   // Auto adversarial review (opt-in). Polls `Review.run` on the same cadence as
@@ -1295,15 +1592,16 @@ function AuthedApp({
     // An empty first result is the "still loading" state, not a real baseline —
     // taking it would let the genuine first result through as an edge.
     const seeding =
-      !prBaselineRef.current && Object.keys(prLifecycle).length > 0;
-    for (const { session, state: prState } of prsToNotify(
-      prLifecycle,
+      !prBaselineRef.current && Object.keys(prStacks).length > 0;
+    for (const { session, number, state: prState, stackedUnder } of prsToNotify(
+      prStacks,
       sweepTargets,
       notifiedPrsRef.current,
     )) {
-      notifiedPrsRef.current.add(session.id);
+      notifiedPrsRef.current.add(prNotifyKey(session.id, number));
       if (seeding) continue;
-      const plan = prNotification(session.title, prState);
+      if (prState === "merged") recordPrEvent(session.id, "merged", number);
+      const plan = prNotification(session.title, prState, number, stackedUnder);
       void rpc
         .notifyShow({
           sessionId: session.id,
@@ -1318,7 +1616,7 @@ function AuthedApp({
         .catch(() => {});
     }
     if (seeding) prBaselineRef.current = true;
-  }, [prLifecycle, sweepTargets]);
+  }, [prStacks, sweepTargets, recordPrEvent]);
 
   useEffect(() => {
     if (!state.matches({ setup: "github" })) return;
@@ -1350,7 +1648,7 @@ function AuthedApp({
         sessions,
       )
     : null;
-  const openSelectedPullRequestTarget = (tabId?: string) => {
+  const openSelectedPullRequestTarget = (tabId?: string, draft?: string) => {
     if (!(selectedPullRequest && selectedPullRequestTarget)) return;
     const existingSession = selectedPullRequestTarget.session;
     if (existingSession) {
@@ -1363,19 +1661,9 @@ function AuthedApp({
     }
     const project = selectedPullRequestTarget.project;
     if (project) {
-      setNewSessionRequest((previous) => ({
-        projectId: project.id,
-        pr: pullRequestInbox.detail ? { ...selectedPullRequest,
-          headRefName: pullRequestInbox.detail.headRefName,
-          baseRefName: pullRequestInbox.detail.baseRefName,
-        } : selectedPullRequest,
-        ...(pullRequestInbox.cliAccountId ? {
-          githubCliAccountId: pullRequestInbox.cliAccountId,
-          githubSlug: selectedPullRequest.repository,
-        } : {}),
-        ...(tabId ? { tabId } : {}),
-        nonce: (previous?.nonce ?? 0) + 1,
-      }));
+      setNewSessionRequest((previous) =>
+        newPullRequestSessionRequest(previous, project.id, selectedPullRequest, pullRequestInbox, { tabId, draft }),
+      );
     }
   };
   const selectedIssue = issueInbox.selected;
@@ -1401,6 +1689,8 @@ function AuthedApp({
       )}
       <ObsidianSaveToast />
       {checkpointOwner && <WorkspaceCheckpointsView key={checkpointOwner.session.id} session={checkpointOwner.session} returnFocus={checkpointOwner.trigger} onSession={publishSessionUpdate} onClosed={() => setCheckpointOwner(null)} />}
+      <SubagentLaneViewProvider>
+      <AgentEditsMarkerContext.Provider value={renderAgentEditsMarker}>
       <JinglerApp
         onOpenCheckpoints={(id, trigger) => { const session = sessions.find((item) => item.id === id); if (session) setCheckpointOwner({ session, trigger }); }}
         tabContributions={pluginTabs}
@@ -1411,16 +1701,20 @@ function AuthedApp({
         selectSessionRequest={selectRequest}
         newSessionRequest={newSessionRequest}
         onVisibleSessionsChange={onVisibleSessionsChange}
+        platform={window.jingler.platform}
+        windowControls={windowControls}
         sessions={sessions}
         user={user}
         update={update}
         releaseNotes={releaseNotes}
+        whatsNew={whatsNew}
         pullRequestsView={
-          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
+          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession, sessionPrKeys, reviewDrafts, (summary) => openSelectedPullRequestTarget(undefined, summary))
         }
         issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
         onSignIn={onSignIn}
+        banner={banner}
         repos={repos}
         projects={projectController.projects}
         projectsLoading={projectController.loading}
@@ -1429,6 +1723,11 @@ function AuthedApp({
         onListProjectDirectories={projectController.listDirectories}
         onListGitHubRepositories={projectController.listGitHubRepositories}
         onRegisterProject={projectController.register}
+        onImportSessions={() => setImportSessionsDialogOpen(true)}
+        onRemoveProject={async (projectId) => {
+          const project = projectController.projects.find((candidate) => candidate.id === projectId);
+          if (project) await projectController.remove(project);
+        }}
         onCreateProjectDirectory={projectController.createDirectory}
         onCloneProject={projectController.clone}
         onCloneProjectFromGitHub={projectController.cloneFromGitHub}
@@ -1438,6 +1737,8 @@ function AuthedApp({
         onSaveProjectWorkflow={async (input) => { await projectController.setWorkflow(input) }}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
+        headerViews={headerViews}
+        onHeaderViewsChange={saveHeaderViews}
         collapsedRepos={collapsedRepos}
         onToggleCollapsed={toggleCollapsed}
         defaultRepoPath={lastRepoPath}
@@ -1448,8 +1749,18 @@ function AuthedApp({
         onGithubRefresh={github.refresh}
         onGithubDisconnect={github.disconnect}
         liveActivity={liveActivity}
+        allowFor={decideGateAllowFor}
+        importCard={homeImportCard}
+        interruptedSessions={interruptedSessions}
         chatActivities={chatActivities}
         prStates={prStates}
+        subagentCounts={subagentCounts}
+        subagentAttentionCounts={subagentAttentionCounts}
+        subagentEntries={subagentEntries}
+        onOpenSubagent={(sessionId, nodeId) => {
+          const s = sessions.find(({ id }) => id === sessionId);
+          if (s) selectSubagentTab(sessionId, s.activeChatId, nodeId);
+        }}
         liveDiff={liveDiff}
         fileDiffs={fileDiffs}
         usage={usage}
@@ -1465,9 +1776,12 @@ function AuthedApp({
         obsidianVaultConfigured={obsidianVaultConfigured}
         notificationsConfig={notificationsConfig}
         onSaveNotificationsConfig={saveNotificationsConfig}
+        notificationPermission={notificationPermission.permission}
+        onOpenNotificationSystemSettings={notificationPermission.onOpenSystemSettings}
         offloadCompute={offloadCompute}
         onSaveOffloadCompute={saveOffloadCompute}
         offloadStatus={offloadSettingsStatus(offloadSettingsState, offloadCompute.enabled)}
+        onRetryOffload={() => sendOffloadSettings({ type: "RETRY" })}
         webSearch={{
           status: webSearchQuery.data ?? null,
           loading: webSearchQuery.isLoading,
@@ -1491,6 +1805,8 @@ function AuthedApp({
         onSaveDefaultMode={saveDefaultMode}
         planAutoRun={planAutoRun}
         onSavePlanAutoRun={savePlanAutoRun}
+        planTemplate={planTemplate}
+        onSavePlanTemplate={savePlanTemplate}
         adhdMode={adhdMode}
         onSaveAdhdMode={saveAdhdMode}
         fontScale={fontScale}
@@ -1501,6 +1817,7 @@ function AuthedApp({
           environments: environmentController.environments,
           loading: environmentController.loading,
           error: environmentController.error,
+          workspaces: sessions.filter((session) => !session.archived),
           onOpen: () => {
             environmentController.send({ type: "RESET" });
             setEnvironmentDialogOpen(true);
@@ -1553,6 +1870,8 @@ function AuthedApp({
           onConnectClaude: providerCatalog.connectClaude,
           onStartCodex: providerCatalog.startCodex,
           onSetApiKey: providerCatalog.setApiKey,
+          onCancelLogin: providerCatalog.cancelLogin,
+          onSaveApiKey: providerCatalog.saveApiKey,
         }}
         agents={{
           resources: agentsSettings.snapshot.context.resources,
@@ -1568,6 +1887,15 @@ function AuthedApp({
             agentsSettings.snapshot.matches("importing") ||
             agentsSettings.snapshot.matches("mutating"),
           reviewing: agentsSettings.snapshot.matches("reviewing"),
+          query: agentsSettings.snapshot.context.query,
+          kind: agentsSettings.snapshot.context.kind,
+          source: agentsSettings.snapshot.context.source,
+          onQueryChange: (query) =>
+            agentsSettings.send({ type: "SET_QUERY", query }),
+          onKindChange: (kind) =>
+            agentsSettings.send({ type: "SET_KIND", kind }),
+          onSourceChange: (source) =>
+            agentsSettings.send({ type: "SET_SOURCE", source }),
           error: agentsSettings.snapshot.context.error,
           onDetect: () => agentsSettings.send({ type: "DETECT" }),
           onSetDelegationEnabled: saveSubagentDelegationEnabled,
@@ -1597,7 +1925,8 @@ function AuthedApp({
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
         contextSessions={contextSessions}
-        mcp={mcp}
+        mcp={{ ...mcp, importEntry: settingsImportCard }}
+        voice={voice}
         environments={environmentController.environments}
         loadEnvironmentDiscovery={rpc.environmentsDiscovery}
         loadBranches={async (repoPath, environmentId) => {
@@ -1689,6 +2018,12 @@ function AuthedApp({
           {/* The registry keeps each actor alive, but React state must remount per
               chat or useSelector can display the previous actor until the new
               transcript load emits its first transition. */}
+          <PrEventActionsContext.Provider
+            value={{
+              openPullRequest: ctx.onOpenPullRequest,
+              archiveWorkspace: () => void archiveSession(session.id),
+            }}
+          >
           <ConversationPane
             key={`${session.id}:${session.activeChatId}`}
             session={session}
@@ -1703,16 +2038,19 @@ function AuthedApp({
             onDelete={deleteSession}
             onInitialPromptConsumed={consumeInitialPrompt}
             onOpenFile={(_sessionId, path) => ctx.onOpenFile(path)}
-            onSelectFiles={ctx.onSelectFiles}
             onSelectChanges={ctx.onSelectChanges}
+            onOpenPullRequest={ctx.onOpenPullRequest}
+            onSelectBrowser={ctx.onSelectBrowser}
             onOpenProviderSettings={ctx.onOpenProviderSettings}
             onAddMcp={mcp.add}
             mcpServers={mcp.servers}
             onSetMcpApiKey={mcp.setApiKey}
             onSetMcpAuth={mcp.setAuth}
             onAuthorizeMcp={mcp.startAuthorization}
+            onPushToast={(toast) => sendToast({ type: "PUSH", toast })}
             paneFocused={ctx.paneFocused ?? true}
           />
+          </PrEventActionsContext.Provider>
           </div>
         )}
         renderExplorer={(session, onOpenPath) => (
@@ -1756,10 +2094,11 @@ function AuthedApp({
             onOpenPath={ctx.onOpenPath}
           />
         )}
+        subagentPrNodes={subagentPrNodes}
+        onOpenSessionPr={requestSessionPr}
         renderSubagentTabs={(session: Session, ctx) => (
           <SessionSubagentTabs
             session={session}
-            filesActive={ctx.activeTabId === "files"}
             onSelectConversation={ctx.onSelectConversation}
           />
         )}
@@ -1769,6 +2108,7 @@ function AuthedApp({
           return (
             <PullRequestPane
               session={session}
+              project={projectController.projects.find((project) => project.id === session.projectId)}
               connected={sessionConnected}
               autoDetect={autoDetect}
               viewerLogin={github.connection.user?.login}
@@ -1788,6 +2128,7 @@ function AuthedApp({
               onPrLinked={onPrLinked}
               onPublishCheckpoint={onPublishCheckpoint}
               onOpenFiles={ctx.onSelectReview}
+              onSession={publishSessionUpdate}
             />
           );
         }}
@@ -1815,11 +2156,8 @@ function AuthedApp({
             />
           );
         }}
-        renderTerminalDock={(session, visible) => (
-          <TerminalDockView session={session} visible={visible} embedded />
-        )}
+        useSessionTerminals={useDesktopSessionTerminals}
         onFocusChat={(sessionId, chatId) => {
-          selectSubagentTab(sessionId, chatId, "main");
           const session = sessions.find((candidate) => candidate.id === sessionId);
           if (!session || session.activeChatId === chatId) return;
           queueSessionChatMutation(sessionId, () => rpc.sessionsSelectChat(sessionId, chatId));
@@ -1837,6 +2175,8 @@ function AuthedApp({
         )}
         version={window.jingler.appVersion}
       />
+      </AgentEditsMarkerContext.Provider>
+      </SubagentLaneViewProvider>
       {sessionMutationError !== null && (
         <div
           role="alert"
@@ -1853,20 +2193,24 @@ function AuthedApp({
           </button>
         </div>
       )}
-      <McpImportPrompt
-        ready={!mcp.loading && mcp.parseError === null}
-        servers={mcp.servers}
-        load={mcp.importCandidates}
-        apply={mcp.applyImport}
-      />
       <ArchiveConfirmation state={archiveState} send={sendArchive} />
+      <Dialog open={importSessionsDialogOpen} onOpenChange={setImportSessionsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import sessions</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <ImportSessionsList {...importSessionsProps} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
         title="Delete session?"
         description={deleteSessionDescription(pendingDelete)}
         confirmLabel="Delete"
-        tone="danger"
+        destructive
         onConfirm={async () => {
           if (!pendingDelete) return;
           setSessionMutationError(null);
@@ -1881,6 +2225,12 @@ function AuthedApp({
             throw error;
           }
         }}
+      />
+      <ToastRegion
+        toasts={toastSnapshot.context.toasts}
+        onDismiss={(key) => sendToast({ type: "DISMISS", key })}
+        onPause={() => sendToast({ type: "PAUSE" })}
+        onResume={() => sendToast({ type: "RESUME" })}
       />
     </>
   );
@@ -1966,6 +2316,7 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
   const defaultMode = configQuery.data?.defaultMode ?? "auto";
   // Absent means on — plan mode's commands are read-only.
   const planAutoRun = configQuery.data?.planAutoRun ?? true;
+  const planTemplate = configQuery.data?.planTemplate ?? null;
   // Absent means off — ADHD mode shapes completion summaries, so it remains an
   // opt-in preference rather than a default the operator has to undo.
   const adhdMode = configQuery.data?.adhdMode ?? false;
@@ -1976,8 +2327,9 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
   const contextConfig = configQuery.data?.context ?? null;
   const starredRepos = configQuery.data?.starredRepos ?? [];
   const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
+  const headerViews = normalizeHeaderViews(configQuery.data?.headerViews);
   const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
-  return { starredRepos, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig };
+  return { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, planTemplate, adhdMode, fontScale, contextConfig };
 }
 
 function renderIssueInbox(
@@ -1990,6 +2342,7 @@ function renderIssueInbox(
     warnings={issueInbox.warnings}
     onActivate={issueInbox.activate}
     onRefresh={issueInbox.refresh}
+    onRetry={issueInbox.refresh}
     refreshing={issueInbox.refreshing}
     selected={issueInbox.selected ? { repository: issueInbox.selected.repository, number: issueInbox.selected.number } : null}
     detail={issueInbox.detail}
@@ -1997,6 +2350,7 @@ function renderIssueInbox(
     onOpenOnGithub={(url) => void window.jingler.openExternal(url)}
     onComment={issueInbox.comment}
     onCloseIssue={issueInbox.close}
+    onReopenIssue={issueInbox.reopen}
     closeError={issueInbox.closeError}
     sessionAction={sessionAction}
     loading={issueInbox.loading}
@@ -2005,12 +2359,36 @@ function renderIssueInbox(
     error={issueInbox.error} />;
 }
 
+function newPullRequestSessionRequest(
+  previous: { nonce: number } | null,
+  projectId: string,
+  selected: NonNullable<ReturnType<typeof usePullRequestInbox>["selected"]>,
+  inbox: ReturnType<typeof usePullRequestInbox>,
+  extra: { tabId?: string; draft?: string },
+) {
+  return {
+    projectId,
+    pr: inbox.detail
+      ? { ...selected, headRefName: inbox.detail.headRefName, baseRefName: inbox.detail.baseRefName }
+      : selected,
+    ...(inbox.cliAccountId
+      ? { githubCliAccountId: inbox.cliAccountId, githubSlug: selected.repository }
+      : {}),
+    ...(extra.draft ? { draft: extra.draft } : {}),
+    ...(extra.tabId ? { tabId: extra.tabId } : {}),
+    nonce: (previous?.nonce ?? 0) + 1,
+  };
+}
+
 function renderPullRequestInbox(
   pullRequestInbox: ReturnType<typeof usePullRequestInbox>,
   github: ReturnType<typeof useGitHubConnection>,
   selectedPullRequestTarget: ReturnType<typeof pullRequestSessionTarget> | null,
   openSelectedPullRequestFiles: () => void,
-  openSelectedPullRequestSession: () => void
+  openSelectedPullRequestSession: () => void,
+  sessionPrKeys: ReadonlySet<string>,
+  reviewDrafts: ReturnType<typeof useReviewDrafts>,
+  promoteReview: (summary: string) => void
 ) {
   return <PullRequestInbox
     prs={pullRequestInbox.prs}
@@ -2025,6 +2403,11 @@ function renderPullRequestInbox(
       discovering: pullRequestInbox.discovering,
       error: pullRequestInbox.discoveryError,
     }}
+    sessionPrKeys={sessionPrKeys}
+    reviewDrafts={reviewDrafts.drafts}
+    reviewRun={reviewDrafts.run}
+    onPromoteReview={selectedPullRequestTarget?.project ? promoteReview : undefined}
+    onSubmitInlineReview={pullRequestInbox.submitInlineReview}
     onActivate={pullRequestInbox.discover}
     warnings={pullRequestInbox.warnings}
     selected={pullRequestInbox.selected ? {
@@ -2045,7 +2428,7 @@ function renderPullRequestInbox(
     merging={pullRequestInbox.merging}
     mergeError={pullRequestInbox.mergeError}
     sessionAction={selectedPullRequestTarget ? {
-      label: selectedPullRequestTarget.session ? "Open session" : "Create session",
+      label: selectedPullRequestTarget.session ? "Open session" : "Start session from this PR",
       onSelect: openSelectedPullRequestSession,
       ...(selectedPullRequestTarget.session || selectedPullRequestTarget.project
         ? {}
@@ -2054,18 +2437,16 @@ function renderPullRequestInbox(
     loading={pullRequestInbox.loading}
     detailLoading={pullRequestInbox.detailLoading}
     detailError={pullRequestInbox.detailError}
-    error={pullRequestInbox.error} />;
+    error={pullRequestInbox.error}
+    onRetry={pullRequestInbox.refreshInbox} />;
 }
 
 /** Map the auth machine's signed-out substate to the LoginScreen's visual state. */
 function loginStateOf(
   matches: (value: object) => boolean,
-): "default" | "loading" | "sent" | "error" {
-  if (
-    matches({ signedOut: "sending" }) ||
-    matches({ signedOut: "oauthPending" })
-  )
-    return "loading";
+): "default" | "loading" | "waiting" | "sent" | "error" {
+  if (matches({ signedOut: "sending" })) return "loading";
+  if (matches({ signedOut: "oauthPending" })) return "waiting";
   if (matches({ signedOut: "magicLinkSent" })) return "sent";
   if (matches({ signedOut: "error" })) return "error";
   return "default";
@@ -2077,7 +2458,18 @@ function loginStateOf(
  * The `jingler://` deep-link callback arrives from the main process via the
  * preload bridge and re-validates the freshly-stored token.
  */
+/** Placeholder reset date until the relay reports the real one: the 1st of next month. */
+const nextMonthStart = () => {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth() + 1, 1).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
+
 export function App() {
+  // Test-only hook: throw immediately if the e2e flag is set, before any real work.
+  if (window.jingler.isE2E && localStorage.getItem('__TEST_CRASH') === 'true') {
+    throw new Error('Test crash triggered by __TEST_CRASH global')
+  }
+
   const [authState, authSend] = useMachine(authMachine);
 
   /**
@@ -2100,6 +2492,10 @@ export function App() {
   useEffect(() => {
     const unsubscribe = window.jingler.onAuthComplete((payload) => {
       if (payload.ok) authSend({ type: "CALLBACK" });
+      // A token-less callback: "denied" is the user declining the provider's
+      // consent screen, everything else (a storage failure, no params at all)
+      // reads as a generic failure.
+      else authSend({ type: "CALLBACK_ERROR", kind: payload.error === "denied" ? "denied" : "failed" });
     });
     return unsubscribe;
   }, [authSend]);
@@ -2137,6 +2533,7 @@ function AppContent({
   authState: ReturnType<typeof useMachine<typeof authMachine>>[0];
   authSend: ReturnType<typeof useMachine<typeof authMachine>>[1];
 }) {
+  const connectivity = useConnectivity();
   // Both splash mounts consult the same floor, and the floor is measured from
   // app start rather than from mount — so the auth check and the boot machine
   // share one hold between them instead of queueing two.
@@ -2162,6 +2559,13 @@ function AppContent({
         user={signedIn ? authState.context.session?.user : undefined}
         onSignOut={signedIn ? () => authSend({ type: "SIGN_OUT" }) : undefined}
         onSignIn={signedOut ? () => setSignInOpen(true) : undefined}
+        banner={
+          <>
+            {connectivity.offline && <OfflineBanner />}
+            {authState.matches("unreachable") && <UnreachableBanner onRetry={() => authSend({ type: "RETRY" })} />}
+            {connectivity.relayQuotaReached && <RelayQuotaBanner resetsOn={nextMonthStart()} />}
+          </>
+        }
       />
       <SignInDialog
         open={signInOpen && signedOut}
@@ -2177,10 +2581,19 @@ function AppContent({
         onSendMagicLink={(email, name) =>
           authSend({ type: "MAGIC_LINK", email, name })
         }
+        onCancel={() => authSend({ type: "CANCEL" })}
+        onRetry={() => authSend({ type: "RETRY" })}
+        signInUrl={authState.context.signInUrl ?? undefined}
         onReset={() => authSend({ type: "RESET" })}
       />
     </>
   );
+}
+
+/** Latest runtime diagnostics export; the raw boot error when no run has been recorded yet. */
+async function exportBootDiagnostics(error: string | null): Promise<string> {
+  const latest = await rpc.runtimeDiagnosticsLatest();
+  return latest ? rpc.runtimeDiagnosticsExport(latest.runId) : (error ?? "");
 }
 
 function renderAuthedAppGate(
@@ -2196,11 +2609,11 @@ function renderAuthedAppGate(
   }
   if (state.matches("failure")) {
     return (
-      <div className="flex h-screen items-center justify-center bg-canvas p-8">
-        <div className="max-w-md rounded-lg border border-red/50 bg-sunken px-4 py-3 font-mono text-[13px] text-red">
-          Failed to load: {state.context.error}
-        </div>
-      </div>
+      <BootFailureCard
+        error={state.context.error ?? "Unknown error"}
+        onRetry={() => send({ type: "RETRY" })}
+        getDiagnostics={() => exportBootDiagnostics(state.context.error)}
+      />
     );
   }
   return state.matches("setup")
@@ -2219,17 +2632,16 @@ function renderAppSetup(
     ? "github"
     : state.matches({ setup: "provider" })
       ? "provider"
-      : state.matches({ setup: "resources" })
-        ? "resources"
+      : state.matches({ setup: "importSessions" })
+        ? "importSessions"
         : "workspace";
   const providerBusy =
     state.matches({ setup: { provider: "refreshing" } }) ||
     state.matches({ setup: { provider: "authenticating" } }) ||
     state.matches({ setup: { provider: "completing" } });
-  const resourcesBusy =
-    state.matches({ setup: { resources: "detecting" } }) ||
-    state.matches({ setup: { resources: "importing" } });
   return (
+    <SetupWithCloneDialog onCloned={() => send({ type: "CONTINUE" })}>
+      {(openClone) => (
     <SetupScreen
       step={setupStep}
       github={github.connection}
@@ -2246,21 +2658,33 @@ function renderAppSetup(
       }}
       providerLoginEvent={state.context.providerLoginEvent}
       providerPendingAuthKind={state.context.providerPendingAuthKind}
-      resourceDetection={state.context.resourceDetection}
       error={state.context.error}
+      providerFailure={
+        state.matches({ setup: { provider: "loadFailed" } })
+          ? "loadFailed"
+          : state.matches({ setup: { provider: "completionFailed" } })
+            ? "completionFailed"
+            : null
+      }
       repos={repos}
       reposDir={reposDir}
       busy={
         state.matches({ setup: { workspace: "choosing" } }) ||
         github.busy ||
-        providerBusy ||
-        resourcesBusy
+        state.matches({ setup: { workspace: "registering" } }) ||
+        providerBusy
       }
+      selectedRepoPaths={state.context.selectedRepoPaths}
       onChooseDir={() => send({ type: "CHOOSE" })}
       onContinue={() => send({ type: "CONTINUE" })}
+      onToggleRepo={(path) => send({ type: "TOGGLE_REPO", path })}
+      onToggleAllRepos={() => send({ type: "TOGGLE_ALL_REPOS" })}
+      onAddProjects={() => send({ type: "ADD_PROJECTS" })}
+      onCloneRepository={openClone}
       onConnectGithub={
         github.connection.connected ? github.manage : github.connect
       }
+      onRetryGithub={github.retry}
       onSkipGithub={() => {
         github.cancel();
         send({ type: "SKIP_GITHUB" });
@@ -2303,13 +2727,44 @@ function renderAppSetup(
           send({ type: "RETRY_PROVIDER" });
         }
       }}
-      onImportResources={(candidates) =>
-        send({ type: "IMPORT_RESOURCES", candidates })
-      }
-      onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
-      onCancelResourceImport={() => send({ type: "CANCEL_RESOURCE_IMPORT" })}
-      onRetryResources={() => send({ type: "RETRY_RESOURCES" })}
+      onSkipImportSessions={() => send({ type: "SKIP_IMPORT_SESSIONS" })}
+      onContinueImportSessions={() => send({ type: "CONTINUE_IMPORT_SESSIONS" })}
     />
+      )}
+    </SetupWithCloneDialog>
+  );
+}
+
+/** Step 1's "Clone a repository" reuses the Add project dialog; a clone registers the project and moves on. */
+function SetupWithCloneDialog({
+  onCloned,
+  children,
+}: {
+  onCloned: () => void;
+  children: (openClone: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const projects = useProjects();
+  return (
+    <>
+      {children(() => setOpen(true))}
+      <AddProjectDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        browse={projects.browse}
+        browseCloneDestination={projects.browseCloneDestination}
+        listDirectories={projects.listDirectories}
+        listGitHubRepositories={projects.listGitHubRepositories}
+        register={projects.register}
+        createDirectory={projects.createDirectory}
+        clone={projects.clone}
+        cloneFromGitHub={projects.cloneFromGitHub}
+        onAdded={() => {
+          setOpen(false);
+          onCloned();
+        }}
+      />
+    </>
   );
 }
 
@@ -2351,14 +2806,29 @@ function shouldAutoDetectPr(connected: boolean, config: GithubConfig | null): bo
   return connected && (config?.autoDetectPr ?? true);
 }
 
-function ArchiveConfirmation({ state, send }: { state: import("xstate").SnapshotFrom<typeof sessionArchiveMachine>; send: import("xstate").ActorRefFrom<typeof sessionArchiveMachine>["send"] }) {
+type ArchiveSnapshot = import("xstate").SnapshotFrom<typeof sessionArchiveMachine>;
+
+const METADATA_ONLY_WARNING =
+  "Interactive terminal jobs cannot be proven stopped. This only hides the workspace in the archive: files and running jobs are preserved, and cleanup will not run. Destructive deletion remains blocked.";
+
+/** The dialog copy for the current archive step: terminal-history consent, first ask, or failure. */
+function archiveDialogCopy(state: ArchiveSnapshot) {
+  const metadataOnly = Boolean(state.context.session?.checkpointPtyHistory);
+  const failed = state.matches("failed") || state.matches("recovering") || (state.matches("loading") && state.context.retrying);
+  if (metadataOnly) {
+    return { destructive: false, title: failed ? "Archive failed" : "Archive without cleanup?", description: state.context.error ?? METADATA_ONLY_WARNING, confirmLabel: failed ? "Retry" : "Archive without cleanup" };
+  }
+  return { destructive: true, title: failed ? "Archive failed" : "Archive this workspace?", description: state.context.error ?? "Terminal history is saved", confirmLabel: failed ? "Retry" : "Archive" };
+}
+
+function ArchiveConfirmation({ state, send }: { state: ArchiveSnapshot; send: import("xstate").ActorRefFrom<typeof sessionArchiveMachine>["send"] }) {
+  // Closed only while idle or the first load; a failure keeps it open with the error until Cancel or a successful Retry.
+  const open = !state.matches("idle") && !(state.matches("loading") && !state.context.retrying);
   return <ConfirmDialog
     closeOnConfirm={false}
-    open={state.matches("confirming") || (Boolean(state.context.session?.checkpointPtyHistory) && state.matches("archiving")) || state.matches("failed")}
+    open={open}
     onOpenChange={open => { if (!open) send({ type: "CANCEL" }); }}
-    title={state.matches("failed") ? "Archive failed" : "Archive without cleanup?"}
-    description={state.context.error ?? "Interactive terminal jobs cannot be proven stopped. This only hides the workspace in the archive: files and running jobs are preserved, and cleanup will not run. Destructive deletion remains blocked."}
-    confirmLabel={state.matches("failed") ? "Retry" : "Archive without cleanup"}
+    {...archiveDialogCopy(state)}
     onConfirm={() => { send({ type: "CONFIRM" }); }}
   />
 }

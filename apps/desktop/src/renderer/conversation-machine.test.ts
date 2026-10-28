@@ -8,6 +8,7 @@ import type {
 } from "@jingler/core"
 import {
   assistantMessage,
+  pendingQuestion,
   piEndpointId,
   ProviderConnectionId,
   ProviderId,
@@ -15,6 +16,7 @@ import {
   STOPPED_NOTE,
   userMessage
 } from "@jingler/core"
+import { queryClient } from "./query-client.js"
 import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -1080,6 +1082,19 @@ describe("conversationMachine — queue while busy", () => {
     actor.send({ type: "UNQUEUE", id: queuedId(actor, 0) })
     expect(accepted).toHaveBeenCalledOnce()
     expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+
+  it("invalidates the Changes diff queries when a subagent finishes a file edit", async () => {
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({ _tag: "ToolEnd", id: "sub-t1", agentId: "sub-1", status: "success", meta: null, diff: { added: 1, removed: 0 }, preview: null })
+    await waitFor(actor, () => invalidate.mock.calls.length > 0)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["local", "diff", session.id] })
+    invalidate.mockRestore()
     actor.stop()
   })
 
@@ -2244,7 +2259,7 @@ describe("conversationMachine — persisted status", () => {
 })
 
 describe("conversationMachine — Plannotator projection", () => {
-  it("stores Plannotator state outside the transcript and enters auto for execution", async () => {
+  it("stores Plannotator state outside the transcript and follows the server's build switch", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
     actor.send({ type: "SET_MODE", mode: "plan" })
@@ -2278,8 +2293,11 @@ describe("conversationMachine — Plannotator projection", () => {
       sections: []
     })
     expect(actor.getSnapshot().context.messages).toHaveLength(messageCount)
-    await waitFor(actor, (snapshot) => snapshot.context.mode === "auto")
-    expect(actor.getSnapshot().context.executionMode).toBe("auto")
+    // The server (not the renderer) switches to build on approval; the approval level is untouched.
+    emit({ _tag: "WorkModeChanged", workMode: "build" })
+    const { mode, executionMode } = actor.getSnapshot().context
+    expect(mode).toBe(executionMode)
+    expect(mode).not.toBe("plan")
     actor.stop()
   })
 
@@ -2460,6 +2478,26 @@ describe("conversationMachine — stop", () => {
     actor.stop()
   })
 
+  it("dismisses a pending question on stop and lets the user send again", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({
+      _tag: "QuestionRequested",
+      request: { id: "q1", questions: [{ question: "Which?", header: "Pick", multiSelect: false, options: [] }] }
+    })
+    expect(pendingQuestion(actor.getSnapshot().context.messages)).not.toBeNull()
+
+    actor.send({ type: "STOP" })
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(pendingQuestion(actor.getSnapshot().context.messages)).toBeNull()
+
+    actor.send({ type: "SEND", text: "again" })
+    await waitFor(actor, (s) => s.matches("running"))
+    actor.stop()
+  })
+
   it("asks the main process to stop the agent, and parks the queue", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
@@ -2508,6 +2546,53 @@ describe("conversationMachine — stop", () => {
     releaseStop()
     await waitFor(actor, (s) => s.matches("running"))
     expect(actor.getSnapshot().context.pendingText).toBe("next")
+    actor.stop()
+  })
+
+  it("settles running sub-agents even when the stop RPC fails", async () => {
+    h.stopFails = true
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({
+      _tag: "SubagentFleetChanged",
+      event: {
+        _tag: "Upsert", version: 2, eventId: "up-1", occurredAt: 15,
+        node: {
+          id: "pi-parent-1/a1", runId: "a1", subagentId: "a1", parentRuntimeSessionId: "pi-parent-1",
+          parentId: null, registryRevision: 15, childSequence: 1, startedAt: 0, updatedAt: 15,
+          status: "running"
+        } as SubagentFleetNode
+      }
+    })
+    actor.send({ type: "STOP" })
+    await waitFor(actor, (s) => s.matches(idle))
+    const last = actor.getSnapshot().context.subagentFleetEvents.at(-1)
+    expect(last?._tag === "Upsert" && last.node.status).toBe("stopped")
+    actor.stop()
+  })
+
+  it("settles running sub-agents when the turn ends on its own", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({
+      _tag: "SubagentFleetChanged",
+      event: {
+        _tag: "Upsert", version: 2, eventId: "up-1", occurredAt: 15,
+        node: {
+          id: "pi-parent-1/a1", runId: "a1", subagentId: "a1", parentRuntimeSessionId: "pi-parent-1",
+          parentId: null, registryRevision: 15, childSequence: 1, startedAt: 0, updatedAt: 15,
+          status: "running"
+        } as SubagentFleetNode
+      }
+    })
+    emit({ _tag: "Done" } as StreamEvent)
+    await waitFor(actor, (s) => s.matches(idle))
+    const last = actor.getSnapshot().context.subagentFleetEvents.at(-1)
+    expect(last?._tag === "Upsert" && last.node.status).toBe("stopped")
     actor.stop()
   })
 
