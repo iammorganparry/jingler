@@ -44,7 +44,7 @@ test("a subagent swaps into the chat lane in place; sibling switch and back keep
   // Same lane: main transcript is replaced, no editor group appears.
   await expect(window.getByTestId("conversation-scroll")).toHaveCount(0)
   await expect(groups).toHaveCount(groupCount)
-  await expect(window.getByTestId("subagent-breadcrumb")).toContainText("survey the app")
+  await expect(window.getByTestId("subagent-breadcrumb")).toContainText("Explore")
 
   // ▾ switches to the sibling without going back to main.
   await window.getByTestId("subagent-crumb").click()
@@ -110,15 +110,14 @@ test("Follow in the subagent view opens a file the viewed child edited", async (
   await composer.fill("[[legacy-agent]] inspect compatibility")
   await composer.press("Enter")
   await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+  // Follow is toggled from the composer; the child view's toolbar hides it (one toolbar, one switcher).
+  const follow = window.getByRole("button", { name: "Follow agent" }).first()
+  await follow.click()
+  await expect(follow).toHaveAttribute("aria-pressed", "true")
   await window.getByTestId("subagent-chip").first().click()
   await window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Legacy Scout/ }).click()
   await expect(window.getByTestId("fleet-agent-transcript")).toBeVisible()
-
-  // The breadcrumb header carries the same Follow toggle as the composer.
-  const follow = window.getByTestId("chat-lane-header").getByTestId("follow-agent-toggle")
-  await expect(follow).toHaveAttribute("aria-pressed", "false")
-  await follow.click()
-  await expect(follow).toHaveAttribute("aria-pressed", "true")
+  await expect(window.getByTestId("chat-lane-header").getByTestId("follow-agent-toggle")).toHaveCount(0)
   await expect(window.getByTestId("editor-tab-file-src/delegated.ts").getByRole("tab")).toBeVisible({
     timeout: 15_000
   })
@@ -138,13 +137,23 @@ test("the subagent view shows the meta strip, Details, the quoted task and a rea
 
   // Strip fields from the fleet node; null fields (phase, cost, artifacts) are omitted.
   const strip = window.getByTestId("subagent-meta-strip")
-  await expect(strip.getByTestId("subagent-meta-identity")).toContainText("e2e/pi-fixture:high")
-  await expect(strip.getByTestId("subagent-meta-identity")).toContainText("running")
-  await expect(strip.getByTestId("subagent-meta-usage")).toContainText("Read file")
+  await expect(strip.getByTestId("subagent-meta-identity")).toContainText("Running")
+  await expect(strip.getByTestId("subagent-meta-facts")).toContainText("e2e/pi-fixture:high")
+  await expect(window.getByTestId("fleet-agent-live")).toContainText("Read file")
   await expect(strip).not.toContainText("—")
   // Held fixture children share the parent checkout and have no PR.
   await expect(strip.getByTestId("subagent-meta-workspace")).toHaveText("Shared checkout")
   await expect(strip.getByTestId("subagent-meta-pr")).toHaveCount(0)
+
+  // One 40px toolbar: no New chat / Follow agent / chip while viewing the child; the real task, not the redaction.
+  const header = window.getByTestId("chat-lane-header")
+  expect((await header.boundingBox())?.height).toBe(40)
+  await expect(header.getByTestId("new-chat-button")).toHaveCount(0)
+  await expect(header.getByTestId("follow-agent-toggle")).toHaveCount(0)
+  await expect(window.getByTestId("subagent-task")).not.toContainText("[prompt redacted]")
+  const column = window.getByTestId("fleet-agent-transcript-scroll")
+  await expect(column.getByTestId("subagent-meta-identity")).toContainText("Running")
+  await expect(column.getByTestId("subagent-meta-facts")).toBeVisible()
 
   // Details expands to the key/value grid with run id and started time.
   await expect(window.getByTestId("subagent-meta-details")).toHaveCount(0)

@@ -93,10 +93,13 @@ test("spawning shows the chip and transcript row, and View and a popover row ope
   await expect(view).toContainText("Survey the tab bar")
 
   // A popover row opens a child; opening the first row again lands on the same child View opened.
+  // The chip lives in the main toolbar; a child view swaps it for the switcher, so go back to Main first.
   const popover = window.getByTestId("subagent-chip-popover")
+  await window.getByTestId("subagent-back").click()
   await window.getByTestId("subagent-chip").first().click()
   await popover.getByRole("menuitem", { name: /Audit the theme tokens/ }).click()
   await expect(view).toContainText("Audit the theme tokens")
+  await window.getByTestId("subagent-back").click()
   await window.getByTestId("subagent-chip").first().click()
   await popover.getByRole("menuitem", { name: /Survey the tab bar/ }).click()
   await expect(view).toContainText("Survey the tab bar")

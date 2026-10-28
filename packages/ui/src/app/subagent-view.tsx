@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import type {
   Message,
   ProviderId,
@@ -10,6 +10,9 @@ import type {
 import { MessageTurn } from "../composites/message-turn.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
+import { Button } from "../components/button.js"
+import { toolCallLabel } from "../composites/tool-call.js"
+import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
 import { SubagentMetaStrip } from "./subagent-meta-strip.js"
 import { Markdown } from "../components/markdown.js"
@@ -43,52 +46,57 @@ const liveMetric = (node: SubagentFleetNode): string =>
  * The live activity of a child that has no readable transcript yet.
  *
  * A running child surfaced only through the harness status RPC has no session
- * file to read (the RPC carries no transcript locator), so the transcript pane
- * would otherwise sit blank on "not available yet" for the child's whole life.
- * This shows what the harness DOES give us — the agent's task, current tool,
- * phase, and running totals — so every subagent has visible output and purpose.
+ * file to read, so this compact feed shows what the harness DOES give us:
+ * current tool, phase and running totals.
  */
 function LiveAgentActivity({ node }: { node: SubagentFleetNode }) {
   const active = ACTIVE_STATUSES.has(node.status)
   const metric = liveMetric(node)
   return (
-    <div
-      data-testid="fleet-agent-live"
-      className="rounded-xl border border-line bg-sunken px-4 py-3.5"
-    >
-      <div className="flex items-center gap-2">
+    <div data-testid="fleet-agent-live" className="flex flex-col gap-1.5 rounded-lg border border-line bg-sunken px-3 py-2.5 text-[12px]">
+      <div className="flex min-w-0 items-center gap-2">
         <StatusDot tone={active ? "bg-yellow" : "bg-dim"} size={6} pulse={active} />
-        <span className="text-[12px] font-medium text-text-bright">
-          {active ? "Working…" : (node.terminal?.reason ?? node.status)}
-        </span>
-        {node.model && <span className="text-[10.5px] text-dim">{node.model}</span>}
+        <span className="font-medium text-text-bright">{active ? "Working…" : (node.terminal?.reason ?? node.status)}</span>
+        {node.currentTool && (
+          <span className="min-w-0 truncate font-mono text-[11px] text-blue">{toolCallLabel({ toolName: node.currentTool }).title}</span>
+        )}
+        {node.phase && <span className="min-w-0 truncate text-[11px] text-muted-foreground">{node.phase}</span>}
+        <span className="flex-1" />
+        {metric && <span className="flex-none font-mono text-[10.5px] text-dim">{metric}</span>}
       </div>
-      {node.currentTool && (
-        <p className="mt-2 text-[11.5px] text-blue">Using {node.currentTool}</p>
-      )}
-      {node.phase && (
-        <p className="mt-1 text-[11px] text-muted-foreground">{node.phase}</p>
-      )}
-      {node.blocking && (
-        <p className="mt-2 text-[11px] text-yellow">
-          Waiting: {node.blocking.message}
-        </p>
-      )}
-      {metric && (
-        <p className="mt-2 font-mono text-[10.5px] text-dim">{metric}</p>
-      )}
+      {node.blocking && <p className="text-[11px] text-yellow">Waiting: {node.blocking.message}</p>}
       {active ? (
-        <p className="mt-3 text-[11px] leading-[1.5] text-dim">
-          This agent is running. Its full transcript appears here once it records output.
-        </p>
+        <p className="text-[11px] leading-[1.5] text-dim">This agent is running. Its full transcript appears here once it records output.</p>
       ) : node.terminal?.summary ? (
-        <div data-testid="subagent-final-output" className="mt-3">
+        <div data-testid="subagent-final-output">
           <Markdown className={SUMMARY}>{node.terminal.summary}</Markdown>
         </div>
       ) : (
-        <p className="mt-3 text-[11px] leading-[1.5] text-dim">
-          This agent finished without recording output.
-        </p>
+        <p className="text-[11px] leading-[1.5] text-dim">This agent finished without recording output.</p>
+      )}
+    </div>
+  )
+}
+
+/** The delegated task, clamped to two lines with a Show more/less toggle. */
+function SubagentTask({ task }: { task: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const long = task.length > 140 || task.includes("\n")
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <blockquote
+        data-testid="subagent-task"
+        className={cn(
+          "w-full whitespace-pre-wrap border-l-2 border-line-strong pl-3 text-[12px] leading-[1.55] text-text-body",
+          !expanded && "line-clamp-2"
+        )}
+      >
+        {task}
+      </blockquote>
+      {long && (
+        <Button variant="ghost" size="sm" aria-expanded={expanded} onClick={() => setExpanded(!expanded)} className="h-5 px-1.5 text-[11px]">
+          {expanded ? "Show less" : "Show more"}
+        </Button>
       )}
     </div>
   )
@@ -136,15 +144,6 @@ export function FleetAgentView({
   onRetry,
   onReply
 }: FleetAgentViewProps) {
-         function renderAgentHeader() {
-           return (<div className="flex items-center gap-2 border-b border-line px-[30px] py-2 text-[11px] text-muted-foreground">
-        <div className="min-w-0 flex-1 truncate">
-          <strong className="text-text-bright">{node?.agent ?? "Agent"}</strong>
-          {node && <span> · {node.task}</span>}
-        </div>
-      </div>)
-         }
-
          function renderEmptyTranscript() {
            return (!loading && messages.length === 0 && (
             // A workflow node is an orchestrator with no pi session of its
@@ -193,8 +192,6 @@ export function FleetAgentView({
   }, [messages])
   return (
     <div data-testid="fleet-agent-transcript" className="flex min-h-0 flex-1 flex-col bg-editor">
-      {renderAgentHeader()}
-      {node && <SubagentMetaStrip node={node} providerId={providerId} onOpenArtifact={onOpenArtifact} onOpenPullRequest={onOpenPullRequest} />}
       {controlOutcome && (
         <div
           data-testid="subagent-control-outcome"
@@ -209,13 +206,9 @@ export function FleetAgentView({
       <div ref={scrollRef} data-testid="fleet-agent-transcript-scroll" className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-[760px] space-y-6">
           {node && (
-            <blockquote
-              data-testid="subagent-task"
-              className="whitespace-pre-wrap border-l-2 border-line-strong pl-3 text-[12px] leading-[1.55] text-text-body"
-            >
-              {node.task}
-            </blockquote>
+            <SubagentMetaStrip node={node} providerId={providerId} onOpenArtifact={onOpenArtifact} onOpenPullRequest={onOpenPullRequest} />
           )}
+          {node && <SubagentTask task={node.task} />}
           {loading && <ListSkeleton rows={3} rowHeight={48} />}
           {error && <InlineError message={error} onRetry={onRetry} />}
           {node?.attention && (
