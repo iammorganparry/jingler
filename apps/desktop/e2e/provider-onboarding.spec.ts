@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { appShell, expect, test, type LaunchedApp } from "./fixtures.js";
 
-const SUBSCRIPTION_ENTITLEMENT = /Test subscription · subscription/;
+const SUBSCRIPTION_ENTITLEMENT = /Test subscription, subscription/;
 const SUBSCRIPTION_BILLING = /billing: subscription/;
 const DETERMINISTIC_MODEL = /^Deterministic pi model 1/u;
 const PROVIDERS_NAV = /Providers/u;
@@ -551,7 +551,7 @@ test("detects native Claude during onboarding without a PI connection", async ({
     e2eEnv: { JINGLER_CLAUDE_BINARY: resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/agent/fixtures/claude-tools.mjs") }
   })
   await chooseFixtureRepo(launched)
-  await expect(launched.window.getByText("Claude Code · ready", { exact: true })).toBeVisible()
+  await expect(launched.window.getByText("Claude Code, ready", { exact: true })).toBeVisible()
   await launched.window.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(launched.window.getByRole("heading", { name: "Import existing sessions?" })).toBeVisible()
   await launched.window.getByRole("button", { name: "Skip for now" }).click()
