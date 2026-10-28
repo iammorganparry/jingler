@@ -47,6 +47,9 @@ import {
 import { FileSystem, type Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
+import { createdPrFromToolOutput, isGhPrCreate } from "./created-pr.js"
+import { gitLine } from "./command.js"
+import { parseGitHubRemote } from "./github-remote.js"
 import { adhdNote } from "./adhd-prompt.js"
 import { isTerminal, routeOf } from "./turn-events.js"
 import {
@@ -268,6 +271,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     // chatId → live handles onto the current run, for the out-of-band plan RPCs.
     const active = yield* Ref.make(new Map<string, ActiveRun>())
     const touchedFiles = yield* Ref.make(new Map<string, ReadonlyArray<string>>())
+    // tool id → command line, so a ToolEnd can tell `gh pr create` from other commands.
+    const toolCommands = yield* Ref.make(new Map<string, string>())
     // chatId → the fiber running the agent, so `stop` can interrupt it.
     // Interruption is the ONLY thing that reaches the underlying provider turn:
     // the production driver interrupts pi in an `onInterrupt` finalizer. Nothing
@@ -894,6 +899,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   )
                   // Remember an edit's target path so its ToolEnd can tie back to a step.
                   yield* rememberTurnFile(touchedFiles, chatId, worktreePath, event)
+                  // A PR the agent opened from some other worktree still belongs to this session.
+                  yield* linkAgentCreatedPr(toolCommands, sessionId, event, out.offer({ _tag: "SessionIssueLinksChanged" }).pipe(Effect.asVoid))
                   // Canonical plan writes must land BEFORE the event is offered.
                   // `Done` makes the renderer leave its invoked stream immediately;
                   // publishing it first lets that cancellation interrupt everything
@@ -1873,6 +1880,54 @@ const persistTurnSessionId = (
       ).pipe(Effect.ignore)
     }
   })
+
+/** Lowercase `owner/repo` of the origin remote of the session's worktree and each checkout. */
+const sessionRepoSlugs = (session: Session) =>
+  Effect.forEach(
+    [session.worktreePath, ...(session.checkouts ?? []).map((c) => c.worktreePath ?? c.repoPath)],
+    (dir) =>
+      dir ? gitLine(dir, "remote", "get-url", "origin") : Effect.succeed(null)
+  ).pipe(
+    Effect.map((remotes) =>
+      new Set(
+        remotes.flatMap((url) => {
+          const remote = parseGitHubRemote(url ?? "")
+          return remote ? [`${remote.owner}/${remote.repo}`.toLowerCase()] : []
+        })
+      )
+    )
+  )
+
+/** Remember a `gh pr create` command at its ToolStart; take (and forget) it at its ToolEnd. */
+const takeGhPrCreate = (toolCommands: Ref.Ref<Map<string, string>>, event: StreamEvent) =>
+  Ref.modify(toolCommands, (current) => {
+    const next = new Map(current)
+    if (event._tag === "ToolStart") {
+      if (event.target !== null && isGhPrCreate(event.target)) next.set(event.id, event.target)
+      return [undefined, next] as const
+    }
+    if (event._tag !== "ToolEnd") return [undefined, current] as const
+    const command = next.get(event.id)
+    next.delete(event.id)
+    return [command, next] as const
+  })
+
+/** Link the PR a successful `gh pr create` printed when it is in this session's repo, and tell the renderer to re-read the session. */
+const linkAgentCreatedPr = (
+  toolCommands: Ref.Ref<Map<string, string>>,
+  sessionId: string,
+  event: StreamEvent,
+  announce: Effect.Effect<void>
+) =>
+  Effect.gen(function* () {
+    const command = yield* takeGhPrCreate(toolCommands, event)
+    if (command === undefined || event._tag !== "ToolEnd" || event.status !== "success") return
+    const session = yield* SessionStore.get(sessionId)
+    const number = createdPrFromToolOutput(command, event.output ?? "", yield* sessionRepoSlugs(session))
+    if (number === null) return
+    yield* SessionStore.linkAgentPr(sessionId, number)
+    yield* announce
+  }).pipe(Effect.ignore)
 
 const rememberTurnFile = (
   touchedFiles: Ref.Ref<Map<string, ReadonlyArray<string>>>,

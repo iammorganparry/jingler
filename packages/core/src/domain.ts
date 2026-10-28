@@ -698,6 +698,11 @@ export const Session = Schema.Struct({
    * decode; the session store fills it from `prNumber` on read.
    */
   prs: Schema.optional(Schema.Array(SessionPr)),
+  /**
+   * PRs the agent opened from a worktree this session does not own. Listed in the
+   * header but never part of `prs`, so they are not stacked, restacked, or polled as layers.
+   */
+  linkedPrs: Schema.optional(Schema.Array(Schema.Number)),
   /** Immutable GitHub App installation owning the linked repository. */
   githubInstallationId: Schema.optional(Schema.String),
   /** Immutable GitHub repository database id used for webhook/session routing. */
