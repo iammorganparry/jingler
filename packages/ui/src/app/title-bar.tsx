@@ -25,8 +25,8 @@ export function TitleBar({
       style={drag}
       className="window-drag-region flex h-11 flex-none items-center gap-2 border-b border-hairline bg-panel px-3.5"
     >
-      {overlay ? null : <div aria-hidden className="w-11 flex-none" />}
-      <div id="session-header-identity-portal" style={noDrag} className="flex min-w-0 flex-none items-center" />
+      {overlay ? null : <div aria-hidden data-testid="traffic-light-inset" className="w-16 flex-none" />}
+      <div id="session-header-identity-portal" style={noDrag} className="flex min-w-0 shrink items-center overflow-hidden" />
       <div
         id="session-tab-bar-portal"
         className="flex h-full min-w-0 flex-1 items-center overflow-hidden"

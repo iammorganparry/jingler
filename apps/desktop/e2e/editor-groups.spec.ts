@@ -369,5 +369,18 @@ test("session chrome: header chips, no chat breadcrumb, New chat button", async 
   await expect(window.getByTestId("session-header-identity")).toBeVisible()
   await expect(window.getByTestId("header-branch")).toBeVisible()
   await expect(window.getByRole("navigation", { name: "Breadcrumb" })).toHaveCount(0)
+  // macOS traffic lights end around x=78: the title must start clear of them,
+  // and the right-hand header views must stay inside the window.
+  const identityBox = await window.getByTestId("session-header-identity").boundingBox()
+  expect(identityBox?.x ?? 0).toBeGreaterThanOrEqual(78)
+  const barBox = await window.getByTestId("title-bar").boundingBox()
+  const viewsBox = await window.locator("#session-header-views-portal").boundingBox()
+  expect((viewsBox?.x ?? 0) + (viewsBox?.width ?? 0)).toBeLessThanOrEqual((barBox?.x ?? 0) + (barBox?.width ?? 0))
+  // Paper 04b: the main pane is a flush toolbar layout, not a floating rounded card.
+  const pane = await window.getByTestId("session-main-pane").evaluate((el) => {
+    const style = getComputedStyle(el)
+    return { radius: Number.parseFloat(style.borderTopLeftRadius), margin: Number.parseFloat(style.marginTop) }
+  })
+  expect(pane).toEqual({ radius: 0, margin: 0 })
   await expect(window.getByTestId("new-chat-button")).toBeVisible()
 })

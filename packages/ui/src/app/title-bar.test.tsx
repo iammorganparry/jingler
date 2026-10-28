@@ -30,6 +30,6 @@ describe("TitleBar window controls (3.11)", () => {
   it.each(["darwin", undefined])("renders no controls and keeps the traffic-light inset on %s", (platform) => {
     const { container } = render(<TitleBar platform={platform} />)
     expect(screen.queryByTestId("window-controls")).toBeNull()
-    expect(container.querySelector(".w-11")).toBeTruthy()
+    expect(container.querySelector("[data-testid=traffic-light-inset]")?.className).toContain("w-16")
   })
 })
