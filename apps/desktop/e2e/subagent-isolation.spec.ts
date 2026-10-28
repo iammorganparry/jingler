@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { resolve } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 
-test("isolated subagent: its file shows under the child checkout, not Main, and a jingler/sub/ branch exists", async ({ launchApp }) => {
+test("isolated subagent: its file shows under the child checkout, not Main, in its own worktree", async ({ launchApp }) => {
   const { window, repoPath } = await launchApp({
     configured: true,
     e2eEnv: { JINGLER_SUBAGENT_PROCESS_WORKER: resolve(import.meta.dirname, "isolated-subagent-process-worker.mjs") },
@@ -36,6 +36,7 @@ test("isolated subagent: its file shows under the child checkout, not Main, and 
   await window.getByRole("option", { name: "Main", exact: true }).click()
   await expect(list.getByRole("option", { name: /isolated\.ts/ })).toHaveCount(0)
 
-  const branches = execFileSync("git", ["branch", "--list", "jingler/sub/*"], { cwd: repoPath, encoding: "utf8" })
-  expect(branches).toContain("jingler/sub/")
+  // In Pi, pi-subagents owns isolation: its child checkout is a separate git worktree.
+  const worktrees = execFileSync("git", ["worktree", "list"], { cwd: repoPath, encoding: "utf8" })
+  expect(worktrees).toContain("pi-worktree-")
 })

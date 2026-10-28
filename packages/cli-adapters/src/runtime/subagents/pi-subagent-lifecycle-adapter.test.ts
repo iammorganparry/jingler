@@ -1157,45 +1157,36 @@ describe("PiSubagentLifecycleAdapter", () => {
     }
   })
 
-  it("gives a foreground child workspace only when its delegation cwd is a separate checkout", async () => {
+  it("gives a foreground child its pi-subagents worktree, and the shared checkout none", async () => {
     const root = await mkdtemp(join(tmpdir(), "fleet-workspace-"))
     const parentCwd = join(root, "main")
-    const childCwd = join(root, "child")
     const git = (cwd: string, ...args: Array<string>) => execFileSync("git", args, { cwd, stdio: "ignore" })
     await mkdir(parentCwd)
     git(parentCwd, "init", "-q")
     git(parentCwd, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
-    git(parentCwd, "worktree", "add", "-q", "-b", "child-branch", childCwd)
-    const events = createEventBus()
+    git(parentCwd, "worktree", "add", "-q", "-b", "child-branch", join(root, "pi-worktree-isolated-run-0"))
     const adapter = new PiSubagentLifecycleAdapter({
-      events,
+      events: createEventBus(),
       parentRuntimeSessionId: "parent-1",
       parentCwd,
       controlJournal: null,
       emit: () => undefined
     })
-    const abort = new AbortController()
     try {
-      for (const [runId, cwd] of [["isolated-run", childCwd], ["shared-run", parentCwd]] as const) {
-        const request = { requestId: runId, ownerRunId: "owner", nodeId: runId }
-        void adapter.delegate({
-          ...request, agent: "worker", task: "t", context: "fresh", cwd, result: { kind: "text" }
-        }, abort.signal).catch(() => undefined)
-        events.emit("prompt-template:subagent:update", { ...request, runId: `tool-${runId}` })
+      for (const runId of ["isolated-run", "shared-run"]) {
         adapter.progress({
-          runId: `tool-${runId}`,
+          runId,
           mode: "single",
           children: [{
-            index: 0, runId, agent: "worker", status: "running", task: "t",
+            index: 0, runId: null, agent: "worker", status: "running", task: "t",
             tokens: 0, toolCount: 0, durationMs: 1, sessionFile: null
           }]
         })
       }
       const byId = (id: string) => adapter.snapshot().nodes.find((node) => node.subagentId === id)
-      expect(byId("isolated-run")?.workspace).toMatchObject({ branch: "child-branch" })
-      expect(byId("shared-run")?.workspace).toBeNull()
+      expect(byId("isolated-run:step:0")?.workspace).toMatchObject({ branch: "child-branch" })
+      expect(byId("shared-run:step:0")?.workspace).toBeNull()
     } finally {
-      abort.abort()
       adapter.stop()
       await rm(root, { recursive: true, force: true })
     }

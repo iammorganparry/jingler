@@ -30,7 +30,9 @@ export function useAgentTrees(
     queries: nodes.map((node) => ({
       queryKey: ["local", "diff", session.id, "workspace", node.workspace!.path],
       queryFn: () => rpc.sessionsDiff(session.id, undefined, node.workspace!.path),
-      enabled
+      enabled,
+      // A child's edits fire no ToolEnd in the parent, so poll its diff while it runs.
+      refetchInterval: node.terminal === null ? 3_000 : false
     }))
   })
   return useMemo(() => {
