@@ -21,9 +21,13 @@ export function SessionHeaderIdentity({
       <span className="min-w-0 max-w-[260px] truncate text-[13px] font-semibold text-text-bright">{title}</span>
       {branch ? (
         <span data-testid="header-branch" className="flex min-w-0">
-          <Badge title={branch} className="min-w-0 max-w-[220px] border-transparent bg-sunken text-muted-foreground">
-            <GitBranch size={14} aria-hidden className="flex-none" />
-            <span className="truncate">{branch}</span>
+          {/* xs = 24px, the PR chip's height. Badge puts children in an inline-block, so the
+              icon and label need their own flex row or the label wraps under the icon. */}
+          <Badge size="xs" title={branch} className="min-w-0 max-w-[220px] rounded-md border-transparent bg-sunken text-muted-foreground">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <GitBranch size={14} aria-hidden className="flex-none" />
+              <span className="truncate">{branch}</span>
+            </span>
           </Badge>
         </span>
       ) : null}
