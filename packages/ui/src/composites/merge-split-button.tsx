@@ -6,6 +6,7 @@ import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { ChipMenu } from "../components/chip-menu.js"
 import { Spinner } from "../components/loading.js"
+import { Tooltip } from "../components/tooltip.js"
 
 /**
  * The three merge strategies, with the button label each one arms.
@@ -65,10 +66,8 @@ export function MergeSplitButton({
   const [method, setMethod] = useState<PrMergeMethod>(readMethod)
   const current = MERGE_METHODS.find((m) => m.method === method)!
   const locked = merging || blockedReason !== null
-  return (
-    <div className="flex flex-col gap-2">
-      {/* A disabled button gets no pointer events, so the reason rides on the wrapper. */}
-      <div data-testid="merge-split-button" title={blockedReason ?? undefined} className="flex w-full">
+  const split = (
+      <div data-testid="merge-split-button" className="flex w-full">
         <Button
           className="flex-1 justify-center gap-2 rounded-r-none"
           disabled={!connected || locked || !onMerge}
@@ -106,6 +105,19 @@ export function MergeSplitButton({
           )}
         />
       </div>
+  )
+  return (
+    <div className="flex flex-col gap-2">
+      {blockedReason === null ? (
+        split
+      ) : (
+        // A disabled button gets no pointer events or focus, so a focusable wrapper carries the reason.
+        <Tooltip label={blockedReason} wrapperClassName="w-full">
+          <span tabIndex={0} className="flex w-full rounded-[6px]">
+            {split}
+          </span>
+        </Tooltip>
+      )}
       {mergeError && (
         <Callout tone="red" className="items-start">
           {mergeError}

@@ -8,7 +8,8 @@ export function Tooltip({
   shortcut,
   side = "top",
   children,
-  className
+  className,
+  wrapperClassName
 }: {
   label: ReactNode
   /** Shown after the label as a platform-aware KbdChip, e.g. `mod+k`. */
@@ -17,8 +18,10 @@ export function Tooltip({
   sideOffset?: number
   children: ReactNode
   className?: string
+  /** Classes for the anchor span, e.g. `w-full` to fill the parent. */
+  wrapperClassName?: string
 }) {
   const trigger = isValidElement(children) ? children as ReactElement : <span>{children}</span>
   const content = shortcut ? <span className="inline-flex items-center gap-2 whitespace-nowrap">{label}<KbdChip shortcut={shortcut} /></span> : label
-  return <BeUITooltip content={content} side={side} className={className}>{trigger}</BeUITooltip>
+  return <BeUITooltip content={content} side={side} className={className} wrapperClassName={wrapperClassName}>{trigger}</BeUITooltip>
 }

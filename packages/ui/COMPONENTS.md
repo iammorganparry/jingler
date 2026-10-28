@@ -89,7 +89,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | Toggle | `components/toggle.tsx` | Compact switch (28×16, 12px thumb; `sm` 24×14). | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel, size | yes | #372 (2.7) |
 | Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip). | — | no | #374 (2.9) |
 | Toggle | `components/toggle.tsx` | Compact switch (28×16, 12px thumb; `sm` 24×14). | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel, size | yes | #372 (2.7) |
-| Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip); optional `shortcut` renders a KbdChip. | — | no | #374 (2.9) |
+| Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip); optional `shortcut` renders a KbdChip; for a disabled trigger wrap it in a `tabIndex={0}` span (disabled buttons get no pointer/focus events). | label, shortcut, side, className, wrapperClassName | no | #374 (2.9) |
 
 ## Atoms — BeUI base
 
