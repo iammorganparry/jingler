@@ -1,5 +1,14 @@
 # @jingler/desktop
 
+## 0.12.2
+
+### Patch Changes
+
+- 34e816e: Pull requests the agent opens from another worktree are now linked to its session.
+- f9f0bff: The review tray can be closed from its header and reopened from the Review button in the diff header. The pull request list is resizable.
+- 1b63a3d: The subagent view now has a single toolbar, shows the real task and status, and keeps its details in one tidy column.
+  - @jingler/plannotator-ext@0.12.2
+
 ## 0.12.1
 
 ### Patch Changes
