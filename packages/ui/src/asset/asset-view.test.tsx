@@ -30,7 +30,7 @@ describe("asset viewer states", () => {
 
   it("shows the size and cap on the too-large state", () => {
     render(<AssetTooLarge path="huge.log" size={44_123_456} cap={5 * 1024 * 1024} />)
-    expect(screen.getByText(/huge\.log is 42\.1 MB — over the 5\.0 MB preview limit/u)).toBeTruthy()
+    expect(screen.getByText(/huge\.log is 42\.1 MB, over the 5\.0 MB preview limit/u)).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Open externally" })).toBeNull()
   })
 

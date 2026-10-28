@@ -80,7 +80,7 @@ function RunHistoryRow({ run, ...props }: RoutinesSettingsViewProps & { run: Rou
   const sessionId = run.sessionId
   return (
     <SettingsRow
-      label={`${run.routineName}: ${run.status} — ${run.message}`}
+      label={`${run.routineName}: ${run.status}, ${run.message}`}
       help={owner}
       control={
         <div className="flex flex-wrap justify-end gap-2">

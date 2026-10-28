@@ -17,7 +17,7 @@ describe("QueuedMessageRow", () => {
         onRemove={() => {}}
       />
     )
-    fireEvent.click(screen.getByLabelText("Send now — steer the agent immediately"))
+    fireEvent.click(screen.getByLabelText("Send now, steer the agent immediately"))
     expect(onSendNow).toHaveBeenCalledTimes(1)
   })
 
@@ -33,7 +33,7 @@ describe("QueuedMessageRow", () => {
         onRemove={() => {}}
       />
     )
-    fireEvent.click(screen.getByLabelText("Hand off — run this in a new chat"))
+    fireEvent.click(screen.getByLabelText("Hand off, run this in a new chat"))
     expect(onHandoff).toHaveBeenCalledTimes(1)
   })
 
@@ -84,8 +84,8 @@ describe("QueuedMessageRow", () => {
         onRemove={() => {}}
       />
     )
-    expect(screen.queryByLabelText("Send now — steer the agent immediately")).toBeNull()
-    expect(screen.queryByLabelText("Hand off — run this in a new chat")).toBeNull()
+    expect(screen.queryByLabelText("Send now, steer the agent immediately")).toBeNull()
+    expect(screen.queryByLabelText("Hand off, run this in a new chat")).toBeNull()
     expect(screen.queryByLabelText("Edit queued message")).toBeNull()
     expect(screen.queryByLabelText("Remove from queue")).toBeNull()
   })

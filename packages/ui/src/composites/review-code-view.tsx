@@ -564,7 +564,7 @@ function ReviewCodeHeader({
           <Button
             variant="secondary"
             size="icon"
-            title="Deslop — hand this file to the agent for a DRY / cleanup pass"
+            title="Deslop, hand this file to the agent for a DRY / cleanup pass"
             onClick={onDeslopFile}
           >
             <BrushCleaning size={15} />

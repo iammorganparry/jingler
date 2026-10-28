@@ -374,7 +374,7 @@ export function SessionConversation(props: SessionConversationProps) {
             group={group}
             sessions={props.sessions}
             emptyState={
-              <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
+              <span className="text-[12px] text-dim">Nothing on screen, pick a session</span>
             }
             renderConversation={props.renderConversation}
             renderExplanation={props.renderExplanation}

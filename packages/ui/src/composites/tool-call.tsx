@@ -50,7 +50,7 @@ const toolCallDetail = (
 
 const workModeTitle = (args: Record<string, unknown> | null | undefined): string => {
   const mode = args?.mode === "build" ? "Build" : "Plan"
-  return typeof args?.reason === "string" && args.reason ? `Switched to ${mode} — ${args.reason}` : `Switched to ${mode}`
+  return typeof args?.reason === "string" && args.reason ? `Switched to ${mode}, ${args.reason}` : `Switched to ${mode}`
 }
 
 /**

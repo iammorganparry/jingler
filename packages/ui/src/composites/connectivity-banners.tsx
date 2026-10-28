@@ -6,7 +6,7 @@ import { Button } from "../components/button.js"
 export function OfflineBanner() {
   return (
     <BannerShell placement="top" className="flex-none" icon={<WifiOff size={13} />}>
-      Offline — agents keep running locally
+      Offline, agents keep running locally
     </BannerShell>
   )
 }
@@ -24,7 +24,7 @@ export function DeviceOfflineBanner({ device, onContinueLocally }: { device: str
         </Button>
       ]}
     >
-      {device} went offline — the run is paused
+      {device} went offline, the run is paused
     </BannerShell>
   )
 }
@@ -33,7 +33,7 @@ export function DeviceOfflineBanner({ device, onContinueLocally }: { device: str
 export function RelayQuotaBanner({ resetsOn, onDismiss }: { resetsOn?: string; onDismiss?: () => void }) {
   return (
     <BannerShell placement="top" className="flex-none" icon={<CloudOff size={13} />} onDismiss={onDismiss}>
-      Remote runs are paused — relay quota reached{resetsOn ? ` · resets ${resetsOn}` : ""}
+      Remote runs are paused, relay quota reached{resetsOn ? ` · resets ${resetsOn}` : ""}
     </BannerShell>
   )
 }

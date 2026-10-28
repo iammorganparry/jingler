@@ -67,8 +67,8 @@ describe("PrStatusGlyph", () => {
     render(<PrStatusGlyph pr={{ state: "open", checks: "fail" }} />)
     // `title` for the pointer, `sr-only` text for assistive tech — a bare icon
     // would read as "graphic".
-    expect(screen.getByTitle("Pull request open — checks failing")).toBeDefined()
-    expect(screen.getByText("Pull request open — checks failing")).toBeDefined()
+    expect(screen.getByTitle("Pull request open, checks failing")).toBeDefined()
+    expect(screen.getByText("Pull request open, checks failing")).toBeDefined()
   })
 
   it("publishes its state as data attributes, so the e2e suite can assert on it", () => {

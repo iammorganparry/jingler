@@ -42,7 +42,7 @@ function SentPanel({
   return (
     <div className="flex w-full flex-col items-center gap-2.5">
       <Callout tone="blue" glyph={<MailCheck className="size-3.5" />} className="w-full">
-        Check <strong className="font-semibold text-text-bright">{sentEmail || "your email"}</strong> — link
+        Check <strong className="font-semibold text-text-bright">{sentEmail || "your email"}</strong>, link
         expires in 15 min
       </Callout>
       {onResend ? (

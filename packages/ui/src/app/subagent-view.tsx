@@ -161,7 +161,7 @@ export function FleetAgentView({
                 )}
                 <EmptyState
                   title="This agent has no transcript (orchestrator)"
-                  description="This workflow orchestrates other agents and has no transcript of its own — select one of its step agents to see their output."
+                  description="This workflow orchestrates other agents and has no transcript of its own, select one of its step agents to see their output."
                 />
               </div>
             ) : node ? (

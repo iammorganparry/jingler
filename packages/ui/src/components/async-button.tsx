@@ -37,7 +37,7 @@ export function AsyncButton({
   children,
   pendingLabel,
   successLabel = "Done",
-  errorLabel = "Failed — retry",
+  errorLabel = "Failed, retry",
   doneLabel,
   onClick,
   variant = "primary",

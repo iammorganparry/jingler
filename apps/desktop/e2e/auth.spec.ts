@@ -228,12 +228,12 @@ test("an offline boot shows the app with the unreachable banner, not the sign-in
   })
   await expect(appShell(window)).toBeVisible()
   await expect(sessionRow(window, "Seeded session")).toBeVisible()
-  await expect(window.getByText("Can't reach Jingler — you can keep working locally")).toBeVisible()
+  await expect(window.getByText("Can't reach Jingler, you can keep working locally")).toBeVisible()
   await expect(signInHeading(window)).toHaveCount(0)
 
   // Retry re-checks; the server is still down, so the banner stays and the app keeps working.
   await window.getByRole("button", { name: "Retry" }).click()
-  await expect(window.getByText("Can't reach Jingler — you can keep working locally")).toBeVisible()
+  await expect(window.getByText("Can't reach Jingler, you can keep working locally")).toBeVisible()
   await expect(sessionRow(window, "Seeded session")).toBeVisible()
 })
 

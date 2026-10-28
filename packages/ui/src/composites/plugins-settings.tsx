@@ -490,7 +490,7 @@ export function PluginsSettings({
           <p className="mt-1 max-w-[520px] text-[12.5px] leading-[1.6] text-dim">
             Plugins add tabs, panes and commands. Drop a folder into{" "}
             <code className="font-mono text-text-body">~/jingler/plugins</code> and it
-            appears here — no restart.{" "}
+            appears here, no restart.{" "}
             <span className="text-text-body">
               Plugins run with the same access as Jingler itself; install ones you
               trust.

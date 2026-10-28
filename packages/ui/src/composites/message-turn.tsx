@@ -306,7 +306,7 @@ const isStoppableTool = (displayName: string): boolean =>
 const emptyBodyNote = (tool: ToolCallModel): string => {
   if (tool.status === "running") return "Running…"
   return tool.compacted === true
-    ? "Output released from memory — the full record is in the session transcript."
+    ? "Output released from memory, the full record is in the session transcript."
     : "No output."
 }
 

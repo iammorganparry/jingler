@@ -341,7 +341,7 @@ function ImportFlow({
       setSource(null)
       setMessage(
         imported.length === 0
-          ? "Nothing imported — the selected servers already exist."
+          ? "Nothing imported, the selected servers already exist."
           : `Imported ${imported.join(", ")}.`
       )
     } catch (cause) {

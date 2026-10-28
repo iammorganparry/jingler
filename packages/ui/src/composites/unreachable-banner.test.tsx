@@ -7,7 +7,7 @@ afterEach(cleanup)
 describe("UnreachableBanner", () => {
   it("is a neutral top notice that says the app keeps working locally", () => {
     render(<UnreachableBanner onRetry={() => {}} />)
-    expect(screen.getByTestId("banner-message").textContent).toBe("Can't reach Jingler — you can keep working locally")
+    expect(screen.getByTestId("banner-message").textContent).toBe("Can't reach Jingler, you can keep working locally")
     expect(screen.getByTestId("banner-shell").getAttribute("role")).toBe("status")
     expect(screen.getByTestId("banner-shell").className).toContain("border-hairline")
   })

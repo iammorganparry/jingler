@@ -889,7 +889,7 @@ export function DevicesSection({
 function StubSection({ label }: { label: string }) {
   return (
     <section aria-label={label} className="flex flex-1 items-center justify-center bg-editor">
-      <EmptyState title={label} description="Coming soon — this section isn't available yet." />
+      <EmptyState title={label} description="Coming soon, this section isn't available yet." />
     </section>
   )
 }
@@ -944,7 +944,7 @@ function ContextSection({
         <Callout tone="blue">
           Long conversations lose accuracy well before they hit a model&apos;s
           limit. Jingler summarises a session in the background once it outgrows
-          the budget below, then quietly continues from that summary — your
+          the budget below, then quietly continues from that summary, your
           transcript is never truncated.
         </Callout>
 
@@ -1533,7 +1533,7 @@ function NotificationsSection({
         </SettingsCard>
         <p className="text-[11px] leading-[1.6] text-muted-foreground">
           Notifications are suppressed for the session you already have open and
-          focused — you can see that one for yourself.
+          focused, you can see that one for yourself.
         </p>
       </div>
     </div>

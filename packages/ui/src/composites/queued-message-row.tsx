@@ -81,26 +81,26 @@ function IdleActions({
   return (
     <>
       {onSendNow && (
-        <Tooltip label="Send now — steer the agent immediately">
+        <Tooltip label="Send now, steer the agent immediately">
           <Button
             size="icon"
             variant="ghost"
             onClick={onSendNow}
-            title="Send now — steer the agent immediately"
-            aria-label="Send now — steer the agent immediately"
+            title="Send now, steer the agent immediately"
+            aria-label="Send now, steer the agent immediately"
           >
             <SendHorizontal size={13} />
           </Button>
         </Tooltip>
       )}
       {onHandoff && (
-        <Tooltip label={handoffHint ?? "Hand off — run this in a new chat"}>
+        <Tooltip label={handoffHint ?? "Hand off, run this in a new chat"}>
           <Button
             size="icon"
             variant="ghost"
             onClick={onHandoff}
-            title={handoffHint ?? "Hand off — run this in a new chat"}
-            aria-label={handoffHint ?? "Hand off — run this in a new chat"}
+            title={handoffHint ?? "Hand off, run this in a new chat"}
+            aria-label={handoffHint ?? "Hand off, run this in a new chat"}
           >
             <Forward size={13} />
           </Button>

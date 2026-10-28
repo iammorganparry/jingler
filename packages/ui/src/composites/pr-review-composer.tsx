@@ -68,7 +68,7 @@ export function PrReviewComposer({
       {pending.length > 0 && (
         <ul data-testid="pr-pending-comments" className="flex flex-col gap-1 px-[14px] pb-[11px] text-[12px] text-text-body">
           {pending.map((d) => (
-            <li key={d.id}><code className="font-mono text-muted-foreground">{d.path}:{d.line}</code> — {d.body}</li>
+            <li key={d.id}><code className="font-mono text-muted-foreground">{d.path}:{d.line}</code>, {d.body}</li>
           ))}
         </ul>
       )}

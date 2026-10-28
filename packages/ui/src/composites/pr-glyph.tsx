@@ -72,13 +72,13 @@ export const prGlyphOf = (pr: SessionPrStatus | null | undefined): PrGlyph => {
 
   switch (pr.checks) {
     case "fail":
-      return { Icon, tone: "text-red", mark: "fail", label: `${where} — checks failing` }
+      return { Icon, tone: "text-red", mark: "fail", label: `${where}, checks failing` }
     case "pass":
-      return { Icon, tone: "text-green", mark: "pass", label: `${where} — checks passing` }
+      return { Icon, tone: "text-green", mark: "pass", label: `${where}, checks passing` }
     case "running":
-      return { Icon, tone: "text-yellow", mark: null, label: `${where} — checks running` }
+      return { Icon, tone: "text-yellow", mark: null, label: `${where}, checks running` }
     case "pending":
-      return { Icon, tone: "text-yellow/70", mark: null, label: `${where} — checks queued` }
+      return { Icon, tone: "text-yellow/70", mark: null, label: `${where}, checks queued` }
     default:
       // No CI configured on this PR. Purple is the neutral "there is a PR here"
       // colour — deliberately not green, which would claim a passing build that
@@ -140,7 +140,7 @@ export function PrStatusGlyph({
         data-testid="pr-glyph-stack"
         data-state={worst?.state ?? "none"}
         data-checks={worst?.checks ?? "none"}
-        title={`Stack of ${stack.length} pull requests — ${label}`}
+        title={`Stack of ${stack.length} pull requests, ${label}`}
         className={cn("inline-flex flex-none items-center gap-0.5 whitespace-nowrap", tone, className)}
       >
         <PrStatusGlyph pr={worst} size={size} />

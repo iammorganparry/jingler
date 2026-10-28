@@ -210,7 +210,7 @@ export function ComponentLibrary() {
           <AgentCard file="auth.ts" state="failed" reason="Tool timed out after 120s" onResume={() => undefined} onViewTranscript={() => undefined} />
         </Spec>
         <Spec title="Callout">
-          <Callout tone="yellow">Large workflow — 26 agents.</Callout>
+          <Callout tone="yellow">Large workflow, 26 agents.</Callout>
           <Callout tone="green">Verified by a reviewer.</Callout>
         </Spec>
         <Spec title="ApprovalGate" wide>
