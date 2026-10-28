@@ -15,7 +15,7 @@ import type {
   ReviewFinding
 } from "@jingler/core"
 import { jinglerDark, toTokens } from "@jingler/themes"
-import { Maximize2, Minimize2 } from "lucide-react"
+import { Maximize2, Minimize2, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 import { Button } from "../components/button.js"
 import { Badge } from "../components/badge.js"
@@ -647,6 +647,8 @@ export interface ReviewSidebarProps {
   readonly onRemoveDraft: (id: string) => void
   readonly onFinishReview: (mode: "comment_only" | "send_to_agent") => void
   readonly onSendFindingToAgent?: (findingId: string) => void
+  /** Hide the tray; the host offers a way back (the diff header's Review toggle). */
+  readonly onClose?: () => void
 }
 
 /**
@@ -669,7 +671,8 @@ export function ReviewSidebar({
   onConnectGithub,
   onRemoveDraft,
   onFinishReview,
-  onSendFindingToAgent
+  onSendFindingToAgent,
+  onClose
 }: ReviewSidebarProps) {
   const activeReview = source === "pr" ? review : null
   const general = useMemo(
@@ -686,6 +689,19 @@ export function ReviewSidebar({
       aria-label="Review"
       className="flex w-[300px] min-w-0 flex-none flex-col border-l border-hairline bg-panel"
     >
+      <div className="flex h-10 flex-none items-center gap-2 border-b border-hairline pl-[15px] pr-1.5">
+        <span className="flex-1 text-[12px] font-semibold text-text-bright">Your review</span>
+        {drafts.length > 0 && (
+          <Badge tone="blue" size="sm">
+            {drafts.length} pending
+          </Badge>
+        )}
+        {onClose ? (
+          <Button variant="ghost" size="sm" aria-label="Close review" onClick={onClose} className="size-6 p-0">
+            <X size={14} aria-hidden />
+          </Button>
+        ) : null}
+      </div>
       {source === "pr" && !connected && drafts.length > 0 ? (
         <div className="flex flex-none items-center gap-2 border-b border-hairline p-2">
           <Callout tone="blue" className="flex-1 text-[11.5px]">

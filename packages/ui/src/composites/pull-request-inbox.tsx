@@ -10,6 +10,7 @@ import { DiffStat } from "../components/diff-stat.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { Button } from "../components/button.js"
 import { FilterChips } from "../components/filter-chips.js"
+import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { SearchField } from "../components/search-input.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
 import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
@@ -239,6 +240,7 @@ export function PullRequestInbox({
     label: filterOptions(prs.flatMap((pr) => pr.labels.map((label) => label.name))),
   }), [prs])
   const [mobileDetail, setMobileDetail] = useState(false)
+  const listWidth = useResizableWidth({ storageKey: "jingler.prInbox.listWidth", initial: 360, min: 280, max: 720 })
   const compact = !atLeast(useWidthTier(), "mid")
   const isTeam = Boolean(teamControls?.teamId)
   const visible = useMemo(
@@ -252,7 +254,11 @@ export function PullRequestInbox({
   return (
     <div data-testid="pull-request-inbox" className="flex min-h-0 min-w-0 flex-1 bg-editor">
       {showList && (
-        <section className={cn("flex min-h-0 min-w-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "w-1/3 min-w-[280px] max-w-[430px]")}>
+        <section
+          data-testid="pull-request-list"
+          style={compact ? undefined : { width: listWidth.width }}
+          className={cn("flex min-h-0 min-w-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "flex-none")}
+        >
           <header className="flex flex-none flex-col gap-3 border-b border-line px-4 py-3.5">
             <div className="flex items-center gap-2">
               <GitPullRequest className="size-4 text-muted-foreground" />
@@ -290,6 +296,7 @@ export function PullRequestInbox({
           </div>
         </section>
       )}
+      {showList && !compact && <ResizeHandle aria-label="Resize pull request list" onResize={(dx) => listWidth.adjust(dx)} />}
 
       {(!compact || mobileDetail) && (
         <WidthTierProvider className="relative bg-editor">
