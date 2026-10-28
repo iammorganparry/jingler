@@ -514,6 +514,7 @@ function renderSessionAnalytics() {
             </div>
           ) : question ? (
             <QuestionCard
+              key={question.id}
               request={question}
               onSubmit={(answers) => onAnswerQuestion?.(question.id, answers)}
               onSwitchToAuto={autoSwitchLink(mode, onSwitchToAuto)}

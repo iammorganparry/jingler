@@ -152,8 +152,11 @@ default: selectNumberedOption(e)
 
   // Focus lands on option 1 whenever a question appears.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refocus only when the question index changes
+  // Deferred a frame, as the composer's autofocus is: a Jump lands here in the same
+  // pass that scrolls the transcript and dismisses the toast, which drops a sync focus.
   React.useEffect(() => {
-    firstOptionRef.current?.focus()
+    const id = requestAnimationFrame(() => firstOptionRef.current?.focus())
+    return () => cancelAnimationFrame(id)
   }, [qi])
 
   const hint = `1–9 ${q.multiSelect ? "toggle" : "pick"} · O other · ↵ next`
