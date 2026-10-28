@@ -774,8 +774,9 @@ test("agent cannot leave plan without an approved plan", async ({ launchApp }) =
   await composer.press("Enter")
   const buildCard = window.getByRole("button", { name: "Work mode Switched to Build, start coding" })
   await expect(buildCard).toBeVisible({ timeout: 30_000 })
-  // The refusal sits in the collapsed card body.
-  await buildCard.click()
+  // The refusal sits in the card body. A card first rendered while the tool
+  // was running starts open, so only toggle it when it is collapsed.
+  if ((await buildCard.getAttribute("aria-expanded")) !== "true") await buildCard.click()
   await expect(window.getByText("Cannot switch to build", { exact: false })).toBeVisible()
   await expect(window.locator("[data-mode='plan']")).toBeVisible()
   await expect.poll(() => savedChat(launched)?.workMode, { timeout: 30_000 }).toBe("plan")
