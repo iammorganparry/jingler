@@ -68,6 +68,12 @@ describe("subagentFleetMachine", () => {
     })
   })
 
+  it("keeps detached background children alive when a turn ends on its own", () => {
+    const events = [{ _tag: "Upsert" as const, version: 2 as const, eventId: "start-1", occurredAt: 10, node: { ...node, background: true } }]
+    expect(settleStoppedFleet(events, 20, true)).toBe(events)
+    expect(settleStoppedFleet(events, 20)).toHaveLength(2)
+  })
+
   it("projects lifecycle events and falls back to Main when a selected child disappears", () => {
     const actor = createActor(subagentFleetMachine, {
       input: { parentRuntimeSessionId: "fallback" }
