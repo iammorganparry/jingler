@@ -101,7 +101,7 @@ test("a long branch name truncates while the status word and diff stat stay on o
     configured: true,
     isolateSystemHome: true,
     withRepo: true,
-    sessions: ({ repoPath }) => [
+    sessions: [
       {
         id: "s_long_branch",
         repo: "widget",
@@ -113,7 +113,6 @@ test("a long branch name truncates while the status word and diff stat stay on o
         costUsd: 0,
         tokens: 0,
         updatedAt: "2026-08-07T12:00:00.000Z",
-        worktreePath: repoPath,
         mode: "accept-edits"
       }
     ]

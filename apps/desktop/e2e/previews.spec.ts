@@ -612,7 +612,9 @@ test("Preview ready chip opens the Browser view without duplicating its tab", as
 })
 
 test("browser toolbar: history buttons follow page history and a failed load offers Retry", async ({ launchApp }) => {
+  const served: string[] = []
   const server = createServer((request, response) => {
+    served.push(request.url ?? "")
     response.writeHead(200, { "Content-Type": "text/html" })
     response.end(`<!doctype html><title>page</title><h1>${request.url}</h1>`)
   })
@@ -645,6 +647,10 @@ test("browser toolbar: history buttons follow page history and a failed load off
     await url.fill(`${origin}/one`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/one`, { timeout: 10_000 })
+    // fill() sets the field instantly; a second Enter before /one is served supersedes it
+    // and leaves no history entry to go back to.
+    await expect.poll(() => served).toContain("/one")
+    await expect(nav.locator("xpath=ancestor::*[@aria-busy][1]")).toHaveAttribute("aria-busy", "false", { timeout: 10_000 })
     await url.fill(`${origin}/two`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/two`, { timeout: 10_000 })
