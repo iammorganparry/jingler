@@ -1,6 +1,7 @@
 import type { SessionCheckout, SessionPrStatus } from "@jingler/core"
 import { GitBranch } from "lucide-react"
 import { ChipMenu, type ChipOption } from "../components/chip-menu.js"
+import { cn } from "../lib/cn.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
 
 const repoName = (repo: string): string => repo.split("/").filter(Boolean).at(-1) ?? repo
@@ -67,7 +68,14 @@ export function CheckoutSwitcher({
         }}
       />
       {checkouts.map((checkout) => (
-        <CheckoutPrChip key={checkout.id} checkout={checkout} prState={prStates[checkout.id]} />
+        <span
+          key={checkout.id}
+          data-testid={`checkout-chip-${checkout.id}`}
+          className={cn("flex flex-none items-center gap-1 font-mono text-[10.5px]", checkout.id === activeCheckoutId ? "text-text-bright" : "text-dim")}
+        >
+          {repoName(checkout.repo)}
+          <CheckoutPrChip checkout={checkout} prState={prStates[checkout.id]} />
+        </span>
       ))}
     </div>
   )

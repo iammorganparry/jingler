@@ -21,6 +21,12 @@ describe("CheckoutSwitcher", () => {
     expect(screen.queryByTestId("checkout-pr-c2")).toBeNull()
   })
 
+  it("names every attached repo in the strip, PR or not", () => {
+    render(<CheckoutSwitcher checkouts={[api, web]} activeCheckoutId="primary" />)
+    expect(screen.getByTestId("checkout-chip-primary").textContent).toContain("api")
+    expect(screen.getByTestId("checkout-chip-c2").textContent).toBe("web")
+  })
+
   it("labels a checkout by its repo name and branch", () => {
     expect(checkoutLabel(api)).toBe("api · feat/x")
   })
