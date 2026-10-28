@@ -1,5 +1,13 @@
 # @jingler/device-agent
 
+## 0.11.3
+
+### Patch Changes
+
+- Updated dependencies [4dec34d]
+  - @jingler/cli-adapters@0.11.3
+  - @jingler/core@0.11.3
+
 ## 0.11.2
 
 ### Patch Changes

@@ -1898,7 +1898,7 @@ describe("SessionStore", () => {
       const archived = yield* SessionStore.get(created.value.id)
       yield* SessionStore.restore(created.value.id)
       return [archived, yield* SessionStore.get(created.value.id)]
-    }).pipe(Effect.provide(SessionStore.Default)), temp.layer)
+    }).pipe(Effect.provide(services)), temp.layer)
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
     expect(result.value[0]?.archived).toBe(true)
@@ -1919,7 +1919,7 @@ describe("SessionStore", () => {
       Effect.gen(function* () {
         yield* SessionStore.archive(id, "merged")
         return yield* SessionStore.get(id)
-      }).pipe(Effect.provide(SessionStore.Default)),
+      }).pipe(Effect.provide(services)),
       temp.layer
     )
     expect(archived._tag).toBe("Success")
@@ -1933,7 +1933,7 @@ describe("SessionStore", () => {
       Effect.gen(function* () {
         yield* SessionStore.restore(id)
         return yield* SessionStore.get(id)
-      }).pipe(Effect.provide(SessionStore.Default)),
+      }).pipe(Effect.provide(services)),
       temp.layer
     )
     expect(restored._tag).toBe("Success")
@@ -1941,6 +1941,60 @@ describe("SessionStore", () => {
       expect(restored.value.archived).toBe(false)
       expect(restored.value.archiveReason).toBeUndefined()
     }
+  })
+
+  describe("archive frees the worktree", () => {
+    const gitIn = (cwd: string, ...args: string[]) =>
+      execFileSync("git", args, { cwd, encoding: "utf-8" })
+    const run = <A>(eff: Effect.Effect<A, unknown, any>) =>
+      Effect.runPromise(eff.pipe(Effect.provide(services), Effect.provide(temp.layer)) as Effect.Effect<A>)
+
+    // Origin repo gets a bare remote holding main, so a fresh worktree's HEAD is "pushed".
+    const createPushedSession = async () => {
+      const remote = join(repos.dir, "remote.git")
+      execFileSync("git", ["init", "--bare", "-b", "main", remote])
+      gitIn(repoPath, "remote", "add", "origin", remote)
+      gitIn(repoPath, "push", "-u", "origin", "main")
+      return run(SessionStore.create(input({ title: "Gc Me" })))
+    }
+
+    it("removes a clean, pushed worktree and keeps the session", async () => {
+      const session = await createPushedSession()
+      await run(SessionStore.archive(session.id, "merged"))
+      const archived = await run(SessionStore.get(session.id))
+      expect(existsSync(session.worktreePath!)).toBe(false)
+      expect(archived.archived).toBe(true)
+      expect(archived.worktreeKeptReason).toBeUndefined()
+    })
+
+    it("keeps a worktree with uncommitted changes and records why", async () => {
+      const session = await createPushedSession()
+      writeFileSync(join(session.worktreePath!, "dirty.txt"), "wip")
+      await run(SessionStore.archive(session.id, "merged"))
+      const archived = await run(SessionStore.get(session.id))
+      expect(existsSync(session.worktreePath!)).toBe(true)
+      expect(archived.archived).toBe(true)
+      expect(archived.worktreeKeptReason).toBe("Uncommitted changes")
+    })
+
+    it("keeps a worktree with unpushed commits and records why", async () => {
+      const session = await createPushedSession()
+      gitIn(session.worktreePath!, "-c", "user.email=t@t.dev", "-c", "user.name=T", "commit", "--allow-empty", "-m", "local", "--no-gpg-sign")
+      await run(SessionStore.archive(session.id, "merged"))
+      const archived = await run(SessionStore.get(session.id))
+      expect(existsSync(session.worktreePath!)).toBe(true)
+      expect(archived.worktreeKeptReason).toBe("Commits not pushed to a remote branch")
+    })
+
+    it("restore recreates a removed worktree from its branch", async () => {
+      const session = await createPushedSession()
+      await run(SessionStore.archive(session.id, "merged"))
+      expect(existsSync(session.worktreePath!)).toBe(false)
+      await run(SessionStore.restore(session.id))
+      const restored = await run(SessionStore.get(session.id))
+      expect(restored.archived).toBe(false)
+      expect(existsSync(session.worktreePath!)).toBe(true)
+    })
   })
 
   it("remove deletes the session record and its worktree", async () => {

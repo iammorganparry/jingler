@@ -312,6 +312,11 @@ export function SessionRow({
             {closed ? "Closed" : "Merged"}
             {session.prNumber !== null ? ` #${session.prNumber}` : ""}
           </Badge>
+          {session.worktreeKeptReason && (
+            <Badge tone="neutral" size="sm" title={`Worktree kept on disk: ${session.worktreeKeptReason}`}>
+              Worktree kept
+            </Badge>
+          )}
           <div className="flex-1" />
           {session.archivedAt && <span>{relativeTime(session.archivedAt)}</span>}
         </div>)

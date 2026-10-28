@@ -827,6 +827,8 @@ export const Session = Schema.Struct({
       nativeSessionId: Schema.String
     })
   ),
+  /** Why archiving kept the worktree on disk (uncommitted or unpushed work). */
+  worktreeKeptReason: Schema.optional(Schema.String),
 });
 export type Session = Schema.Schema.Type<typeof Session>;
 

@@ -1,4 +1,7 @@
-import { appShell, confirmArchive, expect, sessionRow, test } from "./fixtures.js"
+import { execFileSync } from "node:child_process"
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+import { appShell, confirmArchive, createWorkspace, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 const plain = (id: string, title: string, repoPath: string, extra: Partial<SeedSession> = {}): SeedSession => ({
@@ -68,4 +71,28 @@ test("archive via confirm, search the Archived list, Restore, and Delete asks fi
   await list.getByRole("button", { name: "Delete Old billing work" }).click()
   await window.getByRole("dialog", { name: "Delete session?" }).getByRole("button", { name: "Delete", exact: true }).click()
   await expect(window.getByTestId("archived-sidebar-item")).toHaveCount(0)
+})
+
+test("archiving a merged session removes its worktree but keeps it under Archived", async ({ launchApp }) => {
+  const { window, repoPath, home } = await launchApp({ configured: true, withRepo: true })
+  // A pushed base branch is what makes the fresh worktree's HEAD "pushed".
+  const remote = join(home, "remote.git")
+  execFileSync("git", ["init", "--bare", "-b", "main", remote])
+  execFileSync("git", ["remote", "add", "origin", remote], { cwd: repoPath })
+  execFileSync("git", ["push", "-u", "origin", "main"], { cwd: repoPath })
+
+  await expect(appShell(window)).toBeVisible()
+  await createWorkspace(window, "", "worktree", repoPath)
+  await window.getByPlaceholder("Message the agent…").waitFor()
+  const sessions = () => JSON.parse(readFileSync(join(home, "jingler/sessions.json"), "utf8"))
+  const worktreePath: string = sessions()[0].worktreePath
+  expect(existsSync(worktreePath)).toBe(true)
+
+  const row = window.locator("[data-testid^='session-row-']").first(); await row.hover()
+  await row.getByRole("button", { name: /^Archive / }).click()
+  await confirmArchive(window)
+
+  await expect.poll(() => sessions()[0]?.archived).toBe(true)
+  await expect.poll(() => existsSync(worktreePath)).toBe(false)
+  expect(sessions()[0].worktreeKeptReason).toBeUndefined()
 })

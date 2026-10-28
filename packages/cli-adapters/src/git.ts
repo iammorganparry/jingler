@@ -1019,6 +1019,44 @@ export class GitService extends Effect.Service<GitService>()(
      * merge commit lists no paths under this format and simply contributes
      * nothing, which is correct — a merge fixes nothing on its own.
      */
+    /** Why a worktree must not be deleted (uncommitted or unpushed work), else null. */
+    const worktreeKeepReason = (
+      cwd: string
+    ): Effect.Effect<string | null, never, CommandExecutor.CommandExecutor> =>
+      Effect.gen(function* () {
+        if ((yield* runGit(cwd, ["status", "--porcelain"])).trim()) return "Uncommitted changes"
+        if (!(yield* runGit(cwd, ["branch", "-r", "--contains", "HEAD"])).trim()) {
+          return "Commits not pushed to a remote branch"
+        }
+        return null
+      }).pipe(
+        Effect.catchAll(() => Effect.succeed("Could not verify the worktree is clean and pushed"))
+      )
+
+    /** Recreate a removed worktree directory from its branch (archive → restore). */
+    const restoreWorktreeAt = (
+      repoPath: string,
+      worktreePath: string,
+      branch: string
+    ): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> =>
+      runGit(repoPath, ["worktree", "prune"]).pipe(
+        Effect.zipRight(
+          runGit(repoPath, ["worktree", "add", worktreePath, branch]).pipe(
+            // A branch held by another worktree (a not-yet-titled session records
+            // its base branch) is restored detached at the same commit.
+            Effect.orElse(() => runGit(repoPath, ["worktree", "add", "--detach", worktreePath, branch]))
+          )
+        ),
+        Effect.mapError(
+          (cause) =>
+            new GitError({
+              message: `Could not recreate the worktree for branch "${branch}"; it may have been deleted.`,
+              cause
+            })
+        ),
+        Effect.asVoid
+      )
+
     const commitsSince = (
       cwd: string,
       sinceSha: string
@@ -1082,7 +1120,9 @@ export class GitService extends Effect.Service<GitService>()(
       checkoutBranch,
       checkoutPullRequestHead,
       commitsSince,
-      removeWorktreeAt
+      removeWorktreeAt,
+      worktreeKeepReason,
+      restoreWorktreeAt
     }
   }
 }) {}
