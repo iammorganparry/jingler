@@ -157,12 +157,13 @@ const ACTIVE_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set([
 export const settleStoppedFleet = (
   events: ReadonlyArray<SubagentFleetEvent>,
   occurredAt: number,
-  keepAwaitingOperator = false
+  keepOutlivingChildren = false
 ): ReadonlyArray<SubagentFleetEvent> => {
   const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(events, "")
   if (parentRuntimeSessionId === "") return events
   const activeNodes = projectSubagentFleetEvents(parentRuntimeSessionId, events).nodes.filter((node) =>
-    ACTIVE_STATUSES.has(node.status) && !(keepAwaitingOperator && node.status === "needs-attention")
+    ACTIVE_STATUSES.has(node.status) &&
+    !(keepOutlivingChildren && (node.status === "needs-attention" || node.background))
   )
   if (activeNodes.length === 0) return events
   return [
