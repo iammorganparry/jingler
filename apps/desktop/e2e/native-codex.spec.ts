@@ -70,7 +70,7 @@ test("native Codex device login unlocks onboarding through refreshed status", as
     // The fake provider completes outside Jingler, just like browser device authorization.
     writeFileSync(join(codexHome, "authenticated"), "yes")
     await window.getByRole("button", { name: "Check Codex sign-in" }).click()
-    await expect(window.getByText("Codex CLI · ready · desktop", { exact: false })).toBeVisible()
+    await expect(window.getByText("Codex CLI, ready, desktop", { exact: false })).toBeVisible()
     await window.getByRole("button", { name: "Continue", exact: true }).click()
     // #487 removed the standalone resources onboarding step.
     await expect(window.getByRole("heading", { name: "Import existing sessions?" })).toBeVisible()

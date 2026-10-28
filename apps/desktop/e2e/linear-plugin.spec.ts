@@ -7,7 +7,8 @@ const API_KEY = "lin_api_e2e_linear_plugin"
 const LINKED_LINEAR_ISSUE = /Linked issue ENG-/
 const LINEAR_IDENTIFIER = /^ENG-/
 const LINEAR_SOURCE_NAME = /^Linear issue/
-const NEW_SESSION_SOURCES = ["New task", "Existing branch", "Pull request", "GitHub issue", "Linear issue"] as const
+const NEW_SESSION_TABS = ["Branch", "Pull request", "Issue"] as const
+const ISSUE_SOURCES = ["GitHub issue", "Linear issue"] as const
 
 test("shows every new-session source and starts from a Linear issue", async ({
   launchApp
@@ -23,9 +24,15 @@ test("shows every new-session source and starts from a Linear issue", async ({
     await launched.window.getByTestId("new-session").click()
     await addProject(launched.window, launched.repoPath)
 
-    await launched.window.getByRole("button", { name: "Session source" }).click()
+    // Sources live in the "Start from" chip: Branch / Pull request / Issue tabs, issue providers listed under Issue.
+    await launched.window.getByRole("button", { name: "Start from", exact: true }).click()
+    const sourceTabs = launched.window.getByRole("tablist", { name: "Start from source" })
     await Promise.all(
-      NEW_SESSION_SOURCES.map((label) =>
+      NEW_SESSION_TABS.map((label) => expect(sourceTabs.getByRole("tab", { name: label, exact: true })).toBeVisible())
+    )
+    await sourceTabs.getByRole("tab", { name: "Issue", exact: true }).click()
+    await Promise.all(
+      ISSUE_SOURCES.map((label) =>
         expect(launched.window.getByRole("option", { name: new RegExp(label) })).toBeVisible()
       )
     )

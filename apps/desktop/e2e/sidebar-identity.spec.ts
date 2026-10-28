@@ -114,8 +114,8 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   expect(appBackground).toBe(titleBarBackground)
 
   await running.click()
-  await expect(window.getByRole("navigation", { name: "Breadcrumb" }))
-    .toContainText("Liquid glass sidebar")
+  // Chat tabs have no breadcrumb (Paper 04b/04h); the session header names the session.
+  await expect(window.getByTestId("session-header-identity")).toContainText("Liquid glass sidebar")
 
   const sidebarSurface = await window.getByTestId("session-sidebar").evaluate((element) => {
     const style = getComputedStyle(element)
