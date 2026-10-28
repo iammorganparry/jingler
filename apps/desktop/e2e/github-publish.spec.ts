@@ -350,10 +350,8 @@ test("a behind PR lists its blocker with Update branch and disables Merge with t
   const blocker = window.getByText("Branch is out of date with the base")
   await expect(blocker).toBeVisible({ timeout: 20_000 })
   await expect(window.getByRole("button", { name: "Merge pull request" })).toBeDisabled()
-  await expect(window.getByTestId("merge-split-button")).toHaveAttribute(
-    "title",
-    "Branch is out of date with the base"
-  )
+  await window.getByTestId("merge-split-button").locator("xpath=..").focus()
+  await expect(window.getByRole("tooltip")).toHaveText("Branch is out of date with the base")
   await window.getByRole("button", { name: "Update branch" }).click()
   await expect.poll(() => githubServer.operations.join("\n"), { timeout: 15_000 }).toContain("update-branch")
 })

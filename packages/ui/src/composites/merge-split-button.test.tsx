@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MergeSplitButton } from "./merge-split-button.js"
 
@@ -18,11 +18,12 @@ describe("MergeSplitButton", () => {
     expect(screen.getByRole("button", { name: "Squash and merge" })).toBeTruthy()
   })
 
-  it("is disabled with the first blocker as its tooltip", () => {
+  it("is disabled with the first blocker as its tooltip", async () => {
     const onMerge = vi.fn()
     render(<MergeSplitButton connected onMerge={onMerge} blockedReason="Merge conflicts" />)
     expect((screen.getByRole("button", { name: "Merge pull request" }) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByTestId("merge-split-button").getAttribute("title")).toBe("Merge conflicts")
+    act(() => (screen.getByTestId("merge-split-button").parentElement as HTMLElement).focus())
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Merge conflicts")
   })
 
   it("shows a failed merge under the button", () => {

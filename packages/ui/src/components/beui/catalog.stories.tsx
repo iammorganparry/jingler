@@ -33,6 +33,7 @@ function CatalogDemo() {
     <Spec name="preview-rail"><PreviewRail items={options.map(item => ({ id: item.value, label: item.label }))} activeId={choice} onSelect={item => setChoice(item.id)} /></Spec>
     <Spec name="dock"><Dock items={nav} activeId="home" /></Spec>
     <Spec name="tooltip"><Tooltip label="Helpful detail"><button>Hover me</button></Tooltip></Spec>
+    <Spec name="tooltip-disabled-trigger"><Tooltip label="Why it is disabled"><span tabIndex={0}><button disabled>Disabled</button></span></Tooltip></Spec>
     <Spec name="animated-badge"><AnimatedBadge status="success">Ready</AnimatedBadge></Spec>
     <Spec name="loader"><div className="flex gap-3"><Loader /><Loader variant="dots" /></div></Spec>
     <Spec name="catalog-check"><span className="font-mono text-[11px] text-green">{BEUI_MOTION_COMPONENTS.length} production atoms</span></Spec>

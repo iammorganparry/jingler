@@ -270,7 +270,6 @@ export function Tooltip({
             <AnimatePresence>
               {open && coords ? (
                 <span
-                  aria-hidden
                   className="pointer-events-none fixed z-[9999]"
                   style={{
                     top: coords.top,
