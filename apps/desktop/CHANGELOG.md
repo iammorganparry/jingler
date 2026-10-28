@@ -1,5 +1,15 @@
 # @jingler/desktop
 
+## 0.12.1
+
+### Patch Changes
+
+- 4901987: The main pane sits flush against the sidebar and title bar instead of floating in a rounded card.
+- 5b05597: The branch chip in the session header sits on one line, level with the title and the PR chip.
+- 91d436f: The session title no longer sits under the macOS window buttons, and the header buttons on the right stay inside the window.
+- d166e29: The chat toolbar and the file/view tab bar beside it are now the same height.
+  - @jingler/plannotator-ext@0.12.1
+
 ## 0.12.0
 
 ### Minor Changes
