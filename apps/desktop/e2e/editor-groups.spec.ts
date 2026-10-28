@@ -267,6 +267,12 @@ test("dragging file and view tabs creates horizontal and vertical splits", async
   await openFile("a.ts")
   await openFile("b.ts")
   await expect(groups(window)).toHaveCount(2)
+  // Side-by-side toolbars line up: the chat lane and the file tab strip are both 40px.
+  const heights = await Promise.all([
+    window.getByTestId("chat-lane-header").first().boundingBox(),
+    window.getByTestId("editor-tab-strip").first().boundingBox()
+  ])
+  expect(heights.map((box) => box?.height)).toEqual([40, 40])
 
   await dragTo(window, '[data-testid="editor-tab-file-b.ts"]', '[aria-label="Editor group: b.ts"]', 0.95)
   await expect(groups(window)).toHaveCount(3)
