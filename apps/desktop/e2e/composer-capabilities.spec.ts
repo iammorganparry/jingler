@@ -99,7 +99,8 @@ test("offers the same Jingler permission modes for every certified model", async
   await expect(launched.window.getByRole("option", { name: /^Ask Before Actions\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Accept Edits\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Auto\b/ })).toBeVisible()
-  await expect(launched.window.getByRole("option", { name: /^Plan\b/ })).toBeVisible()
+  // Plan moved out of the permission menu into the composer's Work mode control.
+  await expect(launched.window.getByRole("tablist", { name: "Work mode" }).getByRole("tab", { name: "Plan" })).toBeVisible()
 })
 
 test("derives reasoning choices from the certified model capability", async ({ launchApp }) => {
