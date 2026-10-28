@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { delimiter, join } from "node:path"
 import { appShell, createWorkspace, expect, sessionRow, test } from "./fixtures.js"
 import { showPullRequestDetails } from "./pull-request.js"
 
@@ -357,4 +358,32 @@ test("a behind PR lists its blocker with Update branch and disables Merge with t
   await expect(window.getByRole("tooltip")).toHaveText("Branch is out of date with the base")
   await window.getByRole("button", { name: "Update branch" }).click()
   await expect.poll(() => githubServer.operations.join("\n"), { timeout: 15_000 }).toContain("update-branch")
+})
+
+test("a PR the agent opens with gh pr create is linked to the session header", async ({ launchApp }) => {
+  test.setTimeout(120_000)
+  const bin = mkdtempSync(join(tmpdir(), "jingler-e2e-agent-gh-"))
+  writeFileSync(
+    join(bin, "gh"),
+    "#!/usr/bin/env node\nconst a = process.argv.slice(2)\nif (a[0] === 'pr' && a[1] === 'create') { console.log('https://github.com/Acme/Widget/pull/77'); process.exit(0) }\nprocess.exit(1)\n"
+  )
+  chmodSync(join(bin, "gh"), 0o755)
+  const { window, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { github: { enabled: true, autoCreatePr: false, autoDetectPr: false } },
+    e2eEnv: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` }
+  })
+  git(repoPath, ["remote", "add", "origin", "git@github.com:acme/widget.git"])
+  await expect(appShell(window)).toBeVisible()
+  await createWorkspace(window, "Agent opens PR", "worktree", repoPath)
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[gh-pr-create]] open a PR")
+  await composer.press("Enter")
+  await expect.poll(async () => {
+    const allow = window.getByRole("button", { name: /Allow once/ }).first()
+    if (await allow.isVisible().catch(() => false)) await allow.click().catch(() => undefined)
+    return window.getByTestId("header-link-pr").isVisible().catch(() => false)
+  }, { timeout: 60_000 }).toBe(true)
+  await expect(window.getByTestId("header-link-pr")).toContainText("77")
 })

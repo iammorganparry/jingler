@@ -1839,6 +1839,18 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           return migrateSessionPrs({ ...session, prs: next })
         })
 
+      /**
+       * Link a PR the agent opened elsewhere. Becomes the primary PR only when the
+       * session has none; otherwise it sits in `linkedPrs`, outside the stack.
+       */
+      const linkAgentPr = (id: string, number: number) =>
+        update(id, (session) => {
+          if ((session.linkedPrs ?? []).includes(number) || (session.prs ?? []).some((pr) => pr.number === number)) return session
+          if (session.prNumber === number) return session
+          if (session.prNumber === null && !session.prs?.length) return migrateSessionPrs({ ...session, prNumber: number })
+          return { ...session, linkedPrs: [...(session.linkedPrs ?? []), number] }
+        })
+
       /** Persist the live worktree/PR identity as one routing transition. */
       const setGitHubLink = (
         id: string,
@@ -2299,6 +2311,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setCheckoutPr,
         setCheckoutBranch,
         appendPr,
+        linkAgentPr,
         setGitHubLink,
         claimGitHubFeedback,
         markGitHubFeedbackDispatched,

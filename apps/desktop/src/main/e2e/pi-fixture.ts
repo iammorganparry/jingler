@@ -1075,6 +1075,15 @@ const checkoutBranchResponse = (context: PiContext): ReturnType<typeof fauxAssis
   return fauxAssistantMessage("Moved the checkout.")
 }
 
+// `[[gh-pr-create]]`: run `gh pr create` (the e2e fake prints a PR URL), then finish.
+const ghPrCreateResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  if (!latestOperatorText(context).includes("[[gh-pr-create]]")) return null
+  if (recentToolResultCount(context, COMMAND_TOOL) === 0) {
+    return callTool(COMMAND_TOOL, { command: "gh pr create --fill", intent: "Opening a PR" }, "gh-pr-create-1")
+  }
+  return fauxAssistantMessage("Opened the PR.")
+}
+
 const switchRepoSwitchOnly = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
   const target = /\[\[switch-repo=([^\]]+)\]\]/u.exec(latestOperatorText(context))?.[1]
   if (target === undefined || recentToolResultCount(context, SWITCH_CHECKOUT_TOOL) > 0) return null
@@ -1132,6 +1141,7 @@ const markerResponders = [
   switchPlanResponse,
   switchBuildResponse,
   checkoutBranchResponse,
+  ghPrCreateResponse,
   switchRepoResponse,
   fileBrowserResponse,
   supervisorSubagentResponse,
