@@ -84,6 +84,13 @@ export const agentCwdOf = (session: CheckoutSession, scratchDir: string): string
 export const hasNoRepo = (checkout: Pick<SessionCheckout, "repo" | "repoPath">): boolean =>
   checkout.repoPath === undefined && checkout.repo === "";
 
+/** Every attached repo's name ("api + web"), "No repo" for an Auto session that has none yet. */
+export const reposLabelOf = (session: CheckoutSession): string => {
+  const real = checkoutsOf(session).filter((c) => !hasNoRepo(c));
+  if (real.length === 0) return "No repo";
+  return real.map((c) => c.repo.split("/").filter(Boolean).at(-1) ?? c.repo).join(" + ");
+};
+
 export type CheckoutAction =
   /** Attach a checkout and make it active; an existing one for the same repo is re-activated, never duplicated. */
   | { readonly type: "attach"; readonly checkout: SessionCheckout }

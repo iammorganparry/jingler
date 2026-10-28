@@ -18,7 +18,7 @@ import type { PendingEnvironmentSession } from "../app/environment-session-start
 import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
 import { SessionSidebar, type SidebarReleaseNotes, type SidebarUpdate } from "../app/session-sidebar.js"
 import { MissingFolderBanner, ProjectSidebar } from "../app/project-sidebar.js"
-import { projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
+import { MULTI_REPO_PROJECT_ID, projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation, type HomeStart } from "./empty-conversation.js"
@@ -339,7 +339,7 @@ export function SessionConversation(props: SessionConversationProps) {
   }
 
   const openNewSession = () => {
-    if (selectedProjectId !== UNASSIGNED_PROJECT_ID && props.onNewSessionForProject) {
+    if (selectedProjectId !== UNASSIGNED_PROJECT_ID && selectedProjectId !== MULTI_REPO_PROJECT_ID && props.onNewSessionForProject) {
       props.onNewSessionForProject(selectedProjectId)
       return
     }

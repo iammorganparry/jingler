@@ -105,7 +105,7 @@ test("agent switches to a second registered repo mid-turn; Changes groups both; 
 
   // Header switcher and the sidebar repo count.
   await expect(window.getByTestId("checkout-switcher")).toBeVisible()
-  await expect(window.getByTestId(`session-repos-${(session as unknown as { id: string }).id}`)).toContainText("2 repos")
+  await expect(window.getByTestId(`session-repos-${(session as unknown as { id: string }).id}`)).toContainText(" + ")
 
   // Changes: both repos grouped by checkout.
   await window.getByRole("button", { name: /^Changes\b/ }).first().click()

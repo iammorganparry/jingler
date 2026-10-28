@@ -8,6 +8,7 @@ import {
   ownedWorktreePaths,
   PRIMARY_CHECKOUT_ID,
   reduceCheckouts,
+  reposLabelOf,
 } from "./session-checkout.js";
 import type { SessionCheckout } from "./domain.js";
 
@@ -115,5 +116,13 @@ describe("Auto (zero-checkout) sessions", () => {
 
   it("agentCwdOf prefers a legacy session's worktree/repo over the scratch fallback", () => {
     expect(agentCwdOf(legacy, "/scratch/s1")).toBe("/w/api");
+  });
+});
+
+describe("reposLabelOf", () => {
+  it("names one repo, every repo once a second is attached, and No repo for Auto", () => {
+    expect(reposLabelOf(legacy)).toBe("api");
+    expect(reposLabelOf(reduceCheckouts(legacy, { type: "attach", checkout: { ...web, repo: "org/web" } }))).toBe("api + web");
+    expect(reposLabelOf({ id: "s-auto", repo: "", branch: "", prNumber: null, checkouts: [] })).toBe("No repo");
   });
 });

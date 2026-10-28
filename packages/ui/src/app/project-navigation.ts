@@ -1,11 +1,14 @@
-import type { Project, Session } from "@jingler/core"
+import { checkoutsOf, type Project, type Session } from "@jingler/core"
 
 export const UNASSIGNED_PROJECT_ID = "__unassigned__"
+/** Sessions with 2+ checkouts live here, so switching checkouts never moves them between projects. */
+export const MULTI_REPO_PROJECT_ID = "__multi_repo__"
 
 export function projectIdForSession(
   session: Session,
   projects: ReadonlyArray<Project>
 ): string {
+  if (checkoutsOf(session).length > 1) return MULTI_REPO_PROJECT_ID
   if (session.projectId && projects.some((project) => project.id === session.projectId)) {
     return session.projectId
   }

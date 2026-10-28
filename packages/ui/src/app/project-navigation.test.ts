@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Project, Session } from "@jingler/core"
 import { testSession } from "../test-support.js"
-import { projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
+import { MULTI_REPO_PROJECT_ID, projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
 
 const project = (values: Partial<Project> & Pick<Project, "id" | "name" | "path">): Project => ({
   availability: "available",
@@ -34,4 +34,16 @@ describe("project navigation", () => {
     expect(projectIdForSession(session({ id: "remote", repoPath: "/repos/a", environmentId: "device" }), [...projects, remote])).toBe("remote")
   })
 
+})
+
+describe("multi-repo grouping", () => {
+  it("moves a session with 2+ checkouts into the Multi-repo group, whichever checkout is active", () => {
+    const projects = [project({ id: "a", name: "api", path: "/repos/api" })]
+    const co = (id: string, repo: string) => ({ id, repo, repoPath: `/repos/${repo}`, branch: "b", prNumber: null })
+    const multi = (activeCheckoutId: string) =>
+      testSession({ id: "m", projectId: "a", checkouts: [co("primary", "api"), co("c2", "web")], activeCheckoutId })
+    expect(projectIdForSession(multi("primary"), projects)).toBe(MULTI_REPO_PROJECT_ID)
+    expect(projectIdForSession(multi("c2"), projects)).toBe(MULTI_REPO_PROJECT_ID)
+    expect(projectIdForSession(testSession({ id: "one", projectId: "a" }), projects)).toBe("a")
+  })
 })

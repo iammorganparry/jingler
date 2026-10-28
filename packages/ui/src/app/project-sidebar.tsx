@@ -11,7 +11,14 @@ import { HoverCard } from "../components/hover-card.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
-import { projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
+import { MULTI_REPO_PROJECT_ID, projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
+
+/** Groups with no backing project; shown only while they hold an open session. */
+const VIRTUAL_GROUPS: ReadonlyArray<ProjectItem> = [
+  { id: MULTI_REPO_PROJECT_ID, name: "Multi-repo", availability: "available" },
+  { id: UNASSIGNED_PROJECT_ID, name: "Unassigned", availability: "available" }
+]
+const isVirtualGroup = (id: string): boolean => VIRTUAL_GROUPS.some((group) => group.id === id)
 
 /** Live activity kinds that mean the run is blocked on the operator. */
 const NEEDS_YOU_KINDS: ReadonlySet<string> = new Set(["needs-input", "needs-approval"])
@@ -223,12 +230,11 @@ export function ProjectSidebar({
   onRemove?: (projectId: string) => void | Promise<void>
 }) {
   const openSessions = sessions.filter((session) => !session.archived)
-  const hasUnassigned = openSessions.some(
-    (session) => projectIdForSession(session, projects) === UNASSIGNED_PROJECT_ID
-  )
-  const candidates: ReadonlyArray<ProjectItem> = hasUnassigned
-    ? [...projects, { id: UNASSIGNED_PROJECT_ID, name: "Unassigned", availability: "available" }]
-    : projects
+  const groupIds = new Set(openSessions.map((session) => projectIdForSession(session, projects)))
+  const candidates: ReadonlyArray<ProjectItem> = [
+    ...projects,
+    ...VIRTUAL_GROUPS.filter((group) => groupIds.has(group.id))
+  ]
   const items = candidates
     .map((project) => ({
       project,
@@ -271,17 +277,17 @@ export function ProjectSidebar({
                 ).length}
                 onSelect={() => onSelect(project.id)}
                 onOpenSettings={
-                  onOpenSettings && project.id !== UNASSIGNED_PROJECT_ID
+                  onOpenSettings && !isVirtualGroup(project.id)
                     ? () => onOpenSettings(project.id)
                     : undefined
                 }
                 onLocate={
-                  onLocate && project.availability === "missing" && project.id !== UNASSIGNED_PROJECT_ID
+                  onLocate && project.availability === "missing" && !isVirtualGroup(project.id)
                     ? () => void onLocate(project.id)
                     : undefined
                 }
                 onRemove={
-                  onRemove && project.id !== UNASSIGNED_PROJECT_ID
+                  onRemove && !isVirtualGroup(project.id)
                     ? () => onRemove(project.id)
                     : undefined
                 }
