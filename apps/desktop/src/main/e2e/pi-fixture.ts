@@ -1063,6 +1063,24 @@ const switchRepoResponse = (context: PiContext): ReturnType<typeof fauxAssistant
   return fauxAssistantMessage("Edited the second repository.")
 }
 
+// `[[checkout-branch=name]]`: switch to the repo named by `[[switch-repo=…]]`, then move that checkout onto a new branch.
+const checkoutBranchResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  const branch = /\[\[checkout-branch=([^\]]+)\]\]/u.exec(latestOperatorText(context))?.[1]
+  if (branch === undefined) return null
+  const switched = switchRepoSwitchOnly(context)
+  if (switched !== null) return switched
+  if (recentToolResultCount(context, COMMAND_TOOL) === 0) {
+    return callTool(COMMAND_TOOL, { command: `git checkout -b ${branch}`, intent: "Branching" }, "checkout-branch-1")
+  }
+  return fauxAssistantMessage("Moved the checkout.")
+}
+
+const switchRepoSwitchOnly = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  const target = /\[\[switch-repo=([^\]]+)\]\]/u.exec(latestOperatorText(context))?.[1]
+  if (target === undefined || recentToolResultCount(context, SWITCH_CHECKOUT_TOOL) > 0) return null
+  return callTool(SWITCH_CHECKOUT_TOOL, { repoPath: target }, "checkout-branch-switch-1")
+}
+
 // `[[intent-tool]]`: run one command with an agent-written `intent`, then finish.
 const intentToolResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
   if (!latestOperatorText(context).includes("[[intent-tool]]")) return null
@@ -1113,6 +1131,7 @@ const markerResponders = [
   intentToolResponse,
   switchPlanResponse,
   switchBuildResponse,
+  checkoutBranchResponse,
   switchRepoResponse,
   fileBrowserResponse,
   supervisorSubagentResponse,

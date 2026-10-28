@@ -2045,6 +2045,15 @@ export const setSessionStatus = (
 ) =>
   Effect.gen(function* () {
     yield* SessionStore.setStatus(sessionId, status);
+    // A settled turn may have moved a worktree off its recorded branch; labels read
+    // the stored checkout branch, so re-sync before the record is published.
+    // Direct checkouts are excluded: their drift is surfaced by BranchDriftError.
+    const session = yield* SessionStore.get(sessionId);
+    yield* Effect.forEach(
+      checkoutsOf(session).filter((c) => c.worktreePath !== undefined && c.workspaceMode !== "direct"),
+      (checkout) => syncCheckoutBranch(sessionId, checkout),
+      { discard: true },
+    );
     return yield* SessionStore.get(sessionId);
   }).pipe(
     Effect.catchTag("SessionNotFoundError", () =>

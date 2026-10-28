@@ -124,6 +124,26 @@ test("agent switches to a second registered repo mid-turn; Changes groups both; 
   await expect.poll(() => existsSync(second!.worktreePath!), { timeout: 30_000 }).toBe(false)
 })
 
+test("group header and checkout chip show the checkout's live branch after the agent moves it (Q7)", async ({ launchApp }) => {
+  const { window, home, repoPath, secondPath } = await launchTwoRepos(launchApp, true)
+  await expect(appShell(window)).toBeVisible()
+  await createWorkspace(window, "Live branch", "worktree", repoPath)
+  await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
+  await expect.poll(() => sessionsAt(home)[0]?.repoPath, { timeout: 20_000 }).toBeTruthy()
+  const target = sessionsAt(home)[0]!.repoPath === secondPath ? repoPath : secondPath
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill(`[[switch-repo=${target}]] [[checkout-branch=feat/live-label]] move it`)
+  await composer.press("Enter")
+  await expect(window.getByText("Moved the checkout.")).toBeVisible({ timeout: 60_000 })
+  await allowGates(window, async () => (sessionsAt(home)[0]?.checkouts ?? []).some((c) => (c as { branch?: string }).branch === "feat/live-label"))
+
+  const moved = sessionsAt(home)[0]!.checkouts!.find((c) => (c as { branch?: string }).branch === "feat/live-label")!
+  await expect(window.getByTestId("checkout-switcher")).toContainText("feat/live-label")
+  await window.getByRole("button", { name: /^Changes\b/ }).first().click()
+  await expect(window.getByTestId(`changes-checkout-${moved.id}`)).toContainText("feat/live-label", { timeout: 20_000 })
+})
+
 test("an unregistered repo asks for approval: approve registers and attaches", async ({ launchApp }) => {
   const { window, home, repoPath, secondPath } = await launchTwoRepos(launchApp, false)
   await expect(appShell(window)).toBeVisible()
