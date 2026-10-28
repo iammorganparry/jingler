@@ -30,8 +30,65 @@ import {
 } from "../subagents/subagent-capability-broker.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import {
-  makePiSessionFactory
+  makePiSessionFactory,
+  releaseWaitOnSteer
 } from "./pi-session-factory.js"
+
+describe("releaseWaitOnSteer", () => {
+  type Listener = (event: { type: string; steering?: ReadonlyArray<string> }) => void
+  const fakeWaitSession = (steering: string[] = []) => {
+    const listeners: Listener[] = []
+    // Stands in for pi-subagents' bg_wait: blocks until its signal aborts.
+    const definition = {
+      execute: (_id: string, _params: unknown, signal: AbortSignal | undefined) =>
+        new Promise((resolve) => {
+          if (signal?.aborted) resolve("aborted")
+          signal?.addEventListener("abort", () => resolve("aborted"), { once: true })
+        })
+    }
+    const session = {
+      getToolDefinition: (name: string) => (name === "bg_wait" ? definition : undefined),
+      getSteeringMessages: () => steering,
+      subscribe: (listener: Listener) => {
+        listeners.push(listener)
+        return () => listeners.splice(listeners.indexOf(listener), 1)
+      }
+    }
+    releaseWaitOnSteer(session as never)
+    const call = () => (definition.execute as (...args: unknown[]) => Promise<unknown>)(
+      "t1", {}, new AbortController().signal, undefined, undefined
+    )
+    return { call, listeners }
+  }
+
+  it("ends a blocked bg_wait as soon as a steer is queued", async () => {
+    const { call, listeners } = fakeWaitSession()
+    const waiting = call()
+    let settled = false
+    void waiting.then(() => { settled = true })
+    await Promise.resolve()
+    listeners[0]!({ type: "queue_update", steering: [] })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    listeners[0]!({ type: "queue_update", steering: ["operator message"] })
+    await expect(waiting).resolves.toBe("aborted")
+    expect(listeners).toHaveLength(0)
+  })
+
+  it("does not start blocking when a steer is already queued", async () => {
+    const { call } = fakeWaitSession(["typed before the wait"])
+    await expect(call()).resolves.toBe("aborted")
+  })
+
+  it("leaves a session without bg_wait alone", () => {
+    expect(() => releaseWaitOnSteer({
+      getToolDefinition: () => undefined,
+      getSteeringMessages: () => [],
+      subscribe: () => () => {}
+    } as never)).not.toThrow()
+  })
+})
 
 const roots: string[] = []
 const brokers: SubagentCapabilityBroker[] = []
