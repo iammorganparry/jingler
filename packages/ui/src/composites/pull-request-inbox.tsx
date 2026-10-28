@@ -117,6 +117,19 @@ export interface PullRequestInboxProps {
   onRetry?: () => void
 }
 
+/** The list column: full width when compact, otherwise a drag-resizable, remembered width. */
+function InboxListColumn({ compact, children }: { compact: boolean; children: ReactNode }) {
+  const list = useResizableWidth({ storageKey: "jingler.prInbox.listWidth", initial: 360, min: 280, max: 720 })
+  const className = "flex min-h-0 min-w-0 flex-col border-r border-line bg-panel"
+  if (compact) return <section data-testid="pull-request-list" className={cn(className, "flex-1")}>{children}</section>
+  return (
+    <>
+      <section data-testid="pull-request-list" style={{ width: list.width }} className={cn(className, "flex-none")}>{children}</section>
+      <ResizeHandle aria-label="Resize pull request list" onResize={(dx) => list.adjust(dx)} />
+    </>
+  )
+}
+
 /** Global GitHub-style PR list with a responsive read-only detail pane. */
 export function PullRequestInbox({
   prs,
@@ -240,7 +253,6 @@ export function PullRequestInbox({
     label: filterOptions(prs.flatMap((pr) => pr.labels.map((label) => label.name))),
   }), [prs])
   const [mobileDetail, setMobileDetail] = useState(false)
-  const listWidth = useResizableWidth({ storageKey: "jingler.prInbox.listWidth", initial: 360, min: 280, max: 720 })
   const compact = !atLeast(useWidthTier(), "mid")
   const isTeam = Boolean(teamControls?.teamId)
   const visible = useMemo(
@@ -254,11 +266,7 @@ export function PullRequestInbox({
   return (
     <div data-testid="pull-request-inbox" className="flex min-h-0 min-w-0 flex-1 bg-editor">
       {showList && (
-        <section
-          data-testid="pull-request-list"
-          style={compact ? undefined : { width: listWidth.width }}
-          className={cn("flex min-h-0 min-w-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "flex-none")}
-        >
+        <InboxListColumn compact={compact}>
           <header className="flex flex-none flex-col gap-3 border-b border-line px-4 py-3.5">
             <div className="flex items-center gap-2">
               <GitPullRequest className="size-4 text-muted-foreground" />
@@ -294,9 +302,8 @@ export function PullRequestInbox({
           <div className="min-h-0 flex-1 overflow-y-auto">
             {getLoading()}
           </div>
-        </section>
+        </InboxListColumn>
       )}
-      {showList && !compact && <ResizeHandle aria-label="Resize pull request list" onResize={(dx) => listWidth.adjust(dx)} />}
 
       {(!compact || mobileDetail) && (
         <WidthTierProvider className="relative bg-editor">
