@@ -155,6 +155,7 @@ vi.mock("./rpc-client.js", () => ({
     agentDecideGate: async () => {},
     agentAnswerQuestion: async () => {},
     agentSetMode: async () => {},
+    agentSetWorkMode: async () => {},
     agentSetReasoning: async (sessionId: string, chatId: string, reasoning: unknown) => {
       h.reasoningCalls.push({ sessionId, chatId, reasoning })
     },
@@ -2822,5 +2823,201 @@ describe("persistModelSelection", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+/**
+ * Edges the audit found with no test at all — each drives one transition the
+ * view can actually send and asserts what the operator would see.
+ */
+describe("conversationMachine — audited edges", () => {
+  const observeRemoteTurn = async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: remoteEnvelope(1, { _tag: "Started", sessionId: session.id, model: "remote-model" })
+    })
+    await waitFor(actor, (s) => s.matches("remoteRunning"))
+    return actor
+  }
+
+  it("STOP halts an observed remote turn and parks its queue", async () => {
+    const actor = await observeRemoteTurn()
+    actor.send({ type: "SEND", text: "held" })
+
+    actor.send({ type: "STOP" })
+
+    expect(actor.getSnapshot().matches("stopping")).toBe(true)
+    expect(h.stopCalls).toContain("s1")
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+    expect(actor.getSnapshot().context.queueParked).toBe(true)
+    expect(h.agentRunCalls).toHaveLength(0)
+    actor.stop()
+  })
+
+  it("SEND_NOW during an observed remote turn stops it and runs the picked message", async () => {
+    const actor = await observeRemoteTurn()
+    actor.send({ type: "SEND", text: "first" })
+    actor.send({ type: "SEND", text: "jump me" })
+
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 1) })
+
+    expect(actor.getSnapshot().matches("stopping")).toBe(true)
+    await waitFor(actor, (s) => s.matches("running"))
+    expect(h.agentRunCalls[0]?.text).toBe("jump me")
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["first"])
+    actor.stop()
+  })
+
+  it("coalesces a duplicate external send while observing a remote turn", async () => {
+    const actor = await observeRemoteTurn()
+    actor.send({ type: "SEND", text: "feedback", externalInstruction: githubIdentity })
+    actor.send({
+      type: "SEND",
+      text: "feedback again",
+      externalInstruction: { ...githubIdentity, deliveryId: "delivery-2" }
+    })
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("REFRESH_DIFF re-reads the diff from idle and returns to idle", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    const before = h.diffCalls
+    h.diffValue = { added: 4, removed: 1, files: 2 }
+
+    actor.send({ type: "REFRESH_DIFF" })
+
+    await waitFor(actor, (s) => s.matches(idle) && h.diffCalls > before)
+    expect(actor.getSnapshot().context.diffStat).toEqual({ added: 4, removed: 1, files: 2 })
+    actor.stop()
+  })
+
+  it("applies live diff and file reads while a turn runs", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "DIFF_STAT_UPDATED", diffStat: { added: 9, removed: 0, files: 1 } })
+    actor.send({ type: "FILES_UPDATED", files: ["src/a.ts"] })
+
+    expect(actor.getSnapshot().context.diffStat).toEqual({ added: 9, removed: 0, files: 1 })
+    expect(actor.getSnapshot().context.files).toEqual(["src/a.ts"])
+    actor.stop()
+  })
+
+  it("ANSWER_QUESTION clears the pending question without ending the turn", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({
+      _tag: "QuestionRequested",
+      request: { id: "q1", questions: [{ question: "Which?", header: "Pick", multiSelect: false, options: [] }] }
+    })
+
+    actor.send({ type: "ANSWER_QUESTION", requestId: "q1", answers: [{ selected: ["A"], other: null }] })
+
+    expect(pendingQuestion(actor.getSnapshot().context.messages)).toBeNull()
+    expect(actor.getSnapshot().matches("running")).toBe(true)
+    actor.stop()
+  })
+
+  it("SET_WORK_MODE plan switches the chip, and build restores the execution mode", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    const execution = actor.getSnapshot().context.mode
+
+    actor.send({ type: "SET_WORK_MODE", workMode: "plan" })
+    expect(actor.getSnapshot().context.mode).toBe("plan")
+    actor.send({ type: "SET_WORK_MODE", workMode: "build" })
+    expect(actor.getSnapshot().context.mode).toBe(execution)
+    actor.stop()
+  })
+
+  it("SessionSettled marks the session settled without ending the turn", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({ _tag: "SessionSettled" })
+
+    expect(actor.getSnapshot().context.session.status).toBe("settled")
+    expect(actor.getSnapshot().matches("running")).toBe(true)
+    actor.stop()
+  })
+
+  it("leaves `stopping` after the settle cap when the stop RPC never answers", async () => {
+    vi.useFakeTimers()
+    try {
+      h.stopGate = new Promise<void>(() => {})
+      const actor = start()
+      await vi.advanceTimersByTimeAsync(0)
+      actor.send({ type: "SEND", text: "go" })
+      await vi.advanceTimersByTimeAsync(0)
+      actor.send({ type: "STOP" })
+      expect(actor.getSnapshot().matches("stopping")).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(3_001)
+
+      expect(actor.getSnapshot().matches(idle)).toBe(true)
+      actor.send({ type: "SEND", text: "again" })
+      expect(actor.getSnapshot().matches("running")).toBe(true)
+      actor.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("a late steer reply after Stop settles the latch but never runs the parked queue", async () => {
+    h.steerStatus = "deferred"
+    let release = () => {}
+    h.steerGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    actor.send({ type: "SEND", text: "held" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1)
+
+    actor.send({ type: "STOP" })
+    await waitFor(actor, (s) => s.matches(idle))
+    release()
+
+    await waitFor(actor, (s) => s.context.steeringId === null)
+    expect(actor.getSnapshot().matches(idle)).toBe(true)
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+    expect(h.agentRunCalls).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("SEND_NOW while the diff refreshes promotes the pick to run next", async () => {
+    let releaseDiff = () => {}
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+    actor.send({ type: "SEND", text: "first" })
+    actor.send({ type: "SEND", text: "second" })
+    h.diffGate = new Promise<void>((resolve) => {
+      releaseDiff = resolve
+    })
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, (s) => s.matches("refreshingDiff"))
+
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 1) })
+    releaseDiff()
+
+    await waitFor(actor, () => h.agentRunCalls.length === 2)
+    expect(h.agentRunCalls[1]?.text).toBe("second")
+    actor.stop()
   })
 })

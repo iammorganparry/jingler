@@ -6,6 +6,7 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  type AgentSession,
   type AgentSessionEvent,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
@@ -1010,8 +1011,43 @@ async function createConfiguredPiSession(
     uiContext: makeExtensionUIContext(),
     mode: "rpc"
   })
+  releaseWaitOnSteer(result.session)
 
   return { result }
+}
+
+/**
+ * Pi drains a steer only once the whole tool batch has finished, and
+ * `bg_wait` wakes on subagent events alone (default window: 30 minutes). A
+ * steer accepted mid-wait therefore sat unread until the wait ran out, and the
+ * chat looked hung. Abort the wait as soon as a steer is queued — bg_wait
+ * treats abort as "stop waiting"; the background work keeps running.
+ *
+ * Pi's tool wrapper reads `definition.execute` at call time, so patching the
+ * registered definition after `bindExtensions` takes effect.
+ * ponytail: an extension reload re-registers bg_wait unpatched; re-apply on reload if that ever runs mid-session.
+ */
+export const releaseWaitOnSteer = (
+  session: Pick<AgentSession, "getToolDefinition" | "getSteeringMessages" | "subscribe">
+): void => {
+  const definition = session.getToolDefinition?.("bg_wait")
+  if (definition === undefined) return
+  const execute = definition.execute.bind(definition)
+  definition.execute = async (toolCallId, params, signal, onUpdate, ctx) => {
+    const released = new AbortController()
+    const abort = () => released.abort()
+    signal?.addEventListener("abort", abort, { once: true })
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type === "queue_update" && event.steering.length > 0) abort()
+    })
+    if (signal?.aborted || session.getSteeringMessages().length > 0) abort()
+    try {
+      return await execute(toolCallId, params, released.signal, onUpdate, ctx)
+    } finally {
+      unsubscribe()
+      signal?.removeEventListener("abort", abort)
+    }
+  }
 }
 
 const resolveSessionToolRegistry = (

@@ -2436,9 +2436,25 @@ export const conversationMachine = setup({
           { guard: "isTerminal", target: "refreshingDiff", actions: "foldEvent" },
           { actions: ["foldEvent", "liveRefreshDiff"] }
         ],
-        SEND: { actions: "enqueue" },
+        SEND: [
+          { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
+          { actions: "enqueue" }
+        ],
         UNQUEUE: { actions: "removeQueued" },
         EDIT_QUEUED: { actions: "editQueued" },
+        // Without these an observed turn could be neither stopped nor jumped:
+        // the Stop button and "Send now" did nothing until it ended on its own.
+        // "Now" takes stop-and-replay — an accepted steer here would settle via
+        // `settleLateSteer`, which never shows the reply.
+        SEND_NOW: {
+          guard: "hasQueuedMessage",
+          target: "stopping",
+          actions: ["promoteQueued", "settleStoppedRun"]
+        },
+        STOP: {
+          target: "stopping",
+          actions: ["settleStoppedRun", "parkQueue", "clearSubagents"]
+        },
         // A late steer reply can land here too (a session envelope moved the
         // machine while the RPC was in flight). Unhandled, `steeringId` latches
         // forever — see `settleLateSteer`.
