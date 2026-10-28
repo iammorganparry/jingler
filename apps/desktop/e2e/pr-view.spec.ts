@@ -151,6 +151,15 @@ const openInboxPr = async (window: import("@playwright/test").Page, seed = true)
   const inbox = window.getByTestId("pull-request-inbox")
   await inbox.getByRole("button", { name: /Drawer PR/ }).click()
   await expect(inbox.getByRole("heading", { name: "Drawer PR" })).toBeVisible()
+  // The list is resizable: dragging its handle right widens it.
+  const list = inbox.getByTestId("pull-request-list")
+  const before = (await list.boundingBox())!.width
+  const handle = (await inbox.getByRole("separator", { name: "Resize pull request list" }).boundingBox())!
+  await window.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+  await window.mouse.down()
+  await window.mouse.move(handle.x + handle.width / 2 + 120, handle.y + handle.height / 2, { steps: 6 })
+  await window.mouse.up()
+  await expect.poll(async () => (await list.boundingBox())!.width).toBeGreaterThan(before + 100)
   return inbox
 }
 

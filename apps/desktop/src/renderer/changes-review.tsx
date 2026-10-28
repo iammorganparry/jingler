@@ -15,8 +15,10 @@ import {
   setReviewFilter,
   setReviewFocused,
   setReviewPrLayer,
+  setReviewTrayHidden,
   setReviewTurn,
   useReviewFocused,
+  useReviewTrayHidden,
   useSessionReviewState
 } from "./review-store.js"
 import { reviewCommentsContext } from "./review-references.js"
@@ -252,7 +254,8 @@ export function ReviewTrayDock({
   const paths = useMemo(() => new Set(review.files.map((file) => file.path)), [review.files])
   // Findings with no file only matter while the PR's changes are being reviewed.
   const reviewing = review.filter !== "all"
-  if (focused) return null
+  const hidden = useReviewTrayHidden(session.id)
+  if (focused || hidden) return null
   return (
     <ReviewSidebar
       drafts={review.drafts}
@@ -270,6 +273,7 @@ export function ReviewTrayDock({
       onRemoveDraft={review.removeDraft}
       onFinishReview={review.finishReview}
       onSendFindingToAgent={adversarial.sendFindingToAgent}
+      onClose={() => setReviewTrayHidden(session.id, true)}
     />
   )
 }

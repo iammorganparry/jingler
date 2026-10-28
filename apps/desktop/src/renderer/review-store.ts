@@ -123,6 +123,32 @@ export const setReviewFocused = (next: boolean): void => {
   for (const listener of listeners) listener()
 }
 
+/** Sessions whose review tray the operator closed; reopened from the diff header. */
+const HIDDEN_KEY = "jingler.reviewTray.hidden"
+const hiddenTrays: Set<string> = (() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]")
+    return new Set(Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [])
+  } catch {
+    return new Set<string>()
+  }
+})()
+
+export const useReviewTrayHidden = (sessionId: string): boolean =>
+  useSyncExternalStore(subscribe, () => hiddenTrays.has(sessionId))
+
+export const setReviewTrayHidden = (sessionId: string, hidden: boolean): void => {
+  if (hiddenTrays.has(sessionId) === hidden) return
+  if (hidden) hiddenTrays.add(sessionId)
+  else hiddenTrays.delete(sessionId)
+  try {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hiddenTrays]))
+  } catch {
+    /* ignore quota / privacy-mode failures */
+  }
+  for (const listener of listeners) listener()
+}
+
 export const addReviewDraft = (
   sessionId: string,
   prNumber: number | null,

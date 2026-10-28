@@ -10,6 +10,7 @@ import { DiffStat } from "../components/diff-stat.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { Button } from "../components/button.js"
 import { FilterChips } from "../components/filter-chips.js"
+import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { SearchField } from "../components/search-input.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
 import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
@@ -114,6 +115,19 @@ export interface PullRequestInboxProps {
   error?: string | null
   /** Re-runs the failed list load; the error row only shows Retry when this is given. */
   onRetry?: () => void
+}
+
+/** The list column: full width when compact, otherwise a drag-resizable, remembered width. */
+function InboxListColumn({ compact, children }: { compact: boolean; children: ReactNode }) {
+  const list = useResizableWidth({ storageKey: "jingler.prInbox.listWidth", initial: 360, min: 280, max: 720 })
+  const className = "flex min-h-0 min-w-0 flex-col border-r border-line bg-panel"
+  if (compact) return <section data-testid="pull-request-list" className={cn(className, "flex-1")}>{children}</section>
+  return (
+    <>
+      <section data-testid="pull-request-list" style={{ width: list.width }} className={cn(className, "flex-none")}>{children}</section>
+      <ResizeHandle aria-label="Resize pull request list" onResize={(dx) => list.adjust(dx)} />
+    </>
+  )
 }
 
 /** Global GitHub-style PR list with a responsive read-only detail pane. */
@@ -252,7 +266,7 @@ export function PullRequestInbox({
   return (
     <div data-testid="pull-request-inbox" className="flex min-h-0 min-w-0 flex-1 bg-editor">
       {showList && (
-        <section className={cn("flex min-h-0 min-w-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "w-1/3 min-w-[280px] max-w-[430px]")}>
+        <InboxListColumn compact={compact}>
           <header className="flex flex-none flex-col gap-3 border-b border-line px-4 py-3.5">
             <div className="flex items-center gap-2">
               <GitPullRequest className="size-4 text-muted-foreground" />
@@ -288,7 +302,7 @@ export function PullRequestInbox({
           <div className="min-h-0 flex-1 overflow-y-auto">
             {getLoading()}
           </div>
-        </section>
+        </InboxListColumn>
       )}
 
       {(!compact || mobileDetail) && (

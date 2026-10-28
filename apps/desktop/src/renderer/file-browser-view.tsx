@@ -33,7 +33,7 @@ import type { JinglerLineSelection } from "@jingler/ui"
 import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, Maximize2, MessageSquarePlus, Minimize2, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { openSessionFileDiff, useFileBrowser } from "./use-file-browser.js"
-import { setReviewFilter, useSessionReviewState } from "./review-store.js"
+import { setReviewFilter, setReviewTrayHidden, useReviewTrayHidden, useSessionReviewState } from "./review-store.js"
 import { useReview } from "./use-review.js"
 import { ChangesExplorerPanel, useChangesReview, useReviewTurns } from "./changes-review.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
@@ -897,8 +897,26 @@ function ReviewDiffCanvas({
   const onTokenEnter = useCallback((token: BrowserToken) => enter(token), [enter])
   const onTokenLeave = useCallback(() => leave(), [leave])
   const focused = changes.focused
+  const trayHidden = useReviewTrayHidden(sessionId)
+  const drafts = review.drafts.length
   return (
     <div className="relative h-full min-h-0">
+      {trayHidden || drafts > 0 ? (
+        <FileHeaderPortal order="order-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-pressed={!trayHidden}
+            title={trayHidden ? "Show the review tray" : "Hide the review tray"}
+            onClick={() => setReviewTrayHidden(sessionId, !trayHidden)}
+            className="h-6 gap-1 px-1.5 text-[11px]"
+          >
+            <MessageSquarePlus size={12} />
+            {drafts > 0 ? `Review (${drafts})` : "Review"}
+          </Button>
+        </FileHeaderPortal>
+      ) : null}
       <FileHeaderPortal order="order-2">
         <Badge size="xs">{review.source === "local" ? "Uncommitted" : "Pull request"}</Badge>
       </FileHeaderPortal>

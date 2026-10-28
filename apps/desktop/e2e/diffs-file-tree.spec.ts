@@ -368,6 +368,13 @@ test("adds, removes and submits a review comment entirely from the keyboard", as
   await expect(tray).toBeVisible()
   await expect(comment).toBeVisible()
 
+  // The tray closes from its header and comes back from the diff header's Review toggle.
+  await tray.getByRole("button", { name: "Close review" }).click()
+  await expect(tray).toHaveCount(0)
+  await window.getByRole("button", { name: "Review (1)" }).click()
+  await expect(tray).toBeVisible()
+  await expect(comment).toBeVisible()
+
   // Remove it with Backspace while it's focused.
   await comment.press("Backspace")
   await expect(tray).toHaveCount(0)

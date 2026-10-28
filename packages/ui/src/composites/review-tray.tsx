@@ -1,5 +1,4 @@
 import { Trash2 } from "lucide-react"
-import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { FileIcon } from "../components/file-icon.js"
 
@@ -42,15 +41,6 @@ export function ReviewTray({
         }
       }}
     >
-      <div className="flex h-[42px] flex-none items-center gap-2 border-b border-hairline px-[15px]">
-        <span className="flex-1 text-[12px] font-semibold text-text-bright">Your review</span>
-        {count > 0 && (
-          <Badge tone="blue" size="sm">
-            {count} pending
-          </Badge>
-        )}
-      </div>
-
       <div className="flex flex-1 flex-col gap-[9px] overflow-auto p-2.5">
         {count === 0 ? (
           <p className="px-1 pt-2 text-[12px] text-dim">
