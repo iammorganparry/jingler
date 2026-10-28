@@ -98,7 +98,14 @@ const selectRuntime = async (window: Page, entry: RuntimeCase) => {
 
 const chipPopover = (window: Page) => window.getByTestId("subagent-chip-popover")
 
+// The chip lives in the main toolbar; a child view swaps it for the switcher, so leave the child first.
+const leaveChild = async (window: Page) => {
+  const back = window.getByTestId("subagent-back")
+  if (await back.isVisible()) await back.click()
+}
+
 const openChip = async (window: Page) => {
+  await leaveChild(window)
   await window.getByTestId("subagent-chip").first().click()
   return chipPopover(window)
 }

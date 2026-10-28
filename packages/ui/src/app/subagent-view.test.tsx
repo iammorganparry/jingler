@@ -86,7 +86,7 @@ describe("FleetAgentView", () => {
 
     expect(screen.getByTestId("fleet-agent-live")).toBeDefined()
     expect(screen.getByText("Working…")).toBeDefined()
-    expect(screen.getByText("Using workspace_read_file")).toBeDefined()
+    expect(screen.getByText("Read file")).toBeDefined()
     expect(screen.queryByText(NOT_AVAILABLE)).toBeNull()
   })
 
@@ -307,16 +307,15 @@ describe("SubagentMetaStrip", () => {
     const onOpen = vi.fn()
     render(<FleetAgentView node={full} messages={[]} providerId={"anthropic" as ProviderId} onOpenArtifact={onOpen} />)
     const identity = screen.getByTestId("subagent-meta-identity").textContent
-    expect(identity).toContain("anthropic/claude-test")
-    expect(identity).toContain("running · scanning")
-    const usage = screen.getByTestId("subagent-meta-usage").textContent
-    // The derived label, never the raw tool name.
-    expect(usage).toContain("Read file")
-    expect(usage).not.toContain("workspace_read_file")
+    expect(identity).toContain("scout")
+    expect(identity).toContain("Running")
+    expect(identity).toContain("scanning")
+    expect(screen.getByTestId("subagent-meta-facts").textContent).toContain("anthropic/claude-test")
+    const usage = screen.getByTestId("subagent-meta-usage").textContent!
     expect(usage).toContain("12.4k in / 900 out")
     expect(usage).toContain("7 tool calls")
     expect(usage).toContain("$0.42")
-    expect(usage).toContain("Background")
+    expect(screen.getByTestId("subagent-meta-facts").textContent).toContain("Background")
     fireEvent.click(screen.getByRole("button", { name: "report.md" }))
     expect(onOpen).toHaveBeenCalledWith("/tmp/out/report.md")
   })
@@ -369,11 +368,11 @@ describe("SubagentMetaStrip workspace", () => {
   it("shows the branch, diff stat and a PR chip that opens the PR view", () => {
     const onOpenPullRequest = vi.fn()
     render(<FleetAgentView node={fleetNode({ workspace: worktree, prNumber: 491 })} messages={[]} onOpenPullRequest={onOpenPullRequest} />)
-    const row = screen.getByTestId("subagent-meta-workspace")
-    expect(row.textContent).toContain("feat/review-retry")
-    expect(row.textContent).toContain("+42")
-    expect(row.textContent).toContain("−8")
-    expect(screen.getByText("feat/review-retry").className).toContain("truncate")
+    expect(screen.getByTestId("subagent-meta-workspace").textContent).toContain("feat/review-retry")
+    const facts = screen.getByTestId("subagent-meta-facts")
+    expect(facts.textContent).toContain("+42")
+    expect(facts.textContent).toContain("−8")
+    expect(screen.getByText("feat/review-retry").className).toContain("break-all")
     fireEvent.click(screen.getByRole("button", { name: "Open pull request #491" }))
     expect(onOpenPullRequest).toHaveBeenCalledWith(491)
   })

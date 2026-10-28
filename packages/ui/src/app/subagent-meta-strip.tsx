@@ -1,19 +1,48 @@
 import type { ProviderId, SubagentFleetNode } from "@jingler/core"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useState, type ReactNode } from "react"
-import { Badge } from "../components/badge.js"
+import { useEffect, useState } from "react"
+import { Badge, type BadgeTone } from "../components/badge.js"
 import { Button } from "../components/button.js"
+import { StatusDot } from "../components/status-dot.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { ProviderIcon } from "../components/provider-icon.js"
-import { toolCallLabel } from "../composites/tool-call.js"
 import { cn } from "../lib/cn.js"
-import { fmtElapsed } from "../lib/relative-time.js"
 
-const LIVE: ReadonlySet<SubagentFleetNode["status"]> = new Set(["queued", "running", "paused", "needs-attention"])
+export const LIVE_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set(["queued", "running", "paused", "needs-attention"])
+
+type FleetStatus = SubagentFleetNode["status"]
+
+const STATUS_LABEL: Record<FleetStatus, string> = {
+  queued: "Queued",
+  running: "Running",
+  paused: "Paused",
+  "needs-attention": "Needs you",
+  completed: "Done",
+  failed: "Failed",
+  stopped: "Stopped",
+  unknown: "Unknown"
+}
+
+const STATUS_TONE: Record<FleetStatus, { badge: BadgeTone; dot: string }> = {
+  queued: { badge: "neutral", dot: "bg-dim" },
+  running: { badge: "blue", dot: "bg-blue" },
+  paused: { badge: "yellow", dot: "bg-yellow" },
+  "needs-attention": { badge: "yellow", dot: "bg-yellow" },
+  completed: { badge: "green", dot: "bg-green" },
+  failed: { badge: "red", dot: "bg-red" },
+  stopped: { badge: "neutral", dot: "bg-dim" },
+  unknown: { badge: "neutral", dot: "bg-dim" }
+}
+
+/** StatusDot props for a fleet status: live statuses pulse. */
+export const fleetStatusDot = (status: FleetStatus) => ({
+  tone: STATUS_TONE[status].dot,
+  pulse: status === "running"
+})
 
 const compact = (n: number): string => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n))
 
-function useNow(active: boolean): number {
+export function useNow(active: boolean): number {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     if (!active) return
@@ -23,40 +52,25 @@ function useNow(active: boolean): number {
   return now
 }
 
-/** One strip row: children never shrink, `Grow` text takes the slack and truncates. */
-const Row = ({ testId, children }: { testId: string; children: ReactNode }) => (
-  <div data-testid={testId} className="flex min-w-0 items-center gap-2 whitespace-nowrap">
-    {children}
-  </div>
-)
-const Fixed = ({ children, className }: { children: ReactNode; className?: string }) => (
-  <span className={cn("flex-none", className)}>{children}</span>
-)
-const Grow = ({ children, className }: { children: ReactNode; className?: string }) => (
-  <span className={cn("min-w-0 flex-1 truncate", className)}>{children}</span>
-)
-
 function IdentityRow({
   node,
   providerId,
-  now,
   expanded,
   onToggle
 }: {
   node: SubagentFleetNode
   providerId?: ProviderId
-  now: number
   expanded: boolean
   onToggle: () => void
 }) {
-  const status = node.phase ? `${node.status} · ${node.phase}` : node.status
   return (
-    <Row testId="subagent-meta-identity">
-      <ProviderIcon providerId={providerId} size={12} />
-      {node.model && <Grow className="text-text-body">{node.model}</Grow>}
-      {!node.model && <span className="flex-1" />}
-      <Fixed className={node.status === "failed" ? "text-state-failed" : "text-muted-foreground"}>{status}</Fixed>
-      <Fixed className="tabular-nums text-dim">{fmtElapsed((node.completedAt ?? now) - node.startedAt)}</Fixed>
+    <div data-testid="subagent-meta-identity" className="flex min-w-0 items-center gap-2">
+      <ProviderIcon providerId={providerId} size={14} />
+      <span className="min-w-0 truncate text-[13px] font-semibold text-text-bright">{node.agent}</span>
+      <StatusDot {...fleetStatusDot(node.status)} size={7} />
+      <Badge tone={STATUS_TONE[node.status].badge} size="xs">{STATUS_LABEL[node.status]}</Badge>
+      {node.phase && <span className="min-w-0 truncate text-[11px] text-muted-foreground">{node.phase}</span>}
+      <span className="flex-1" />
       <Button
         variant="ghost"
         size="sm"
@@ -67,37 +81,25 @@ function IdentityRow({
       >
         Details <ChevronDown className={cn("size-3", expanded && "rotate-180")} />
       </Button>
-    </Row>
+    </div>
   )
 }
 
-function UsageRow({ node }: { node: SubagentFleetNode }) {
+/** One wrapping mono line: model, branch (or shared checkout), diff, PR chip, tokens, Background. */
+function FactsLine({ node, onOpenPullRequest }: { node: SubagentFleetNode; onOpenPullRequest?: (prNumber: number) => void }) {
+  const { workspace, prNumber } = node
   const { inputTokens, outputTokens, toolCalls, costUsd } = node.usage
   const usage = [
     inputTokens + outputTokens > 0 ? `${compact(inputTokens)} in / ${compact(outputTokens)} out` : null,
     toolCalls > 0 ? `${toolCalls} ${toolCalls === 1 ? "tool call" : "tool calls"}` : null,
     costUsd > 0 ? `$${costUsd.toFixed(2)}` : null
   ].filter((part) => part !== null)
-  if (!node.currentTool && usage.length === 0 && !node.background) return null
   return (
-    <Row testId="subagent-meta-usage">
-      <Grow className="font-mono text-text-body">{node.currentTool === null ? null : toolCallLabel({ toolName: node.currentTool }).title}</Grow>
-      {usage.length > 0 && <Fixed className="text-dim">{usage.join(" · ")}</Fixed>}
-      {node.background && <Badge tone="neutral" size="xs">Background</Badge>}
-    </Row>
-  )
-}
-
-/** Worktree branch (mono, truncates first), diff stat and a PR chip that opens the PR view. Shared-checkout children say so. */
-function WorkspaceRow({ node, onOpenPullRequest }: { node: SubagentFleetNode; onOpenPullRequest?: (prNumber: number) => void }) {
-  const { workspace, prNumber } = node
-  return (
-    <Row testId="subagent-meta-workspace">
-      {workspace ? (
-        <Grow className="font-mono text-text-body">{workspace.branch}</Grow>
-      ) : (
-        <Grow className="text-dim">Shared checkout</Grow>
-      )}
+    <div data-testid="subagent-meta-facts" className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-text-body">
+      {node.model && <span data-testid="subagent-meta-model">{node.model}</span>}
+      <span data-testid="subagent-meta-workspace" className={workspace ? "break-all" : "text-dim"}>
+        {workspace ? workspace.branch : "Shared checkout"}
+      </span>
       {workspace?.diff && <DiffStat added={workspace.diff.added} removed={workspace.diff.removed} className="flex-none" />}
       {prNumber !== null && (
         <Button
@@ -111,7 +113,9 @@ function WorkspaceRow({ node, onOpenPullRequest }: { node: SubagentFleetNode; on
           PR #{prNumber}
         </Button>
       )}
-    </Row>
+      {usage.length > 0 && <span data-testid="subagent-meta-usage" className="text-dim">{usage.join(" · ")}</span>}
+      {node.background && <Badge tone="neutral" size="xs">Background</Badge>}
+    </div>
   )
 }
 
@@ -151,7 +155,7 @@ function DetailsGrid({ node }: { node: SubagentFleetNode }) {
   )
 }
 
-/** Meta strip under the subagent breadcrumb (board 20a): up to 4 rows, `Details` opens a key/value grid. Null fields are omitted. */
+/** Identity, one facts line and a Details disclosure; rendered at the top of the subagent view's centred column. */
 export function SubagentMetaStrip({
   node,
   providerId,
@@ -165,12 +169,10 @@ export function SubagentMetaStrip({
   onOpenPullRequest?: (prNumber: number) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const now = useNow(LIVE.has(node.status) && node.completedAt === null)
   return (
-    <div data-testid="subagent-meta-strip" className="flex flex-col gap-1.5 border-b border-line px-[30px] py-2 text-[11px]">
-      <IdentityRow node={node} providerId={providerId} now={now} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
-      <UsageRow node={node} />
-      <WorkspaceRow node={node} onOpenPullRequest={onOpenPullRequest} />
+    <div data-testid="subagent-meta-strip" className="flex flex-col gap-1.5 text-[11px]">
+      <IdentityRow node={node} providerId={providerId} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
+      <FactsLine node={node} onOpenPullRequest={onOpenPullRequest} />
       <ArtifactRow node={node} onOpenArtifact={onOpenArtifact} />
       {expanded && <DetailsGrid node={node} />}
     </div>

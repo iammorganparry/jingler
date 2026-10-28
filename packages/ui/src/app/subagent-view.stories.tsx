@@ -61,3 +61,26 @@ export const NeedsAttention: Story = {
     }
   }
 }
+
+const running: SubagentFleetNode = {
+  ...node,
+  model: "claude-sonnet-5-5",
+  phase: "scanning",
+  currentTool: "workspace_read_file",
+  background: true,
+  task: "Map the UI components and report which ones still use raw buttons, with file paths and a suggested fix for each.",
+  usage: { inputTokens: 12_400, outputTokens: 900, totalTokens: 13_300, costUsd: 0.42, durationMs: 10_000, toolCalls: 7 }
+}
+const finished = { ...running, currentTool: null, phase: null, completedAt: 60_000 }
+
+export const Running: Story = { args: { node: running } }
+export const DoneWithOutput: Story = {
+  args: { node: { ...finished, status: "completed", terminal: { reason: "completed", summary: "Found 3 raw buttons in the toolbar.", at: 60_000, retryable: false } } }
+}
+export const Failed: Story = {
+  args: { node: { ...finished, status: "failed", terminal: { reason: "failed", summary: "Tool call timed out.", at: 60_000, retryable: false } } }
+}
+export const SharedCheckout: Story = { args: { node: running } }
+export const Worktree: Story = {
+  args: { node: { ...running, workspace: { path: "/wt/scout", branch: "feat/scout-ui-audit", baseRef: "main", diff: { added: 42, removed: 8 } }, prNumber: 491 } }
+}

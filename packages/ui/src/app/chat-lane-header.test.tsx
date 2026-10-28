@@ -163,9 +163,10 @@ describe("ChatLaneHeader", () => {
         />
       )
 
-    it("shows chat title and agent instead of the thread switcher", () => {
+    it("shows back, then the agent switcher, instead of the thread switcher and New chat", () => {
       renderCrumb()
-      expect(screen.getByTestId("subagent-breadcrumb").textContent).toContain("Main workspace")
+      expect(screen.getByTestId("subagent-breadcrumb").firstElementChild).toBe(screen.getByTestId("subagent-back"))
+      expect(screen.queryByTestId("new-chat-button")).toBeNull()
       expect(screen.getByTestId("subagent-crumb").textContent).toContain("Scout")
       expect(screen.queryByTestId("thread-switcher")).toBeNull()
     })
@@ -179,8 +180,7 @@ describe("ChatLaneHeader", () => {
       expect(onBack).toHaveBeenCalledTimes(2)
     })
 
-    it("keeps the follow toggle in the breadcrumb header and toggles it", () => {
-      const onToggleFollowAgent = vi.fn()
+    it("hides the follow toggle and subagent slot while viewing a child", () => {
       render(
         <ChatLaneHeader
           chats={[{ id: "chat-1", title: "Main workspace" }]}
@@ -188,15 +188,14 @@ describe("ChatLaneHeader", () => {
           onSelectChat={vi.fn()}
           onCreateChat={vi.fn()}
           followAgent
-          onToggleFollowAgent={onToggleFollowAgent}
+          onToggleFollowAgent={vi.fn()}
+          subagentSlot={<span>chip</span>}
           subagentView={{ selectedId: "a", siblings, onSwitch: vi.fn(), onBack: vi.fn() }}
         />
       )
       expect(screen.getByTestId("subagent-breadcrumb")).toBeTruthy()
-      const toggle = screen.getByTestId("follow-agent-toggle")
-      expect(toggle.getAttribute("aria-pressed")).toBe("true")
-      fireEvent.click(toggle)
-      expect(onToggleFollowAgent).toHaveBeenCalledWith(false)
+      expect(screen.queryByTestId("follow-agent-toggle")).toBeNull()
+      expect(screen.queryByTestId("subagent-slot")).toBeNull()
     })
 
     it("switches to a sibling from the ▾ menu", () => {

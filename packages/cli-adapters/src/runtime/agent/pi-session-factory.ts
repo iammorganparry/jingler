@@ -950,16 +950,19 @@ function* observeSessionDiagnostics(
     })
   }
 
-function publishSubagentProgress(
+/** Exported for tests. Direct tasks are remembered by tool call id, then by run id once decoded. */
+export function publishSubagentProgress(
   event: AgentSessionEvent,
   subagentTasks: Map<string, string>,
   lifecycle: PiSubagentLifecycleAdapter,
   listener: (event: AgentSessionEvent) => void
 ) {
-  const progress = piSubagentProgress(
-    event,
-    "toolCallId" in event ? subagentTasks.get(event.toolCallId) : undefined
-  )
+  const callTask = "toolCallId" in event ? subagentTasks.get(event.toolCallId) : undefined
+  let progress = piSubagentProgress(event, callTask)
+  if (progress && callTask) subagentTasks.set(progress.runId, callTask)
+  // Async children keep reporting after the call ended: resolve the task by run id.
+  const runTask = progress && !callTask ? subagentTasks.get(progress.runId) : undefined
+  if (runTask) progress = piSubagentProgress(event, runTask)
   if (event.type === "tool_execution_end") subagentTasks.delete(event.toolCallId)
   if (progress) lifecycle.progress(progress)
   const attention = piSupervisorAttention(event)

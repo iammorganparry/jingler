@@ -670,7 +670,7 @@ export class PiSubagentLifecycleAdapter {
           parentId: existing?.parentId ?? childParentId,
           parentRuntimeSessionId: this.#parentRuntimeSessionId,
           agent: child.agent,
-          task: cleanTaskLabel(child.task),
+          task: child.task === "[prompt redacted]" && existing ? existing.task : cleanTaskLabel(child.task),
         status,
           terminal: status === "completed" || status === "failed"
             ? {

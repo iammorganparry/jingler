@@ -1,7 +1,6 @@
 import type { Session, SubagentFleetNode } from "@jingler/core"
 import { useCallback, useMemo, type ReactNode } from "react"
 import {
-  FollowAgentToggle,
   SubagentChip,
   SubagentLaneViewContext,
   type ChatLaneHeaderSubagentView,
@@ -10,7 +9,6 @@ import {
 } from "@jingler/ui"
 import { useAgentRoster } from "./agent-roster.js"
 import { rpc } from "./rpc-client.js"
-import { useFileBrowser } from "./use-file-browser.js"
 import {
   scopeForChild,
   selectSubagentTab,
@@ -57,17 +55,8 @@ export function SessionSubagentTabs({
 }) {
   const { subagents, onOpenSubagent } = useSessionSubagentEntry(session)
   const peers = useAgentRoster(session).filter((agent) => agent.chatId !== session.activeChatId)
-  const inSubagentView = useSubagentViewSelections()[session.activeChatId] !== undefined
-  // Same session follow state as the composer toggle (one file-browser actor per session).
-  const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   return (
     <>
-    {inSubagentView && (
-      <FollowAgentToggle
-        followAgent={fileBrowser.followEnabled}
-        onToggleFollowAgent={(enabled) => (enabled ? fileBrowser.enableFollow() : fileBrowser.disableFollow())}
-      />
-    )}
     <SubagentChip
       subagents={subagents}
       peers={peers}
@@ -94,7 +83,9 @@ export function SubagentLaneViewProvider({ children }: { readonly children: Reac
       return {
         selectedId,
         siblings: [...(snapshot?.active ?? []), ...(snapshot?.completed ?? [])].map(
-          ({ id, agent, task }) => ({ id, agent, task })
+          ({ id, agent, task, status, startedAt, completedAt }) => ({
+            id, agent, task, status, startedAt, completedAt
+          })
         ),
         onSwitch: (id) => actor.send({ type: "SWITCH_SIBLING", id, scope: scopeForChild(chatId, id) }),
         onBack: () => actor.send({ type: "BACK" })

@@ -224,12 +224,18 @@ test("durable native status appears as a live subagent tab", async ({
     const chip = window.getByTestId("subagent-chip")
     const popover = window.getByTestId("subagent-chip-popover")
     await expect(chip).toBeVisible({ timeout: 30_000 })
-    const openScout = async () => {
+    // A child view swaps the chip for the subagent switcher, so leave the child first.
+    const openChip = async () => {
+      const back = window.getByTestId("subagent-back")
+      if (await back.isVisible()) await back.click()
       await chip.click()
+    }
+    const openScout = async () => {
+      await openChip()
       await popover.locator('[data-testid^="subagent-chip-row-"]').filter({ hasText: "main" }).click()
     }
     await expect(window.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
-    await chip.click()
+    await openChip()
     await expect(popover.locator('[data-depth="0"]')).toHaveCount(1)
     await expect(popover.locator('[data-depth="1"]')).toHaveCount(2)
     await expect(popover.locator('[data-testid^="subagent-chip-view-error-"]')).toHaveCount(1)
@@ -272,7 +278,7 @@ test("durable native status appears as a live subagent tab", async ({
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     await window.evaluate(() => window.dispatchEvent(new Event("focus")))
     // The chip keeps settled children under Done; the scout row must stop running.
-    await chip.click()
+    await openChip()
     await expect(
       popover.locator('[data-testid^="subagent-chip-row-"]').filter({ hasText: "main" })
     ).toContainText("stopped", { timeout: 15_000 })
