@@ -148,6 +148,7 @@ import {
   reduceCheckouts,
   activeCheckoutOf,
   checkoutById,
+  PRIMARY_CHECKOUT_ID,
   checkoutsOf,
   sessionForCheckout,
   createWorkspaceProvisioningPlan,
@@ -7157,6 +7158,18 @@ const continueLocalWorkspace = (
   return created;
 });
 
+/** The source re-pointed at one target checkout, in wire shape so the device can decode it. */
+export const continuationSource = (source: Session, target: string, repo: string, repoPath: string, baseBranch: string) => {
+  const { worktreePath: _worktreePath, workspaceMode: _workspaceMode, ...checkout } = activeCheckoutOf(source);
+  return Schema.encodeSync(SessionSchema)({
+    ...source,
+    title: `${source.title} continuation`,
+    environmentId: target,
+    checkouts: [{ ...checkout, id: PRIMARY_CHECKOUT_ID, repo, repoPath, baseBranch }],
+    activeCheckoutId: PRIMARY_CHECKOUT_ID,
+  });
+};
+
 const admitRemoteContinuation = (source: Session, target: string, requestedSessionId: string | undefined, targetRepository: ContinuationRepository | null, targetBaseBranch: string, checkpoint: WorkspaceTransferCheckpoint, sourceMessages: ReadonlyArray<Message>, remote: RemoteSessionService) => Effect.gen(function* () {
   const targetSession = requestedSessionId
     ? {
@@ -7173,15 +7186,7 @@ const admitRemoteContinuation = (source: Session, target: string, requestedSessi
         targetSession,
         "Sessions.continueOnEnvironment",
         {
-          sourceSession: {
-            ...source,
-            title: `${source.title} continuation`,
-            environmentId: target,
-            repo: targetRepository?.name ?? activeCheckoutOf(source).repo,
-            repoPath: "/workspace",
-            worktreePath: undefined,
-            baseBranch: targetBaseBranch,
-          },
+          sourceSession: continuationSource(source, target, targetRepository?.name ?? activeCheckoutOf(source).repo, "/workspace", targetBaseBranch),
           requestedSessionId,
         },
       )
@@ -7189,15 +7194,7 @@ const admitRemoteContinuation = (source: Session, target: string, requestedSessi
         target,
         "Sessions.continueOnEnvironment",
         {
-          sourceSession: {
-            ...source,
-            title: `${source.title} continuation`,
-            environmentId: target,
-            repo: targetRepository!.name,
-            repoPath: targetRepository!.path,
-            worktreePath: undefined,
-            baseBranch: targetBaseBranch,
-          },
+          sourceSession: continuationSource(source, target, targetRepository!.name, targetRepository!.path, targetBaseBranch),
         },
       )
   ).pipe(

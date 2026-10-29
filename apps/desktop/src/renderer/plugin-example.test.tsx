@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { LoadedPlugin } from "@jingler/core"
+import { activeCheckoutOf, type LoadedPlugin } from "@jingler/core"
 import type { Session } from "@jingler/core"
 import { PluginTabHost } from "./plugin-tab-host.js"
 import { loadPluginUi } from "./plugin-loader.js"
@@ -34,7 +34,8 @@ vi.mock("./rpc-client.js", () => ({
 afterEach(cleanup)
 
 const session = (over: Partial<Session> & { worktreePath?: string } = {}): Session => {
-  const { worktreePath = "/tmp/s1", ...rest } = over
+  const { worktreePath: override, ...rest } = over
+  const worktreePath = "worktreePath" in over ? override : "/tmp/s1"
   return {
     id: "s1",
     checkouts: [{ id: "primary", repo: "trigify/api", branch: "chore/s1", prNumber: 42, baseBranch: "main", ...(worktreePath === undefined ? {} : { worktreePath }) }],
@@ -150,7 +151,9 @@ describe("the shipped hello-tab example", () => {
     if (!result.ok) throw new Error(result.error.message)
     const tab = result.plugin.tabs[0]!
 
-    for (const s of [session(), session({ prNumber: null, worktreePath: undefined })]) {
+    const bare = session({ prNumber: null, worktreePath: undefined })
+    expect(activeCheckoutOf(bare).worktreePath).toBeUndefined()
+    for (const s of [session(), bare]) {
       expect(tab.when({ session: s, hasPlan: false })).toBe(true)
     }
   })

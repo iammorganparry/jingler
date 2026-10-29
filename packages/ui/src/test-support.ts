@@ -1,6 +1,7 @@
 import {
   ProviderCatalog,
   type ReasoningEffort,
+  Session as SessionSchema,
   type Session,
   type SessionCheckout
 } from "@jingler/core"
@@ -67,16 +68,13 @@ export const testProviderCatalog = (
 /** Per-repo fields callers may still pass flat; they are folded into the primary checkout. */
 export type CheckoutFields = Partial<Omit<SessionCheckout, "id">>
 
-/** Move flat per-repo fields into the primary checkout of a Session. */
-export const foldCheckout = (flat: object): Session => {
-  const { projectId, repo, repoPath, worktreePath, workspaceMode, branch, baseBranch, prNumber, githubSlug, ...rest } = flat as CheckoutFields & Record<string, unknown>
-  const checkout = Object.fromEntries(Object.entries({
-    id: "primary", projectId, repo: repo ?? "", repoPath, worktreePath, workspaceMode,
-    branch: branch ?? "", baseBranch, prNumber: prNumber ?? null, githubSlug
-  }).filter(([, v]) => v !== undefined)) as SessionCheckout
-  if (Array.isArray(rest.checkouts) && rest.checkouts.length > 0) return { ...rest, ...(prNumber === undefined ? {} : { prNumber }) } as unknown as Session
-  return { ...rest, ...(prNumber === undefined ? {} : { prNumber }), checkouts: [checkout], activeCheckoutId: "primary" } as unknown as Session
-}
+/**
+ * Decode a wire-shaped fixture (flat per-repo fields, or explicit checkouts)
+ * through the production `Session` schema, so fixtures migrate exactly as
+ * persisted sessions do and invalid ones fail loudly.
+ */
+export const foldCheckout = (flat: object): Session =>
+  Schema.decodeUnknownSync(SessionSchema)({ repo: "", branch: "", prNumber: null, ...flat })
 
 export const testSession = (over: Partial<Session> & CheckoutFields & { id: string }): Session =>
   foldCheckout({

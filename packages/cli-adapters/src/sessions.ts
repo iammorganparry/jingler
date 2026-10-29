@@ -960,9 +960,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                     ).pipe(Effect.ignore)
                   )
                 )
-                return branch === activeCheckoutOf(reservation).branch
+                const reserved = activeCheckoutOf(reservation)
+                return branch === reserved.branch
                   ? reservation
-                  : { ...reservation, branch }
+                  : reduceCheckouts(reservation, { type: "update", checkoutId: reserved.id, patch: { branch } })
               })
             )
           }

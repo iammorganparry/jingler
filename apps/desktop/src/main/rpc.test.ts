@@ -1,4 +1,4 @@
-import { activeCheckoutOf } from "@jingler/core"
+import { activeCheckoutOf, Session as SessionSchema } from "@jingler/core"
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -73,6 +73,7 @@ import { RoutineInput, type AuthSession, type SessionWire } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   authenticatedSession,
+  continuationSource,
   adoptBranch,
   forkOntoBranch,
   transcriptForFork,
@@ -2558,3 +2559,32 @@ describe("Auth.getSession routine sign-in fence", () => {
     } finally { await scheduler.stop(); rmSync(root, { recursive: true, force: true }) }
   })
 })
+
+describe("continuationSource", () => {
+  it("re-points the source at the target checkout in wire shape", () => {
+    const source = {
+      id: "s1",
+      checkouts: [
+        { id: "co-web", repo: "web", repoPath: "/r/web", worktreePath: "/w/web", workspaceMode: "worktree" as const, branch: "feat/x", baseBranch: "main", prNumber: null },
+        { id: "co-api", repo: "api", repoPath: "/r/api", worktreePath: "/w/api", branch: "feat/x", prNumber: null },
+      ],
+      activeCheckoutId: "co-web",
+      title: "Work",
+      status: "idle" as const,
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-07-11T10:00:00.000Z",
+      chats: [],
+      activeChatId: "c1",
+    };
+    const wire = continuationSource(source, "device_1", "web", "/workspace", "develop");
+    expect(wire).toMatchObject({ repo: "web", repoPath: "/workspace", branch: "feat/x", baseBranch: "develop", environmentId: "device_1" });
+    expect(wire).not.toHaveProperty("worktreePath");
+    const decoded = Schema.decodeUnknownSync(SessionSchema)(JSON.parse(JSON.stringify(wire)));
+    expect(decoded.checkouts).toHaveLength(1);
+    expect(activeCheckoutOf(decoded)).toMatchObject({ repoPath: "/workspace", baseBranch: "develop" });
+    expect(activeCheckoutOf(decoded).worktreePath).toBeUndefined();
+  });
+});

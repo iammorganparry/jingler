@@ -208,6 +208,9 @@ const stripTranscriptAttachmentData = (
 const ArchivePayload = Schema.Struct({ reason: ArchiveReason })
 const RepoPathPayload = Schema.Struct({ repoPath: Schema.optional(Schema.String) })
 const FilePathPayload = Schema.Struct({ path: Schema.String })
+/** Sessions cross the wire in their persisted shape, which still mirrors the active checkout for older desktops. */
+const encodeSession = (session: SessionValue) => Schema.encodeSync(Session)(session)
+
 const ContinuationPayload = Schema.Struct({
   sourceSession: Session,
   requestedSessionId: Schema.optional(Schema.String)
@@ -312,14 +315,14 @@ export const makeDeviceSessionCommandExecutor = (
   execute: async (command, emit) => {
     switch (command.operation) {
       case "Sessions.create":
-        return services.create(decodePayload(command, CreateSessionInput))
+        return services.create(decodePayload(command, CreateSessionInput)).then(encodeSession)
       case "Sessions.createFromPr":
-        return services.createFromPr(decodePayload(command, CreateSessionFromPrInput))
+        return services.createFromPr(decodePayload(command, CreateSessionFromPrInput)).then(encodeSession)
       case "Sessions.createFromIssue":
-        return services.createFromIssue(decodePayload(command, CreateSessionFromIssueInput))
+        return services.createFromIssue(decodePayload(command, CreateSessionFromIssueInput)).then(encodeSession)
       case "Sessions.continueOnEnvironment": {
         const input = decodePayload(command, ContinuationPayload)
-        return services.continuation(input.sourceSession, input.requestedSessionId)
+        return services.continuation(input.sourceSession, input.requestedSessionId).then(encodeSession)
       }
       case "Projects.list":
         payloadRecord(command)
@@ -341,7 +344,7 @@ export const makeDeviceSessionCommandExecutor = (
           input,
           (event) => emit({ kind: "event", payload: event })
         )
-        return { status: "complete", session }
+        return { status: "complete", session: encodeSession(session) }
       }
       case "Agent.decideGate":
         return services.decideGate(command.sessionId, decodePayload(command, DecideGatePayload))
@@ -385,7 +388,7 @@ export const makeDeviceSessionCommandExecutor = (
         case "AgentEndpoint.setModel": {
           const input = decodePayload(command, SetSessionAgentModelInput)
           if (input.sessionId !== command.sessionId) throw new DeviceOperationError({ reason: "invalid-payload", operation: command.operation, message: "Remote model selection session mismatch" })
-          return services.setAgentModel(input)
+          return services.setAgentModel(input).then(encodeSession)
         }
         case "Sessions.transcriptPage": {
           const page = await services.transcriptPage(
@@ -430,7 +433,7 @@ export const makeDeviceSessionCommandExecutor = (
             decodePayload(command, ImportConversationPayload).messages
           )
         case "Sessions.archive":
-          return services.archive(command.sessionId, decodePayload(command, ArchivePayload).reason)
+          return services.archive(command.sessionId, decodePayload(command, ArchivePayload).reason).then(encodeSession)
         case "Sessions.delete":
           payloadRecord(command)
           return services.remove(command.sessionId)
@@ -441,7 +444,7 @@ export const makeDeviceSessionCommandExecutor = (
           return services.completePublish(
             command.sessionId,
             decodePayload(command, RemotePublishCompleteInput).prNumber
-          )
+          ).then(encodeSession)
         case "Offload.begin":
           return services.beginOffload(decodePayload(command, OwnedOffloadBegin))
         case "Offload.chunk":
