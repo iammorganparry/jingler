@@ -329,6 +329,12 @@ function FollowAgentToggle({ session }: { session: Session }) {
   )
 }
 
+const fileSurfaceTarget = (surfaceId: string | undefined) => {
+  if (surfaceId === undefined) return { path: undefined, checkoutId: undefined, instanceId: undefined }
+  const { path, checkoutId } = parseFileSurface(surfaceId)
+  return { path, checkoutId, instanceId: `file:${surfaceId}` }
+}
+
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
 export function FileBrowserView({
   session,
@@ -340,13 +346,11 @@ export function FileBrowserView({
   onOpenPath,
   onClosed
 }: FileBrowserViewProps) {
-  const target = surfaceId === undefined ? undefined : parseFileSurface(surfaceId)
-  const path = target?.path
-  const checkoutId = target?.checkoutId
+  const { path, checkoutId, instanceId } = fileSurfaceTarget(surfaceId)
   const browser = useFileBrowser(
     session.id,
     checkoutById(session, checkoutId).worktreePath,
-    surfaceId === undefined ? undefined : `file:${surfaceId}`,
+    instanceId,
     checkoutId
   )
   const debug = useDebugSessionModel(session.id, debugSnapshot)
