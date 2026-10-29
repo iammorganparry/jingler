@@ -503,10 +503,12 @@ const disambiguateIssueSlug = (
 const sessionBelongsToRepository = (
   session: Session,
   repository: { readonly path: string; readonly name: string }
-): boolean =>
-  session.repoPath === undefined
-    ? session.repo === repository.name
-    : session.repoPath === repository.path
+): boolean => {
+  const checkout = activeCheckoutOf(session)
+  return checkout.repoPath === undefined
+    ? checkout.repo === repository.name
+    : checkout.repoPath === repository.path
+}
 
 const sessionLinksIssue = (
   session: Session,
@@ -607,9 +609,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
       const checkWorkspaceSetup = (session: Session) => Effect.gen(function* () {
-        if (!session.checkpointSafeMode || session.environmentId || session.workspaceMode === "direct" || !session.worktreePath) return session
+        const checkout = activeCheckoutOf(session)
+        if (!session.checkpointSafeMode || session.environmentId || checkout.workspaceMode === "direct" || !checkout.worktreePath) return session
         const projectService = yield* Effect.serviceOption(ProjectService)
-        const project = session.projectId && projectService._tag === "Some" ? yield* projectService.value.get(session.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project workflow", cause }))) : undefined
+        const project = checkout.projectId && projectService._tag === "Some" ? yield* projectService.value.get(checkout.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project workflow", cause }))) : undefined
         if (project?.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot execute project setup shell commands." }))
         return session
       })
@@ -774,14 +777,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           } else {
             const usedSlugs = new Set(
               existing
-                .filter((s) => s.repo === input.repoName && s.worktreePath)
+                .filter((s) => activeCheckoutOf(s).repo === input.repoName && activeCheckoutOf(s).worktreePath)
                 // `basename`, not `split("/")`. Worktree paths are built with
                 // `path.join`, so on Windows they are backslash-separated and a
                 // "/" split returns the WHOLE path — the used-slug set then
                 // never matches a candidate, `freeCreativeName` always believes
                 // its first pick is free, and every untitled session in a repo
                 // collides on one name.
-                .map((s) => basename(s.worktreePath!))
+                .map((s) => basename(activeCheckoutOf(s).worktreePath!))
             )
             // `Date.now()` ALONE is not a distinct seed. Two untitled sessions
             // created in the same millisecond get the same clock reading and the
@@ -913,14 +916,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                 const directIdentities = yield* Effect.forEach(
                   current.filter(
                     (session) =>
-                      workspaceModeOf(session) === "direct" &&
-                      session.repoPath !== undefined
+                      workspaceModeOf(activeCheckoutOf(session)) === "direct" &&
+                      activeCheckoutOf(session).repoPath !== undefined
                   ),
                   (session) =>
-                    GitService.repositoryIdentity(session.repoPath!).pipe(
+                    GitService.repositoryIdentity(activeCheckoutOf(session).repoPath!).pipe(
                       Effect.map((candidate) => candidate.commonDir),
                       // A missing legacy checkout cannot race this live one.
-                      Effect.orElseSucceed(() => session.repoPath!)
+                      Effect.orElseSucceed(() => activeCheckoutOf(session).repoPath!)
                     )
                 )
                 if (directIdentities.includes(identity.commonDir)) {
@@ -1027,7 +1030,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
           const id = input.requestedSessionId ?? `s_${slug}_${stamp}`
           yield* ensureSessionIdAvailable(priorSessions, id)
-          if (priorSessions.some((s) => s.worktreePath === worktreePath)) {
+          if (priorSessions.some((s) => activeCheckoutOf(s).worktreePath === worktreePath)) {
             return yield* Effect.fail(
               new GitError({ message: "A session already exists for this pull request." })
             )
@@ -1158,7 +1161,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const slug = prior.some(
             (session) =>
               sessionBelongsToRepository(session, repository) &&
-              session.worktreePath === baseWorktreePath
+              activeCheckoutOf(session).worktreePath === baseWorktreePath
           )
             ? disambiguateIssueSlug(baseSlug, input.issue)
             : baseSlug
@@ -2471,7 +2474,7 @@ function* createIsolatedSession(
   checkWorkspaceSetup: (session: Session) => Effect.Effect<Session, GitError, PersistEnv | Path.Path>
 ) {
   const worktreePath = yield* GitService.worktreePathFor(input.repoName!, slug)
-  if (existing.some((s) => s.worktreePath === worktreePath)) {
+  if (existing.some((s) => activeCheckoutOf(s).worktreePath === worktreePath)) {
     return yield* Effect.fail(
       new GitError({
         message: "A session already exists for this branch name."

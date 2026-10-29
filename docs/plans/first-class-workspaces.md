@@ -32,8 +32,8 @@ So that switching the active checkout can't silently change what an unrelated fe
 - Plugin SDK keeps `session.repo` / `session.branch` as values derived from the active checkout (public API)
 
 ### Steps
-- [~] Route `rpc.ts` reads through `resolveCheckoutSession` / `activeCheckoutOf`
-- [ ] Route `sessions.ts`, `agent-runner.ts`, `workspace-workflow.ts`, `session-title-service.ts`
+- [x] Route `rpc.ts` reads through `resolveCheckoutSession` / `activeCheckoutOf`
+- [~] Route `sessions.ts`, `agent-runner.ts`, `workspace-workflow.ts`, `session-title-service.ts`
 - [ ] Route renderer + `packages/ui` reads (`file-browser-view`, `use-review`, `App`, `conversation-pane`, `session-filters`, `session-row`)
 - [ ] Derive plugin SDK `repo`/`branch` from the active checkout
 - [ ] Drop the scalars from the `Session` schema; keep the legacy decode in the session store

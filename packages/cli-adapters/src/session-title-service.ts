@@ -1,4 +1,4 @@
-import type { Message, Session } from "@jingler/core"
+import { activeCheckoutOf, type Message, type Session } from "@jingler/core"
 import {
   GitError,
   buildTitlePrompt,
@@ -163,16 +163,17 @@ function* applySessionMetadata(
   messages: ReadonlyArray<Message>,
   proposal: SessionMetadataProposal
 ) {
-  if (workspaceModeOf(session) === "direct") {
+  const checkout = activeCheckoutOf(session)
+  if (workspaceModeOf(checkout) === "direct") {
       if (title !== session.title) yield* SessionStore.setTitle(sessionId, title)
       return { ...session, title }
     }
-    if (!session.worktreePath) {
+    if (!checkout.worktreePath) {
       if (title !== session.title) yield* SessionStore.setTitle(sessionId, title)
       return { ...session, title }
     }
 
-    const liveBranch = yield* GitService.branchAt(session.worktreePath)
+    const liveBranch = yield* GitService.branchAt(checkout.worktreePath)
     if (liveBranch !== null) {
       // A process can stop after `git switch -c` and before sessions.json is
       // updated. Recover the proposal from the canonical live ref in that case;
@@ -207,7 +208,7 @@ function* applySessionMetadata(
       yield* SessionStore.setSemanticBranchProposal(sessionId, safeProposal)
     }
     const branch = yield* GitService.createTaskBranch(
-      session.worktreePath,
+      checkout.worktreePath,
       semanticBranchName(safeProposal)
     )
     yield* SessionStore.setTitleAndBranch(sessionId, title, branch, safeProposal)
@@ -229,7 +230,7 @@ function* reconcileExistingTaskBranch(
 ) {
   if (
     title !== session.title ||
-    liveBranch !== session.branch ||
+    liveBranch !== activeCheckoutOf(session).branch ||
     session.semanticBranchPending === true ||
     (session.semanticBranchProposal === undefined && persistedProposal !== undefined)
   ) {

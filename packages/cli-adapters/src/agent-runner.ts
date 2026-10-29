@@ -31,8 +31,10 @@ import {
   ADHD_MODE_DEFAULT,
   applyStreamEvent,
   assistantMessage,
+  activeCheckoutOf,
   AgentRunError,
   BranchDriftError,
+  checkoutsOf,
   CURRENT_RUNTIME_CONTRACTS,
   defaultModeFor,
   isFileMutationTool,
@@ -1823,12 +1825,13 @@ const resolveTurnChat = (sessionId: string, chatId: string) =>
 
 const resolveTurnWorktree = (sessionId: string, session: Session) =>
   Effect.gen(function* () {
-    const storedWorktree = session?.worktreePath ?? ""
+    const checkout = activeCheckoutOf(session)
+    const storedWorktree = checkout.worktreePath ?? ""
     const healPaths = yield* AppPaths
     const worktreePath =
-      workspaceModeOf(session) === "direct"
+      workspaceModeOf(checkout) === "direct"
         ? storedWorktree
-        : yield* healedWorktreePath(storedWorktree, session.repo, healPaths.worktreesDir)
+        : yield* healedWorktreePath(storedWorktree, checkout.repo, healPaths.worktreesDir)
     if (worktreePath !== storedWorktree) {
       yield* SessionStore.setWorktreePath(sessionId, worktreePath).pipe(Effect.ignore)
     }
@@ -1839,20 +1842,20 @@ const resolveTurnWorktree = (sessionId: string, session: Session) =>
     // files, and only fail at diff/commit time with "not a git
     // repository". Memoised per worktree, so this is one `rev-parse` on
     // the first turn and nothing after.
-    if (worktreePath.length > 0 && session?.repoPath && workspaceModeOf(session) === "worktree") {
-      yield* ensureWorktreeLinked(session.repoPath, worktreePath)
+    if (worktreePath.length > 0 && checkout.repoPath && workspaceModeOf(checkout) === "worktree") {
+      yield* ensureWorktreeLinked(checkout.repoPath, worktreePath)
     }
     // A direct session shares the repository's primary checkout with the
     // developer. Refuse every turn after that checkout moves: continuing
     // would run the agent on a branch different from the one recorded in
     // the session, while plans and review state still name the old branch.
-    if (workspaceModeOf(session) === "direct") {
+    if (workspaceModeOf(checkout) === "direct") {
       const liveBranch = yield* branchAt(worktreePath)
-      if (liveBranch !== session.branch) {
+      if (liveBranch !== checkout.branch) {
         return yield* Effect.fail(
           new BranchDriftError({
             sessionId: session.id,
-            pinnedBranch: session.branch,
+            pinnedBranch: checkout.branch,
             liveBranch
           })
         )
@@ -1884,7 +1887,7 @@ const persistTurnSessionId = (
 /** Lowercase `owner/repo` of the origin remote of the session's worktree and each checkout. */
 const sessionRepoSlugs = (session: Session) =>
   Effect.forEach(
-    [session.worktreePath, ...(session.checkouts ?? []).map((c) => c.worktreePath ?? c.repoPath)],
+    checkoutsOf(session).map((c) => c.worktreePath ?? c.repoPath),
     (dir) =>
       dir ? gitLine(dir, "remote", "get-url", "origin") : Effect.succeed(null)
   ).pipe(
@@ -2128,7 +2131,7 @@ const guardWorkspaceBranch = <A, E, R>(
   worktreePath: string,
   adapterRun: Effect.Effect<A, E, R>
 ) =>
-  session !== null && workspaceModeOf(session) === "direct"
+  session !== null && workspaceModeOf(activeCheckoutOf(session)) === "direct"
     ? Effect.raceFirst(
         adapterRun,
         Effect.forever(
@@ -2136,11 +2139,11 @@ const guardWorkspaceBranch = <A, E, R>(
             Effect.zipRight(
               Effect.gen(function* () {
                 const liveBranch = yield* branchAt(worktreePath)
-                if (liveBranch === session.branch) return
+                if (liveBranch === activeCheckoutOf(session).branch) return
                 return yield* Effect.fail(
                   new BranchDriftError({
                     sessionId: session.id,
-                    pinnedBranch: session.branch,
+                    pinnedBranch: activeCheckoutOf(session).branch,
                     liveBranch
                   })
                 )
