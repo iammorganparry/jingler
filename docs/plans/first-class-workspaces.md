@@ -37,7 +37,7 @@ So that switching the active checkout can't silently change what an unrelated fe
 - [x] Route renderer + `packages/ui` reads (`file-browser-view`, `use-review`, `App`, `conversation-pane`, `session-filters`, `session-row`)
 - [x] Derive plugin SDK `repo`/`branch` from the active checkout
 - [ ] Drop the scalars from the `Session` schema; keep the legacy decode in the session store
-- [ ] Delete `sessionForCheckout` once nothing uses it
+- [-] Delete `sessionForCheckout` once nothing uses it
 
 ### Technical explanation
 `withActive` copies the active checkout onto the session on every reducer action. Two copies drift: `resolveTurnWorktree` calls `SessionStore.setWorktreePath`, which writes the scalar, not the checkout. With one copy there's nothing to drift.
@@ -49,9 +49,9 @@ So that switching the active checkout can't silently change what an unrelated fe
 ```
 
 ### Acceptance
-- [ ] A legacy scalar-only session decodes to one `primary` checkout and is written back without scalars (test[unit]: packages/core/src/session-checkout.test.ts::legacy scalars migrate to primary checkout)
+- [x] A legacy scalar-only session decodes to one `primary` checkout and is written back without scalars (test[unit]: packages/core/src/session-checkout.test.ts::legacy scalars migrate to primary checkout)
 - [x] Healing a worktree path updates the checkout, not a scalar (test[unit]: packages/cli-adapters/src/sessions.test.ts::setWorktreePath updates the active checkout)
-- [ ] Session create and PR flows still work end to end (test[e2e]: apps/desktop/e2e/projects-and-workspaces.spec.ts::creates an isolated worktree workspace from a selected base branch, apps/desktop/e2e/multi-repo-prs.spec.ts::a multi-repo session shows every checkout's PR labelled with its repo)
+- [x] Session create and PR flows still work end to end (test[e2e]: apps/desktop/e2e/projects-and-workspaces.spec.ts::creates an isolated worktree workspace from a selected base branch, apps/desktop/e2e/multi-repo-prs.spec.ts::a multi-repo session shows every checkout's PR labelled with its repo)
 
 ### Definition of Done
 - `pnpm lint`, `pnpm typecheck`, `pnpm test` green
