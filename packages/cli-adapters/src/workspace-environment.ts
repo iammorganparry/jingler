@@ -1,11 +1,12 @@
 import { worktreeEnv } from "./worktree-env.js"
-import type { Session } from "@jingler/core"
+import { activeCheckoutOf, type Session } from "@jingler/core"
 
-export const workspaceEnvironment = (session: Pick<Session, "worktreePath" | "repoPath" | "environmentId" | "workspaceMode">): Record<string, string> => {
-  if (session.environmentId || session.workspaceMode === "direct" || !session.worktreePath) return {}
+export const workspaceEnvironment = (session: Parameters<typeof activeCheckoutOf>[0] & Pick<Session, "environmentId">): Record<string, string> => {
+  const checkout = activeCheckoutOf(session)
+  if (session.environmentId || checkout.workspaceMode === "direct" || !checkout.worktreePath) return {}
   return {
-    JINGLER_WORKSPACE_PATH: session.worktreePath,
-    ...(session.repoPath ? { JINGLER_ROOT_PATH: session.repoPath } : {}),
+    JINGLER_WORKSPACE_PATH: checkout.worktreePath,
+    ...(checkout.repoPath ? { JINGLER_ROOT_PATH: checkout.repoPath } : {}),
   }
 }
 
@@ -14,6 +15,6 @@ export const trustedWorkspaceEnvironment = (environment: Readonly<Record<string,
   Object.fromEntries(Object.entries(environment).filter(([name, value]) =>
     (name === "JINGLER_WORKSPACE_PATH" || name === "JINGLER_ROOT_PATH") && !value.includes("\0")))
 
-export const workspaceProcessEnvironment = (environment: Record<string, string | undefined>, session: Pick<Session, "worktreePath" | "repoPath" | "environmentId" | "workspaceMode">): Record<string, string> => ({
-  ...worktreeEnv(environment, session.worktreePath ?? undefined), ...workspaceEnvironment(session)
+export const workspaceProcessEnvironment = (environment: Record<string, string | undefined>, session: Parameters<typeof activeCheckoutOf>[0] & Pick<Session, "environmentId">): Record<string, string> => ({
+  ...worktreeEnv(environment, activeCheckoutOf(session).worktreePath ?? undefined), ...workspaceEnvironment(session)
 })

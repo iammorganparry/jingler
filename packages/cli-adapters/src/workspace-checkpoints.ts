@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import type { CommandExecutor, FileSystem, Path } from "@effect/platform"
-import { GitError, type Session } from "@jingler/core"
+import { GitError, activeCheckoutOf, type Session } from "@jingler/core"
 import { Effect } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { SessionStore } from "./sessions.js"
@@ -8,11 +8,12 @@ import { WorkspaceCheckpointStore } from "./workspace-checkpoint-store.js"
 import { acquireWorkspaceActivity, acquireCheckpointTurnOwner, closeWorkspaceAdmission, reopenWorkspaceAdmission, setWorkspaceCheckpointMode, workspaceActivityCount, workspaceAdmissionReason, type WorkspaceActivity } from "./workspace-admission.js"
 
 const supported = (session: Session, requireClean = true): void => {
-  if (session.environmentId || session.executionLocation === "cloud" || session.workspaceMode !== "worktree" || !session.worktreePath || session.archived) throw new Error("Checkpoints require an unarchived isolated local worktree.")
+  const checkout = activeCheckoutOf(session)
+  if (session.environmentId || session.executionLocation === "cloud" || checkout.workspaceMode !== "worktree" || !checkout.worktreePath || session.archived) throw new Error("Checkpoints require an unarchived isolated local worktree.")
   if (requireClean && session.checkpointExecutionHistory !== "clean") throw new Error("This workspace has prior or unknown interactive-terminal/unsupported execution history. Create a fresh workspace to enable safe checkpoints.")
   if (process.platform === "win32") throw new Error("Checkpoint-safe filesystem operations are unsupported on Windows.")
 }
-const store = (session: Session, root: string) => new WorkspaceCheckpointStore({ root, sessionId: session.id, cwd: session.worktreePath!, verifiedBranch: session.semanticBranchProposal && session.semanticBranchPending === false ? session.branch : undefined })
+const store = (session: Session, root: string) => new WorkspaceCheckpointStore({ root, sessionId: session.id, cwd: activeCheckoutOf(session).worktreePath!, verifiedBranch: session.semanticBranchProposal && session.semanticBranchPending === false ? activeCheckoutOf(session).branch : undefined })
 const exclusive = async <T>(session: Session, reason: string, operation: () => Promise<T>, requireClean = true): Promise<T> => {
   supported(session, requireClean)
   const readiness = workspaceAdmissionReason(session.id)

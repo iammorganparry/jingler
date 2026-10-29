@@ -73,6 +73,7 @@ import {
   ReasoningSetting,
   SetSessionAgentModelInput,
   piEndpointId,
+  activeCheckoutOf,
   Project,
   RemotePublishCompleteInput,
   RemotePublishPrepared,
@@ -617,15 +618,15 @@ export const makeLiveDeviceSessionCommandExecutor = (
     explicit === undefined
       ? deviceSession(sessionId).pipe(
           Effect.flatMap((session) =>
-            session.worktreePath
-              ? Effect.succeed(session.worktreePath)
+            activeCheckoutOf(session).worktreePath
+              ? Effect.succeed(activeCheckoutOf(session).worktreePath!)
               : Effect.fail(new Error(`Session ${sessionId} has no workspace.`))
           )
         )
       : Effect.succeed(explicit)
 
   const baseBranchOf = (sessionId: string) =>
-    deviceSession(sessionId).pipe(Effect.map((session) => session.baseBranch))
+    deviceSession(sessionId).pipe(Effect.map((session) => activeCheckoutOf(session).baseBranch))
 
   return makeDeviceSessionCommandExecutor({
     create: (input) => run(Effect.gen(function* () {
@@ -837,16 +838,17 @@ export const makeLiveDeviceSessionCommandExecutor = (
     preparePublish: (sessionId) => run(
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId)
-        if (!session.worktreePath) {
+        const checkout = activeCheckoutOf(session)
+        if (!checkout.worktreePath) {
           return yield* Effect.fail(new Error("This remote session has no worktree to publish."))
         }
-        const cwd = session.worktreePath
-        const inspection = yield* GitService.publishInspection(cwd, session.baseBranch ?? "main")
+        const cwd = checkout.worktreePath
+        const inspection = yield* GitService.publishInspection(cwd, checkout.baseBranch ?? "main")
         const validatePublishBranch = Effect.gen(function* () {
           if (session.semanticBranchPending === true || !inspection.branch) {
             return yield* Effect.fail(new Error("Finish creating the remote task branch before publishing."))
           }
-          if (inspection.branch !== session.branch || !isSessionPublishBranchReady(session, inspection.branch)) {
+          if (inspection.branch !== checkout.branch || !isSessionPublishBranchReady(session, inspection.branch)) {
             return yield* Effect.fail(new Error("The remote worktree is not on its validated session branch."))
           }
           return inspection.branch
@@ -893,7 +895,7 @@ export const makeLiveDeviceSessionCommandExecutor = (
           sessionId,
           githubSlug: `${parsed.owner}/${parsed.repo}`,
           branch,
-          baseBranch: session.baseBranch ?? "main",
+          baseBranch: checkout.baseBranch ?? "main",
           commitSha,
           commitMessage: metadata.commitMessage,
           prTitle: metadata.prTitle,

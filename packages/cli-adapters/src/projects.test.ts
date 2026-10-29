@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { initGitRepo, mkTemp, runExit, withTempRoot } from "./test-support.js"
 import { ProjectService } from "./projects.js"
 
+const S = { id: "s", branch: "main", prNumber: null } as const
 describe("ProjectService", () => {
   let temp: ReturnType<typeof withTempRoot>
   let repos: ReturnType<typeof mkTemp>
@@ -142,9 +143,9 @@ describe("ProjectService", () => {
     }))
     writeFileSync(file, JSON.stringify(legacy))
     const result = await runExit(ProjectService.backfill([
-      { projectId: "by-id", repo: "by-id" },
-      { repoPath: join(repos.dir, "by-path"), repo: "by-path" },
-      { projectId: "remote-only", repo: "remote-only", environmentId: "device" }
+      { ...S, projectId: "by-id", repo: "by-id" },
+      { ...S, repoPath: join(repos.dir, "by-path"), repo: "by-path" },
+      { ...S, projectId: "remote-only", repo: "remote-only", environmentId: "device" }
     ]).pipe(Effect.provide(ProjectService.Default)), temp.layer)
     expect(result).toMatchObject({ _tag: "Success", value: [
       { id: "by-id", imported: true, availability: "missing" },
@@ -157,9 +158,9 @@ describe("ProjectService", () => {
     const alpha = initGitRepo(join(repos.dir, "alpha"))
     const beta = initGitRepo(join(repos.dir, "beta"))
     const legacy = [
-      { id: "s-1", repoPath: alpha, repo: "alpha" },
-      { id: "s-2", repoPath: alpha, repo: "alpha" },
-      { id: "s-3", repoPath: beta, repo: "beta" }
+      { ...S, id: "s-1", repoPath: alpha, repo: "alpha" },
+      { ...S, id: "s-2", repoPath: alpha, repo: "alpha" },
+      { ...S, id: "s-3", repoPath: beta, repo: "beta" }
     ] as const
     const before = JSON.stringify(legacy)
 
@@ -180,8 +181,8 @@ describe("ProjectService", () => {
 
     const result = await runExit(
       ProjectService.backfill([
-        { repoPath: missing, repo: "deleted" },
-        { repoPath: valid, repo: "valid" }
+        { ...S, repoPath: missing, repo: "deleted" },
+        { ...S, repoPath: valid, repo: "valid" }
       ]).pipe(Effect.provide(ProjectService.Default)),
       temp.layer
     )

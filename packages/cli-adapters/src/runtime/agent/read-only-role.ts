@@ -1,5 +1,5 @@
 import type { AgentRole, Session } from "@jingler/core"
-import { CURRENT_RUNTIME_CONTRACTS, piEndpointId } from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS, activeCheckoutOf, piEndpointId } from "@jingler/core"
 import { Duration, Effect, Stream } from "effect"
 import {
   AgentRuntimeError,
@@ -58,7 +58,7 @@ export const runReadOnlyRoleText = (
         modelId: identity.modelId,
         role,
         mode: "read-only",
-        cwd: session.worktreePath ?? process.cwd(),
+        cwd: activeCheckoutOf(session).worktreePath ?? process.cwd(),
         prompt,
         priorMessages: [],
         continuation: null,

@@ -527,15 +527,14 @@ const sessionLinksIssue = (
  * sessions intentionally have established non-semantic branches.
  */
 export const isSessionPublishBranchReady = (
-  session: Pick<
-    Session,
-    "branch" | "semanticBranchPending" | "semanticBranchProposal" | "workspaceMode"
-  >,
+  session: Parameters<typeof activeCheckoutOf>[0] &
+    Pick<Session, "semanticBranchPending" | "semanticBranchProposal">,
   liveBranch: string | null
 ): boolean => {
-  if (workspaceModeOf(session) !== "worktree") return false
+  const checkout = activeCheckoutOf(session)
+  if (workspaceModeOf(checkout) !== "worktree") return false
   if (session.semanticBranchPending === true) return false
-  if (liveBranch === null || liveBranch !== session.branch) return false
+  if (liveBranch === null || liveBranch !== checkout.branch) return false
   return session.semanticBranchProposal === undefined ||
     semanticBranchProposalFromName(liveBranch) !== null
 }

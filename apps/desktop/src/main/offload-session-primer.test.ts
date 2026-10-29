@@ -8,7 +8,7 @@ describe("Offload session priming", () => {
     let maximum = 0
     const attempted: string[] = []
     const sessions = Array.from({ length: 8 }, (_, index) => ({
-      id: `session-${index}`,
+      id: `session-${index}`, repo: "r", branch: "main", prNumber: null,
       worktreePath: `/repo/${index}`
     }))
     await Effect.runPromise(primeOffloadSessions(
@@ -30,7 +30,7 @@ describe("Offload session priming", () => {
   })
   it("never primes safe or archived workspaces when enabling offload", async () => {
     const attempted: string[] = []
-    await Effect.runPromise(primeOffloadSessions([{ id: "safe", worktreePath: "/safe", checkpointSafeMode: true }, { id: "archived", worktreePath: "/archived", archived: true }, { id: "normal", worktreePath: "/normal" }], (_cwd, id) => Effect.sync(() => attempted.push(id))))
+    await Effect.runPromise(primeOffloadSessions([{ id: "safe", repo: "r", branch: "main", prNumber: null, worktreePath: "/safe", checkpointSafeMode: true }, { id: "archived", repo: "r", branch: "main", prNumber: null, worktreePath: "/archived", archived: true }, { id: "normal", repo: "r", branch: "main", prNumber: null, worktreePath: "/normal" }], (_cwd, id) => Effect.sync(() => attempted.push(id))))
     expect(attempted).toEqual(["normal"])
   })
 })

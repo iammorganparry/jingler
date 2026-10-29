@@ -812,11 +812,13 @@ describe("SessionStore", () => {
 
   it("does not treat a fresh pending or direct session as branch-ready", () => {
     expect(isSessionPublishBranchReady({
+      id: "s", projectId: "p", repo: "r", prNumber: null,
       branch: "main",
       semanticBranchPending: true,
       workspaceMode: "worktree"
     }, "main")).toBe(false)
     expect(isSessionPublishBranchReady({
+      id: "s", repo: "r", prNumber: null,
       branch: "feature/direct",
       workspaceMode: "direct"
     }, "feature/direct")).toBe(false)
