@@ -1,5 +1,15 @@
 # @jingler/ui
 
+## 0.12.3
+
+### Patch Changes
+
+- 1d06f87: Sessions working across several repos now name every attached repo in the sidebar row, hover card and header, and live in their own "Multi-repo" sidebar group instead of jumping between projects as the agent switches.
+- Updated dependencies [1d06f87]
+  - @jingler/core@0.12.3
+  - @jingler/contracts@0.12.3
+  - @jingler/themes@0.12.3
+
 ## 0.12.2
 
 ### Patch Changes

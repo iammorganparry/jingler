@@ -1,5 +1,13 @@
 # @jingler/desktop
 
+## 0.12.3
+
+### Patch Changes
+
+- 1d06f87: Sessions working across several repos now name every attached repo in the sidebar row, hover card and header, and live in their own "Multi-repo" sidebar group instead of jumping between projects as the agent switches.
+- 0b726ad: A message sent while the agent is waiting on background work now reaches it right away instead of sitting unanswered until the wait times out, and Stop and "Send now" now work while you're watching a turn that's running elsewhere.
+  - @jingler/plannotator-ext@0.12.3
+
 ## 0.12.2
 
 ### Patch Changes
