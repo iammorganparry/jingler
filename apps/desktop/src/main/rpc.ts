@@ -252,7 +252,7 @@ import {
   showNotification,
   shouldNotify,
 } from "./notifications.js";
-import { downloadVoiceModel, removeVoiceModel, requestMicrophone, transcribeWav, voiceModels } from "./voice.js";
+import { downloadVoiceModel, removeVoiceModel, requestMicrophone, superwhisperInstalled, superwhisperRecord, transcribeWav, voiceModels } from "./voice.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
 import { primeOffloadSessions } from "./offload-session-primer.js";
@@ -6561,6 +6561,8 @@ const AssetListHandlersLayer = AssetListRpcs.toLayer({
       ),
     ),
   "Voice.requestMicrophone": () => Effect.promise(() => requestMicrophone()),
+  "Voice.superwhisperInstalled": () => Effect.promise(() => superwhisperInstalled()),
+  "Voice.superwhisperRecord": ({ action }) => Effect.promise(() => superwhisperRecord(action)),
   "Mcp.importDismissed": () =>
     ConfigService.get().pipe(Effect.map((config) => config?.mcpImportDismissed === true)),
   "Mcp.dismissImport": () => ConfigService.setMcpImportDismissed(true).pipe(Effect.asVoid),

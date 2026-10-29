@@ -57,6 +57,23 @@ test("without a speech model the mic says so and Cancel discards a recording", a
   await expect(composer).toHaveValue("")
 })
 
+test("with Superwhisper installed the mic starts and stops it instead of recording", async ({ launchApp }) => {
+  const log = join(tmpdir(), `superwhisper-${Date.now()}.log`)
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    e2eEnv: { JINGLER_E2E_SUPERWHISPER_LOG: log },
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByRole("button", { name: "Voice input", exact: true }).click()
+  await window.getByRole("button", { name: "Stop recording", exact: true }).click()
+  await expect(window.getByRole("button", { name: "Voice input", exact: true })).toBeEnabled()
+  await expect.poll(() => readFileSync(log, "utf8")).toBe("superwhisper://record/start\nsuperwhisper://record/stop\n")
+  await expect(window.getByRole("button", { name: /^No speech model installed/ })).toHaveCount(0)
+  rmSync(log, { force: true })
+})
+
 const modelServer = async () => {
   const { createServer } = await import("node:http")
   const body = Buffer.from("fake whisper model bytes")
