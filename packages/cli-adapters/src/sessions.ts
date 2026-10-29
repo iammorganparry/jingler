@@ -2039,7 +2039,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
      * directory is really there, so this never invents a path.
      */
     const setWorktreePath = (id: string, worktreePath: string) =>
-        update(id, (s) => ({ ...s, worktreePath }))
+        update(id, (s) =>
+          reduceCheckouts(s, { type: "update", checkoutId: activeCheckoutOf(s).id, patch: { worktreePath } })
+        )
 
       /** Persist a checkout reducer result: the checkout list plus the scalar mirrors of the active one. */
       const setCheckouts = (id: string, next: Parameters<typeof activeCheckoutOf>[0]) =>
@@ -2060,7 +2062,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
 
       /** Attach a durable project identity without changing checkout/transcript state. */
       const setProject = (id: string, projectId: string) =>
-        update(id, (session) => ({ ...session, projectId }))
+        update(id, (session) =>
+          reduceCheckouts(session, { type: "update", checkoutId: activeCheckoutOf(session).id, patch: { projectId } })
+        )
 
       /** Replace every link (or, with `null`, clear them) for legacy callers. */
       const setIssue = (

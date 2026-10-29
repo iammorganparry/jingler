@@ -1007,6 +1007,28 @@ describe("SessionStore", () => {
     expect(exit.value.checkouts?.map((c) => c.branch)).toEqual(["feat/x", "feat/x"])
   })
 
+  it("setWorktreePath updates the active checkout", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Heal Session" }))
+        const co = (id: string) => ({
+          id, projectId: "p", repo: id, repoPath: `/r/${id}`, worktreePath: `/w/${id}`,
+          workspaceMode: "worktree" as const, branch: "main", baseBranch: "main", prNumber: null
+        })
+        yield* SessionStore.setCheckouts(created.id, {
+          ...created, checkouts: [co("web"), co("api")], activeCheckoutId: "api"
+        })
+        yield* SessionStore.setWorktreePath(created.id, "/healed/api")
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.checkouts?.map((c) => c.worktreePath)).toEqual(["/w/web", "/healed/api"])
+    expect(exit.value.worktreePath).toBe("/healed/api")
+  })
+
   it("setPrNumber links (and clears) a session's PR across a fresh read", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
