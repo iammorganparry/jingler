@@ -2047,20 +2047,23 @@ export class SessionStore extends Effect.Service<SessionStore>()(
 
       /** Persist a checkout reducer result: the checkout list plus the scalar mirrors of the active one. */
       const setCheckouts = (id: string, next: Parameters<typeof activeCheckoutOf>[0]) =>
-        update(id, (session) => ({
-          ...session,
-          projectId: next.projectId,
-          repo: next.repo,
-          repoPath: next.repoPath,
-          worktreePath: next.worktreePath,
-          workspaceMode: next.workspaceMode,
-          branch: next.branch,
-          baseBranch: next.baseBranch,
-          prNumber: next.prNumber,
-          githubSlug: next.githubSlug,
-          checkouts: next.checkouts,
-          activeCheckoutId: next.activeCheckoutId
-        }))
+        update(id, (session) => {
+          const active = activeCheckoutOf(next)
+          return {
+            ...session,
+            projectId: active.projectId,
+            repo: active.repo,
+            repoPath: active.repoPath,
+            worktreePath: active.worktreePath,
+            workspaceMode: active.workspaceMode,
+            branch: active.branch,
+            baseBranch: active.baseBranch,
+            prNumber: active.prNumber,
+            githubSlug: active.githubSlug,
+            checkouts: next.checkouts,
+            activeCheckoutId: next.activeCheckoutId
+          }
+        })
 
       /** Attach a durable project identity without changing checkout/transcript state. */
       const setProject = (id: string, projectId: string) =>

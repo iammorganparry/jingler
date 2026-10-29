@@ -3,20 +3,10 @@ import type { Session, SessionCheckout } from "./domain.js";
 /** Id of the implicit checkout built from a legacy session's scalar fields. */
 export const PRIMARY_CHECKOUT_ID = "primary";
 
-type CheckoutScalars = Pick<
-  Session,
-  | "projectId"
-  | "repo"
-  | "repoPath"
-  | "worktreePath"
-  | "workspaceMode"
-  | "branch"
-  | "baseBranch"
-  | "prNumber"
-  | "githubSlug"
->;
+/** Legacy per-session copies of the active checkout; optional so the helpers never depend on them. */
+type CheckoutScalars = Omit<SessionCheckout, "id">;
 
-type CheckoutSession = CheckoutScalars & Pick<Session, "id" | "checkouts" | "activeCheckoutId">;
+type CheckoutSession = Partial<CheckoutScalars> & Pick<Session, "id" | "checkouts" | "activeCheckoutId">;
 
 const defined = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
@@ -34,17 +24,17 @@ const scalarsOf = (checkout: SessionCheckout): CheckoutScalars => ({
   githubSlug: checkout.githubSlug,
 });
 
-const legacyCheckoutOf = (session: CheckoutScalars): SessionCheckout =>
+const legacyCheckoutOf = (session: Partial<CheckoutScalars>): SessionCheckout =>
   defined({
     id: PRIMARY_CHECKOUT_ID,
     projectId: session.projectId,
-    repo: session.repo,
+    repo: session.repo ?? "",
     repoPath: session.repoPath,
     worktreePath: session.worktreePath,
     workspaceMode: session.workspaceMode,
-    branch: session.branch,
+    branch: session.branch ?? "",
     baseBranch: session.baseBranch,
-    prNumber: session.prNumber,
+    prNumber: session.prNumber ?? null,
     githubSlug: session.githubSlug,
   });
 
@@ -162,5 +152,7 @@ export const checkoutById = (session: CheckoutSession, checkoutId?: string): Ses
  */
 export const sessionForCheckout = <S extends CheckoutSession>(session: S, checkoutId: string): S => {
   const checkout = checkoutById(session, checkoutId);
-  return checkout.id === activeCheckoutOf(session).id ? session : { ...session, ...scalarsOf(checkout) };
+  return checkout.id === activeCheckoutOf(session).id
+    ? session
+    : { ...session, ...scalarsOf(checkout), activeCheckoutId: checkout.id };
 };

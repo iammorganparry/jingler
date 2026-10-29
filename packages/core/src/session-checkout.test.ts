@@ -9,6 +9,7 @@ import {
   PRIMARY_CHECKOUT_ID,
   reduceCheckouts,
   reposLabelOf,
+  sessionForCheckout,
 } from "./session-checkout.js";
 import type { SessionCheckout } from "./domain.js";
 
@@ -59,6 +60,14 @@ describe("checkout reducer", () => {
     expect(s.checkouts).toHaveLength(2);
     expect(s.activeCheckoutId).toBe("co-web");
     expect(s.worktreePath).toBe("/w/web");
+  });
+
+  it("a view through a non-active checkout resolves that checkout", () => {
+    const s = reduceCheckouts(legacy, { type: "attach", checkout: web });
+    const view = sessionForCheckout(s, PRIMARY_CHECKOUT_ID);
+    expect(activeCheckoutOf(view).id).toBe(PRIMARY_CHECKOUT_ID);
+    expect(view).toMatchObject({ repo: "api", worktreePath: "/w/api" });
+    expect(sessionForCheckout(s, "co-web")).toBe(s);
   });
 
   it("update mirrors only when the checkout is active", () => {
