@@ -1,4 +1,5 @@
 import type { Session, SessionActivity } from "@jingler/core"
+import { activeCheckoutOf } from "@jingler/core"
 
 /**
  * Session ids whose live agent run just COMPLETED between two `liveActivity`
@@ -18,5 +19,5 @@ export const completedSessionIds = (
   sessions: ReadonlyArray<Session>
 ): ReadonlyArray<string> =>
   sessions
-    .filter((s) => Boolean(s.worktreePath) && prev[s.id] != null && next[s.id] == null)
+    .filter((s) => Boolean(activeCheckoutOf(s).worktreePath) && prev[s.id] != null && next[s.id] == null)
     .map((s) => s.id)

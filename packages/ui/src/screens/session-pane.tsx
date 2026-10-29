@@ -19,6 +19,7 @@ import type {
   SessionPrStatus
 } from "@jingler/core"
 import {
+  activeCheckoutOf,
   issueReferenceOf,
   issueReferencesOf,
   UNTITLED_SESSION
@@ -959,7 +960,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     ...(props.onCreateChat
       ? [{ id: "chat", label: "Chat", detail: "Start a new conversation", icon: MessageSquarePlus, onSelect: () => props.onCreateChat?.(sessionId) }]
       : []),
-    ...(props.onOpenFilePicker && active.worktreePath
+    ...(props.onOpenFilePicker && activeCheckoutOf(active).worktreePath
       ? [{ id: "file", label: "File", detail: "Open a repository file", icon: File, onSelect: () => props.onOpenFilePicker?.(sessionId) }]
       : []),
     ...viewLauncherItems
@@ -1107,7 +1108,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   const headerIdentity = (
     <SessionHeaderIdentity
       title={active.title || UNTITLED_SESSION}
-      branch={active.branch}
+      branch={activeCheckoutOf(active).branch}
       chips={prRows.length > 1 ? linkChips.filter((chip) => chip.id !== "pr") : linkChips}
     >
       {prRows.length > 1 && (

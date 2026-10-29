@@ -5,6 +5,7 @@
  */
 import { useCallback, useMemo } from "react"
 import type { Session } from "@jingler/core"
+import { activeCheckoutOf } from "@jingler/core"
 import type { SessionTerminals } from "@jingler/ui"
 import { terminalCwd } from "./subagent-scope.js"
 import { useViewedChild } from "./subagent-tab-store.js"
@@ -14,7 +15,7 @@ import { XtermView } from "./xterm-view.js"
 export function useDesktopSessionTerminals(session: Session): SessionTerminals {
   const viewed = useViewedChild(session.id, session.activeChatId)
   // While the lane shows a child with its own worktree, new terminals start there.
-  const cwd = terminalCwd(viewed, session.worktreePath)
+  const cwd = terminalCwd(viewed, activeCheckoutOf(session).worktreePath)
   const { create, close, restart, markExited, tabs: infos, hydrated } = useTerminals(session.id, cwd)
   const tabs = useMemo(
     () => infos.map((t) => ({ id: t.id, title: t.title, status: t.status, exitCode: t.exitCode })),

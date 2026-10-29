@@ -1,4 +1,5 @@
 import type { AssetFileEntry, Session } from "@jingler/core"
+import { activeCheckoutOf } from "@jingler/core"
 
 const ASSET_LIST_TIMEOUT_MS = 5_000
 
@@ -6,7 +7,7 @@ export interface RepositoryFileApis {
   readonly assetList: (sessionId: string) => Promise<ReadonlyArray<AssetFileEntry>>
   readonly sessionsGet: (
     sessionId: string
-  ) => Promise<Pick<Session, "worktreePath" | "environmentId">>
+  ) => Promise<Session>
   readonly workspaceFiles: (
     worktreePath: string,
     environmentId?: string,
@@ -51,7 +52,7 @@ export const listRepositoryFiles = async (
   // current record before falling back so an early undefined path cannot leave
   // that persistent actor permanently empty.
   const session = await apis.sessionsGet(sessionId).catch(() => null)
-  const currentWorktreePath = session?.worktreePath ?? worktreePath
+  const currentWorktreePath = (session ? activeCheckoutOf(session).worktreePath : undefined) ?? worktreePath
   if (currentWorktreePath === undefined) {
     if (assetListError !== undefined) throw assetListError
     return []

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useMachine } from "@xstate/react"
-import { conflictResolutionPrompt, type PrMergeMethod, type Session } from "@jingler/core"
+import { activeCheckoutOf, conflictResolutionPrompt, type PrMergeMethod, type Session } from "@jingler/core"
 import type { PrStackNav } from "@jingler/ui"
 import { prStackMachine, type PrStackEvent } from "./pr-stack-machine.js"
 import { prNumbersOf } from "./pr-sweep.js"
@@ -100,7 +100,7 @@ export function usePrStack(session: Session, connected: boolean): { selected: nu
   const [mergeMethod, setMergeMethod] = useState<PrMergeMethod>("merge")
   const run = useCallback(
     async (from: number) => {
-      const slug = session.githubSlug
+      const slug = activeCheckoutOf(session).githubSlug
       if (!slug) return
       const all = layersRef.current
       for (const [index, layer] of all.slice(from).entries()) {

@@ -23,6 +23,7 @@ import type {
 } from "@jingler/core"
 import type { ToastInput } from "@jingler/ui"
 import {
+  activeCheckoutOf,
   agentFileActivityOf,
   clampFontScale,
   countNodesAwaitingAttention,
@@ -567,7 +568,8 @@ export function ConversationPane({
   const turnRevert = useTurnRevert(session, convo.busy)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
   const offlineDevice = offlineDeviceOf(environments, session.environmentId, () => continueEnvironmentMutation.mutate(undefined))
-  const fileBrowser = useFileBrowser(session.id, session.worktreePath)
+  const checkout = activeCheckoutOf(session)
+  const fileBrowser = useFileBrowser(session.id, checkout.worktreePath)
   const toggleFollowAgent = useCallback(
     (enabled: boolean) => {
       if (enabled) {
@@ -582,11 +584,11 @@ export function ConversationPane({
   useFollowAgentFiles({
     sessionId: session.id,
     chatId: activeChat.id,
-    worktreePath: session.worktreePath,
+    worktreePath: checkout.worktreePath,
     enabled: fileBrowser.followEnabled,
     onFollow: ({ path, eventId, preview, completed }) => {
       fileBrowser.followAgentTarget(path, eventId, preview, completed)
-      openSessionFileDiff(session.id, session.worktreePath, path, { eventId, preview, completed })
+      openSessionFileDiff(session.id, checkout.worktreePath, path, { eventId, preview, completed })
       onOpenFile?.(session.id, path)
     }
   })
@@ -790,9 +792,9 @@ export function ConversationPane({
   // a turn is running — the per-ToolEnd refresh owns that window.
   const refreshDiffStable = convo.refreshDiff
   useEffect(() => {
-    if (!session.worktreePath) return
+    if (!checkout.worktreePath) return
     refreshDiffStable()
-  }, [session.id, session.worktreePath, refreshDiffStable])
+  }, [session.id, checkout.worktreePath, refreshDiffStable])
 
   useEffect(() => {
     const firstTurnImages = takeFirstMessage(session.id)
@@ -1124,7 +1126,7 @@ export function ConversationPane({
       <OpenAssetProvider
         open={openAsset}
         knownFiles={knownFiles}
-        worktreeRoot={session.worktreePath}
+        worktreeRoot={checkout.worktreePath}
       >
         <div className="flex min-h-0 flex-1 flex-col">
           {planSurface}
@@ -1142,7 +1144,7 @@ export function ConversationPane({
     <OpenAssetProvider
         open={openAsset}
         knownFiles={knownFiles}
-        worktreeRoot={session.worktreePath}
+        worktreeRoot={checkout.worktreePath}
       >
     <AttachmentSourceProvider resolve={resolveAttachment}>
     {/* `min-w-0` is load-bearing on BOTH rows, not decoration. A flex item
@@ -1511,6 +1513,7 @@ function renderMainConversation({
   onRevertToTurn: (turn: number) => void;
   onFilterChanges: (() => void) | undefined;
 }) {
+  const checkout = activeCheckoutOf(session);
   return <ConversationView
     messages={convo.messages}
     hasMoreHistory={convo.hasMoreHistory}
@@ -1526,9 +1529,9 @@ function renderMainConversation({
     onSetMcpAuth={onSetMcpAuth}
     onAuthorizeMcp={onAuthorizeMcp}
     paused={convo.paused}
-    branch={session.branch}
+    branch={checkout.branch}
     branchPending={session.semanticBranchPending === true}
-    repo={session.repo}
+    repo={checkout.repo}
     diff={liveDiffs[session.id] ?? null}
     environments={environments}
     environmentId={session.environmentId}
@@ -1630,7 +1633,7 @@ function renderMainConversation({
       ? {
         reason: session.archiveReason ?? "merged",
         prNumber: session.prNumber,
-        base: session.baseBranch,
+        base: checkout.baseBranch,
         onRestore: () => onRestore?.(session.id),
         onDelete: () => onDelete?.(session.id)
       }

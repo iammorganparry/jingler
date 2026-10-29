@@ -61,6 +61,7 @@ export function SessionHoverCard({
   /** This session's PR stack, bottom layer first. More than one layer renders a stack list instead of the single PR line. */
   stack?: ReadonlyArray<PrStackLayer>
 }) {
+  const checkout = activeCheckoutOf(session)
   const display = displayStatusOf(activity, session.status, interrupted)
   // The detail line ("Running pnpm test -- auth") when there IS live activity;
   // the five-word rollup otherwise. Never both — they'd say the same thing twice.
@@ -88,7 +89,7 @@ export function SessionHoverCard({
       <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-dim">
         <GitBranch size={11} className="flex-none text-cyan" />
         <span className="truncate">
-          {hasNoRepo(activeCheckoutOf(session)) || checkoutsOf(session).length > 1 ? reposLabelOf(session) : `${session.repo} · ${session.branch}`}
+          {hasNoRepo(checkout) || checkoutsOf(session).length > 1 ? reposLabelOf(session) : `${checkout.repo} · ${checkout.branch}`}
         </span>
       </span>
 

@@ -64,7 +64,10 @@ const prLabelOf = (session: Session): string | null => {
 }
 
 /** A session row for the sidebar list. Active state gets the blue ring. */
-const repoLabelOf = (session: Session): string => (hasNoRepo(activeCheckoutOf(session)) ? "No repo" : session.repo)
+const repoLabelOf = (session: Session): string => {
+  const checkout = activeCheckoutOf(session)
+  return hasNoRepo(checkout) ? "No repo" : checkout.repo
+}
 
 /** Every attached repo for a multi-repo session, else the single repo label. */
 const repoLabelNode = (session: Session): ReactNode =>
@@ -236,7 +239,7 @@ export function SessionRow({
             className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}
             title={session.semanticBranchPending === true ? "Task branch will be named after task understanding" : undefined}
           >
-            {session.semanticBranchPending === true ? "Naming branch…" : session.branch}
+            {session.semanticBranchPending === true ? "Naming branch…" : activeCheckoutOf(session).branch}
           </span>)
     }
 
@@ -490,7 +493,7 @@ function sessionMenuItems(session: Session, h: SessionMenuHandlers): ContextMenu
     {
       label: "Copy branch",
       icon: Copy,
-      onSelect: () => void navigator.clipboard?.writeText(session.branch)
+      onSelect: () => void navigator.clipboard?.writeText(activeCheckoutOf(session).branch)
     },
     h.openInTerminal && { label: "Open in terminal", icon: SquareTerminal, onSelect: h.openInTerminal },
     h.remove && { label: "Delete", icon: Trash2, tone: "danger", separated: true, onSelect: h.remove }

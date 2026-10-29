@@ -7,7 +7,7 @@
 import { useCallback, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type { Session, SubagentFleetNode } from "@jingler/core"
-import { activeCheckoutOf, checkoutsOf, hasNoRepo, workspaceModeOf } from "@jingler/core"
+import { activeCheckoutOf, checkoutById, checkoutsOf, hasNoRepo, workspaceModeOf } from "@jingler/core"
 import type { AgentTreeChanges } from "@jingler/ui"
 import { ChangedFilesExplorer, EmptyState, SubagentScopeBar, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
@@ -41,7 +41,7 @@ export function useChangesReview(session: Session, connected: boolean, checkoutI
   // Read-only: the adversarial review is *run* from the Pull Request tab; its
   // findings anchor to the PR diff wherever that diff renders.
   const adversarial = useAdversarialReview(session, { connected })
-  const worktree = workspaceModeOf(session) === "worktree"
+  const worktree = workspaceModeOf(checkoutById(session, checkoutId)) === "worktree"
 
   const deslopFile = useCallback(
     // Fix in place, on this session's own worktree, through its conversation

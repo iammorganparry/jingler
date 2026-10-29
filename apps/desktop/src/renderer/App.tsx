@@ -40,6 +40,7 @@ import type {
 } from "@jingler/core";
 import type { SessionCreationPhase } from "@jingler/contracts";
 import {
+  activeCheckoutOf,
   clampFontScale,
   countNodesAwaitingAttention,
   DEFAULT_THEME_ID,
@@ -954,10 +955,11 @@ function AuthedApp({
 
   const accessForSession = useCallback(
     (session: Session) => {
+      const checkout = activeCheckoutOf(session);
       const repo = repos.find(
         (candidate) =>
-          candidate.path === session.repoPath ||
-          (session.repoPath === undefined && candidate.name === session.repo),
+          candidate.path === checkout.repoPath ||
+          (checkout.repoPath === undefined && candidate.name === checkout.repo),
       );
       return repositoryAccess(
         github.connection,
@@ -969,14 +971,15 @@ function AuthedApp({
   );
   const canUseGitHubForSession = useCallback(
     (session: Session) => {
+      const checkout = activeCheckoutOf(session);
       const repo = repos.find(
         (candidate) =>
-          candidate.path === session.repoPath ||
-          (session.repoPath === undefined && candidate.name === session.repo),
+          candidate.path === checkout.repoPath ||
+          (checkout.repoPath === undefined && candidate.name === checkout.repo),
       );
       return (
         (github.connection.cliAvailable === true &&
-          (session.worktreePath != null || repo?.githubSlug != null)) ||
+          (checkout.worktreePath != null || repo?.githubSlug != null)) ||
         accessForSession(session).status === "accessible"
       );
     },
@@ -1020,7 +1023,7 @@ function AuthedApp({
         !(autoCreate && canUseGitHubForSession(session)) ||
         session.archived ||
         session.prNumber !== null ||
-        workspaceModeOf(session) !== "worktree" ||
+        workspaceModeOf(activeCheckoutOf(session)) !== "worktree" ||
         session.semanticBranchPending === true ||
         session.publish?.step === "complete" ||
         autoPublishCancels.current.has(session.id)
@@ -1274,7 +1277,7 @@ function AuthedApp({
     const detect = () => {
       for (const session of sessionsRef.current) {
         if (
-          !session.worktreePath ||
+          !activeCheckoutOf(session).worktreePath ||
           session.archived ||
           !canUseGitHubForSession(session)
         ) {
@@ -1365,7 +1368,7 @@ function AuthedApp({
       sessions.filter(
         (session) =>
           session.prNumber != null &&
-          Boolean(session.worktreePath) &&
+          Boolean(activeCheckoutOf(session).worktreePath) &&
           !session.archived &&
           canUseGitHubForSession(session),
       ),
@@ -1439,11 +1442,12 @@ function AuthedApp({
   const sessionPrKeys = useMemo(
     () =>
       new Set(
-        sessions.flatMap((s) =>
-          visibleIds.has(s.id) && s.githubSlug
-            ? sessionPrRows(prNumbersOf(s), subagentPrNodes[s.id] ?? []).map((row) => `${s.githubSlug}#${row.number}`.toLowerCase())
-            : [],
-        ),
+        sessions.flatMap((s) => {
+          const { githubSlug } = activeCheckoutOf(s);
+          return visibleIds.has(s.id) && githubSlug
+            ? sessionPrRows(prNumbersOf(s), subagentPrNodes[s.id] ?? []).map((row) => `${githubSlug}#${row.number}`.toLowerCase())
+            : [];
+        }),
       ),
     [sessions, visibleIds, subagentPrNodes],
   );
@@ -2012,7 +2016,7 @@ function AuthedApp({
             <CheckoutHeader session={session} />
             <WorkspaceWorkflowBar
               session={session}
-              project={projectController.projects.find((project) => project.id === session.projectId)}
+              project={projectController.projects.find((project) => project.id === activeCheckoutOf(session).projectId)}
               onSession={publishSessionUpdate}
             />
           {/* The registry keeps each actor alive, but React state must remount per
@@ -2108,7 +2112,7 @@ function AuthedApp({
           return (
             <PullRequestPane
               session={session}
-              project={projectController.projects.find((project) => project.id === session.projectId)}
+              project={projectController.projects.find((project) => project.id === activeCheckoutOf(session).projectId)}
               connected={sessionConnected}
               autoDetect={autoDetect}
               viewerLogin={github.connection.user?.login}
@@ -2783,7 +2787,7 @@ function offloadSettingsStatus(state: import("xstate").SnapshotFrom<ReturnType<t
 
 function deleteSessionDescription(pendingDelete: Session | null) {
   return pendingDelete
-    ? workspaceModeOf(pendingDelete) === "direct"
+    ? workspaceModeOf(activeCheckoutOf(pendingDelete)) === "direct"
       ? `“${pendingDelete.title}” session data will be permanently removed. The repository checkout will be left untouched. This can't be undone.`
       : `“${pendingDelete.title}” and its isolated worktree will be permanently removed. This can't be undone.`
     : undefined

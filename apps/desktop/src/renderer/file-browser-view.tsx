@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom"
 import { useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
-import { workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
+import { activeCheckoutOf, workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
 import { isLanguageHoverPath } from "@jingler/contracts"
 import {
@@ -184,7 +184,8 @@ export interface FileBrowserExplorerProps {
 /** Files the agent edited this session; the one still being written pulses until the run ends. */
 function useExplorerAgentActivity(session: Session): AssetAgentActivity {
   const activity = useAgentFileActivity(session.id, session.activeChatId)
-  const { id, activeChatId, worktreePath, status } = session
+  const { id, activeChatId, status } = session
+  const { worktreePath } = activeCheckoutOf(session)
   return useMemo(() => {
     const normalize = (raw: string) => normalizeAgentFileTarget(raw, worktreePath)
     const editedPaths = getAgentTouchedFiles(id, activeChatId)
@@ -197,7 +198,7 @@ function useExplorerAgentActivity(session: Session): AssetAgentActivity {
 }
 
 export function FileBrowserExplorer({ session, connected = false, onOpenPath }: FileBrowserExplorerProps) {
-  const browser = useFileBrowser(session.id, session.worktreePath)
+  const browser = useFileBrowser(session.id, activeCheckoutOf(session).worktreePath)
   const agentActivity = useExplorerAgentActivity(session)
   const { filter } = useSessionReviewState(session.id, session.prNumber)
   // Show the diff actually listed: a PR with nothing fetchable (GitHub offline)
@@ -209,12 +210,12 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
   const openChangedPath = (path: string) => {
     browser.open(path)
     browser.showDiff()
-    openSessionFileDiff(session.id, session.worktreePath, path)
+    openSessionFileDiff(session.id, activeCheckoutOf(session).worktreePath, path)
     onOpenPath(path)
   }
 
   const discardFile =
-    workspaceModeOf(session) === "worktree"
+    workspaceModeOf(activeCheckoutOf(session)) === "worktree"
       ? (path: string) => {
           void rpc.workspaceRevertFile(session.id, path).then(browser.refreshTree).catch(() => {})
         }
@@ -225,11 +226,11 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
 
   return (
     <ExplorerPanel
-      branch={session.branch}
-      worktreePath={session.worktreePath}
+      branch={activeCheckoutOf(session).branch}
+      worktreePath={activeCheckoutOf(session).worktreePath}
       filter={shownFilter}
       onFilterChange={(next) => setReviewFilter(session.id, session.prNumber, next)}
-      localAvailable={session.worktreePath != null}
+      localAvailable={activeCheckoutOf(session).worktreePath != null}
       prAvailable={session.prNumber != null}
       localCount={localCount}
       prCount={prCount}
@@ -274,7 +275,7 @@ export function FileBrowserQuickOpen({
   onOpenChange,
   onOpenPath
 }: FileBrowserQuickOpenProps) {
-  const browser = useFileBrowser(session.id, session.worktreePath)
+  const browser = useFileBrowser(session.id, activeCheckoutOf(session).worktreePath)
   return (
     <FileQuickOpen
       open={open}
@@ -302,7 +303,7 @@ const COLLAPSING_LABEL = "hidden @[560px]:inline"
 
 function FollowAgentToggle({ session }: { session: Session }) {
   // Follow is session state: file tabs own per-file actors, but the toggle mirrors the composer's.
-  const sessionBrowser = useFileBrowser(session.id, session.worktreePath)
+  const sessionBrowser = useFileBrowser(session.id, activeCheckoutOf(session).worktreePath)
   const followEnabled = sessionBrowser.followEnabled
   return (
     <FileHeaderPortal order="order-3">
@@ -336,7 +337,7 @@ export function FileBrowserView({
 }: FileBrowserViewProps) {
   const browser = useFileBrowser(
     session.id,
-    session.worktreePath,
+    activeCheckoutOf(session).worktreePath,
     path === undefined ? undefined : `file:${path}`
   )
   const debug = useDebugSessionModel(session.id, debugSnapshot)
@@ -348,7 +349,7 @@ export function FileBrowserView({
     ? (debug.snapshot.session.frame ?? null)
     : null
   const debugPath = debugFrame?.source?.path
-    ? normalizeAgentFileTarget(debugFrame.source.path, session.worktreePath)
+    ? normalizeAgentFileTarget(debugFrame.source.path, activeCheckoutOf(session).worktreePath)
     : null
   const debugStopKey = debug.snapshot.session?.status === "stopped"
     ? `${debug.snapshot.session.id}:${debug.snapshot.session.stopSequence ?? 0}`
@@ -419,8 +420,8 @@ export function FileBrowserView({
     () =>
       agentFileActivity === null
         ? null
-        : normalizeAgentFileTarget(agentFileActivity.path, session.worktreePath),
-    [agentFileActivity, session.worktreePath]
+        : normalizeAgentFileTarget(agentFileActivity.path, activeCheckoutOf(session).worktreePath),
+    [agentFileActivity, activeCheckoutOf(session).worktreePath]
   )
 
   const openFollowedPath = useEffectEvent((followedPath: string) => onOpenPath?.(followedPath))
@@ -433,7 +434,7 @@ export function FileBrowserView({
       agentFileActivity.preview,
       agentFileActivity.phase === "completed"
     )
-    openSessionFileDiff(session.id, session.worktreePath, normalizedAgentTarget, {
+    openSessionFileDiff(session.id, activeCheckoutOf(session).worktreePath, normalizedAgentTarget, {
       eventId: agentFileActivity.eventId,
       preview: agentFileActivity.preview,
       completed: agentFileActivity.phase === "completed"
@@ -446,7 +447,7 @@ export function FileBrowserView({
     normalizedAgentTarget,
     path,
     session.id,
-    session.worktreePath
+    activeCheckoutOf(session).worktreePath
   ])
 
   useEffect(() => {

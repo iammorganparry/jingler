@@ -39,6 +39,7 @@ import type {
   SubagentFleetNode
 } from "@jingler/core"
 import {
+  activeCheckoutOf,
   activityOf,
   admitSessionEvent,
   applyReviewEvent,
@@ -1813,7 +1814,7 @@ export const conversationMachine = setup({
       // worse, the Preview dock's clickability gate rejects the very path the
       // agent just announced. The list is small (one `git ls-files` pair) and
       // this only fires on a tool that actually touched files.
-      const worktreePath = context.session.worktreePath
+      const { worktreePath } = activeCheckoutOf(context.session)
       if (worktreePath) {
         void rpc
           .workspaceFiles(
@@ -1999,10 +2000,11 @@ export const conversationMachine = setup({
      */
     loadWorkspaceMeta: ({ context, self }) => {
       const { session } = context
+      const { worktreePath } = activeCheckoutOf(session)
       void Promise.all([
-        session.worktreePath
+        worktreePath
           ? rpc.workspaceFiles(
-              session.worktreePath,
+              worktreePath,
               session.environmentId,
               session.id
             )
