@@ -57,6 +57,32 @@ test("without a speech model the mic says so and Cancel discards a recording", a
   await expect(composer).toHaveValue("")
 })
 
+test("with Superwhisper installed the mic starts and stops it instead of recording", async ({ launchApp }) => {
+  const log = join(tmpdir(), `superwhisper-${Date.now()}.log`)
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    e2eEnv: { JINGLER_E2E_SUPERWHISPER_LOG: log },
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.click()
+  await window.getByRole("button", { name: "Voice input", exact: true }).click()
+  await expect(window.getByRole("button", { name: "Stop recording", exact: true })).toBeVisible()
+  // Superwhisper has no discard deep link, so Cancel would paste anyway.
+  await expect(window.getByRole("button", { name: "Cancel recording", exact: true })).toHaveCount(0)
+  await window.getByRole("button", { name: "Stop recording", exact: true }).click()
+  await expect(window.getByRole("button", { name: "Voice input", exact: true })).toBeEnabled()
+  await expect.poll(() => readFileSync(log, "utf8")).toBe("superwhisper://record/start\nsuperwhisper://record/stop\n")
+  // Superwhisper pastes into whatever has focus after stop; clicking Stop must not have kept it.
+  await expect(composer).toBeFocused()
+  await window.keyboard.insertText("pasted by superwhisper")
+  await expect(composer).toHaveValue("pasted by superwhisper")
+  await expect(window.getByRole("button", { name: /^No speech model installed/ })).toHaveCount(0)
+  rmSync(log, { force: true })
+})
+
 const modelServer = async () => {
   const { createServer } = await import("node:http")
   const body = Buffer.from("fake whisper model bytes")

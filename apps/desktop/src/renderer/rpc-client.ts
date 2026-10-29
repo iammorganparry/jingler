@@ -972,6 +972,9 @@ export const rpc = {
     runAssetList((c) => c.Voice.requestMicrophone()),
   voiceTranscribe: (wavBase64: string, language?: string, modelId?: string): Promise<{ text: string }> =>
     runAssetList((c) => c.Voice.transcribe({ wavBase64, language, modelId })),
+  voiceSuperwhisperInstalled: (): Promise<boolean> => runAssetList((c) => c.Voice.superwhisperInstalled()),
+  voiceSuperwhisperRecord: (action: "start" | "stop"): Promise<void> =>
+    runAssetList((c) => c.Voice.superwhisperRecord({ action })),
   voiceModels: (): Promise<ReadonlyArray<VoiceModel>> => runAssetList((c) => c.Voice.models()),
   voiceDownloadModel: (id: string): Promise<void> => runAssetList((c) => c.Voice.downloadModel({ id })),
   voiceRemoveModel: (id: string): Promise<void> => runAssetList((c) => c.Voice.removeModel({ id })),
