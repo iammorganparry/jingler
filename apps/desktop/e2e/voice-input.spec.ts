@@ -66,10 +66,19 @@ test("with Superwhisper installed the mic starts and stops it instead of recordi
     sessions: ({ repoPath }) => [session(repoPath)]
   })
   await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.click()
   await window.getByRole("button", { name: "Voice input", exact: true }).click()
+  await expect(window.getByRole("button", { name: "Stop recording", exact: true })).toBeVisible()
+  // Superwhisper has no discard deep link, so Cancel would paste anyway.
+  await expect(window.getByRole("button", { name: "Cancel recording", exact: true })).toHaveCount(0)
   await window.getByRole("button", { name: "Stop recording", exact: true }).click()
   await expect(window.getByRole("button", { name: "Voice input", exact: true })).toBeEnabled()
   await expect.poll(() => readFileSync(log, "utf8")).toBe("superwhisper://record/start\nsuperwhisper://record/stop\n")
+  // Superwhisper pastes into whatever has focus after stop; clicking Stop must not have kept it.
+  await expect(composer).toBeFocused()
+  await window.keyboard.insertText("pasted by superwhisper")
+  await expect(composer).toHaveValue("pasted by superwhisper")
   await expect(window.getByRole("button", { name: /^No speech model installed/ })).toHaveCount(0)
   rmSync(log, { force: true })
 })

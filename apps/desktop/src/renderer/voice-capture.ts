@@ -6,8 +6,8 @@ export interface VoiceRecording {
   readonly stop: () => Promise<string>
   /** Current input loudness, 0–1. */
   readonly level: () => number
-  /** Stop and discard. */
-  readonly cancel: () => void
+  /** Stop and discard; absent when the recorder cannot discard (Superwhisper), which hides Cancel. */
+  readonly cancel?: () => void
 }
 
 export const encodeWav = (samples: Float32Array): Uint8Array => {

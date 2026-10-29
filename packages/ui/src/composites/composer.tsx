@@ -265,7 +265,8 @@ export interface ComposerVoiceInput {
   elapsedMs?: number;
   /** Start recording, or stop and transcribe. The transcript lands in the draft, never sent. */
   onToggle: () => void;
-  onCancel: () => void;
+  /** Absent when the recorder cannot discard (e.g. Superwhisper), which hides Cancel. */
+  onCancel?: () => void;
   onDismiss: () => void;
 }
 
@@ -308,7 +309,7 @@ function ComposerVoiceControl({ voice }: { voice: ComposerVoiceInput }) {
   return (<>
     {note && <Button type="button" variant="ghost" size="sm" onClick={voice.onDismiss} title="Dismiss" className="max-w-[200px] truncate text-state-failed">{note}</Button>}
     {recording && <VoiceLevelMeter level={voice.level ?? 0} elapsedMs={voice.elapsedMs ?? 0} />}
-    {recording && <Button type="button" variant="ghost" size="sm" aria-label="Cancel recording" onClick={voice.onCancel}>Cancel</Button>}
+    {recording && voice.onCancel && <Button type="button" variant="ghost" size="sm" aria-label="Cancel recording" onClick={voice.onCancel}>Cancel</Button>}
     <Tooltip label={label}>
       <Button type="button" variant={recording ? "primary" : "ghost"} size="icon" className="size-7 rounded-full"
         aria-label={label} aria-pressed={recording} aria-busy={busyVoice || undefined} disabled={busyVoice} onClick={voice.onToggle}>

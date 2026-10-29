@@ -13,17 +13,18 @@ export interface VoiceRpc {
   voiceSuperwhisperRecord: (action: "start" | "stop") => Promise<void>
 }
 
-/** Superwhisper pastes into whatever has focus, so put the caret back in this composer's textarea first. */
-const focusComposer = (): void => {
-  document.activeElement?.closest("[data-testid=\"composer\"]")?.querySelector("textarea")?.focus()
-}
-
-/** A "recording" Superwhisper owns: stop resolves with no WAV because the transcript arrives by paste. */
-const superwhisperRecording = async (rpc: VoiceRpc): Promise<VoiceRecording> => {
-  focusComposer()
-  await rpc.voiceSuperwhisperRecord("start")
-  const stop = () => rpc.voiceSuperwhisperRecord("stop")
-  return { stop: () => stop().then(() => ""), level: () => 0, cancel: () => void stop() }
+/**
+ * A "recording" Superwhisper owns: stop resolves with no WAV because the transcript arrives by paste into whatever
+ * has focus, so the composer's textarea is captured at start and refocused before each deep link (clicking Stop
+ * focuses the button). Superwhisper has no discard deep link, so the composer hides Cancel; `cancel` only stops it.
+ */
+const superwhisperRecording = async (rpc: VoiceRpc, textarea: HTMLTextAreaElement | null | undefined): Promise<VoiceRecording> => {
+  const send = (action: "start" | "stop") => {
+    textarea?.focus()
+    return rpc.voiceSuperwhisperRecord(action)
+  }
+  await send("start")
+  return { stop: () => send("stop").then(() => ""), level: () => 0 }
 }
 
 /** Saved dictation prefs: whisper `-l` code, installed model id, and the `KeyboardEvent.code` held to talk ("none" = off). */
@@ -42,7 +43,9 @@ export function useVoiceInput(chatId: string, rpc: VoiceRpc, config?: { readonly
   const [state, send] = useMachine(voiceInputMachine, {
     input: {
       start: async () => {
-        if (await rpc.voiceSuperwhisperInstalled().catch(() => false)) return superwhisperRecording(rpc)
+        // Captured before any await: the mic button disables while starting, which drops focus to <body>.
+        const textarea = document.activeElement?.closest("[data-testid=\"composer\"]")?.querySelector("textarea")
+        if (await rpc.voiceSuperwhisperInstalled().catch(() => false)) return superwhisperRecording(rpc, textarea)
         if (!(await rpc.voiceRequestMicrophone())) throw new Error("Microphone access is blocked in system settings")
         return startRecording()
       },
@@ -76,7 +79,7 @@ export function useVoiceInput(chatId: string, rpc: VoiceRpc, config?: { readonly
     level: state.context.level,
     elapsedMs: state.context.elapsedMs,
     onToggle: () => send({ type: "TOGGLE" }),
-    onCancel: () => send({ type: "CANCEL" }),
+    ...(state.context.recording !== null && state.context.recording.cancel === undefined ? {} : { onCancel: () => send({ type: "CANCEL" }) }),
     onDismiss: () => send({ type: "DISMISS" })
   }
 }
