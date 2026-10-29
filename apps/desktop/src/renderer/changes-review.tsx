@@ -148,7 +148,7 @@ function CheckoutChangesList({
     },
     [session.id, session.prNumber]
   )
-  // The turn filter and Discard belong to the active checkout only.
+  // The turn filter belongs to the active checkout only.
   const active = checkoutId === undefined
   const agentTrees = useAgentTrees(session, review.files, active && review.source === "local")
   const { changesScope, setChangesScope } = useSubagentView(session.activeChatId)
@@ -177,7 +177,7 @@ function CheckoutChangesList({
       review={review.source === "pr" && checkoutId === undefined ? adversarial.review : null}
       activePath={activePath}
       onSelectFile={onOpenPath}
-      onDiscardFile={active && review.source === "local" ? revertFile : undefined}
+      onDiscardFile={review.source === "local" ? revertFile : undefined}
       loading={review.loading}
       error={review.error}
       onRetry={review.retry}
@@ -196,7 +196,7 @@ export function ChangesExplorerPanel({
   readonly session: Session
   readonly connected: boolean
   readonly activePath: string | null
-  readonly onOpenPath: (path: string) => void
+  readonly onOpenPath: (path: string, checkoutId?: string) => void
 }) {
   const checkouts = checkoutsOf(session)
   // An Auto session with nothing attached yet has no repo to diff against.
@@ -229,7 +229,7 @@ export function ChangesExplorerPanel({
             connected={connected}
             checkoutId={checkout.id}
             activePath={activePath}
-            onOpenPath={onOpenPath}
+            onOpenPath={(path) => onOpenPath(path, checkout.id)}
           />
         </section>
       ))}

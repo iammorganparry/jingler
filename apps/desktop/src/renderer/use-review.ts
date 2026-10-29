@@ -305,10 +305,10 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   const refetchLocal = () => qc.invalidateQueries({ queryKey: localKey(session.id) })
   const revertFile = useCallback(
     (path: string) => {
-      void rpc.workspaceRevertFile(session.id, path).then(refetchLocal).catch(() => {})
+      void rpc.workspaceRevertFile(session.id, path, checkoutId).then(refetchLocal).catch(() => {})
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.id]
+    [session.id, checkoutId]
   )
 
   const activeQuery = effective === "pr" ? prQuery : localQuery

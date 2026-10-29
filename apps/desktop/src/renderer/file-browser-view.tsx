@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom"
 import { useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
-import { activeCheckoutOf, workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
+import { activeCheckoutOf, checkoutById, workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
 import { isLanguageHoverPath } from "@jingler/contracts"
 import {
@@ -32,7 +32,7 @@ import type { AgentEdit, PierreAnnotationMetadata, ReviewTurn } from "@jingler/u
 import type { JinglerLineSelection } from "@jingler/ui"
 import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, Maximize2, MessageSquarePlus, Minimize2, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
-import { openSessionFileDiff, useFileBrowser } from "./use-file-browser.js"
+import { fileSurfaceId, openSessionFileDiff, parseFileSurface, useFileBrowser } from "./use-file-browser.js"
 import { setReviewFilter, setReviewTrayHidden, useReviewTrayHidden, useSessionReviewState } from "./review-store.js"
 import { useReview } from "./use-review.js"
 import { ChangesExplorerPanel, useChangesReview, useReviewTurns } from "./changes-review.js"
@@ -207,7 +207,12 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
   const shownFilter = filter === "all" ? "all" : source
   useEffect(() => browser.activate(), [browser.activate])
   // A changed file opens on its diff: that is the point of filtering to it.
-  const openChangedPath = (path: string) => {
+  const openChangedPath = (path: string, checkoutId?: string) => {
+    if (checkoutId !== undefined && checkoutId !== activeCheckoutOf(session).id) {
+      openSessionFileDiff(session.id, checkoutById(session, checkoutId).worktreePath, path, undefined, checkoutId)
+      onOpenPath(fileSurfaceId(path, checkoutId))
+      return
+    }
     browser.open(path)
     browser.showDiff()
     openSessionFileDiff(session.id, activeCheckoutOf(session).worktreePath, path)
@@ -331,18 +336,23 @@ export function FileBrowserView({
   debugSnapshot,
   onSendReference,
   onSendComment,
-  path,
+  path: surfaceId,
   onOpenPath,
   onClosed
 }: FileBrowserViewProps) {
+  const target = surfaceId === undefined ? undefined : parseFileSurface(surfaceId)
+  const path = target?.path
+  const checkoutId = target?.checkoutId
   const browser = useFileBrowser(
     session.id,
-    activeCheckoutOf(session).worktreePath,
-    path === undefined ? undefined : `file:${path}`
+    checkoutById(session, checkoutId).worktreePath,
+    surfaceId === undefined ? undefined : `file:${surfaceId}`,
+    checkoutId
   )
   const debug = useDebugSessionModel(session.id, debugSnapshot)
-  const changes = useChangesReview(session, connected)
-  const { turn } = useReviewTurns(session)
+  const changes = useChangesReview(session, connected, checkoutId)
+  const { turn: activeTurn } = useReviewTurns(session)
+  const turn = checkoutId === undefined ? activeTurn : null
   const agentEdits = useAgentEdits(session, browser.selectedPath)
   const jumpToAgentEditTurn = useJumpToAgentEditTurn(session)
   const debugFrame = debug.snapshot.session?.status === "stopped"

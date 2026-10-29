@@ -17,13 +17,15 @@ import { fileDiffStat, setSessionFileDiff } from "./diff-presence.js"
 
 export type FileBrowserActor = ActorRefFrom<FileBrowserMachine>
 
-const api: FileBrowserApi = {
+/** `checkoutId` binds every call to one checkout of a multi-repo session; absent means the active one. */
+const apiFor = (checkoutId?: string): FileBrowserApi => ({
   list: (sessionId, worktreePath) =>
     listRepositoryFiles(rpc, sessionId, worktreePath),
-  diff: rpc.sessionsFileDiff,
-  read: rpc.assetRead,
-  write: rpc.assetWrite
-}
+  diff: (sessionId, path) => rpc.sessionsFileDiff(sessionId, path, checkoutId),
+  read: (sessionId, path) => rpc.assetRead(sessionId, path, checkoutId),
+  write: (sessionId, path, text, expectedRevision) =>
+    rpc.assetWrite(sessionId, path, text, expectedRevision, checkoutId)
+})
 const actors = new Map<string, FileBrowserActor>()
 
 /**
@@ -80,13 +82,30 @@ const evictFileBrowserActors = (keep: string): void => {
   }
 }
 
+const CHECKOUT_FILE_SURFACE = /^checkout:([^/]+)\/(.+)$/
+
+/**
+ * The editor-tab id of a file. A file of a non-active checkout is prefixed with
+ * its checkout so two repos' same-named files get separate tabs and buffers.
+ */
+export const fileSurfaceId = (path: string, checkoutId?: string): string =>
+  checkoutId === undefined ? path : `checkout:${checkoutId}/${path}`
+
+export const parseFileSurface = (
+  surfaceId: string
+): { readonly path: string; readonly checkoutId?: string } => {
+  const match = CHECKOUT_FILE_SURFACE.exec(surfaceId)
+  return match === null ? { path: surfaceId } : { path: match[2]!, checkoutId: match[1]! }
+}
+
 const fileBrowserActorKey = (sessionId: string, instanceId?: string): string =>
   instanceId === undefined ? sessionId : `${sessionId}\0${instanceId}`
 
 const getFileBrowserActor = (
   sessionId: string,
   worktreePath?: string,
-  instanceId?: string
+  instanceId?: string,
+  checkoutId?: string
 ): FileBrowserActor => {
   const key = fileBrowserActorKey(sessionId, instanceId)
   const existing = actors.get(key)
@@ -99,11 +118,11 @@ const getFileBrowserActor = (
     actors.set(key, existing)
     return existing
   }
-  const actor = createActor(createFileBrowserMachine(api), {
+  const actor = createActor(createFileBrowserMachine(apiFor(checkoutId)), {
     input: {
       sessionId,
       ...(worktreePath === undefined ? {} : { worktreePath }),
-      ...(instanceId === undefined
+      ...(instanceId === undefined || checkoutId !== undefined
         ? {}
         : { initialEntries: actors.get(sessionId)?.getSnapshot().context.entries ?? [] }),
       documentOnly: instanceId !== undefined
@@ -136,9 +155,15 @@ export const openSessionFileDiff = (
   sessionId: string,
   worktreePath: string | undefined,
   path: string,
-  target?: Omit<Extract<FileBrowserEvent, { type: "AGENT_TARGET" }>, "type" | "path">
+  target?: Omit<Extract<FileBrowserEvent, { type: "AGENT_TARGET" }>, "type" | "path">,
+  checkoutId?: string
 ): void => {
-  const actor = getFileBrowserActor(sessionId, worktreePath, `file:${path}`)
+  const actor = getFileBrowserActor(
+    sessionId,
+    worktreePath,
+    `file:${fileSurfaceId(path, checkoutId)}`,
+    checkoutId
+  )
   if (target !== undefined) {
     if (actor.getSnapshot().context.selectedPath === null) {
       actor.send({ type: "OPEN", path })
@@ -155,11 +180,11 @@ export const openSessionFileDiff = (
 
 /** List a path among the session's open files without selecting it. */
 export const trackSessionFile = (sessionId: string, path: string): void => {
-  getFileBrowserActor(sessionId).send({ type: "TRACK", path })
+  if (parseFileSurface(path).checkoutId === undefined) getFileBrowserActor(sessionId).send({ type: "TRACK", path })
 }
 
 export const closeSessionFile = (sessionId: string, path: string): void => {
-  getFileBrowserActor(sessionId).send({ type: "CLOSE", path })
+  if (parseFileSurface(path).checkoutId === undefined) getFileBrowserActor(sessionId).send({ type: "CLOSE", path })
 }
 
 /** Ask a path-owned editor to close. False means its discard prompt now owns the decision. */
@@ -171,7 +196,7 @@ export const requestCloseFileSurface = (
   const actor = actors.get(key)
   if (!actor) return true
   const blocked = isFileBrowserActorPinned(actor, false)
-  actor.send({ type: "CLOSE", path })
+  actor.send({ type: "CLOSE", path: parseFileSurface(path).path })
   return !blocked
 }
 
@@ -259,12 +284,13 @@ export function fileBrowserStatus(snapshot: ReturnType<FileBrowserActor["getSnap
 export function useFileBrowser(
   sessionId: string,
   worktreePath?: string,
-  instanceId?: string
+  instanceId?: string,
+  checkoutId?: string
 ): FileBrowserController {
   const registryKey = fileBrowserActorKey(sessionId, instanceId)
   const actor = useMemo(
-    () => getFileBrowserActor(sessionId, worktreePath, instanceId),
-    [instanceId, sessionId, worktreePath]
+    () => getFileBrowserActor(sessionId, worktreePath, instanceId, checkoutId),
+    [checkoutId, instanceId, sessionId, worktreePath]
   )
   const snapshot = useSelector(actor, (state) => state)
   // Pin this session's actor against eviction for as long as a browser is

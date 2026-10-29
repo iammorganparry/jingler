@@ -103,6 +103,7 @@ import {
   setSessionPersistent,
   sessionCreationOptions,
   sessionDiff,
+  sessionFileDiff,
   skillsList,
   transcriptHasGitHubFeedback,
   uninstallPlugin,
@@ -1207,6 +1208,61 @@ describe("RPC handlers", () => {
       expect(readFileSync(join(worktreePath, "config.custom"), "utf8")).toBe(
         "after\n",
       );
+    });
+  });
+
+  describe("checkoutId routing", () => {
+    it("resolves the requested non-active checkout for fileDiff, read, write and revert", async () => {
+      const now = "2026-07-30T10:00:00.000Z";
+      const webPath = join(dir, "co-web");
+      const apiPath = join(dir, "co-api");
+      for (const [path, text] of [[webPath, "WEB\n"], [apiPath, "API\n"]] as const) {
+        mkdirSync(path, { recursive: true });
+        const git = (...args: string[]) =>
+          execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: path, stdio: "ignore" });
+        git("init", "-b", "main");
+        writeFileSync(join(path, "README.md"), text);
+        git("add", "-A");
+        git("commit", "-m", "init", "--no-gpg-sign");
+        writeFileSync(join(path, "README.md"), `${text}EDIT\n`);
+      }
+      const co = (id: string, worktreePath: string) => ({
+        id, repo: id, repoPath: worktreePath, worktreePath, branch: "main", baseBranch: "main",
+        workspaceMode: "worktree", prNumber: null,
+      });
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(root, "sessions.json"), JSON.stringify([{
+        id: "co-session", repo: "web", branch: "main", baseBranch: "main", title: "Two repos",
+        status: "idle", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0, tokens: 0,
+        updatedAt: now, worktreePath: webPath, repoPath: webPath, workspaceMode: "worktree",
+        checkouts: [co("web", webPath), co("api", apiPath)], activeCheckoutId: "web",
+        chats: [], activeChatId: null,
+      }]));
+      const layer = Layer.mergeAll(SessionStore.Default, AssetService.Default, WorkspaceService.Default)
+        .pipe(Layer.provideMerge(base));
+      const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
+
+      const diff = await run(sessionFileDiff("co-session", "README.md", "api").pipe(Effect.provide(layer)));
+      expect(JSON.stringify(diff)).toContain("API");
+      expect(JSON.stringify(diff)).not.toContain("WEB");
+      const activeDiff = await run(sessionFileDiff("co-session", "README.md").pipe(Effect.provide(layer)));
+      expect(JSON.stringify(activeDiff)).toContain("WEB");
+
+      const loaded = await run(
+        assetRead({ sessionId: "co-session", path: "README.md", checkoutId: "api" }).pipe(Effect.provide(layer)),
+      );
+      expect(loaded).toMatchObject({ text: "API\nEDIT\n" });
+      if (!("text" in loaded)) return;
+      await run(assetWrite({
+        sessionId: "co-session", path: "README.md", text: "API\nSAVED\n",
+        expectedRevision: loaded.revision, checkoutId: "api",
+      }).pipe(Effect.provide(layer)));
+      expect(readFileSync(join(apiPath, "README.md"), "utf8")).toBe("API\nSAVED\n");
+      expect(readFileSync(join(webPath, "README.md"), "utf8")).toBe("WEB\nEDIT\n");
+
+      await run(workspaceRevertFile({ sessionId: "co-session", path: "README.md", checkoutId: "api" }).pipe(Effect.provide(layer)));
+      expect(readFileSync(join(apiPath, "README.md"), "utf8")).toBe("API\n");
+      expect(readFileSync(join(webPath, "README.md"), "utf8")).toBe("WEB\nEDIT\n");
     });
   });
 

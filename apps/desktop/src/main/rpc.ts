@@ -657,17 +657,25 @@ export const sessionDiffStat = (id: string) =>
     const session = yield* SessionStore.get(id).pipe(
       Effect.orElseSucceed(() => null),
     );
-    const checkout = session && activeCheckoutOf(session);
-    if (!checkout?.worktreePath) return { added: 0, removed: 0, files: 0 };
-    return yield* WorkspaceService.diffStat(checkout.worktreePath, checkout.baseBranch);
+    const stats = yield* Effect.forEach(
+      session === null ? [] : checkoutsOf(session),
+      (checkout) =>
+        checkout.worktreePath
+          ? WorkspaceService.diffStat(checkout.worktreePath, checkout.baseBranch)
+          : Effect.succeed({ added: 0, removed: 0, files: 0 }),
+    );
+    return stats.reduce(
+      (total, stat) => ({ added: total.added + stat.added, removed: total.removed + stat.removed, files: total.files + stat.files }),
+      { added: 0, removed: 0, files: 0 },
+    );
   });
 
-export const sessionFileDiff = (id: string, path: string) =>
+export const sessionFileDiff = (id: string, path: string, checkoutId?: string) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(id).pipe(
       Effect.orElseSucceed(() => null),
     );
-    const checkout = session && activeCheckoutOf(session);
+    const checkout = session && checkoutById(session, checkoutId);
     if (!checkout?.worktreePath) return { kind: "patch" as const, patch: "" };
     return yield* WorkspaceService.boundedFileDiff(checkout.worktreePath, path, checkout.baseBranch);
   });
@@ -1575,12 +1583,12 @@ export const githubIssue = (sessionId: string) =>
  * find a worktree must not silently fall back to anything — the worktree root
  * IS the sandbox, so "no worktree" has to stop the read rather than widen it.
  */
-const assetWorktree = (sessionId: string) =>
+const assetWorktree = (sessionId: string, checkoutId?: string) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId).pipe(
       Effect.catchAll(() => new SessionNotFoundError({ sessionId })),
     );
-    const checkout = activeCheckoutOf(session);
+    const checkout = checkoutById(session, checkoutId);
     if (!checkout.worktreePath)
       return yield* new SessionNotFoundError({ sessionId });
     return checkout.worktreePath;
@@ -1593,8 +1601,8 @@ export const assetList = (input: { sessionId: string }) =>
   );
 
 /** `Asset.read` handler — one asset's contents, sandboxed to the session worktree. */
-export const assetRead = (input: { sessionId: string; path: string }) =>
-  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+export const assetRead = (input: { sessionId: string; path: string; checkoutId?: string }) =>
+  Effect.flatMap(assetWorktree(input.sessionId, input.checkoutId), (worktree) =>
     AssetService.read(worktree, input.path),
   );
 
@@ -1642,10 +1650,11 @@ export const assetWrite = (input: {
   path: string;
   text: string;
   expectedRevision: string;
+  checkoutId?: string;
 }) =>
   Effect.flatMap(resolveSession(input.sessionId), (session) => session?.checkpointSafeMode
     ? Effect.fail(new AssetWriteIoError({ path: input.path, message: "Use managed Pi structured file tools in checkpoint-safe mode; direct editor mutations are unsupported." }))
-    : Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+    : Effect.flatMap(assetWorktree(input.sessionId, input.checkoutId), (worktree) =>
     AssetService.write(
       worktree,
       input.path,
@@ -1697,11 +1706,12 @@ export const assetOpenPdf = (input: {
 export const workspaceRevertFile = (input: {
   sessionId: string;
   path: string;
+  checkoutId?: string;
 }) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     if (!session) return;
-    const checkout = activeCheckoutOf(session);
+    const checkout = checkoutById(session, input.checkoutId);
     if (!checkout.worktreePath) return;
     if (session.checkpointSafeMode) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in checkpoint-safe mode. Use the checkpoint restore preview." }));
     if (workspaceModeOf(checkout) === "direct") {
@@ -5567,7 +5577,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           : new GitError({ message: "Could not count the session diff", cause }),
       ),
     ),
-  "Sessions.fileDiff": ({ id, path }) =>
+  "Sessions.fileDiff": ({ id, path, checkoutId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(id);
       const remote = yield* RemoteSessionService;
@@ -5575,7 +5585,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Sessions.fileDiff",
         { path },
-        { execute: () => sessionFileDiff(id, path) },
+        { execute: () => sessionFileDiff(id, path, checkoutId) },
         {
           execute: () =>
             remote.request(session, "Sessions.fileDiff", { path }).pipe(

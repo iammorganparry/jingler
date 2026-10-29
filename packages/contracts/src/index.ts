@@ -673,7 +673,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /** Discard ALL uncommitted changes to a file in a session's worktree. */
   Rpc.make("Workspace.revertFile", {
     error: GitError,
-    payload: { sessionId: Schema.String, path: Schema.String }
+    payload: { sessionId: Schema.String, path: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** List all agent sessions for the sidebar. */
@@ -1042,7 +1042,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.fileDiff", {
     success: SessionFileDiff,
     error: GitError,
-    payload: { id: Schema.String, path: Schema.String }
+    payload: { id: Schema.String, path: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /**
@@ -2590,7 +2590,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       AssetUnsupportedError,
       SessionNotFoundError
     ),
-    payload: { sessionId: Schema.String, path: Schema.String }
+    payload: { sessionId: Schema.String, path: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** Replace one existing UTF-8 text asset if its loaded revision is current. */
@@ -2608,7 +2608,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       path: Schema.String,
       text: Schema.String,
-      expectedRevision: Schema.String
+      expectedRevision: Schema.String,
+      checkoutId: Schema.optional(Schema.String)
     }
   }),
 

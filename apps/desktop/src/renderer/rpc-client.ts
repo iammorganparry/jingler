@@ -712,8 +712,8 @@ export const rpc = {
     run((c) => c.Sessions.diff({ id, checkoutId, workspacePath })),
   sessionsDiffStat: (id: string): Promise<SessionDiffStat> =>
     run((c) => c.Sessions.diffStat({ id })),
-  sessionsFileDiff: (id: string, path: string): Promise<SessionFileDiff> =>
-    run((c) => c.Sessions.fileDiff({ id, path })),
+  sessionsFileDiff: (id: string, path: string, checkoutId?: string): Promise<SessionFileDiff> =>
+    run((c) => c.Sessions.fileDiff({ id, path, checkoutId })),
   workspaceFiles: (
     repoPath: string,
     environmentId?: string,
@@ -749,16 +749,17 @@ export const rpc = {
       column,
       ...(text === undefined ? {} : { text })
     }), signal),
-  assetRead: (sessionId: string, path: string): Promise<AssetPayload> =>
-    run((c) => c.Asset.read({ sessionId, path })),
+  assetRead: (sessionId: string, path: string, checkoutId?: string): Promise<AssetPayload> =>
+    run((c) => c.Asset.read({ sessionId, path, checkoutId })),
   /** Save one existing text asset only if its loaded revision is still current. */
   assetWrite: (
     sessionId: string,
     path: string,
     text: string,
-    expectedRevision: string
+    expectedRevision: string,
+    checkoutId?: string
   ): Promise<AssetWriteResult> =>
-    run((c) => c.Asset.write({ sessionId, path, text, expectedRevision })),
+    run((c) => c.Asset.write({ sessionId, path, text, expectedRevision, checkoutId })),
   assetReveal: (sessionId: string, path: string): Promise<void> =>
     run((c) => c.Asset.reveal({ sessionId, path })),
   /** Park Chromium's PDF viewer over `bounds`. Main resolves the path itself. */
@@ -773,8 +774,8 @@ export const rpc = {
   ): Promise<void> => run((c) => c.Asset.setPdfBounds({ sessionId, bounds })),
   assetHidePdf: (sessionId: string): Promise<void> =>
     run((c) => c.Asset.hidePdf({ sessionId })),
-  workspaceRevertFile: (sessionId: string, path: string): Promise<void> =>
-    run((c) => c.Workspace.revertFile({ sessionId, path })),
+  workspaceRevertFile: (sessionId: string, path: string, checkoutId?: string): Promise<void> =>
+    run((c) => c.Workspace.revertFile({ sessionId, path, checkoutId })),
   skillsList: (sessionId: string): Promise<ReadonlyArray<Skill>> =>
     run((c) => c.Skills.list({ sessionId })),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),
