@@ -1,4 +1,4 @@
-import { activeCheckoutOf, type Message, type Session } from "@jingler/core"
+import { activeCheckoutOf, reduceCheckouts, type Message, type Session } from "@jingler/core"
 import {
   GitError,
   buildTitlePrompt,
@@ -213,9 +213,8 @@ function* applySessionMetadata(
     )
     yield* SessionStore.setTitleAndBranch(sessionId, title, branch, safeProposal)
     return {
-      ...session,
+      ...reduceCheckouts(session, { type: "update", checkoutId: checkout.id, patch: { branch } }),
       title,
-      branch,
       semanticBranchProposal: safeProposal,
       semanticBranchPending: false
     }
@@ -237,9 +236,8 @@ function* reconcileExistingTaskBranch(
     yield* SessionStore.setTitleAndBranch(sessionId, title, liveBranch, persistedProposal)
   }
   return {
-    ...session,
+    ...reduceCheckouts(session, { type: "update", checkoutId: activeCheckoutOf(session).id, patch: { branch: liveBranch } }),
     title,
-    branch: liveBranch,
     ...(persistedProposal === undefined ? {} : { semanticBranchProposal: persistedProposal }),
     semanticBranchPending: false
   }

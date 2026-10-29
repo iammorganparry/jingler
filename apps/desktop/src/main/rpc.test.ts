@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -68,7 +69,7 @@ import {
 import { RoutinesService } from "./routines.js"
 import { RoutineScheduler } from "./routine-scheduler.js"
 import { RoutineStore } from "@jingler/cli-adapters/routine-store"
-import { RoutineInput, type AuthSession } from "@jingler/core"
+import { RoutineInput, type AuthSession, type SessionWire } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   authenticatedSession,
@@ -125,9 +126,11 @@ describe("session creation defaults", () => {
 describe("publish branch verification", () => {
   const session = (branch: string, semanticBranchPending = false): Session => ({
     id: "publish-session",
-    repo: "jingler",
-    branch,
-    baseBranch: "main",
+    checkouts: [{
+      id: "primary", repo: "jingler", branch, baseBranch: "main",
+      worktreePath: "/tmp/publish-session", workspaceMode: "worktree", prNumber: null,
+    }],
+    activeCheckoutId: "primary",
     title: "Publish session",
     status: "idle",
     diff: { added: 0, removed: 0 },
@@ -135,8 +138,6 @@ describe("publish branch verification", () => {
     costUsd: 0,
     tokens: 0,
     updatedAt: "2026-08-10T00:00:00.000Z",
-    worktreePath: "/tmp/publish-session",
-    workspaceMode: "worktree",
     semanticBranchPending,
     semanticBranchProposal: { type: "fix", slug: "create-session-race" },
     chats: [{
@@ -151,19 +152,16 @@ describe("publish branch verification", () => {
   it("refreshes a session whose semantic branch persisted after publishing started", async () => {
     const refreshed = vi.fn(async () => session("fix/create-session-race"));
 
-    await expect(
-      resolvePublishSessionBranch(
-        session("main", true),
-        "fix/create-session-race",
-        refreshed,
-      ),
-    ).resolves.toMatchObject({
+    const resolved = await resolvePublishSessionBranch(
+      session("main", true),
+      "fix/create-session-race",
+      refreshed,
+    );
+    expect(resolved).toMatchObject({
       branch: "fix/create-session-race",
-      session: {
-        branch: "fix/create-session-race",
-        semanticBranchPending: false,
-      },
+      session: { semanticBranchPending: false },
     });
+    expect(activeCheckoutOf(resolved.session).branch).toBe("fix/create-session-race");
     expect(refreshed).toHaveBeenCalledOnce();
   });
 
@@ -630,8 +628,8 @@ describe("RPC handlers", () => {
         SessionStore.get("s1").pipe(Effect.provide(layer)),
       );
 
-      expect(updated.branch).toBe("feature/other");
-      expect(reloaded.branch).toBe("feature/other");
+      expect(activeCheckoutOf(updated).branch).toBe("feature/other");
+      expect(activeCheckoutOf(reloaded).branch).toBe("feature/other");
     });
 
     it("adoptBranch is a no-op when the checkout has not drifted", async () => {
@@ -643,7 +641,7 @@ describe("RPC handlers", () => {
         adoptBranch("s1").pipe(Effect.provide(layer)),
       );
 
-      expect(updated.branch).toBe("main");
+      expect(activeCheckoutOf(updated).branch).toBe("main");
     });
 
     it("transcriptForFork keeps the work but strips the drift banner that led to the fork", () => {
@@ -705,15 +703,15 @@ describe("RPC handlers", () => {
       );
 
       // An ISOLATED worktree, not the shared checkout.
-      expect(fork.workspaceMode).toBe("worktree");
-      expect(fork.worktreePath).toBeDefined();
-      expect(fork.worktreePath).not.toBe(checkoutPath);
+      expect(activeCheckoutOf(fork).workspaceMode).toBe("worktree");
+      expect(activeCheckoutOf(fork).worktreePath).toBeDefined();
+      expect(activeCheckoutOf(fork).worktreePath).not.toBe(checkoutPath);
       // Committed history on the drifted branch is preserved.
-      expect(existsSync(join(fork.worktreePath!, "committed-on-fix.txt"))).toBe(
+      expect(existsSync(join(activeCheckoutOf(fork).worktreePath!, "committed-on-fix.txt"))).toBe(
         true,
       );
       // The dirty working tree is NOT dragged in — the fork is clean.
-      expect(existsSync(join(fork.worktreePath!, "dirty-from-main.txt"))).toBe(
+      expect(existsSync(join(activeCheckoutOf(fork).worktreePath!, "dirty-from-main.txt"))).toBe(
         false,
       );
       // The source session stays pinned to its original branch.
@@ -723,7 +721,7 @@ describe("RPC handlers", () => {
           Effect.provide(base),
         ),
       );
-      expect(source.branch).toBe("main");
+      expect(activeCheckoutOf(source).branch).toBe("main");
     });
 
     it("forkOntoBranch fails with GitError when the checkout has not drifted", async () => {
@@ -1466,7 +1464,7 @@ describe("RPC handlers", () => {
         .resolves.toBe(44);
       const linked = await Effect.runPromise(SessionStore.get("cli-only").pipe(Effect.provide(github)));
       expect(linked.prNumber).toBe(44);
-      expect(linked.branch).toBe("fix/cli");
+      expect(activeCheckoutOf(linked).branch).toBe("fix/cli");
       expect(linked.githubInstallationId).toBeUndefined();
       expect(linked.githubRepositoryId).toBeUndefined();
       expect(upsertSessionRoute).not.toHaveBeenCalled();
@@ -1574,12 +1572,11 @@ describe("RPC handlers", () => {
           githubDetectPr("replacement-session").pipe(Effect.provide(github)),
         ),
       ).resolves.toBe(43);
-      await expect(
-        Effect.runPromise(
-          SessionStore.get("replacement-session").pipe(Effect.provide(github)),
-        ),
-      ).resolves.toMatchObject({
-        branch: "fix/replacement-pr",
+      const replaced = await Effect.runPromise(
+        SessionStore.get("replacement-session").pipe(Effect.provide(github)),
+      );
+      expect(activeCheckoutOf(replaced).branch).toBe("fix/replacement-pr");
+      expect(replaced).toMatchObject({
         prNumber: 43,
         githubInstallationId: "99",
         githubRepositoryId: "200",
@@ -1746,7 +1743,7 @@ describe("RPC handlers", () => {
    */
   describe("Review.run", () => {
     /** Persist a session with a linked PR by writing the store's own file. */
-    const withSession = (over: Partial<Session> = {}) => {
+    const withSession = (over: Partial<typeof SessionWire.Type> = {}) => {
       mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "sessions.json"),

@@ -1,7 +1,8 @@
 import {
   ProviderCatalog,
   type ReasoningEffort,
-  type Session
+  type Session,
+  type SessionCheckout
 } from "@jingler/core"
 import { Schema } from "effect"
 
@@ -63,8 +64,22 @@ export const testProviderCatalog = (
  * `updatedAt` is a fixed date, never `new Date()`: relative-time rendering
  * ("2 hours ago") must not depend on when the suite happens to run.
  */
-export const testSession = (over: Partial<Session> & { id: string }): Session =>
-  ({
+/** Per-repo fields callers may still pass flat; they are folded into the primary checkout. */
+export type CheckoutFields = Partial<Omit<SessionCheckout, "id">>
+
+/** Move flat per-repo fields into the primary checkout of a Session. */
+export const foldCheckout = (flat: object): Session => {
+  const { projectId, repo, repoPath, worktreePath, workspaceMode, branch, baseBranch, prNumber, githubSlug, ...rest } = flat as CheckoutFields & Record<string, unknown>
+  const checkout = Object.fromEntries(Object.entries({
+    id: "primary", projectId, repo: repo ?? "", repoPath, worktreePath, workspaceMode,
+    branch: branch ?? "", baseBranch, prNumber: prNumber ?? null, githubSlug
+  }).filter(([, v]) => v !== undefined)) as SessionCheckout
+  if (Array.isArray(rest.checkouts) && rest.checkouts.length > 0) return { ...rest, ...(prNumber === undefined ? {} : { prNumber }) } as unknown as Session
+  return { ...rest, ...(prNumber === undefined ? {} : { prNumber }), checkouts: [checkout], activeCheckoutId: "primary" } as unknown as Session
+}
+
+export const testSession = (over: Partial<Session> & CheckoutFields & { id: string }): Session =>
+  foldCheckout({
     repo: "gtm-grid",
     branch: `chore/${over.id}`,
     title: over.id,
@@ -88,4 +103,4 @@ export const testSession = (over: Partial<Session> & { id: string }): Session =>
     baseBranch: "main",
     mode: "auto",
     ...over
-  }) as Session
+  })

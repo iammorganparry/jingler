@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import { useMemo, useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { Project, Session } from "@jingler/core"
@@ -72,8 +73,8 @@ const prSession: Session = {
   ...localSession,
   id: "changes-pr",
   title: "Refresh expired sessions",
-  branch: "feat/session-refresh",
-  prNumber: 482
+  prNumber: 482,
+  checkouts: [{ ...activeCheckoutOf(localSession), branch: "feat/session-refresh", prNumber: 482 }]
 }
 
 interface FlowSetup {
@@ -199,8 +200,8 @@ type FlowState = ReturnType<typeof useFlowState>
 function FlowExplorer({ flow }: { readonly flow: FlowState }) {
   return (
     <ExplorerPanel
-      branch={flow.session.branch}
-      worktreePath={flow.session.worktreePath}
+      branch={activeCheckoutOf(flow.session).branch}
+      worktreePath={activeCheckoutOf(flow.session).worktreePath}
       filter={flow.shownFilter}
       onFilterChange={flow.setFilter}
       localAvailable

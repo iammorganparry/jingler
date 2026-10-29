@@ -41,7 +41,7 @@ import {
   UNTITLED_SESSION,
   workspaceModeOf
 } from "@jingler/core"
-import { Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths, reduceCheckouts } from "@jingler/core"
+import { PRIMARY_CHECKOUT_ID, Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths, reduceCheckouts } from "@jingler/core"
 import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, type Path } from "@effect/platform"
@@ -825,9 +825,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               checkpointExecutionHistory: "clean",
               ...checkpointCreationFields(input),
               ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-              repo: "",
-              branch: "",
-              checkouts: [],
+              checkouts: [{ id: PRIMARY_CHECKOUT_ID, repo: "", branch: "", worktreePath: scratchDir, prNumber: null }],
+              activeCheckoutId: PRIMARY_CHECKOUT_ID,
               title,
               ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
                 initialPrompt: input.initialPrompt?.trim()
@@ -841,8 +840,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               tokens: 0,
               updatedAt: now,
               chats: [chat],
-              activeChatId: chat.id,
-              worktreePath: scratchDir
+              activeChatId: chat.id
             }
             yield* atomically(
               Effect.gen(function* () {
@@ -861,13 +859,22 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             id,
             checkpointExecutionHistory: "clean",
             ...checkpointCreationFields(input),
-            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-            // Non-Auto creation always supplies `repoName`; Auto (no `repoPath`)
-            // returns above before this closure is ever called.
-            repo: input.repoName!,
-            ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
-            branch: workspace.branch,
+            // Non-Auto creation always supplies `repoName` and `baseBranch`; Auto
+            // (no `repoPath`) returns above before this closure is ever called.
+            checkouts: [{
+              id: PRIMARY_CHECKOUT_ID,
+              ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+              repo: input.repoName!,
+              ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
+              branch: workspace.branch,
+              worktreePath: workspace.path,
+              workspaceMode,
+              repoPath: workspace.repoPath,
+              baseBranch: input.baseBranch!,
+              prNumber: null
+            }],
+            activeCheckoutId: PRIMARY_CHECKOUT_ID,
             ...propertiesWhen(workspaceMode === "worktree" && input.continueBranch !== true, { semanticBranchPending: true }),
             title,
             ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
@@ -883,12 +890,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             updatedAt: now,
             chats: [chat],
             activeChatId: chat.id,
-            worktreePath: workspace.path,
-            workspaceMode,
-            repoPath: workspace.repoPath,
-            // Non-Auto creation always supplies `baseBranch`; Auto (no `repoPath`)
-            // returns above before this closure is ever called.
-            baseBranch: input.baseBranch!,
             ...propertiesWhen(
               workspaceMode === "worktree" && input.projectId !== undefined && input.environmentId === undefined,
               { workspaceLifecycle: initialWorkspaceLifecycle(input, now) }
@@ -1065,11 +1066,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           let session: Session = {
             id,
             checkpointExecutionHistory: "clean",
-            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-            repo: input.repoName,
-            githubSlug: input.githubSlug ?? repository.fullName,
-            branch,
+            checkouts: [{
+              id: PRIMARY_CHECKOUT_ID,
+              ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+              repo: input.repoName,
+              githubSlug: input.githubSlug ?? repository.fullName,
+              branch,
+              worktreePath: worktree.path,
+              workspaceMode: "worktree",
+              repoPath: worktree.repoPath,
+              baseBranch: input.pr.baseRefName,
+              prNumber: input.pr.number
+            }],
+            activeCheckoutId: PRIMARY_CHECKOUT_ID,
             title: input.pr.title,
             ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
               initialPrompt: input.initialPrompt?.trim()
@@ -1087,10 +1097,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             updatedAt: now,
             chats: [chat],
             activeChatId: chat.id,
-            worktreePath: worktree.path,
-            workspaceMode: "worktree",
-            repoPath: worktree.repoPath,
-            baseBranch: input.pr.baseRefName,
             ...propertiesWhen(
               input.projectId !== undefined && input.environmentId === undefined,
               { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
@@ -1189,11 +1195,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             // worktree slug stays deterministic for the one-session-per-issue guard.
             id,
             checkpointExecutionHistory: "clean",
-            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-            repo: input.repoName,
-            ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
-            branch: worktree.branch,
+            checkouts: [{
+              id: PRIMARY_CHECKOUT_ID,
+              ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+              repo: input.repoName,
+              ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
+              branch: worktree.branch,
+              worktreePath: worktree.path,
+              workspaceMode: "worktree",
+              repoPath: worktree.repoPath,
+              baseBranch: input.baseBranch,
+              prNumber: null
+            }],
+            activeCheckoutId: PRIMARY_CHECKOUT_ID,
             semanticBranchPending: true,
             // Seed (and pin) the title from the issue.
             title: input.issue.title,
@@ -1222,10 +1237,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             updatedAt: now,
             chats: [chat],
             activeChatId: chat.id,
-            worktreePath: worktree.path,
-            workspaceMode: "worktree",
-            repoPath: worktree.repoPath,
-            baseBranch: input.baseBranch,
             ...propertiesWhen(
               input.projectId !== undefined && input.environmentId === undefined,
               { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }

@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import { execFileSync } from "node:child_process"
 import { existsSync, writeFileSync } from "node:fs"
 import { ConfigService } from "@jingler/cli-adapters/config"
@@ -548,7 +549,7 @@ it("passes the session baseBranch through diff, diffStat and fileDiff so committ
       modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5.6-sol"),
       baseBranch: "main"
     }), async () => undefined) as Session
-    const worktree = created.worktreePath as string
+    const worktree = activeCheckoutOf(created).worktreePath as string
     writeFileSync(join(worktree, "committed.txt"), "already committed\n")
     execFileSync("git", ["add", "-A"], { cwd: worktree })
     execFileSync("git", ["commit", "-m", "agent work", "--no-gpg-sign"], { cwd: worktree })

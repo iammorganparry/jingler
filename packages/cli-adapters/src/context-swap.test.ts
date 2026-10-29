@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { Session, StreamEvent } from "@jingler/core"
-import { piEndpointId, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import type { StreamEvent } from "@jingler/core"
+import { piEndpointId, Session, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Effect, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
@@ -106,8 +106,8 @@ const seed = (over: Partial<Session> = {}) =>
     const now = new Date().toISOString()
     const session: Session = {
       id: SESSION,
-      repo: "trigify-app",
-      branch: "chore/swap",
+      checkouts: [{ id: "primary", repo: "trigify-app", branch: "chore/swap", prNumber: null, worktreePath: temp.root }],
+      activeCheckoutId: "primary",
       title: "Swap",
       status: "idle",
       runtimeId: "pi",
@@ -146,12 +146,11 @@ const seed = (over: Partial<Session> = {}) =>
           : { contextTokens: 290_000 })
       }],
       activeChatId: SESSION,
-      worktreePath: temp.root,
       continuation: piContinuation("harness_thread_old"),
       ...over
     }
     mkdirSync(temp.root, { recursive: true })
-    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session], null, 2))
+    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([Schema.encodeSync(Session)(session)], null, 2))
   })
 
 const seedTranscript = () =>

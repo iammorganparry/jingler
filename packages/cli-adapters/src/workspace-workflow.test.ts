@@ -1,7 +1,7 @@
 import { existsSync, linkSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { CreateSessionInput } from "@jingler/core"
-import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import { activeCheckoutOf, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Cause, Effect, Layer, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { GitService } from "./git.js"
@@ -44,7 +44,7 @@ const harness = async (setup: string, body: (workflow: WorkspaceWorkflowService,
     }
     const session = yield* SessionStore.create(input)
     const workflow = yield* WorkspaceWorkflowService
-    yield* Effect.promise(() => body(workflow, session.id, session.worktreePath!, {
+    yield* Effect.promise(() => body(workflow, session.id, activeCheckoutOf(session).worktreePath!, {
       read: () => Effect.runPromise(SessionStore.get(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer))),
       safe: () => Effect.runPromise(SessionStore.setCheckpointSafeMode(session.id, true).pipe(Effect.provide(services), Effect.provide(temp.layer))),
       reconcile: () => Effect.runPromise(SessionStore.reconcileInterruptedWorkspaceLifecycles().pipe(Effect.provide(services), Effect.provide(temp.layer)))

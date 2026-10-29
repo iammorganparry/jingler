@@ -4,7 +4,7 @@ import type { Session } from "@jingler/core"
 import { routeSessionOperation } from "./execution-router.js"
 
 const session = (environmentId?: string): Session => ({
-  id: "s_test", repo: "acme/app", branch: "main", title: "Test", status: "idle",
+  id: "s_test", checkouts: [{ id: "primary", repo: "acme/app", branch: "main", prNumber: null }], activeCheckoutId: "primary", title: "Test", status: "idle",
   ...(environmentId ? { environmentId } : {}), diff: { added: 0, removed: 0 }, prNumber: null,
   costUsd: 0, tokens: 0, updatedAt: "2026-08-08T00:00:00.000Z",
   chats: [{ id: "c_test", title: null, createdAt: "2026-08-08T00:00:00.000Z", updatedAt: "2026-08-08T00:00:00.000Z" }],

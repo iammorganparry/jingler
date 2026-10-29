@@ -1,3 +1,4 @@
+import { type CheckoutFields, foldCheckout } from "../test-support"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { Session } from "@jingler/core"
 import { ComponentLibrary } from "./component-library.js"
@@ -11,8 +12,8 @@ export default meta
 type Story = StoryObj
 
 const session = (
-  value: Omit<Session, "chats" | "activeChatId">
-): Session => ({
+  value: Omit<Session, "chats" | "activeChatId" | "checkouts" | "activeCheckoutId"> & CheckoutFields
+): Session => foldCheckout({
   ...value,
   chats: [{
     id: `c_${value.id}_1`,

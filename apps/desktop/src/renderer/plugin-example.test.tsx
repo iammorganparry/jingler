@@ -33,11 +33,12 @@ vi.mock("./rpc-client.js", () => ({
 
 afterEach(cleanup)
 
-const session = (over: Partial<Session> = {}): Session =>
-  ({
+const session = (over: Partial<Session> & { worktreePath?: string } = {}): Session => {
+  const { worktreePath = "/tmp/s1", ...rest } = over
+  return {
     id: "s1",
-    repo: "trigify/api",
-    branch: "chore/s1",
+    checkouts: [{ id: "primary", repo: "trigify/api", branch: "chore/s1", prNumber: 42, baseBranch: "main", ...(worktreePath === undefined ? {} : { worktreePath }) }],
+    activeCheckoutId: "primary",
     title: "Fix auth",
     status: "idle",
     diff: { added: 0, removed: 0 },
@@ -47,11 +48,10 @@ const session = (over: Partial<Session> = {}): Session =>
     updatedAt: "2026-07-16T00:00:00.000Z",
     chats: [],
     activeChatId: "c1",
-    worktreePath: "/tmp/s1",
-    baseBranch: "main",
     mode: "auto",
-    ...over
-  }) as Session
+    ...rest
+  } as Session
+}
 
 const asLoadedPlugin = (): LoadedPlugin =>
   ({

@@ -6,7 +6,12 @@ export const PRIMARY_CHECKOUT_ID = "primary";
 /** Legacy per-session copies of the active checkout; optional so the helpers never depend on them. */
 type CheckoutScalars = Omit<SessionCheckout, "id">;
 
-type CheckoutSession = Partial<CheckoutScalars> & Pick<Session, "id" | "checkouts" | "activeCheckoutId">;
+// Structural, not `Pick<Session, …>`: `Session`'s schema calls these helpers, so referencing it here is a type cycle.
+type CheckoutSession = Partial<CheckoutScalars> & {
+  readonly id: string;
+  readonly checkouts?: ReadonlyArray<SessionCheckout>;
+  readonly activeCheckoutId?: string;
+};
 
 const defined = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;

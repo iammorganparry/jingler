@@ -1,3 +1,4 @@
+import { type CheckoutFields, foldCheckout } from "../test-support"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { Project, Session, SessionActivity } from "@jingler/core"
 import { ProjectSidebar } from "./project-sidebar.js"
@@ -19,7 +20,7 @@ const project = (over: Partial<Project> & Pick<Project, "id" | "name">): Project
   ...over
 })
 
-const session = (projectId: string, over: Partial<Session> & Pick<Session, "id" | "title">): Session => ({
+const session = (projectId: string, over: Partial<Session> & CheckoutFields & Pick<Session, "id" | "title">): Session => foldCheckout({
   repo: "jingler",
   branch: `feat/${over.id}`,
   status: "idle",

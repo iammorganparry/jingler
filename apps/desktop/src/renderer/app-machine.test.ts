@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import {
   ProviderCatalog as ProviderCatalogSchema,
   type ProviderCatalog,
@@ -198,7 +199,7 @@ describe("appMachine first-run coordination", () => {
     const actor = createActor(configured).start();
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     const running: Session = {
-      id: "retry", repo: "widget", branch: "main", title: "Preparing",
+      id: "retry", checkouts: [{ id: "primary", repo: "widget", branch: "main", prNumber: null }], activeCheckoutId: "primary", title: "Preparing",
       status: "idle", diff: { added: 0, removed: 0 }, prNumber: null,
       costUsd: 0, tokens: 0, chats: [], activeChatId: "chat-1",
       updatedAt: "2026-08-08T08:00:03.000Z",
@@ -472,7 +473,7 @@ describe("appMachine first-run coordination", () => {
       checkpoint: {
         step: "complete",
         completed: ["inspecting", "verifying-branch", "pushing", "linking"],
-        branch: session.branch,
+        branch: activeCheckoutOf(session).branch,
         prNumber: 42,
         updatedAt: "2026-08-05T08:01:00.000Z",
       },

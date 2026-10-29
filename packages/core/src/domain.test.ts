@@ -21,10 +21,12 @@ import {
   persistentOf,
   Repo,
   Session,
+  SessionWire,
   sessionsLinkedToIssue,
   workspaceModeOf,
   WorkspaceConfig,
 } from "./domain.js";
+import { activeCheckoutOf } from "./session-checkout.js";
 import {
   ProviderConnectionId,
   ProviderId,
@@ -364,7 +366,7 @@ describe("AdversarialReview", () => {
 });
 
 describe("Session", () => {
-  const base: Session = {
+  const base: typeof SessionWire.Type = {
     id: "s_fix-login_abc",
     repo: "trigify-app",
     branch: "chore/fix-login",
@@ -389,7 +391,7 @@ describe("Session", () => {
   it("decodes a legacy session as non-persistent and worktree-backed", () => {
     const decoded = Schema.decodeUnknownSync(Session)(base);
     expect(persistentOf(decoded)).toBe(false);
-    expect(workspaceModeOf(decoded)).toBe("worktree");
+    expect(workspaceModeOf(activeCheckoutOf(decoded))).toBe("worktree");
   });
 
   it("decodes a legacy session without environmentId as local", () => {
@@ -414,12 +416,22 @@ describe("Session", () => {
   });
 
   it("round-trips the optional workspace and persistence fields when present", () => {
+    const { repo, branch, ...rest } = base;
     const withWorktree: Session = {
-      ...base,
-      worktreePath: "/Users/me/jingler/worktrees/trigify-app/fix-login",
-      workspaceMode: "direct",
+      ...rest,
+      checkouts: [
+        {
+          id: "primary",
+          repo,
+          branch,
+          prNumber: base.prNumber,
+          worktreePath: "/Users/me/jingler/worktrees/trigify-app/fix-login",
+          workspaceMode: "direct",
+          baseBranch: "main",
+        },
+      ],
+      activeCheckoutId: "primary",
       persistent: true,
-      baseBranch: "main",
       chats: [{ ...base.chats[0]!, mode: "auto" }],
     };
     const roundTripped = Schema.decodeUnknownSync(Session)(

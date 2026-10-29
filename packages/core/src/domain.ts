@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { activeCheckoutOf, migrateSessionCheckouts } from "./session-checkout.js";
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js";
 import { PlanTemplateConfig } from "./plan-document.js";
 import { ThemeConfig } from "./theme.js";
@@ -630,7 +631,12 @@ export const SessionCheckout = Schema.Struct({
 });
 export type SessionCheckout = Schema.Schema.Type<typeof SessionCheckout>;
 
-export const Session = Schema.Struct({
+/**
+ * `Session` as written to disk and sent over RPC. It still carries the active
+ * checkout's fields at the top level so older builds and paired devices, which
+ * require `repo`/`branch`, keep reading it. In-memory code uses `Session`.
+ */
+export const SessionWire = Schema.Struct({
   routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
   /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
   checkpointSafeMode: Schema.optional(Schema.Boolean),
@@ -834,6 +840,40 @@ export const Session = Schema.Struct({
   ),
   /** Why archiving kept the worktree on disk (uncommitted or unpushed work). */
   worktreeKeptReason: Schema.optional(Schema.String),
+});
+const {
+  projectId: _projectId,
+  repo: _repo,
+  githubSlug: _githubSlug,
+  branch: _branch,
+  worktreePath: _worktreePath,
+  workspaceMode: _workspaceMode,
+  repoPath: _repoPath,
+  baseBranch: _baseBranch,
+  ...sessionFields
+} = SessionWire.fields;
+
+/** A session whose repos live only in `checkouts`; see `SessionWire` for the persisted shape. */
+export const Session = Schema.transform(SessionWire, Schema.typeSchema(Schema.Struct(sessionFields)), {
+  strict: true,
+  decode: (wire) => {
+    const {
+      projectId: _p,
+      repo: _r,
+      githubSlug: _g,
+      branch: _b,
+      worktreePath: _w,
+      workspaceMode: _m,
+      repoPath: _rp,
+      baseBranch: _bb,
+      ...session
+    } = migrateSessionCheckouts(wire);
+    return session;
+  },
+  encode: (session) => {
+    const { id: _id, prNumber: _pr, ...mirror } = activeCheckoutOf(session);
+    return { ...session, ...mirror };
+  },
 });
 export type Session = Schema.Schema.Type<typeof Session>;
 

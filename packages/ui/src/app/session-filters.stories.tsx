@@ -1,3 +1,4 @@
+import { type CheckoutFields, foldCheckout } from "../test-support"
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { Session, SessionActivity, SessionPrStatus } from "@jingler/core"
@@ -11,7 +12,7 @@ const meta: Meta = { title: "App/Filter Menu", parameters: { layout: "fullscreen
 export default meta
 type Story = StoryObj
 
-const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Session => ({
+const session = (over: Partial<Session> & CheckoutFields & Pick<Session, "id" | "title">): Session => foldCheckout({
   repo: "jingler",
   branch: `chore/${over.id}`,
   status: "idle",

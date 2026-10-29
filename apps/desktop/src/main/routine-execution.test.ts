@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import { join } from "node:path"
 import { existsSync, readdirSync } from "node:fs"
 import { Effect, Layer, Runtime, Schema } from "effect"
@@ -39,7 +40,7 @@ describe("routine execution adapter", () => {
   it("durably reserves identity, creates a real isolated Git session, and captures before prompt work", async () => {
     const { temp, repoPath, store, claim, create, setMode } = await fixture()
     const prompt = vi.fn(async (session: Session) => {
-      expect(session.worktreePath).not.toBe(repoPath)
+      expect(activeCheckoutOf(session).worktreePath).not.toBe(repoPath)
       expect(session.chats.find(chat => chat.id === session.activeChatId)!.mode).toBe("ask")
       const lease = await acquireCheckpointedTurn(session, join(temp.root, "checkpoints"), session.activeChatId)
       try { expect(readdirSync(join(temp.root, "checkpoints")).flatMap(owner => readdirSync(join(temp.root, "checkpoints", owner))).length).toBeGreaterThan(0) } finally { lease.release() }
@@ -55,7 +56,7 @@ describe("routine execution adapter", () => {
     let created: Session | undefined
     const execute = routineExecution({ validate: async () => {}, create: async (_, run) => { created = await create(run); return created }, setMode: async () => { throw new Error("capture failed") }, prompt })
     await expect(execute(claim.routine, claim.run, new AbortController().signal, async () => true, () => store.link(claim.run, 0))).rejects.toThrow("capture failed")
-    expect(prompt).not.toHaveBeenCalled(); expect(existsSync(created!.worktreePath!)).toBe(true)
+    expect(prompt).not.toHaveBeenCalled(); expect(existsSync(activeCheckoutOf(created!).worktreePath!)).toBe(true)
     expect((await store.read()).runs[0]!.sessionId).toBe(created!.id)
   })
   it("cancellation or revision changes while creation awaits prevent mode and prompt", async () => {

@@ -1,4 +1,6 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { Session } from "./domain.js";
 import {
   activeCheckoutOf,
   agentCwdOf,
@@ -33,6 +35,40 @@ const web: SessionCheckout = {
   baseBranch: "main",
   prNumber: 7,
 };
+
+describe("Session wire format", () => {
+  const wire = {
+    id: "s1",
+    repo: "api",
+    repoPath: "/r/api",
+    worktreePath: "/w/api",
+    branch: "feat/a",
+    baseBranch: "main",
+    title: "t",
+    status: "idle",
+    diff: { added: 0, removed: 0 },
+    prNumber: null,
+    costUsd: 0,
+    tokens: 0,
+    updatedAt: "2026-07-11T10:00:00.000Z",
+    chats: [{ id: "c1", title: null, createdAt: "2026-07-11T10:00:00.000Z", updatedAt: "2026-07-11T10:00:00.000Z" }],
+    activeChatId: "c1",
+  };
+
+  it("decodes legacy scalars into a primary checkout and strips them", () => {
+    const session = Schema.decodeUnknownSync(Session)(wire);
+    expect(activeCheckoutOf(session)).toMatchObject({ id: PRIMARY_CHECKOUT_ID, repo: "api", worktreePath: "/w/api", baseBranch: "main" });
+    expect(session).not.toHaveProperty("repo");
+    expect(session).not.toHaveProperty("worktreePath");
+  });
+
+  it("encodes the active checkout back to top-level fields for older readers", () => {
+    const session = reduceCheckouts(Schema.decodeUnknownSync(Session)(wire), { type: "attach", checkout: web });
+    const encoded = Schema.encodeSync(Session)(session);
+    expect(encoded).toMatchObject({ repo: "web", worktreePath: "/w/web", branch: "feat/b", activeCheckoutId: "co-web" });
+    expect(Schema.decodeUnknownSync(Session)(encoded).checkouts).toHaveLength(2);
+  });
+});
 
 describe("legacy migration", () => {
   it("reads a scalar-only session as one checkout and persists it idempotently", () => {
