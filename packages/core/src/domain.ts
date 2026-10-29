@@ -853,8 +853,17 @@ const {
   ...sessionFields
 } = SessionWire.fields;
 
+export interface SessionWire extends Schema.Schema.Type<typeof SessionWire> {}
+export interface SessionWireEncoded extends Schema.Schema.Encoded<typeof SessionWire> {}
+// Named interfaces, not the inferred transform type: that one is too long for tsc to serialize (TS7056) in RPC contracts.
+export interface Session
+  extends Omit<
+    SessionWire,
+    "projectId" | "repo" | "githubSlug" | "branch" | "worktreePath" | "workspaceMode" | "repoPath" | "baseBranch"
+  > {}
+
 /** A session whose repos live only in `checkouts`; see `SessionWire` for the persisted shape. */
-export const Session = Schema.transform(SessionWire, Schema.typeSchema(Schema.Struct(sessionFields)), {
+export const Session: Schema.Schema<Session, SessionWireEncoded> = Schema.transform(SessionWire, Schema.typeSchema(Schema.Struct(sessionFields)), {
   strict: true,
   decode: (wire) => {
     const {
@@ -875,7 +884,6 @@ export const Session = Schema.transform(SessionWire, Schema.typeSchema(Schema.St
     return { ...session, ...mirror };
   },
 });
-export type Session = Schema.Schema.Type<typeof Session>;
 
 /** The persisted fields needed to resolve canonical and historical issue links. */
 export type SessionIssueLinks = Pick<
