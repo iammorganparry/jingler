@@ -671,6 +671,8 @@ export const sessionFileDiff = (id: string, path: string) =>
     return yield* WorkspaceService.boundedFileDiff(checkout.worktreePath, path, checkout.baseBranch);
   });
 
+const activeCheckoutOrNull = (session: Session | null) => (session === null ? null : activeCheckoutOf(session));
+
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
 const resolveSession = (sessionId: string) =>
   SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null));
@@ -1827,7 +1829,7 @@ export const deleteSession = (sessionId: string, skipCleanup = false) =>
       const session = yield* SessionStore.get(sessionId).pipe(
         Effect.orElseSucceed(() => null),
       );
-      const checkout = session && activeCheckoutOf(session);
+      const checkout = activeCheckoutOrNull(session);
       if (session?.environmentId) {
         const remote = yield* RemoteSessionService;
         yield* removeRemoteSessionMirror(
@@ -2300,7 +2302,7 @@ const reviewLocations = (
 export const reviewRun = (sessionId: string, force: boolean) =>
   Effect.gen(function* () {
     const session = yield* sessionWithPr(sessionId);
-    const checkout = session && activeCheckoutOf(session);
+    const checkout = activeCheckoutOrNull(session);
     if (!session || !checkout?.worktreePath) {
       return yield* Effect.fail(
         new ReviewError({
