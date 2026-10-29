@@ -939,7 +939,7 @@ export const executionTargetOf = (
 
 /** Backward-compatible workspace ownership for persisted sessions. */
 export const workspaceModeOf = (
-  session: Pick<Session, "workspaceMode">,
+  session: { readonly workspaceMode?: WorkspaceMode },
 ): WorkspaceMode => session.workspaceMode ?? "worktree";
 
 /** Backward-compatible persistence status for persisted sessions. */

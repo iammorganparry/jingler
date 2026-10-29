@@ -959,7 +959,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                     ).pipe(Effect.ignore)
                   )
                 )
-                return branch === reservation.branch
+                return branch === activeCheckoutOf(reservation).branch
                   ? reservation
                   : { ...reservation, branch }
               })

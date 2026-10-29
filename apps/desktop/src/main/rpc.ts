@@ -1358,7 +1358,8 @@ export const adoptBranch = (sessionId: string) =>
  */
 const forkInputs = (source: Session) =>
   Effect.gen(function* () {
-    if (workspaceModeOf(source) !== "direct") {
+    const checkout = activeCheckoutOf(source);
+    if (workspaceModeOf(checkout) !== "direct") {
       return yield* Effect.fail(
         new GitError({
           message:
@@ -1367,7 +1368,7 @@ const forkInputs = (source: Session) =>
       );
     }
     const { liveBranch } = yield* driftedLiveBranch(source);
-    if (liveBranch === source.branch) {
+    if (liveBranch === checkout.branch) {
       return yield* Effect.fail(
         new GitError({
           message: "The checkout has not drifted; there is nothing to fork.",
@@ -1385,14 +1386,14 @@ const forkInputs = (source: Session) =>
         }),
       );
     }
-    if (!source.repoPath) {
+    if (!checkout.repoPath) {
       return yield* Effect.fail(
         new GitError({ message: "This session has no repository to fork from." }),
       );
     }
     return {
       liveBranch,
-      repoPath: source.repoPath,
+      repoPath: checkout.repoPath,
       connectionId: source.connectionId,
       providerId: source.providerId,
       modelId: source.modelId,
@@ -1417,7 +1418,7 @@ export const forkOntoBranch = (sessionId: string) =>
     // re-derives its edits from that context in a clean tree.
     const created = yield* createSession({
       repoPath,
-      repoName: source.repo,
+      repoName: activeCheckoutOf(source).repo,
       connectionId,
       providerId,
       modelId,
@@ -1431,7 +1432,7 @@ export const forkOntoBranch = (sessionId: string) =>
           }),
       ),
     );
-    if (!created.worktreePath) {
+    if (!activeCheckoutOf(created).worktreePath) {
       return yield* Effect.fail(
         new GitError({ message: "The fork has no verified workspace." }),
       );
@@ -2961,7 +2962,7 @@ export const resolvePublishSessionBranch = async (
   refresh: () => Promise<Session>,
 ): Promise<{ readonly session: Session; readonly branch: string }> => {
   const session =
-    captured.semanticBranchPending === true || liveBranch !== captured.branch
+    captured.semanticBranchPending === true || liveBranch !== activeCheckoutOf(captured).branch
       ? await refresh()
       : captured;
   if (session.semanticBranchPending === true) {
@@ -6981,11 +6982,11 @@ const continueWorkspace = (source: Session, target: string | undefined, environm
 
 const continuationCheckpoint = (source: Session, eventCursor: number, remote: RemoteSessionService) =>
   source.environmentId === undefined
-    ? source.worktreePath
+    ? activeCheckoutOf(source).worktreePath
       ? Effect.tryPromise({
         try: () =>
           exportWorkspaceHandoff({
-            workspacePath: source.worktreePath!,
+            workspacePath: activeCheckoutOf(source).worktreePath!,
             sourceSessionId: source.id,
             eventCursor: eventCursor,
           }),
@@ -7063,8 +7064,8 @@ const prepareManagedContinuation = (
         createWorkspaceProvisioningPlan({
           githubSlug: checkpoint.repositorySlug,
           headSha: checkpoint.headSha,
-          branch: checkpoint.branch ?? source.baseBranch ?? "main",
-          baseBranch: source.baseBranch ?? checkpoint.branch ?? "main",
+          branch: checkpoint.branch ?? activeCheckoutOf(source).baseBranch ?? "main",
+          baseBranch: activeCheckoutOf(source).baseBranch ?? checkpoint.branch ?? "main",
           createBranch: false,
           source: {
             kind: "handoff",
@@ -7122,7 +7123,8 @@ const continueLocalWorkspace = (
         }),
     ),
   );
-  if (!created.worktreePath) {
+  const createdWorktreePath = activeCheckoutOf(created).worktreePath;
+  if (!createdWorktreePath) {
     return yield* Effect.fail(
       new EnvironmentHandoffError({
         reason: "unavailable",
@@ -7134,10 +7136,10 @@ const continueLocalWorkspace = (
   yield* Effect.tryPromise({
     try: async () => {
       await checkoutWorkspaceHandoffBase(
-        created.worktreePath!,
+        createdWorktreePath,
         checkpoint,
       );
-      await importWorkspaceHandoff(created.worktreePath!, checkpoint);
+      await importWorkspaceHandoff(createdWorktreePath, checkpoint);
     },
     catch: (cause) =>
       new EnvironmentHandoffError({
@@ -7173,7 +7175,7 @@ const admitRemoteContinuation = (source: Session, target: string, requestedSessi
             ...source,
             title: `${source.title} continuation`,
             environmentId: target,
-            repo: targetRepository?.name ?? source.repo,
+            repo: targetRepository?.name ?? activeCheckoutOf(source).repo,
             repoPath: "/workspace",
             worktreePath: undefined,
             baseBranch: targetBaseBranch,
@@ -7317,19 +7319,20 @@ function remoteProvisioningSource(
 }
 
 const resolveContinuationTarget = (source: Session, checkpoint: WorkspaceTransferCheckpoint, target: string | undefined, environments: EnvironmentService) => Effect.gen(function* () {
+  const sourceCheckout = activeCheckoutOf(source);
   const sourceRepositories = yield* continuationRepositories(
     environments,
     source.environmentId,
   ).pipe(Effect.orElseSucceed(() => []));
   const sourceRepository =
     sourceRepositories.find(
-      (candidate) => candidate.path === source.repoPath,
+      (candidate) => candidate.path === sourceCheckout.repoPath,
     ) ??
     sourceRepositories.find(
-      (candidate) => candidate.name === source.repo,
+      (candidate) => candidate.name === sourceCheckout.repo,
     );
   const sourceIdentity = {
-    name: sourceRepository?.name ?? source.repo,
+    name: sourceRepository?.name ?? sourceCheckout.repo,
     githubSlug:
       checkpoint.repositorySlug ?? sourceRepository?.githubSlug ?? null,
   };
@@ -7384,9 +7387,9 @@ const resolveContinuationTarget = (source: Session, checkpoint: WorkspaceTransfe
     );
   }
   const targetBaseBranch =
-    source.baseBranch ??
+    sourceCheckout.baseBranch ??
     targetRepository?.defaultBranch ??
-    source.branch;
+    sourceCheckout.branch;
 
   return { targetEnvironment, targetRepository, targetBaseBranch };
 });

@@ -652,16 +652,17 @@ export const makeLiveDeviceSessionCommandExecutor = (
           new Error("The source session needs a certified provider connection before continuation.")
         )
       }
+      const checkout = activeCheckoutOf(source)
       return yield* SessionStore.create({
         ...(source.environmentId === undefined ? {} : { environmentId: source.environmentId }),
         ...(requestedSessionId === undefined ? {} : { requestedSessionId }),
-        repoPath: source.repoPath ?? source.worktreePath ?? "",
-        repoName: source.repo,
+        repoPath: checkout.repoPath ?? checkout.worktreePath ?? "",
+        repoName: checkout.repo,
         title: source.title,
         connectionId: source.connectionId,
         providerId: source.providerId,
         modelId: source.modelId,
-        baseBranch: source.baseBranch ?? source.branch,
+        baseBranch: checkout.baseBranch ?? checkout.branch,
         useWorktree: true
       })
     })),
