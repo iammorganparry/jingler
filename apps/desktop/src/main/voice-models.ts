@@ -48,12 +48,18 @@ export const downloadVerified = async (input: {
   readonly dest: string
   readonly sha256: string
   readonly onProgress: (receivedBytes: number) => void
+  /** Electron passes `net.fetch` so corporate proxies and OS-trusted root CAs work; Node's fetch honours neither. */
+  readonly fetch?: (url: string) => Promise<Response>
 }): Promise<void> => {
   const part = `${input.dest}.part`
   const hash = createHash("sha256")
   let received = 0
   try {
-    const response = await fetch(input.url)
+    const response = await (input.fetch ?? fetch)(input.url).catch((error: unknown) => {
+      // Node's fetch throws a bare "fetch failed"; the real reason (TLS, DNS, refused) is only on `cause`.
+      const cause = error instanceof Error && error.cause instanceof Error ? `: ${error.cause.message}` : ""
+      throw new Error(`Download failed${cause || (error instanceof Error ? `: ${error.message}` : "")}`, { cause: error })
+    })
     if (!response.ok || response.body === null) throw new Error(`Download failed (HTTP ${response.status})`)
     await pipeline(
       Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),

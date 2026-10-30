@@ -78,7 +78,7 @@ export const voiceInputMachine = setup({
         },
         RELEASE: { guard: ({ context }) => context.held, target: "transcribing" },
         TOGGLE: "transcribing",
-        CANCEL: { target: "idle", actions: ({ context }) => context.recording?.cancel() }
+        CANCEL: { target: "idle", actions: ({ context }) => context.recording?.cancel?.() }
       }
     },
     transcribing: {

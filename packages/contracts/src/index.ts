@@ -1660,6 +1660,17 @@ export class AssetListRpcs extends RpcGroup.make(
     success: Schema.Boolean
   }),
 
+  /** Whether Superwhisper is installed (its `superwhisper://` handler is registered). */
+  Rpc.make("Voice.superwhisperInstalled", {
+    success: Schema.Boolean
+  }),
+
+  /** Start or stop Superwhisper dictation; Superwhisper pastes the transcript into the focused input itself. */
+  Rpc.make("Voice.superwhisperRecord", {
+    success: Schema.Void,
+    payload: { action: Schema.Literal("start", "stop") }
+  }),
+
   // ── MCP servers — the operator's ~/jingler/mcp.json ────────────────────────
 
   /**

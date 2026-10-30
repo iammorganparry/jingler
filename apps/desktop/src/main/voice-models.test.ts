@@ -41,4 +41,25 @@ describe("downloadVerified", () => {
     expect(existsSync(`${dest}.part`)).toBe(false)
     expect(existsSync(dest)).toBe(false)
   })
+
+  it("downloads through the injected fetch", async () => {
+    const dest = join(dir, "injected.bin")
+    const seen: string[] = []
+    const fetchVia = (target: string) => {
+      seen.push(target)
+      return Promise.resolve(new Response(body))
+    }
+    await downloadVerified({ url: "https://example.invalid/m.bin", dest, sha256, onProgress: () => {}, fetch: fetchVia })
+    expect(seen).toEqual(["https://example.invalid/m.bin"])
+    expect(await readFile(dest)).toEqual(body)
+  })
+
+  it("surfaces the network cause instead of a bare 'fetch failed'", async () => {
+    const dest = join(dir, "offline.bin")
+    const failing = () => Promise.reject(new TypeError("fetch failed", { cause: new Error("unable to get local issuer certificate") }))
+    await expect(downloadVerified({ url, dest, sha256, onProgress: () => {}, fetch: failing })).rejects.toThrow(
+      "Download failed: unable to get local issuer certificate"
+    )
+    expect(existsSync(`${dest}.part`)).toBe(false)
+  })
 })

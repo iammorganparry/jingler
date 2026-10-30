@@ -1,6 +1,6 @@
 {
   "name": "@jingler/plugin-obsidian",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "private": true,
   "type": "module",
   "description": "Official local Markdown vault plugin for Jingler.",

@@ -5,10 +5,10 @@
  */
 import { execFile } from "node:child_process"
 import { existsSync, statSync } from "node:fs"
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { app, systemPreferences } from "electron"
+import { app, net, shell, systemPreferences } from "electron"
 import type { VoiceModel } from "@jingler/contracts"
 import { pickWhisperBinary } from "./voice-binary.js"
 import { downloadVerified, listModels, modelFile, WHISPER_MODELS } from "./voice-models.js"
@@ -84,11 +84,31 @@ export const downloadVoiceModel = async (id: string): Promise<void> => {
       url: `${modelBaseUrl()}/ggml-${id}.bin`,
       dest: modelFile(whisperDir(), id),
       sha256: pinnedSha(model.sha256),
-      onProgress: (received) => downloading.set(id, received)
+      onProgress: (received) => downloading.set(id, received),
+      fetch: (url) => net.fetch(url)
     })
   } finally {
     downloading.delete(id)
   }
+}
+
+/** E2E only: pretend Superwhisper is installed and log deep links here instead of opening them. */
+const superwhisperLog = (): string | undefined =>
+  process.env.JINGLER_E2E === "1" ? process.env.JINGLER_E2E_SUPERWHISPER_LOG : undefined
+
+/** Superwhisper ships for macOS and Windows only, the same platforms `getApplicationInfoForProtocol` supports. */
+export const superwhisperInstalled = async (): Promise<boolean> => {
+  if (process.env.JINGLER_E2E === "1") return superwhisperLog() !== undefined
+  if (process.platform !== "darwin" && process.platform !== "win32") return false
+  return app.getApplicationInfoForProtocol("superwhisper://").then(() => true, () => false)
+}
+
+/** `activate: false` keeps Jingler frontmost, so Superwhisper pastes the transcript into our composer. */
+export const superwhisperRecord = async (action: "start" | "stop"): Promise<void> => {
+  const url = `superwhisper://record/${action}`
+  const log = superwhisperLog()
+  if (log !== undefined) return appendFile(log, `${url}\n`)
+  await shell.openExternal(url, { activate: false })
 }
 
 export const removeVoiceModel = async (id: string): Promise<void> => {
