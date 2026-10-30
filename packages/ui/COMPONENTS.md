@@ -67,6 +67,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | OAuthButton | `components/oauth-button.tsx` | OAuth provider button (GitHub octocat etc.). | provider, mode, onClick, disabled, className | no | — |
 | PierreFileTree | `components/pierre-file-tree.tsx` | Large repository file tree (Pierre). | paths, gitStatus, path, status, selectedPaths, focusedPath | no | — |
 | Pill | `components/pill.tsx` | Status lozenge with optional leading dot. One line by construction (nowrap, shrink-0). | children, dot, pulse, className, title | yes | #361 (1.3) |
+| RepoChip | `components/repo-chip.tsx` | One checkout of a workspace: short repo name, PR glyph + number, diff +/-; dashed red when the folder is missing. One line (nowrap, shrink-0). | repo, prNumber, pr, added, removed, missing | yes | workspace sidebar |
 | ProviderIcon | `components/provider-icon.tsx` | Brand marks for agent providers (Claude, Codex…); providerLabel/providerColor helpers. | — | no | — |
 | HarnessCard | `composites/harness-card.tsx` | Agent harness row: real provider logo, name, detail and a one-line status pill (Ready / Signing in… / Needs attention / Signed out). | providerId, name, detail, status | yes | #475 (9.5) |
 | ProviderSignedOutCard, ProviderResumeCard, ProviderLimitBanner, ProviderAccountChoice | `composites/provider-recovery-cards.tsx` | Chat recovery states: signed-out Reconnect, Resume run, "Limited until HH:MM" banner, signed-in account radio choice. | title, message, limit, accounts, onUse | yes | #419 (5.13) |
