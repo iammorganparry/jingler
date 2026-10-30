@@ -159,6 +159,22 @@ describe("SessionRow per-checkout PRs", () => {
       ]
     })
     render(<SessionRow session={session} />)
-    expect(screen.getByText("qa-api #2 · qa-web #1")).toBeDefined()
+    expect(screen.getByTestId("repo-chip-qa-web").textContent).toContain("qa-web #1")
+    expect(screen.getByTestId("repo-chip-qa-api").textContent).toContain("qa-api #2")
+    expect(screen.queryByText("qa-api #2 · qa-web #1")).toBeNull()
+  })
+
+  it("marks a checkout whose folder is missing", () => {
+    const session = testSession({
+      id: "missing",
+      checkouts: [
+        { ...co("web", "qa-web", null), repoPath: "/r/web" },
+        { ...co("api", "qa-api", null), repoPath: "/r/api" }
+      ],
+      activeCheckoutId: "web"
+    })
+    render(<SessionRow session={session} missingRepoPaths={new Set(["/r/api"])} />)
+    expect(screen.getByTestId("repo-chip-qa-api").dataset.missing).toBe("true")
+    expect(screen.getByTestId("repo-chip-qa-web").dataset.missing).toBeUndefined()
   })
 })

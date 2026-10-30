@@ -22,6 +22,7 @@ import { relativeTime } from "../lib/relative-time.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
 import { Badge } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
+import { RepoChip } from "../components/repo-chip.js"
 import { ThinkingOrb } from "../components/loading.js"
 import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
@@ -91,6 +92,7 @@ export function SessionRow({
   onOpenInTerminal,
   expanded,
   onToggleExpanded,
+  missingRepoPaths,
   className
 }: {
   session: Session
@@ -132,6 +134,8 @@ export function SessionRow({
   /** Whether the row's chat tree is shown. Absent hides the chevron. */
   expanded?: boolean
   onToggleExpanded?: (id: string) => void
+  /** Registered repo folders that are gone from disk; their chips render dashed red. */
+  missingRepoPaths?: ReadonlySet<string>
   className?: string
 }) {
   const prLabel = prLabelOf(session)
@@ -181,6 +185,7 @@ export function SessionRow({
           )}
         </div>
         {renderEditableSessionTitle()}
+        {renderRepoChips()}
         {renderActiveMetadata()}
       </div>
     </motion.div>)
@@ -234,6 +239,17 @@ export function SessionRow({
         </div>)
   }
 
+  /** One chip per attached repo; only multi-repo workspaces, single-repo rows already name their repo. */
+  function renderRepoChips() {
+    const real = checkoutsOf(session).filter((c) => !hasNoRepo(c))
+    if (real.length < 2) return null
+    return (<div data-testid={`session-repo-chips-${session.id}`} className="flex min-w-0 flex-wrap gap-1">
+          {real.map((c) => (
+            <RepoChip key={c.id} repo={c.repo} prNumber={c.prNumber} missing={missingRepoPaths?.has(c.repoPath ?? "") ?? false} />
+          ))}
+        </div>)
+  }
+
   function renderActiveMetadata() {
     function renderBranchLabel() {
       return (<span
@@ -255,7 +271,7 @@ export function SessionRow({
               {linkedIssue.identifier}
             </span>
           )}
-          {prLabel !== null && (
+          {prLabel !== null && checkoutsOf(session).length < 2 && (
             <span
               className="flex shrink-0 items-center gap-1 whitespace-nowrap"
               title={`Pull request ${prLabel}`}
