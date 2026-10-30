@@ -37,7 +37,7 @@ So that switching the active checkout can't silently change what an unrelated fe
 - [x] Route renderer + `packages/ui` reads (`file-browser-view`, `use-review`, `App`, `conversation-pane`, `session-filters`, `session-row`)
 - [x] Derive plugin SDK `repo`/`branch` from the active checkout
 - [x] Drop the scalars from the `Session` schema; keep the legacy decode in the session store
-- [-] Delete `sessionForCheckout` once nothing uses it
+- [x] Delete `sessionForCheckout` once nothing uses it
 
 ### Technical explanation
 `withActive` copies the active checkout onto the session on every reducer action. Two copies drift: `resolveTurnWorktree` calls `SessionStore.setWorktreePath`, which writes the scalar, not the checkout. With one copy there's nothing to drift.
@@ -87,18 +87,18 @@ So that the second repo's PR isn't invisible and the workspace archives only whe
 - `PublishCheckpoint` is stored per checkout so publish can open one PR per repo
 
 ### Steps
-- [ ] Schema move + decode migration (session `prs` go to the checkout whose `repo` matches, else primary)
-- [ ] `pr-sweep` / `pr-refresh` / auto-archive iterate checkouts
-- [ ] `use-pr-stack`, `pull-request-pane`, `session-prs-chip` read per checkout
-- [ ] Per-checkout publish checkpoint
+- [x] Schema move + decode migration (session `prs` go to the checkout whose `repo` matches, else primary)
+- [x] `pr-sweep` / `pr-refresh` / auto-archive iterate checkouts
+- [x] `use-pr-stack`, `pull-request-pane`, `session-prs-chip` read per checkout
+- [x] Per-checkout publish checkpoint
 
 ### Technical explanation
 Today `CheckoutHeader` polls a checkout's `prNumber` only when there are 2+ checkouts, and `prsToNotify` only sees the session-level stack, so a merge in the second repo never notifies and never archives.
 
 ### Acceptance
-- [ ] A merge in checkout B notifies once under B's key (test[unit]: apps/desktop/src/renderer/pr-sweep.test.ts::notifies per checkout)
-- [ ] The session archives only after A and B are both merged or closed (test[unit]: apps/desktop/src/renderer/pr-sweep.test.ts::archives when every checkout PR is done)
-- [ ] Legacy `prs` with `repo` tags land on the matching checkouts (test[unit]: packages/core/src/session-checkout.test.ts::migrates session prs onto checkouts)
+- [x] A merge in checkout B notifies once under B's key (test[unit]: apps/desktop/src/renderer/pr-sweep.test.ts::notifies per checkout)
+- [x] The session archives only after A and B are both merged or closed (test[unit]: apps/desktop/src/renderer/pr-sweep.test.ts::archives when every checkout PR is done)
+- [x] Legacy `prs` with `repo` tags land on the matching checkouts (test[unit]: packages/core/src/session-checkout.test.ts::migrates session prs onto checkouts)
 
 ### Definition of Done
 - Unit tests above pass
