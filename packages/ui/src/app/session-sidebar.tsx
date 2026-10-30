@@ -11,6 +11,8 @@ import {
   ExternalLink,
   GitBranch,
   CircleDot,
+  House,
+  type LucideIcon,
   GitPullRequest,
   Layers,
   LoaderCircle,
@@ -163,6 +165,10 @@ export interface SessionSidebarProps {
   releaseNotes?: SidebarReleaseNotes
   /** Every version's notes behind the account menu's "What's new" item. */
   whatsNew?: readonly WhatsNewEntry[]
+  /** Home is on screen: no workspace pane is active. */
+  homeActive?: boolean
+  /** Show Home without closing any pane or chat. */
+  onOpenHome?: () => void
   /** Global open pull requests across the connected GitHub App. */
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
@@ -377,6 +383,34 @@ function ReleaseNotesCard({ releaseNotes }: { releaseNotes: SidebarReleaseNotes 
  * the hover overlay — the same markup both times, so the expanded rail can't
  * drift out of sync with the docked sidebar it is meant to be.
  */
+/** One top-level sidebar destination (Home, Pull requests, Issues); hidden without a handler. */
+function SidebarNavLink({ testId, label, Icon, active, onOpen }: {
+  readonly testId: string
+  readonly label: string
+  readonly Icon: LucideIcon
+  readonly active?: boolean
+  readonly onOpen?: () => void
+}) {
+  if (!onOpen) return null
+  return (
+    <div className="px-2 pb-2">
+      <button
+        type="button"
+        data-testid={testId}
+        aria-current={active ? "page" : undefined}
+        onClick={onOpen}
+        className={cn(
+          "flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          active ? "bg-surface text-text-bright" : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+        )}
+      >
+        <Icon size={15} className={active ? "text-text-bright" : undefined} />
+        <span className="flex-1">{label}</span>
+      </button>
+    </div>
+  )
+}
+
 function SidebarBody({
   width,
   onResize,
@@ -426,6 +460,8 @@ function SidebarBody({
   filterActions,
   notice,
   onOpenInTerminal,
+  homeActive,
+  onOpenHome,
   pullRequestsActive = false,
   onOpenPullRequests,
   issuesActive = false,
@@ -613,51 +649,7 @@ return (renderExpandedGroupHeading())
             )
           }) satisfies  Parameters<typeof groups.map>[0]
 
-  function renderIssuesLink() {
-    return (onOpenIssues && (
-        <div className="px-2 pb-2">
-          <button
-            type="button"
-            data-testid="issues-sidebar-item"
-            aria-current={issuesActive ? "page" : undefined}
-            onClick={onOpenIssues}
-            className={cn(
-              "flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              issuesActive
-                ? "bg-surface text-text-bright"
-                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
-            )}
-          >
-            <CircleDot size={15} className={issuesActive ? "text-text-bright" : undefined} />
-            <span className="flex-1">Issues</span>
-            
-          </button>
-        </div>
-      ))
-  }
 
-  function renderPullRequestsLink() {
-    return (onOpenPullRequests && (
-        <div className="px-2 pb-2">
-          <button
-            type="button"
-            data-testid="pull-requests-sidebar-item"
-            aria-current={pullRequestsActive ? "page" : undefined}
-            onClick={onOpenPullRequests}
-            className={cn(
-              "flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              pullRequestsActive
-                ? "bg-surface text-text-bright"
-                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
-            )}
-          >
-            <GitPullRequest size={15} className={pullRequestsActive ? "text-text-bright" : undefined} />
-            <span className="flex-1">Pull requests</span>
-            
-          </button>
-        </div>
-      ))
-  }
 
   const [filters, setFiltersState] = React.useState<SessionFilters>(
     () => defaultFilters ?? loadFilters(projectId)
@@ -942,8 +934,9 @@ return (renderExpandedGroupHeading())
         <div className="min-h-0 flex-1 border-t border-hairline">{explorer}</div>
       ) : (
         <>
-      {renderPullRequestsLink()}
-      {renderIssuesLink()}
+      <SidebarNavLink testId="home-sidebar-item" label="Home" Icon={House} active={homeActive} onOpen={onOpenHome} />
+      <SidebarNavLink testId="pull-requests-sidebar-item" label="Pull requests" Icon={GitPullRequest} active={pullRequestsActive} onOpen={onOpenPullRequests} />
+      <SidebarNavLink testId="issues-sidebar-item" label="Issues" Icon={CircleDot} active={issuesActive} onOpen={onOpenIssues} />
       <ArchivedEntry sessions={sessions} onRestore={onRestore} onDelete={onDelete} />
 
       {renderPendingEnvironment()}

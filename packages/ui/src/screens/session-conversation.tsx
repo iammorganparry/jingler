@@ -204,6 +204,8 @@ export interface SessionConversationProps {
   onSelectPendingEnvironmentSession?: () => void
   /** Global Pull Requests takeover. */
   pullRequestsView?: ReactNode
+  homeActive?: boolean
+  onOpenHome?: () => void
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
   issuesView?: ReactNode
@@ -470,6 +472,8 @@ export function SessionConversation(props: SessionConversationProps) {
         update={props.update}
         releaseNotes={props.releaseNotes}
         whatsNew={props.whatsNew}
+        homeActive={props.homeActive}
+        onOpenHome={props.onOpenHome}
         pullRequestsActive={props.pullRequestsActive}
         onOpenPullRequests={props.onOpenPullRequests}
         issuesActive={props.issuesActive}

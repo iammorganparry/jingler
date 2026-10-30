@@ -435,6 +435,10 @@ export const resize = (
   return replaceGroup(ws, groupId, { ...group, panes })
 }
 
+/** Put nothing on screen (Home) but keep every group, so no pane or chat is closed. */
+export const deactivate = (ws: Workspace): Workspace =>
+  ws.activeGroupId === null ? ws : { ...ws, activeGroupId: null }
+
 /** Make a group the one on screen. Unknown ids are ignored rather than clearing. */
 export const activate = (ws: Workspace, groupId: string): Workspace =>
   groupById(ws, groupId) === null || ws.activeGroupId === groupId

@@ -631,6 +631,14 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
 
 
 
+        homeActive={showEmpty && !pullRequestsOpen && !settingsOpen && !newOpen && inboxView !== "issues"}
+        onOpenHome={() => {
+          setPullRequestsOpen(false)
+          setSettingsOpen(false)
+          setNewOpen(false)
+          setInboxView(null)
+          split.goHome()
+        }}
         pullRequestsActive={pullRequestsOpen}
         onOpenPullRequests={
           pullRequestsView

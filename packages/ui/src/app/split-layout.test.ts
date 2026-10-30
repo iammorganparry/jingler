@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  deactivate,
   activate,
   activeGroup,
   closePane,
@@ -498,5 +499,17 @@ describe("migrateLegacyLayout", () => {
     expect(migrateLegacyLayout({ mode: "1", slots: [null], focused: 0 })).toBeNull()
     expect(migrateLegacyLayout(null)).toBeNull()
     expect(migrateLegacyLayout({ mode: "1" })).toBeNull()
+  })
+})
+
+describe("deactivate", () => {
+  it("shows nothing but keeps every group, and show() brings a session back", () => {
+    const ws = show(EMPTY_WORKSPACE, "a")
+    const home = deactivate(ws)
+    expect(home.activeGroupId).toBeNull()
+    expect(home.groups).toStrictEqual(ws.groups)
+    expect(focusedSessionId(home)).toBeNull()
+    expect(show(home, "a")).toStrictEqual(ws)
+    expect(deactivate(home)).toBe(home)
   })
 })

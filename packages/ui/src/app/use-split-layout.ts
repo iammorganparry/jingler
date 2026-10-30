@@ -3,6 +3,7 @@ import {
   activate,
   activeGroup,
   closePane,
+  deactivate,
   focusAdjacent,
   focusedSessionId,
   focusPane,
@@ -257,6 +258,8 @@ export function useSplitLayout(
    * Close the pane that currently has focus — what ⌘W means with a split open.
    * A separate callback because the keyboard has no group id to hand.
    */
+  const goHome = useCallback(() => setWorkspace(deactivate), [])
+
   const closeFocused = useCallback(() => {
     setWorkspace((current) => {
       const group = activeGroup(current)
@@ -331,7 +334,8 @@ export function useSplitLayout(
       resizePane,
       focusPane: focus,
       focusNeighbour,
-      activateGroup
+      activateGroup,
+      goHome
     }),
     [
       workspace,
@@ -350,7 +354,8 @@ export function useSplitLayout(
       resizePane,
       focus,
       focusNeighbour,
-      activateGroup
+      activateGroup,
+      goHome
     ]
   )
 }
