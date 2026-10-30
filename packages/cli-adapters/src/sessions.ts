@@ -21,6 +21,7 @@ import type {
   ProviderModelId,
   RuntimeContinuation,
   Session,
+  SessionCheckout,
   SessionPr,
   SettledSessionStatus,
   WorkspaceLifecycle,
@@ -41,7 +42,7 @@ import {
   UNTITLED_SESSION,
   workspaceModeOf
 } from "@jingler/core"
-import { Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths, reduceCheckouts } from "@jingler/core"
+import { PRIMARY_CHECKOUT_ID, Session as SessionSchema, activeCheckoutOf, checkoutPrsOf, checkoutsOf, migrateSessionCheckouts, sessionPrsOf, withCheckoutPrs, ownedWorktreePaths, reduceCheckouts } from "@jingler/core"
 import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, type Path } from "@effect/platform"
@@ -413,27 +414,6 @@ export const migrateSessionIssue = (session: Session): Session => {
   return withCanonicalIssues(session, linkedIssues, selected)
 }
 
-/**
- * A multi-checkout session tracks one PR per checkout: `prs` lists them (active
- * checkout last, repo-labelled) after any stack layers that belong to none, and
- * `prNumber` keeps mirroring the ACTIVE checkout. Returns the session itself when no checkout has a PR.
- */
-const prsFromCheckouts = (session: Session): Session => {
-  const checkouts = session.checkouts ?? []
-  const withPr = checkouts.filter((c) => c.prNumber !== null)
-  if (withPr.length === 0) return session
-  const owned = new Set(withPr.map((c) => c.prNumber))
-  const entry = (c: (typeof checkouts)[number]): SessionPr => ({
-    ...(session.prs?.find((pr) => pr.number === c.prNumber) ?? {}),
-    number: c.prNumber as number,
-    repo: c.repo
-  })
-  const ordered = [...withPr.filter((c) => c.id !== session.activeCheckoutId), ...withPr.filter((c) => c.id === session.activeCheckoutId)]
-  const prs = [...(session.prs ?? []).filter((pr) => !owned.has(pr.number)), ...ordered.map(entry)]
-  const active = checkouts.find((c) => c.id === session.activeCheckoutId)
-  return { ...session, prs, prNumber: active ? active.prNumber : session.prNumber }
-}
-
 /** Set the scalar `branch` and keep the active checkout's own record in step (labels read the checkout). */
 const withActiveCheckoutBranch = <S extends Session>(session: S, branch: string): S => ({
   ...session,
@@ -443,21 +423,11 @@ const withActiveCheckoutBranch = <S extends Session>(session: S, branch: string)
     : {})
 })
 
-/**
- * Keep `prs` (the stack, bottom first) and `prNumber` (its top) consistent.
- * Sessions persisted before stacks existed have only `prNumber`; they read as a
- * one-element stack. Deterministic, so it is safe on every read and write.
- */
-export const migrateSessionPrs = (session: Session): Session => {
-  const withPrs = session.checkouts && session.checkouts.length > 1 ? prsFromCheckouts(session) : session
-  if (withPrs !== session) return withPrs
-  const prs = session.prs ?? []
-  if (prs.length > 0) {
-    const top = prs[prs.length - 1]!.number
-    return session.prNumber === top && session.prs === prs ? session : { ...session, prs, prNumber: top }
-  }
-  if (session.prNumber === null) return session
-  return { ...session, prs: [{ number: session.prNumber }] }
+/** Apply `edit` to the active checkout's PR stack; `prNumber` follows its top. */
+const editActivePrs = (session: Session, edit: (prs: ReadonlyArray<SessionPr>) => ReadonlyArray<SessionPr>): Session => {
+  const active = activeCheckoutOf(session)
+  const next = withCheckoutPrs(active, edit(checkoutPrsOf(active)))
+  return reduceCheckouts(session, { type: "update", checkoutId: active.id, patch: { prs: next.prs, prNumber: next.prNumber } })
 }
 
 /**
@@ -503,10 +473,12 @@ const disambiguateIssueSlug = (
 const sessionBelongsToRepository = (
   session: Session,
   repository: { readonly path: string; readonly name: string }
-): boolean =>
-  session.repoPath === undefined
-    ? session.repo === repository.name
-    : session.repoPath === repository.path
+): boolean => {
+  const checkout = activeCheckoutOf(session)
+  return checkout.repoPath === undefined
+    ? checkout.repo === repository.name
+    : checkout.repoPath === repository.path
+}
 
 const sessionLinksIssue = (
   session: Session,
@@ -525,15 +497,14 @@ const sessionLinksIssue = (
  * sessions intentionally have established non-semantic branches.
  */
 export const isSessionPublishBranchReady = (
-  session: Pick<
-    Session,
-    "branch" | "semanticBranchPending" | "semanticBranchProposal" | "workspaceMode"
-  >,
+  session: Parameters<typeof activeCheckoutOf>[0] &
+    Pick<Session, "semanticBranchPending" | "semanticBranchProposal">,
   liveBranch: string | null
 ): boolean => {
-  if (workspaceModeOf(session) !== "worktree") return false
+  const checkout = activeCheckoutOf(session)
+  if (workspaceModeOf(checkout) !== "worktree") return false
   if (session.semanticBranchPending === true) return false
-  if (liveBranch === null || liveBranch !== session.branch) return false
+  if (liveBranch === null || liveBranch !== checkout.branch) return false
   return session.semanticBranchProposal === undefined ||
     semanticBranchProposalFromName(liveBranch) !== null
 }
@@ -607,9 +578,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
       const checkWorkspaceSetup = (session: Session) => Effect.gen(function* () {
-        if (!session.checkpointSafeMode || session.environmentId || session.workspaceMode === "direct" || !session.worktreePath) return session
+        const checkout = activeCheckoutOf(session)
+        if (!session.checkpointSafeMode || session.environmentId || checkout.workspaceMode === "direct" || !checkout.worktreePath) return session
         const projectService = yield* Effect.serviceOption(ProjectService)
-        const project = session.projectId && projectService._tag === "Some" ? yield* projectService.value.get(session.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project workflow", cause }))) : undefined
+        const project = checkout.projectId && projectService._tag === "Some" ? yield* projectService.value.get(checkout.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project workflow", cause }))) : undefined
         if (project?.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot execute project setup shell commands." }))
         return session
       })
@@ -637,7 +609,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* fs
             .makeDirectory(paths.root, { recursive: true })
             .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create ~/jingler", cause })))
-          const encoded = yield* Schema.encode(SessionArray)(sessions.map((session) => migrateSessionPrs(migrateSessionIssue(session)))).pipe(
+          const encoded = yield* Schema.encode(SessionArray)(sessions.map(migrateSessionIssue)).pipe(
             Effect.mapError((cause) => new GitError({ message: "Failed to encode sessions", cause }))
           )
           // Write-then-RENAME, never write in place.
@@ -774,14 +746,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           } else {
             const usedSlugs = new Set(
               existing
-                .filter((s) => s.repo === input.repoName && s.worktreePath)
+                .filter((s) => activeCheckoutOf(s).repo === input.repoName && activeCheckoutOf(s).worktreePath)
                 // `basename`, not `split("/")`. Worktree paths are built with
                 // `path.join`, so on Windows they are backslash-separated and a
                 // "/" split returns the WHOLE path — the used-slug set then
                 // never matches a candidate, `freeCreativeName` always believes
                 // its first pick is free, and every untitled session in a repo
                 // collides on one name.
-                .map((s) => basename(s.worktreePath!))
+                .map((s) => basename(activeCheckoutOf(s).worktreePath!))
             )
             // `Date.now()` ALONE is not a distinct seed. Two untitled sessions
             // created in the same millisecond get the same clock reading and the
@@ -823,9 +795,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               checkpointExecutionHistory: "clean",
               ...checkpointCreationFields(input),
               ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-              repo: "",
-              branch: "",
-              checkouts: [],
+              checkouts: [{ id: PRIMARY_CHECKOUT_ID, repo: "", branch: "", worktreePath: scratchDir, prNumber: null }],
+              activeCheckoutId: PRIMARY_CHECKOUT_ID,
               title,
               ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
                 initialPrompt: input.initialPrompt?.trim()
@@ -834,13 +805,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               status: "idle",
               ...selection,
               diff: { added: 0, removed: 0 },
-              prNumber: null,
               costUsd: 0,
               tokens: 0,
               updatedAt: now,
               chats: [chat],
-              activeChatId: chat.id,
-              worktreePath: scratchDir
+              activeChatId: chat.id
             }
             yield* atomically(
               Effect.gen(function* () {
@@ -859,13 +828,22 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             id,
             checkpointExecutionHistory: "clean",
             ...checkpointCreationFields(input),
-            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-            // Non-Auto creation always supplies `repoName`; Auto (no `repoPath`)
-            // returns above before this closure is ever called.
-            repo: input.repoName!,
-            ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
-            branch: workspace.branch,
+            // Non-Auto creation always supplies `repoName` and `baseBranch`; Auto
+            // (no `repoPath`) returns above before this closure is ever called.
+            checkouts: [{
+              id: PRIMARY_CHECKOUT_ID,
+              ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+              repo: input.repoName!,
+              ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
+              branch: workspace.branch,
+              worktreePath: workspace.path,
+              workspaceMode,
+              repoPath: workspace.repoPath,
+              baseBranch: input.baseBranch!,
+              prNumber: null
+            }],
+            activeCheckoutId: PRIMARY_CHECKOUT_ID,
             ...propertiesWhen(workspaceMode === "worktree" && input.continueBranch !== true, { semanticBranchPending: true }),
             title,
             ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
@@ -875,18 +853,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             status: "idle",
             ...selection,
             diff: { added: 0, removed: 0 },
-            prNumber: null,
             costUsd: 0,
             tokens: 0,
             updatedAt: now,
             chats: [chat],
             activeChatId: chat.id,
-            worktreePath: workspace.path,
-            workspaceMode,
-            repoPath: workspace.repoPath,
-            // Non-Auto creation always supplies `baseBranch`; Auto (no `repoPath`)
-            // returns above before this closure is ever called.
-            baseBranch: input.baseBranch!,
             ...propertiesWhen(
               workspaceMode === "worktree" && input.projectId !== undefined && input.environmentId === undefined,
               { workspaceLifecycle: initialWorkspaceLifecycle(input, now) }
@@ -913,14 +884,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                 const directIdentities = yield* Effect.forEach(
                   current.filter(
                     (session) =>
-                      workspaceModeOf(session) === "direct" &&
-                      session.repoPath !== undefined
+                      workspaceModeOf(activeCheckoutOf(session)) === "direct" &&
+                      activeCheckoutOf(session).repoPath !== undefined
                   ),
                   (session) =>
-                    GitService.repositoryIdentity(session.repoPath!).pipe(
+                    GitService.repositoryIdentity(activeCheckoutOf(session).repoPath!).pipe(
                       Effect.map((candidate) => candidate.commonDir),
                       // A missing legacy checkout cannot race this live one.
-                      Effect.orElseSucceed(() => session.repoPath!)
+                      Effect.orElseSucceed(() => activeCheckoutOf(session).repoPath!)
                     )
                 )
                 if (directIdentities.includes(identity.commonDir)) {
@@ -957,9 +928,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                     ).pipe(Effect.ignore)
                   )
                 )
-                return branch === reservation.branch
+                const reserved = activeCheckoutOf(reservation)
+                return branch === reserved.branch
                   ? reservation
-                  : { ...reservation, branch }
+                  : reduceCheckouts(reservation, { type: "update", checkoutId: reserved.id, patch: { branch } })
               })
             )
           }
@@ -1027,7 +999,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
           const id = input.requestedSessionId ?? `s_${slug}_${stamp}`
           yield* ensureSessionIdAvailable(priorSessions, id)
-          if (priorSessions.some((s) => s.worktreePath === worktreePath)) {
+          if (priorSessions.some((s) => activeCheckoutOf(s).worktreePath === worktreePath)) {
             return yield* Effect.fail(
               new GitError({ message: "A session already exists for this pull request." })
             )
@@ -1063,11 +1035,21 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           let session: Session = {
             id,
             checkpointExecutionHistory: "clean",
-            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-            repo: input.repoName,
-            githubSlug: input.githubSlug ?? repository.fullName,
-            branch,
+            checkouts: [{
+              id: PRIMARY_CHECKOUT_ID,
+              ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+              repo: input.repoName,
+              githubSlug: input.githubSlug ?? repository.fullName,
+              branch,
+              worktreePath: worktree.path,
+              workspaceMode: "worktree",
+              repoPath: worktree.repoPath,
+              baseBranch: input.pr.baseRefName,
+              prNumber: input.pr.number,
+              prs: [{ number: input.pr.number }]
+            }],
+            activeCheckoutId: PRIMARY_CHECKOUT_ID,
             title: input.pr.title,
             ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
               initialPrompt: input.initialPrompt?.trim()
@@ -1075,7 +1057,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             status: "idle",
             ...selection,
             diff: { added: 0, removed: 0 },
-            prNumber: input.pr.number,
             ...propertiesWhen(repository.installationId !== undefined, {
               githubInstallationId: repository.installationId
             }),
@@ -1085,10 +1066,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             updatedAt: now,
             chats: [chat],
             activeChatId: chat.id,
-            worktreePath: worktree.path,
-            workspaceMode: "worktree",
-            repoPath: worktree.repoPath,
-            baseBranch: input.pr.baseRefName,
             ...propertiesWhen(
               input.projectId !== undefined && input.environmentId === undefined,
               { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
@@ -1158,7 +1135,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const slug = prior.some(
             (session) =>
               sessionBelongsToRepository(session, repository) &&
-              session.worktreePath === baseWorktreePath
+              activeCheckoutOf(session).worktreePath === baseWorktreePath
           )
             ? disambiguateIssueSlug(baseSlug, input.issue)
             : baseSlug
@@ -1187,11 +1164,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             // worktree slug stays deterministic for the one-session-per-issue guard.
             id,
             checkpointExecutionHistory: "clean",
-            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
-            repo: input.repoName,
-            ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
-            branch: worktree.branch,
+            checkouts: [{
+              id: PRIMARY_CHECKOUT_ID,
+              ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+              repo: input.repoName,
+              ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
+              branch: worktree.branch,
+              worktreePath: worktree.path,
+              workspaceMode: "worktree",
+              repoPath: worktree.repoPath,
+              baseBranch: input.baseBranch,
+              prNumber: null
+            }],
+            activeCheckoutId: PRIMARY_CHECKOUT_ID,
             semanticBranchPending: true,
             // Seed (and pin) the title from the issue.
             title: input.issue.title,
@@ -1199,7 +1185,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             status: "idle",
             ...selection,
             diff: { added: 0, removed: 0 },
-            prNumber: null,
             linkedIssues: [{
               providerId: input.issue.providerId,
               id: input.issue.id,
@@ -1220,10 +1205,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             updatedAt: now,
             chats: [chat],
             activeChatId: chat.id,
-            worktreePath: worktree.path,
-            workspaceMode: "worktree",
-            repoPath: worktree.repoPath,
-            baseBranch: input.baseBranch,
             ...propertiesWhen(
               input.projectId !== undefined && input.environmentId === undefined,
               { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
@@ -1806,7 +1787,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       /** Link a PR number without App routing; changing PRs clears stale realtime identity. */
       const setPrNumber = (id: string, prNumber: number | null) =>
         update(id, (session) => {
-          if (session.prNumber === prNumber) return session
+          if (activeCheckoutOf(session).prNumber === prNumber) return session
           const {
             githubInstallationId: _installationId,
             githubRepositoryId: _repositoryId,
@@ -1814,10 +1795,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             githubFeedbackSemanticKeys: _semanticKeys,
             ...unlinked
           } = session
-          const { prs: _prs, ...single } = unlinked
-          // Keep the active checkout's own record in step with the scalar mirror.
-          const checkouts = single.checkouts?.map((c) => (c.id === single.activeCheckoutId ? { ...c, prNumber } : c))
-          return migrateSessionPrs({ ...single, prNumber, ...(checkouts ? { checkouts } : {}) })
+          return editActivePrs(unlinked, () => (prNumber === null ? [] : [{ number: prNumber }]))
         })
 
       /** Record the live branch of one specific checkout (not necessarily the active one). */
@@ -1827,27 +1805,30 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       /** Link a PR to one specific checkout (not necessarily the active one). */
       const setCheckoutPr = (id: string, checkoutId: string, prNumber: number | null) =>
         update(id, (session) =>
-          migrateSessionPrs(reduceCheckouts(session, { type: "update", checkoutId, patch: { prNumber } }))
+          reduceCheckouts(session, {
+            type: "update",
+            checkoutId,
+            patch: { prNumber, prs: prNumber === null ? [] : [{ number: prNumber }] }
+          })
         )
 
-      /** Add a PR on top of the stack (or update it in place when `number` is already in it). */
+      /** Add a PR on top of the active checkout's stack (or update it in place when `number` is already in it). */
       const appendPr = (id: string, pr: SessionPr) =>
-        update(id, (session) => {
-          const prs = session.prs ?? []
-          const at = prs.findIndex((existing) => existing.number === pr.number)
-          const next = at === -1 ? [...prs, pr] : prs.map((existing, i) => (i === at ? { ...existing, ...pr } : existing))
-          return migrateSessionPrs({ ...session, prs: next })
-        })
+        update(id, (session) =>
+          editActivePrs(session, (prs) => {
+            const at = prs.findIndex((existing) => existing.number === pr.number)
+            return at === -1 ? [...prs, pr] : prs.map((existing, i) => (i === at ? { ...existing, ...pr } : existing))
+          })
+        )
 
       /**
-       * Link a PR the agent opened elsewhere. Becomes the primary PR only when the
-       * session has none; otherwise it sits in `linkedPrs`, outside the stack.
+       * Link a PR the agent opened elsewhere. Becomes the active checkout's PR only
+       * when it has none; otherwise it sits in `linkedPrs`, outside every stack.
        */
       const linkAgentPr = (id: string, number: number) =>
         update(id, (session) => {
-          if ((session.linkedPrs ?? []).includes(number) || (session.prs ?? []).some((pr) => pr.number === number)) return session
-          if (session.prNumber === number) return session
-          if (session.prNumber === null && !session.prs?.length) return migrateSessionPrs({ ...session, prNumber: number })
+          if ((session.linkedPrs ?? []).includes(number) || sessionPrsOf(session).some((pr) => pr.number === number)) return session
+          if (activeCheckoutOf(session).prNumber === null) return editActivePrs(session, () => [{ number }])
           return { ...session, linkedPrs: [...(session.linkedPrs ?? []), number] }
         })
 
@@ -1861,16 +1842,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           readonly branch?: string
         }
       ) =>
-        update(id, (session) => {
-          const { prs: _prs, ...single } = session
-          return migrateSessionPrs({
-            ...single,
-            ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
-            prNumber: link.prNumber,
-            githubInstallationId: link.installationId,
-            githubRepositoryId: link.repositoryId
-          })
-        })
+        update(id, (session) =>
+          reduceCheckouts(
+            { ...session, githubInstallationId: link.installationId, githubRepositoryId: link.repositoryId },
+            {
+              type: "update",
+              checkoutId: activeCheckoutOf(session).id,
+              patch: {
+                ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
+                prNumber: link.prNumber,
+                prs: [{ number: link.prNumber }]
+              }
+            }
+          )
+        )
 
     /**
      * Exactly-once claim, validated and persisted atomically before the
@@ -2027,8 +2012,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         }))
 
       /** Persist an authoritative publication checkpoint for restart-safe retries. */
-      const setPublishCheckpoint = (id: string, publish: Session["publish"]) =>
-        update(id, (s) => ({ ...s, publish }))
+      const setPublishCheckpoint = (id: string, publish: SessionCheckout["publish"]) =>
+        update(id, (s) => reduceCheckouts(s, { type: "update", checkoutId: activeCheckoutOf(s).id, patch: { publish } }))
 
     /**
      * Record a worktree that has MOVED — not one that was re-forked.
@@ -2039,28 +2024,35 @@ export class SessionStore extends Effect.Service<SessionStore>()(
      * directory is really there, so this never invents a path.
      */
     const setWorktreePath = (id: string, worktreePath: string) =>
-        update(id, (s) => ({ ...s, worktreePath }))
+        update(id, (s) =>
+          reduceCheckouts(s, { type: "update", checkoutId: activeCheckoutOf(s).id, patch: { worktreePath } })
+        )
 
       /** Persist a checkout reducer result: the checkout list plus the scalar mirrors of the active one. */
       const setCheckouts = (id: string, next: Parameters<typeof activeCheckoutOf>[0]) =>
-        update(id, (session) => ({
-          ...session,
-          projectId: next.projectId,
-          repo: next.repo,
-          repoPath: next.repoPath,
-          worktreePath: next.worktreePath,
-          workspaceMode: next.workspaceMode,
-          branch: next.branch,
-          baseBranch: next.baseBranch,
-          prNumber: next.prNumber,
-          githubSlug: next.githubSlug,
-          checkouts: next.checkouts,
-          activeCheckoutId: next.activeCheckoutId
-        }))
+        update(id, (session) => {
+          const active = activeCheckoutOf(next)
+          return {
+            ...session,
+            projectId: active.projectId,
+            repo: active.repo,
+            repoPath: active.repoPath,
+            worktreePath: active.worktreePath,
+            workspaceMode: active.workspaceMode,
+            branch: active.branch,
+            baseBranch: active.baseBranch,
+            prNumber: active.prNumber,
+            githubSlug: active.githubSlug,
+            checkouts: next.checkouts,
+            activeCheckoutId: next.activeCheckoutId
+          }
+        })
 
       /** Attach a durable project identity without changing checkout/transcript state. */
       const setProject = (id: string, projectId: string) =>
-        update(id, (session) => ({ ...session, projectId }))
+        update(id, (session) =>
+          reduceCheckouts(session, { type: "update", checkoutId: activeCheckoutOf(session).id, patch: { projectId } })
+        )
 
       /** Replace every link (or, with `null`, clear them) for legacy callers. */
       const setIssue = (
@@ -2362,7 +2354,7 @@ function* reconcileFeedbackOutbox(
       !session.archived &&
       session.githubInstallationId === entry.installationId &&
       session.githubRepositoryId === entry.repositoryId &&
-      session.prNumber === entry.prNumber
+      activeCheckoutOf(session).prNumber === entry.prNumber
     if (!linked) {
       changed = true
       continue
@@ -2412,7 +2404,7 @@ function* claimSessionFeedback(
     session.archived ||
     session.githubInstallationId !== input.installationId ||
     session.githubRepositoryId !== input.repositoryId ||
-    session.prNumber !== input.prNumber ||
+    activeCheckoutOf(session).prNumber !== input.prNumber ||
     input.event.installationId !== input.installationId ||
     input.event.repository.id !== input.repositoryId ||
     input.event.pullRequest?.number !== input.prNumber
@@ -2467,7 +2459,7 @@ function* createIsolatedSession(
   checkWorkspaceSetup: (session: Session) => Effect.Effect<Session, GitError, PersistEnv | Path.Path>
 ) {
   const worktreePath = yield* GitService.worktreePathFor(input.repoName!, slug)
-  if (existing.some((s) => s.worktreePath === worktreePath)) {
+  if (existing.some((s) => activeCheckoutOf(s).worktreePath === worktreePath)) {
     return yield* Effect.fail(
       new GitError({
         message: "A session already exists for this branch name."
@@ -2524,7 +2516,7 @@ function* readPersistedSessions(fs: FileSystem.FileSystem) {
       migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
     )
     if (Either.isRight(decoded)) {
-      const session = migrateSessionCheckouts(migrateSessionPrs(decoded.right))
+      const session = decoded.right
       updateWorkspaceReadiness(session)
       sessions.push(session)
     }

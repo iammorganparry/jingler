@@ -16,7 +16,7 @@ import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "n
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { Effect, Schema } from "effect"
-import { Message as MessageSchema } from "@jingler/core"
+import { Message as MessageSchema, activeCheckoutOf } from "@jingler/core"
 import { harnessLogPath, rebuildTranscript } from "../src/main/transcript-backfill.js"
 
 const JINGLER_HOME = process.env.JINGLER_HOME ?? join(homedir(), "jingler")
@@ -48,9 +48,10 @@ const main = async () => {
     )
   }
   if (!legacyResumeId) throw new Error(`session ${sessionId} has no legacy resume id — nothing to recover from`)
-  if (!session.worktreePath) throw new Error(`session ${sessionId} has no worktreePath`)
+  const { worktreePath } = activeCheckoutOf(session)
+  if (!worktreePath) throw new Error(`session ${sessionId} has no worktreePath`)
 
-  const jsonl = harnessLogPath(session.worktreePath, legacyResumeId)
+  const jsonl = harnessLogPath(worktreePath, legacyResumeId)
   if (!existsSync(jsonl)) throw new Error(`no harness log at ${jsonl}`)
 
   const target = join(JINGLER_HOME, "transcripts", `${sessionId}.json`)

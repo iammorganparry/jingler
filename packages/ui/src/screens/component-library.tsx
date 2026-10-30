@@ -33,12 +33,11 @@ const ACCENTS = ["blue", "green", "yellow", "red", "purple", "cyan", "orange"]
 
 const demoSession: Session = {
   id: "demo",
-  repo: "trigify/api",
-  branch: "feat/oauth",
+  checkouts: [{ id: "primary", repo: "trigify/api", branch: "feat/oauth", prNumber: 482 }],
+  activeCheckoutId: "primary",
   title: "Refactor auth flow",
   status: "thinking",
   diff: { added: 313, removed: 23 },
-  prNumber: 482,
   costUsd: 1.24,
   tokens: 218000,
   updatedAt: "2026-07-11T09:41:00.000Z",

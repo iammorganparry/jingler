@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import {
   ProviderCatalog as ProviderCatalogSchema,
   type ProviderCatalog,
@@ -198,8 +199,8 @@ describe("appMachine first-run coordination", () => {
     const actor = createActor(configured).start();
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     const running: Session = {
-      id: "retry", repo: "widget", branch: "main", title: "Preparing",
-      status: "idle", diff: { added: 0, removed: 0 }, prNumber: null,
+      id: "retry", checkouts: [{ id: "primary", repo: "widget", branch: "main", prNumber: null }], activeCheckoutId: "primary", title: "Preparing",
+      status: "idle", diff: { added: 0, removed: 0 },
       costUsd: 0, tokens: 0, chats: [], activeChatId: "chat-1",
       updatedAt: "2026-08-08T08:00:03.000Z",
       workspaceLifecycle: { status: "setup-running", updatedAt: "2026-08-08T08:00:01.000Z" },
@@ -472,14 +473,15 @@ describe("appMachine first-run coordination", () => {
       checkpoint: {
         step: "complete",
         completed: ["inspecting", "verifying-branch", "pushing", "linking"],
-        branch: session.branch,
+        branch: activeCheckoutOf(session).branch,
         prNumber: 42,
         updatedAt: "2026-08-05T08:01:00.000Z",
       },
     });
 
-    expect(actor.getSnapshot().context.sessions[0]).toMatchObject({
-      title: "Current title",
+    const merged = actor.getSnapshot().context.sessions[0]!;
+    expect(merged.title).toBe("Current title");
+    expect(activeCheckoutOf(merged)).toMatchObject({
       prNumber: 42,
       publish: { step: "complete", prNumber: 42 },
     });

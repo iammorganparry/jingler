@@ -61,6 +61,7 @@ export function SessionHoverCard({
   /** This session's PR stack, bottom layer first. More than one layer renders a stack list instead of the single PR line. */
   stack?: ReadonlyArray<PrStackLayer>
 }) {
+  const checkout = activeCheckoutOf(session)
   const display = displayStatusOf(activity, session.status, interrupted)
   // The detail line ("Running pnpm test -- auth") when there IS live activity;
   // the five-word rollup otherwise. Never both — they'd say the same thing twice.
@@ -88,7 +89,7 @@ export function SessionHoverCard({
       <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-dim">
         <GitBranch size={11} className="flex-none text-cyan" />
         <span className="truncate">
-          {hasNoRepo(activeCheckoutOf(session)) || checkoutsOf(session).length > 1 ? reposLabelOf(session) : `${session.repo} · ${session.branch}`}
+          {hasNoRepo(checkout) || checkoutsOf(session).length > 1 ? reposLabelOf(session) : `${checkout.repo} · ${checkout.branch}`}
         </span>
       </span>
 
@@ -104,7 +105,7 @@ export function SessionHoverCard({
 
       {/* The footer only exists when it has something to say — an untouched
           session with no PR would otherwise get an empty grey strip. */}
-      {(hasDiff || session.prNumber !== null || isStacked) && (
+      {(hasDiff || activeCheckoutOf(session).prNumber !== null || isStacked) && (
         <div className="flex flex-col gap-1.5 border-t border-hairline pt-1.5">
           {hasDiff && <DiffStat added={added} removed={removed} />}
           {isStacked ? (
@@ -129,9 +130,9 @@ export function SessionHoverCard({
               })}
             </div>
           ) : (
-            session.prNumber !== null && (
+            activeCheckoutOf(session).prNumber !== null && (
               <span className="flex items-center gap-1 font-mono text-[10px] text-dim">
-                <PrStatusGlyph pr={prState ?? null} size={12} />#{session.prNumber}
+                <PrStatusGlyph pr={prState ?? null} size={12} />#{activeCheckoutOf(session).prNumber}
               </span>
             )
           )}

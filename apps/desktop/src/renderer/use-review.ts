@@ -8,6 +8,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrFileChange, PrReviewThread, Session } from "@jingler/core"
+import { activeCheckoutOf } from "@jingler/core"
 import type { ReviewOmittedFile } from "@jingler/ui"
 import { diffBlocks, diffForPath } from "./review-diff-blocks.js"
 import { rpc } from "./rpc-client.js"
@@ -134,7 +135,7 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   const qc = useQueryClient()
   // Filter, drafts and viewed markers are shared across the Explorer, the Files
   // view and the review tray, so they live in the session's review store.
-  const shared = useSessionReviewState(session.id, session.prNumber)
+  const shared = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
   const { filter, drafts } = shared
   const viewedPaths = shared.viewed
   const source: ReviewSource = filter === "pr" ? "pr" : "local"
@@ -142,8 +143,8 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
 
   const toggleViewed = useCallback(
     (path: string, viewed: boolean) =>
-      setReviewViewed(session.id, session.prNumber, path, viewed),
-    [session.id, session.prNumber]
+      setReviewViewed(session.id, activeCheckoutOf(session).prNumber, path, viewed),
+    [session.id, activeCheckoutOf(session).prNumber]
   )
 
   // Only fetch while changes are being reviewed. This hook is mounted in every
@@ -152,8 +153,8 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   const reviewing = filter !== "all" || drafts.length > 0
 
   const prQuery = useQuery({
-    queryKey: ["github", "review", session.id, session.prNumber, shared.prLayer, ...checkoutKeyPart(checkoutId)],
-    enabled: reviewing && session.prNumber != null,
+    queryKey: ["github", "review", session.id, activeCheckoutOf(session).prNumber, shared.prLayer, ...checkoutKeyPart(checkoutId)],
+    enabled: reviewing && activeCheckoutOf(session).prNumber != null,
     queryFn: async () => {
       // Settle independently: the file list and the diff are separate fetches
       // with separate permission surfaces, and a diff failure must not blank an
@@ -179,9 +180,9 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   // within the stale window and never re-detected — a session stayed on its
   // old PR after a new one was opened.
   const threadsQuery = useQuery({
-    queryKey: threadsKey(session.id, session.prNumber),
+    queryKey: threadsKey(session.id, activeCheckoutOf(session).prNumber),
     queryFn: () => rpc.githubPr(session.id, undefined, checkoutId),
-    enabled: reviewing && filter === "pr" && session.prNumber != null
+    enabled: reviewing && filter === "pr" && activeCheckoutOf(session).prNumber != null
   })
   const localQuery = useQuery({
     queryKey: localKey(session.id, checkoutId),
@@ -235,22 +236,22 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
 
   const setFilter = useCallback(
     (next: ReviewFilter) => {
-      setReviewFilter(session.id, session.prNumber, next)
+      setReviewFilter(session.id, activeCheckoutOf(session).prNumber, next)
       setSelectedPath(null) // reset to the first file of the new source
     },
-    [session.id, session.prNumber]
+    [session.id, activeCheckoutOf(session).prNumber]
   )
   const setSource = useCallback((s: ReviewSource) => setFilter(s), [setFilter])
 
   const addDraft = useCallback(
     (d: { path: string; line: number; endLine: number | null; body: string; routeToAgent: boolean }) =>
-      addReviewDraft(session.id, session.prNumber, d),
-    [session.id, session.prNumber]
+      addReviewDraft(session.id, activeCheckoutOf(session).prNumber, d),
+    [session.id, activeCheckoutOf(session).prNumber]
   )
 
   const removeDraft = useCallback(
-    (id: string) => removeReviewDraft(session.id, session.prNumber, id),
-    [session.id, session.prNumber]
+    (id: string) => removeReviewDraft(session.id, activeCheckoutOf(session).prNumber, id),
+    [session.id, activeCheckoutOf(session).prNumber]
   )
 
   const finishReview = useCallback(
@@ -291,13 +292,13 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
           // here and in the Pull Request tab.
           .then(() =>
             Promise.all([
-              qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) }),
-              qc.invalidateQueries({ queryKey: threadsKey(session.id, session.prNumber) })
+              qc.invalidateQueries({ queryKey: prKey(session.id, activeCheckoutOf(session).prNumber) }),
+              qc.invalidateQueries({ queryKey: threadsKey(session.id, activeCheckoutOf(session).prNumber) })
             ])
           )
           .catch(() => {})
       }
-      clearReviewDrafts(session.id, session.prNumber)
+      clearReviewDrafts(session.id, activeCheckoutOf(session).prNumber)
     },
     [blocks, drafts, session, qc]
   )
@@ -305,10 +306,10 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   const refetchLocal = () => qc.invalidateQueries({ queryKey: localKey(session.id) })
   const revertFile = useCallback(
     (path: string) => {
-      void rpc.workspaceRevertFile(session.id, path).then(refetchLocal).catch(() => {})
+      void rpc.workspaceRevertFile(session.id, path, checkoutId).then(refetchLocal).catch(() => {})
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.id]
+    [session.id, checkoutId]
   )
 
   const activeQuery = effective === "pr" ? prQuery : localQuery

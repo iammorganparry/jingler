@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { issueReferencesOf } from "@jingler/core"
+import { activeCheckoutOf, issueReferencesOf } from "@jingler/core"
 import type { IssueListItem, Project, Repo, Session } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 
@@ -26,7 +26,7 @@ export function issueSessionTarget(
     : null
   const session = repo
     ? sessions.find((candidate) =>
-        linksIssue(candidate, issue) && (candidate.repoPath === repo.path || candidate.projectId === project?.id)) ?? null
+        linksIssue(candidate, issue) && (activeCheckoutOf(candidate).repoPath === repo.path || activeCheckoutOf(candidate).projectId === project?.id)) ?? null
     : null
   return { project, session }
 }

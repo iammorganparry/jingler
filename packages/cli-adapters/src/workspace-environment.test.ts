@@ -2,7 +2,7 @@ import { expect, it } from "vitest"
 import { trustedWorkspaceEnvironment, workspaceEnvironment, workspaceProcessEnvironment } from "./workspace-environment.js"
 
 it("injects isolated workspace paths without managed ports", () => {
-  const session = { worktreePath: "/work", repoPath: "/root" }
+  const session = { id: "s", repo: "r", branch: "main", prNumber: null, worktreePath: "/work", repoPath: "/root" }
   expect(workspaceEnvironment(session)).toEqual({ JINGLER_WORKSPACE_PATH: "/work", JINGLER_ROOT_PATH: "/root" })
   expect(workspaceProcessEnvironment({ PATH: "/bin", JINGLER_WORKSPACE_PATH: "/other" }, session)).toEqual({ PATH: "/bin", ...workspaceEnvironment(session) })
   expect(workspaceEnvironment({ ...session, environmentId: "remote" })).toEqual({})

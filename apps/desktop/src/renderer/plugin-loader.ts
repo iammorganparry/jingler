@@ -29,7 +29,7 @@
  * advisory, since a module could register whatever it liked at import time.
  */
 import { createElement, type ComponentType } from "react"
-import { issueReferenceOf, issueReferencesOf, PLUGIN_API_VERSION } from "@jingler/core"
+import { activeCheckoutOf, issueReferenceOf, issueReferencesOf, PLUGIN_API_VERSION } from "@jingler/core"
 import type {
   LoadedPlugin,
   PluginIcon as PluginIconDeclaration,
@@ -90,20 +90,21 @@ export interface PluginViewProps {
 export const toSessionSnapshot = (session: Session): SessionSnapshot => {
   const linkedIssues = issueReferencesOf(session)
   const linkedIssue = issueReferenceOf(session)
+  const checkout = activeCheckoutOf(session)
   return {
     id: session.id,
-    repo: session.repo,
-    branch: session.branch,
+    repo: checkout.repo,
+    branch: checkout.branch,
     title: session.title,
     ...(session.providerId === undefined ? {} : { providerId: session.providerId }),
-    prNumber: session.prNumber ?? null,
+    prNumber: activeCheckoutOf(session).prNumber ?? null,
     ...(session.issueNumber != null ? { issueNumber: session.issueNumber } : {}),
     ...(linkedIssue ? { linkedIssue } : {}),
     linkedIssues,
     ...(linkedIssue
       ? { selectedIssue: { providerId: linkedIssue.providerId, id: linkedIssue.id } }
       : {}),
-    ...(session.worktreePath != null ? { worktreePath: session.worktreePath } : {})
+    ...(checkout.worktreePath != null ? { worktreePath: checkout.worktreePath } : {})
   }
 }
 
@@ -204,9 +205,9 @@ const visibilityPredicate = (
   }
   switch (when) {
     case "hasPr":
-      return ({ session }) => session.prNumber != null
+      return ({ session }) => activeCheckoutOf(session).prNumber != null
     case "hasWorktree":
-      return ({ session }) => session.worktreePath != null
+      return ({ session }) => activeCheckoutOf(session).worktreePath != null
     case "hasIssue":
       return ({ session }) => issueReferenceOf(session) != null
     default:

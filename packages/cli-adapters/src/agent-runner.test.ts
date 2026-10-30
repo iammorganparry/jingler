@@ -4,7 +4,6 @@ import { join } from "node:path"
 import type {
   GateDecision,
   PermissionMode,
-  Session,
   StreamEvent
 } from "@jingler/core"
 import {
@@ -14,6 +13,7 @@ import {
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
+  Session,
   STOPPED_NOTE
 } from "@jingler/core"
 import { Deferred, Effect, Fiber, Layer, Ref, Schema, Stream, TestClock, TestContext } from "effect"
@@ -845,12 +845,11 @@ describe("AgentRunner model", () => {
   it("does not replace the certified model id with provider event metadata", async () => {
     const session: Session = {
       id: SESSION,
-      repo: "r",
-      branch: "b",
+      checkouts: [{ id: "primary", repo: "r", branch: "b", prNumber: null }],
+      activeCheckoutId: "primary",
       title: "t",
       status: "idle",
       diff: { added: 0, removed: 0 },
-      prNumber: null,
       costUsd: 0,
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
@@ -858,7 +857,7 @@ describe("AgentRunner model", () => {
       activeChatId: SESSION
     }
     mkdirSync(temp.root, { recursive: true })
-    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
+    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([Schema.encodeSync(Session)(session)]))
 
     const base = Layer.mergeAll(
       AgentRunner.Default,
@@ -889,12 +888,11 @@ describe("AgentRunner resume across restarts", () => {
   const seedBareSession = () => {
     const session: Session = {
       id: SESSION,
-      repo: "acme/widget",
-      branch: "b",
+      checkouts: [{ id: "primary", repo: "acme/widget", branch: "b", prNumber: null }],
+      activeCheckoutId: "primary",
       title: "t",
       status: "idle",
       diff: { added: 0, removed: 0 },
-      prNumber: null,
       costUsd: 0,
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
@@ -903,7 +901,7 @@ describe("AgentRunner resume across restarts", () => {
       mode: "auto"
     }
     mkdirSync(temp.root, { recursive: true })
-    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
+    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([Schema.encodeSync(Session)(session)]))
   }
 
   // A driver that records the pi session id it was handed and reports the next

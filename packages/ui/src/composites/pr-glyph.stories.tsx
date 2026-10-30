@@ -1,3 +1,4 @@
+import { type CheckoutFields, foldCheckout } from "../test-support"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { Session, SessionPrStatus } from "@jingler/core"
 import { SessionSidebar } from "../app/session-sidebar.js"
@@ -60,7 +61,7 @@ export const Vocabulary: Story = {
  */
 export const InTheSidebar: Story = {
   render: () => {
-    const session = (id: string, title: string, over: Partial<Session> = {}): Session => ({
+    const session = (id: string, title: string, over: Partial<Session> & CheckoutFields = {}): Session => foldCheckout({
       id,
       title,
       repo: "jingler",

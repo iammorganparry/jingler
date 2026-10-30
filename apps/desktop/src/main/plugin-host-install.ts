@@ -12,6 +12,7 @@
  * the host costs nothing on a launch where the operator never opens a plugin.
  */
 import { Effect } from "effect"
+import { activeCheckoutOf } from "@jingler/core"
 import {
   makeGithubAuthProvider,
   PluginAuth,
@@ -90,15 +91,16 @@ export const installPluginHost = (
         appRuntime.runPromise(
           SessionStore.get(sessionId).pipe(
             Effect.map((session) => {
+              const checkout = activeCheckoutOf(session)
               const snapshot = {
                 id: session.id,
-                repo: session.repo,
-                branch: session.branch,
+                repo: checkout.repo,
+                branch: checkout.branch,
                 title: session.title,
-                prNumber: session.prNumber ?? null
+                prNumber: checkout.prNumber ?? null
               }
-              return session.worktreePath
-                ? { ...snapshot, worktreePath: session.worktreePath }
+              return checkout.worktreePath
+                ? { ...snapshot, worktreePath: checkout.worktreePath }
                 : snapshot
             }),
             Effect.catchAll(() => Effect.succeed(null))

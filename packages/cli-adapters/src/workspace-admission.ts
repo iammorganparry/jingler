@@ -1,4 +1,4 @@
-import type { Session } from "@jingler/core"
+import { activeCheckoutOf, type Session } from "@jingler/core"
 
 interface Closure {
   readonly reason: string
@@ -136,4 +136,4 @@ export const resetWorkspaceAdmissions = (): void => {
 
 /** Never infer descendant shutdown from history that cannot be owned on this platform. */
 export const workspaceHasUnprovenProcesses = (session: Session): boolean =>
-  session.checkpointPtyHistory === true || (process.platform === "win32" && session.workspaceMode !== "direct" && session.checkpointExecutionHistory !== "clean")
+  session.checkpointPtyHistory === true || (process.platform === "win32" && activeCheckoutOf(session).workspaceMode !== "direct" && session.checkpointExecutionHistory !== "clean")

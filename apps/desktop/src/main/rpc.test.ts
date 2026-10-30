@@ -1,3 +1,4 @@
+import { activeCheckoutOf, sessionPrsOf, Session as SessionSchema } from "@jingler/core"
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -68,10 +69,11 @@ import {
 import { RoutinesService } from "./routines.js"
 import { RoutineScheduler } from "./routine-scheduler.js"
 import { RoutineStore } from "@jingler/cli-adapters/routine-store"
-import { RoutineInput, type AuthSession } from "@jingler/core"
+import { RoutineInput, type AuthSession, type SessionWire } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   authenticatedSession,
+  continuationSource,
   adoptBranch,
   forkOntoBranch,
   transcriptForFork,
@@ -101,6 +103,7 @@ import {
   setSessionPersistent,
   sessionCreationOptions,
   sessionDiff,
+  sessionFileDiff,
   skillsList,
   transcriptHasGitHubFeedback,
   uninstallPlugin,
@@ -125,18 +128,17 @@ describe("session creation defaults", () => {
 describe("publish branch verification", () => {
   const session = (branch: string, semanticBranchPending = false): Session => ({
     id: "publish-session",
-    repo: "jingler",
-    branch,
-    baseBranch: "main",
+    checkouts: [{
+      id: "primary", repo: "jingler", branch, baseBranch: "main",
+      worktreePath: "/tmp/publish-session", workspaceMode: "worktree", prNumber: null,
+    }],
+    activeCheckoutId: "primary",
     title: "Publish session",
     status: "idle",
     diff: { added: 0, removed: 0 },
-    prNumber: null,
     costUsd: 0,
     tokens: 0,
     updatedAt: "2026-08-10T00:00:00.000Z",
-    worktreePath: "/tmp/publish-session",
-    workspaceMode: "worktree",
     semanticBranchPending,
     semanticBranchProposal: { type: "fix", slug: "create-session-race" },
     chats: [{
@@ -151,19 +153,16 @@ describe("publish branch verification", () => {
   it("refreshes a session whose semantic branch persisted after publishing started", async () => {
     const refreshed = vi.fn(async () => session("fix/create-session-race"));
 
-    await expect(
-      resolvePublishSessionBranch(
-        session("main", true),
-        "fix/create-session-race",
-        refreshed,
-      ),
-    ).resolves.toMatchObject({
+    const resolved = await resolvePublishSessionBranch(
+      session("main", true),
+      "fix/create-session-race",
+      refreshed,
+    );
+    expect(resolved).toMatchObject({
       branch: "fix/create-session-race",
-      session: {
-        branch: "fix/create-session-race",
-        semanticBranchPending: false,
-      },
+      session: { semanticBranchPending: false },
     });
+    expect(activeCheckoutOf(resolved.session).branch).toBe("fix/create-session-race");
     expect(refreshed).toHaveBeenCalledOnce();
   });
 
@@ -355,7 +354,8 @@ describe("reconcileRelaySessionRoutes", () => {
     ({
       id: "session-1",
       archived: false,
-      prNumber: 42,
+      checkouts: [{ id: "primary", repo: "r", branch: "b", prNumber: 42, worktreePath: "/tmp/wt" }],
+      activeCheckoutId: "primary",
       githubInstallationId: "99",
       githubRepositoryId: "200",
       ...patch,
@@ -405,7 +405,7 @@ describe("reconcileRelaySessionRoutes", () => {
     await expect(
       reconcileRelaySessionRoutes(
         async () => [linkedSession({
-          prNumber: 43,
+          checkouts: [{ id: "primary", repo: "r", branch: "b", prNumber: 43, worktreePath: "/tmp/wt" }],
           githubInstallationId: undefined,
           githubRepositoryId: undefined,
         })],
@@ -630,8 +630,8 @@ describe("RPC handlers", () => {
         SessionStore.get("s1").pipe(Effect.provide(layer)),
       );
 
-      expect(updated.branch).toBe("feature/other");
-      expect(reloaded.branch).toBe("feature/other");
+      expect(activeCheckoutOf(updated).branch).toBe("feature/other");
+      expect(activeCheckoutOf(reloaded).branch).toBe("feature/other");
     });
 
     it("adoptBranch is a no-op when the checkout has not drifted", async () => {
@@ -643,7 +643,7 @@ describe("RPC handlers", () => {
         adoptBranch("s1").pipe(Effect.provide(layer)),
       );
 
-      expect(updated.branch).toBe("main");
+      expect(activeCheckoutOf(updated).branch).toBe("main");
     });
 
     it("transcriptForFork keeps the work but strips the drift banner that led to the fork", () => {
@@ -705,15 +705,15 @@ describe("RPC handlers", () => {
       );
 
       // An ISOLATED worktree, not the shared checkout.
-      expect(fork.workspaceMode).toBe("worktree");
-      expect(fork.worktreePath).toBeDefined();
-      expect(fork.worktreePath).not.toBe(checkoutPath);
+      expect(activeCheckoutOf(fork).workspaceMode).toBe("worktree");
+      expect(activeCheckoutOf(fork).worktreePath).toBeDefined();
+      expect(activeCheckoutOf(fork).worktreePath).not.toBe(checkoutPath);
       // Committed history on the drifted branch is preserved.
-      expect(existsSync(join(fork.worktreePath!, "committed-on-fix.txt"))).toBe(
+      expect(existsSync(join(activeCheckoutOf(fork).worktreePath!, "committed-on-fix.txt"))).toBe(
         true,
       );
       // The dirty working tree is NOT dragged in — the fork is clean.
-      expect(existsSync(join(fork.worktreePath!, "dirty-from-main.txt"))).toBe(
+      expect(existsSync(join(activeCheckoutOf(fork).worktreePath!, "dirty-from-main.txt"))).toBe(
         false,
       );
       // The source session stays pinned to its original branch.
@@ -723,7 +723,7 @@ describe("RPC handlers", () => {
           Effect.provide(base),
         ),
       );
-      expect(source.branch).toBe("main");
+      expect(activeCheckoutOf(source).branch).toBe("main");
     });
 
     it("forkOntoBranch fails with GitError when the checkout has not drifted", async () => {
@@ -1211,6 +1211,61 @@ describe("RPC handlers", () => {
     });
   });
 
+  describe("checkoutId routing", () => {
+    it("resolves the requested non-active checkout for fileDiff, read, write and revert", async () => {
+      const now = "2026-07-30T10:00:00.000Z";
+      const webPath = join(dir, "co-web");
+      const apiPath = join(dir, "co-api");
+      for (const [path, text] of [[webPath, "WEB\n"], [apiPath, "API\n"]] as const) {
+        mkdirSync(path, { recursive: true });
+        const git = (...args: string[]) =>
+          execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: path, stdio: "ignore" });
+        git("init", "-b", "main");
+        writeFileSync(join(path, "README.md"), text);
+        git("add", "-A");
+        git("commit", "-m", "init", "--no-gpg-sign");
+        writeFileSync(join(path, "README.md"), `${text}EDIT\n`);
+      }
+      const co = (id: string, worktreePath: string) => ({
+        id, repo: id, repoPath: worktreePath, worktreePath, branch: "main", baseBranch: "main",
+        workspaceMode: "worktree", prNumber: null,
+      });
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(root, "sessions.json"), JSON.stringify([{
+        id: "co-session", repo: "web", branch: "main", baseBranch: "main", title: "Two repos",
+        status: "idle", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0, tokens: 0,
+        updatedAt: now, worktreePath: webPath, repoPath: webPath, workspaceMode: "worktree",
+        checkouts: [co("web", webPath), co("api", apiPath)], activeCheckoutId: "web",
+        chats: [], activeChatId: null,
+      }]));
+      const layer = Layer.mergeAll(SessionStore.Default, AssetService.Default, WorkspaceService.Default)
+        .pipe(Layer.provideMerge(base));
+      const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
+
+      const diff = await run(sessionFileDiff("co-session", "README.md", "api").pipe(Effect.provide(layer)));
+      expect(JSON.stringify(diff)).toContain("API");
+      expect(JSON.stringify(diff)).not.toContain("WEB");
+      const activeDiff = await run(sessionFileDiff("co-session", "README.md").pipe(Effect.provide(layer)));
+      expect(JSON.stringify(activeDiff)).toContain("WEB");
+
+      const loaded = await run(
+        assetRead({ sessionId: "co-session", path: "README.md", checkoutId: "api" }).pipe(Effect.provide(layer)),
+      );
+      expect(loaded).toMatchObject({ text: "API\nEDIT\n" });
+      if (!("text" in loaded)) return;
+      await run(assetWrite({
+        sessionId: "co-session", path: "README.md", text: "API\nSAVED\n",
+        expectedRevision: loaded.revision, checkoutId: "api",
+      }).pipe(Effect.provide(layer)));
+      expect(readFileSync(join(apiPath, "README.md"), "utf8")).toBe("API\nSAVED\n");
+      expect(readFileSync(join(webPath, "README.md"), "utf8")).toBe("WEB\nEDIT\n");
+
+      await run(workspaceRevertFile({ sessionId: "co-session", path: "README.md", checkoutId: "api" }).pipe(Effect.provide(layer)));
+      expect(readFileSync(join(apiPath, "README.md"), "utf8")).toBe("API\n");
+      expect(readFileSync(join(webPath, "README.md"), "utf8")).toBe("WEB\nEDIT\n");
+    });
+  });
+
   describe("Workspace.revertFile", () => {
     // Revert on an unknown / worktree-less session must be a safe no-op.
     it("no-ops for an unknown session (no worktree to touch)", async () => {
@@ -1465,8 +1520,8 @@ describe("RPC handlers", () => {
       await expect(Effect.runPromise(githubDetectPr("cli-only").pipe(Effect.provide(github))))
         .resolves.toBe(44);
       const linked = await Effect.runPromise(SessionStore.get("cli-only").pipe(Effect.provide(github)));
-      expect(linked.prNumber).toBe(44);
-      expect(linked.branch).toBe("fix/cli");
+      expect(activeCheckoutOf(linked).prNumber).toBe(44);
+      expect(activeCheckoutOf(linked).branch).toBe("fix/cli");
       expect(linked.githubInstallationId).toBeUndefined();
       expect(linked.githubRepositoryId).toBeUndefined();
       expect(upsertSessionRoute).not.toHaveBeenCalled();
@@ -1504,8 +1559,8 @@ describe("RPC handlers", () => {
       await Effect.runPromise(githubDetectPr("two-repos").pipe(Effect.provide(github)));
       const linked = await Effect.runPromise(SessionStore.get("two-repos").pipe(Effect.provide(github)));
       expect(linked.checkouts?.map((c) => [c.id, c.prNumber])).toEqual([["web", 1], ["api", 2]]);
-      expect(linked.prNumber).toBe(1);
-      expect(linked.prs).toEqual([{ number: 2, repo: "qa-api" }, { number: 1, repo: "qa-web" }]);
+      expect(activeCheckoutOf(linked).prNumber).toBe(1);
+      expect(sessionPrsOf(linked)).toEqual([{ number: 2, repo: "qa-api" }, { number: 1, repo: "qa-web" }]);
     });
 
     it("synchronizes the live branch and replacement PR route before returning", async () => {
@@ -1574,13 +1629,12 @@ describe("RPC handlers", () => {
           githubDetectPr("replacement-session").pipe(Effect.provide(github)),
         ),
       ).resolves.toBe(43);
-      await expect(
-        Effect.runPromise(
-          SessionStore.get("replacement-session").pipe(Effect.provide(github)),
-        ),
-      ).resolves.toMatchObject({
-        branch: "fix/replacement-pr",
-        prNumber: 43,
+      const replaced = await Effect.runPromise(
+        SessionStore.get("replacement-session").pipe(Effect.provide(github)),
+      );
+      expect(activeCheckoutOf(replaced).branch).toBe("fix/replacement-pr");
+      expect(activeCheckoutOf(replaced).prNumber).toBe(43);
+      expect(replaced).toMatchObject({
         githubInstallationId: "99",
         githubRepositoryId: "200",
       });
@@ -1746,7 +1800,7 @@ describe("RPC handlers", () => {
    */
   describe("Review.run", () => {
     /** Persist a session with a linked PR by writing the store's own file. */
-    const withSession = (over: Partial<Session> = {}) => {
+    const withSession = (over: Partial<typeof SessionWire.Type> = {}) => {
       mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "sessions.json"),
@@ -2561,3 +2615,32 @@ describe("Auth.getSession routine sign-in fence", () => {
     } finally { await scheduler.stop(); rmSync(root, { recursive: true, force: true }) }
   })
 })
+
+describe("continuationSource", () => {
+  it("re-points the source at the target checkout in wire shape", () => {
+    const source = {
+      id: "s1",
+      checkouts: [
+        { id: "co-web", repo: "web", repoPath: "/r/web", worktreePath: "/w/web", workspaceMode: "worktree" as const, branch: "feat/x", baseBranch: "main", prNumber: null },
+        { id: "co-api", repo: "api", repoPath: "/r/api", worktreePath: "/w/api", branch: "feat/x", prNumber: null },
+      ],
+      activeCheckoutId: "co-web",
+      title: "Work",
+      status: "idle" as const,
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-07-11T10:00:00.000Z",
+      chats: [],
+      activeChatId: "c1",
+    };
+    const wire = continuationSource(source, "device_1", "web", "/workspace", "develop");
+    expect(wire).toMatchObject({ repo: "web", repoPath: "/workspace", branch: "feat/x", baseBranch: "develop", environmentId: "device_1" });
+    expect(wire).not.toHaveProperty("worktreePath");
+    const decoded = Schema.decodeUnknownSync(SessionSchema)(JSON.parse(JSON.stringify(wire)));
+    expect(decoded.checkouts).toHaveLength(1);
+    expect(activeCheckoutOf(decoded)).toMatchObject({ repoPath: "/workspace", baseBranch: "develop" });
+    expect(activeCheckoutOf(decoded).worktreePath).toBeUndefined();
+  });
+});

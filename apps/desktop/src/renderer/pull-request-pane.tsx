@@ -3,8 +3,8 @@
  * (keyed by session id) when the PR tab is active; owns its data via
  * `usePullRequest`.
  */
-import type { Project, Session } from "@jingler/core"
-import { workspaceModeOf } from "@jingler/core"
+import type { Project, Session, SessionCheckout } from "@jingler/core"
+import { activeCheckoutOf, checkoutPrsOf, workspaceModeOf } from "@jingler/core"
 import { PullRequestView } from "@jingler/ui"
 import { PrFilesPanel } from "./pr-files-panel.js"
 import { CheckoutChecks } from "./checkout-checks.js"
@@ -42,11 +42,12 @@ export function PullRequestPane({
   connectionActionLabel?: string
   onConnectGithub: () => void
   onPrLinked: (sessionId: string, prNumber: number) => void
-  onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<Session["publish"]>) => void
+  onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<SessionCheckout["publish"]>) => void
   onOpenFiles: () => void
   /** Publishes a workspace lifecycle update (retry/skip setup) back to the session list. */
   onSession: (session: Session) => void
 }) {
+  const checkout = activeCheckoutOf(session)
   const stack = usePrStack(session, connected)
   // Session-level writes (merge, review, close…) act on the session's own PR, so a lower layer is read-only.
   const requestedPr = useSessionPrRequest(session.id)
@@ -54,7 +55,7 @@ export function PullRequestPane({
   // Viewing a child that opened a PR: show that PR, read-only like any non-session layer.
   const childPr = scopedPrNumber(useViewedChild(session.id, session.activeChatId), changesScope)
   const shownPr = childPr ?? requestedPr ?? stack.selected
-  const viewingLowerLayer = shownPr !== null && shownPr !== session.prNumber
+  const viewingLowerLayer = shownPr !== null && shownPr !== activeCheckoutOf(session).prNumber
   const {
     pr,
     busy,
@@ -108,9 +109,9 @@ export function PullRequestPane({
       viewerLogin={viewerLogin}
       publish={publish.checkpoint}
       publishing={publish.publishing}
-      branch={session.branch}
-      baseBranch={session.baseBranch ?? pr?.baseRefName}
-      prs={session.prs}
+      branch={checkout.branch}
+      baseBranch={checkout.baseBranch ?? pr?.baseRefName}
+      prs={checkoutPrsOf(checkout)}
       stack={stack.nav && {
         ...stack.nav,
         selected: shownPr ?? stack.nav.selected,
@@ -124,7 +125,7 @@ export function PullRequestPane({
       readOnly={viewingLowerLayer}
       sessionTitle={session.title}
       onCreatePr={
-        workspaceModeOf(session) === "worktree" ? publish.publish : undefined
+        workspaceModeOf(checkout) === "worktree" ? publish.publish : undefined
       }
       onRetryPublish={publish.retry}
       onMerge={mergePr}
@@ -144,7 +145,7 @@ export function PullRequestPane({
       onReplyToThread={replyToThread}
       onOpenOnGithub={openOnGithub}
       onOpenFiles={onOpenFiles}
-      filesPanel={<PrFilesPanel session={session} prNumber={stack.selected ?? session.prNumber} connected={connected} />}
+      filesPanel={<PrFilesPanel session={session} prNumber={stack.selected ?? activeCheckoutOf(session).prNumber} connected={connected} />}
       conflictedFiles={conflictedFiles}
       onResolveConflicts={resolveConflicts}
       review={{

@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { resolve } from "node:path"
 import { anchoredFs } from "./anchored-fs.js"
 import type { FileSystem, Path, CommandExecutor } from "@effect/platform"
-import { GitError, type Session, type WorkspaceRunState } from "@jingler/core"
+import { activeCheckoutOf, GitError, type Session, type WorkspaceRunState } from "@jingler/core"
 import { Effect } from "effect"
 import type { AppPaths } from "./app-paths.js"
 import { trackChild, stopChildAndWait, stopOwnedChildren } from "./child-registry.js"
@@ -44,14 +44,15 @@ const runCommand = async (
   timeoutMs: number | null = COMMAND_TIMEOUT_MS
 ): Promise<{ exitCode: number; output: string }> => {
   assertShellSupported(session)
-  if (!session.worktreePath) throw new Error("Workspace checkout is unavailable.")
+  const checkout = activeCheckoutOf(session)
+  if (!checkout.worktreePath) throw new Error("Workspace checkout is unavailable.")
   const lease = lifecycleOwner
     ? acquireWorkspaceLifecycleActivity(session.id, action, lifecycleOwner)
     : acquireWorkspaceActivity(session.id, action)
   let ownedChild: ChildProcess | undefined
   try {
     const child = trackChild(spawn(process.env.SHELL || "/bin/sh", ["-lc", command], {
-      cwd: session.worktreePath,
+      cwd: checkout.worktreePath,
       env: workspaceProcessEnvironment(process.env, session),
       detached: true,
       stdio: ["ignore", "pipe", "pipe"]
@@ -140,7 +141,8 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           operations.add(sessionId)
           try {
           const session = await runEffect(sessions.get(sessionId))
-          if (session.environmentId || session.workspaceMode === "direct" || !session.projectId) {
+          const checkout = activeCheckoutOf(session)
+          if (session.environmentId || checkout.workspaceMode === "direct" || !checkout.projectId) {
             await runEffect(lifecycle(sessionId, "ready"))
             return await runEffect(sessions.get(sessionId))
           }
@@ -154,11 +156,11 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           setupClosures.set(sessionId, closure)
           owned = true
           await runEffect(lifecycle(sessionId, "setup-running"))
-          const project = await runEffect(projects.get(session.projectId))
+          const project = await runEffect(projects.get(checkout.projectId))
           const workflow = approvedWorkflow(project.workflow)
           if (project.workflow && !workflow) throw new Error("Project workflow changed and needs operator approval.")
           if (workflow) {
-            for (const file of workflow.copyFiles) await copyApprovedFile(project.path, session.worktreePath!, file)
+            for (const file of workflow.copyFiles) await copyApprovedFile(project.path, checkout.worktreePath!, file)
             if (workflow.setup) {
               assertShellSupported(session)
               await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
@@ -229,9 +231,10 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
       const executeCleanup = async (sessionId: string, owner: symbol) => {
           const session = await runEffect(sessions.get(sessionId))
           await runEffect(lifecycle(sessionId, "cleanup-running"))
-          if (session.environmentId || session.workspaceMode === "direct") throw new Error("Workspace cleanup requires an isolated local worktree.")
-          if (!session.projectId) return
-          const project = await runEffect(projects.get(session.projectId))
+          const checkout = activeCheckoutOf(session)
+          if (session.environmentId || checkout.workspaceMode === "direct") throw new Error("Workspace cleanup requires an isolated local worktree.")
+          if (!checkout.projectId) return
+          const project = await runEffect(projects.get(checkout.projectId))
           const workflow = approvedWorkflow(project.workflow)
           if (project.workflow && !workflow) throw new Error("Project workflow changed and needs operator approval before cleanup.")
           if (workflow?.cleanup) {
@@ -268,9 +271,10 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
 
       const commandForRun = async (sessionId: string, runId: string) => {
         const session = await runEffect(sessions.get(sessionId))
-        if (session.environmentId || session.workspaceMode === "direct") throw new Error("Workspace commands require an isolated local worktree.")
-        if (!session.projectId || (session.workspaceLifecycle?.status !== "ready" && session.workspaceLifecycle?.status !== "setup-skipped")) throw new Error("Workspace setup must finish before running project commands.")
-        const project = await runEffect(projects.get(session.projectId))
+        const checkout = activeCheckoutOf(session)
+        if (session.environmentId || checkout.workspaceMode === "direct") throw new Error("Workspace commands require an isolated local worktree.")
+        if (!checkout.projectId || (session.workspaceLifecycle?.status !== "ready" && session.workspaceLifecycle?.status !== "setup-skipped")) throw new Error("Workspace setup must finish before running project commands.")
+        const project = await runEffect(projects.get(checkout.projectId))
         const workflow = approvedWorkflow(project.workflow)
         if (!workflow) throw new Error("Project workflow needs operator approval.")
         const command = workflow.runs.find((candidate) => candidate.id === runId)

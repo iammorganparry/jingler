@@ -11,6 +11,7 @@
 import { useCallback, useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrMergeMethod, PullRequest, ReviewSubmitKind, Session } from "@jingler/core"
+import { activeCheckoutOf } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { markRouted, useRoutedEntries } from "./routed-store.js"
@@ -84,7 +85,7 @@ export function usePullRequest(
 ): PullRequestState {
   const qc = useQueryClient()
   const { autoDetect, onPrLinked } = opts
-  const prNumber = opts.prNumber ?? session.prNumber
+  const prNumber = opts.prNumber ?? activeCheckoutOf(session).prNumber
 
   const query = useQuery({
     queryKey: prKey(session.id, prNumber),
@@ -96,7 +97,7 @@ export function usePullRequest(
       // Re-detect even when linked: a session can outlive one PR and open another.
       if (autoDetect) {
         const n = await rpc.githubDetectPr(session.id).catch(() => null)
-        if (n != null && n !== session.prNumber) onPrLinked?.(session.id, n)
+        if (n != null && n !== activeCheckoutOf(session).prNumber) onPrLinked?.(session.id, n)
       }
       return rpc.githubPr(session.id, prNumber ?? undefined)
     }

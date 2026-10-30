@@ -10,6 +10,7 @@ import type {
   WorkspaceConfig
 } from "@jingler/core"
 import {
+  activeCheckoutOf,
   CURRENT_RUNTIME_CONTRACTS,
   piEndpointId,
   piEndpointTargets,
@@ -442,7 +443,7 @@ export const makePiAgentRuntimeLive = (
                 ...plugins,
                 context: {
                   id: session.id,
-                  repository: { name: session.repo, path: spec.cwd }
+                  repository: { name: activeCheckoutOf(session).repo, path: spec.cwd }
                 }
               }),
           // Plugin tools are additive. A missing/dead host must not remove

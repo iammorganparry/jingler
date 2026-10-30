@@ -16,7 +16,8 @@ import {
   reconcileWindow,
   shouldHoldSwap,
   triggerAt,
-  piEndpointId
+  piEndpointId,
+  activeCheckoutOf
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Fiber, Ref } from "effect"
@@ -766,7 +767,7 @@ function* runDigestTurn(
       resourceIds: [],
       targetId: settings.session.environmentId ?? "desktop"
     },
-    cwd: settings.session.worktreePath ?? "",
+    cwd: activeCheckoutOf(settings.session).worktreePath ?? "",
     prompt: compactionPrompt,
     images: [],
     mode: "read-only"

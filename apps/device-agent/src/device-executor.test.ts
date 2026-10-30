@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import { execFileSync } from "node:child_process"
 import { existsSync, writeFileSync } from "node:fs"
 import { ConfigService } from "@jingler/cli-adapters/config"
@@ -20,6 +21,7 @@ import {
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
+  Session as SessionSchema,
   SetSessionAgentModelInput
 } from "@jingler/core"
 import { Effect, Layer, Schema } from "effect"
@@ -38,7 +40,20 @@ import { join } from "node:path"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 
-const resultSession = { id: "session_1" } as Session
+const resultSession: Session = {
+  id: "session_1",
+  checkouts: [{ id: "primary", repo: "widget", branch: "main", prNumber: null }],
+  activeCheckoutId: "primary",
+  title: "Device session",
+  status: "idle",
+  diff: { added: 0, removed: 0 },
+  costUsd: 0,
+  tokens: 0,
+  updatedAt: "2026-08-09T00:00:00.000Z",
+  chats: [],
+  activeChatId: "chat_1"
+}
+const encodedResult = Schema.encodeSync(SessionSchema)(resultSession)
 const resultProject: Project = {
   id: "p_1",
   name: "jingler",
@@ -61,7 +76,11 @@ const services = (): DeviceExecutorServices => ({
   removeProject: vi.fn(async () => undefined),
   run: vi.fn(async (_sessionId, _input, emit) => {
     await emit({ _tag: "Assistant", text: "hello from device" })
-    return { ...resultSession, title: "Cloud title", branch: "fix/cloud-title" } as Session
+    return {
+      ...resultSession,
+      title: "Cloud title",
+      checkouts: [{ id: "primary", repo: "widget", branch: "fix/cloud-title", prNumber: null }]
+    }
   }),
   decideGate: vi.fn(async () => undefined),
   answerQuestion: vi.fn(async () => undefined),
@@ -188,7 +207,23 @@ describe("device session command executor", () => {
       async () => undefined
     )
     expect(dependencies.create).toHaveBeenCalledWith(input)
-    expect(result).toBe(resultSession)
+    expect(result).toEqual(encodedResult)
+  })
+
+  it("returns sessions the desktop decoder accepts after JSON transport", async () => {
+    const result = await makeDeviceSessionCommandExecutor(services()).execute(
+      command("Sessions.create", {
+        repoPath: "/r",
+        repoName: "widget",
+        connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("codex-subscription"),
+        providerId: Schema.decodeUnknownSync(ProviderId)("openai-codex"),
+        modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5.6-sol"),
+        baseBranch: "main"
+      }),
+      async () => undefined
+    )
+    const decoded = Schema.decodeUnknownSync(SessionSchema)(JSON.parse(JSON.stringify(result)))
+    expect(activeCheckoutOf(decoded)).toMatchObject({ repo: "widget", branch: "main" })
   })
 
   it("persists endpoint model changes on the device session store", async () => {
@@ -206,7 +241,7 @@ describe("device session command executor", () => {
       async () => undefined
     )
     expect(dependencies.setAgentModel).toHaveBeenCalledWith(input)
-    expect(result).toBe(resultSession)
+    expect(result).toEqual(encodedResult)
   })
 
   it("rejects a native model that the device no longer exposes as selectable", () => {
@@ -464,7 +499,7 @@ describe("device session command executor", () => {
     expect(dependencies.preparePublish).toHaveBeenCalledWith("session_1")
     expect(prepared).toMatchObject({ githubSlug: "acme/widget", commitSha: "a".repeat(40) })
     expect(dependencies.completePublish).toHaveBeenCalledWith("session_1", 73)
-    expect(completed).toBe(resultSession)
+    expect(completed).toEqual(encodedResult)
   })
 
   it("rejects invalid pull request linkage before mutating the device session", async () => {
@@ -548,7 +583,7 @@ it("passes the session baseBranch through diff, diffStat and fileDiff so committ
       modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5.6-sol"),
       baseBranch: "main"
     }), async () => undefined) as Session
-    const worktree = created.worktreePath as string
+    const worktree = activeCheckoutOf(created).worktreePath as string
     writeFileSync(join(worktree, "committed.txt"), "already committed\n")
     execFileSync("git", ["add", "-A"], { cwd: worktree })
     execFileSync("git", ["commit", "-m", "agent work", "--no-gpg-sign"], { cwd: worktree })

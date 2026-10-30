@@ -65,7 +65,7 @@ it("disables tainted safe mode exclusively without clearing history; enabling st
   const temp = withTempRoot()
   try {
     mkdirSync(temp.root, { recursive: true })
-    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session({ checkpointSafeMode: true, checkpointExecutionHistory: "unprovable", checkpointPtyHistory: true })]))
+    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([Schema.encodeSync(Session)(session({ checkpointSafeMode: true, checkpointExecutionHistory: "unprovable", checkpointPtyHistory: true }))]))
     await Effect.runPromise(Effect.gen(function* () {
       const service = yield* WorkspaceCheckpointService
       const active = acquireWorkspaceActivity("test", "agent-turn")

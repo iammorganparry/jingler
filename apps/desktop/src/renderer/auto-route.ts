@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query"
 import type { AdversarialReview, Session } from "@jingler/core"
-import { partitionFindings } from "@jingler/core"
+import { partitionFindings, activeCheckoutOf } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { markRouted } from "./routed-store.js"
@@ -65,7 +65,7 @@ export const routeReviewToCurrentAgent = async (
 ): Promise<void> => {
   try {
     const session = await rpc.sessionsGet(review.sessionId)
-    if (session.prNumber !== review.prNumber) return
+    if (activeCheckoutOf(session).prNumber !== review.prNumber) return
     await routeReviewToAgent(session, review, qc)
   } catch {
     // Best-effort automation: the review remains visible and can be sent manually.
@@ -103,7 +103,7 @@ export const routeReviewToAgent = async (
    * Cheap, total, and checked BEFORE the claim is staked, so a mispaired call
    * neither sends nor burns the guard key for the legitimate pairing.
    */
-  if (review.sessionId !== session.id || review.prNumber !== session.prNumber) return
+  if (review.sessionId !== session.id || review.prNumber !== activeCheckoutOf(session).prNumber) return
 
   // Already routed for this head — the whole point of persisting the stamp.
   if (review.routedAt !== null) return

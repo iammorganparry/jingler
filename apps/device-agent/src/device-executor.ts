@@ -73,6 +73,7 @@ import {
   ReasoningSetting,
   SetSessionAgentModelInput,
   piEndpointId,
+  activeCheckoutOf,
   Project,
   RemotePublishCompleteInput,
   RemotePublishPrepared,
@@ -207,6 +208,9 @@ const stripTranscriptAttachmentData = (
 const ArchivePayload = Schema.Struct({ reason: ArchiveReason })
 const RepoPathPayload = Schema.Struct({ repoPath: Schema.optional(Schema.String) })
 const FilePathPayload = Schema.Struct({ path: Schema.String })
+/** Sessions cross the wire in their persisted shape, which still mirrors the active checkout for older desktops. */
+const encodeSession = (session: SessionValue) => Schema.encodeSync(Session)(session)
+
 const ContinuationPayload = Schema.Struct({
   sourceSession: Session,
   requestedSessionId: Schema.optional(Schema.String)
@@ -311,14 +315,14 @@ export const makeDeviceSessionCommandExecutor = (
   execute: async (command, emit) => {
     switch (command.operation) {
       case "Sessions.create":
-        return services.create(decodePayload(command, CreateSessionInput))
+        return services.create(decodePayload(command, CreateSessionInput)).then(encodeSession)
       case "Sessions.createFromPr":
-        return services.createFromPr(decodePayload(command, CreateSessionFromPrInput))
+        return services.createFromPr(decodePayload(command, CreateSessionFromPrInput)).then(encodeSession)
       case "Sessions.createFromIssue":
-        return services.createFromIssue(decodePayload(command, CreateSessionFromIssueInput))
+        return services.createFromIssue(decodePayload(command, CreateSessionFromIssueInput)).then(encodeSession)
       case "Sessions.continueOnEnvironment": {
         const input = decodePayload(command, ContinuationPayload)
-        return services.continuation(input.sourceSession, input.requestedSessionId)
+        return services.continuation(input.sourceSession, input.requestedSessionId).then(encodeSession)
       }
       case "Projects.list":
         payloadRecord(command)
@@ -340,7 +344,7 @@ export const makeDeviceSessionCommandExecutor = (
           input,
           (event) => emit({ kind: "event", payload: event })
         )
-        return { status: "complete", session }
+        return { status: "complete", session: encodeSession(session) }
       }
       case "Agent.decideGate":
         return services.decideGate(command.sessionId, decodePayload(command, DecideGatePayload))
@@ -384,7 +388,7 @@ export const makeDeviceSessionCommandExecutor = (
         case "AgentEndpoint.setModel": {
           const input = decodePayload(command, SetSessionAgentModelInput)
           if (input.sessionId !== command.sessionId) throw new DeviceOperationError({ reason: "invalid-payload", operation: command.operation, message: "Remote model selection session mismatch" })
-          return services.setAgentModel(input)
+          return services.setAgentModel(input).then(encodeSession)
         }
         case "Sessions.transcriptPage": {
           const page = await services.transcriptPage(
@@ -429,7 +433,7 @@ export const makeDeviceSessionCommandExecutor = (
             decodePayload(command, ImportConversationPayload).messages
           )
         case "Sessions.archive":
-          return services.archive(command.sessionId, decodePayload(command, ArchivePayload).reason)
+          return services.archive(command.sessionId, decodePayload(command, ArchivePayload).reason).then(encodeSession)
         case "Sessions.delete":
           payloadRecord(command)
           return services.remove(command.sessionId)
@@ -440,7 +444,7 @@ export const makeDeviceSessionCommandExecutor = (
           return services.completePublish(
             command.sessionId,
             decodePayload(command, RemotePublishCompleteInput).prNumber
-          )
+          ).then(encodeSession)
         case "Offload.begin":
           return services.beginOffload(decodePayload(command, OwnedOffloadBegin))
         case "Offload.chunk":
@@ -617,15 +621,15 @@ export const makeLiveDeviceSessionCommandExecutor = (
     explicit === undefined
       ? deviceSession(sessionId).pipe(
           Effect.flatMap((session) =>
-            session.worktreePath
-              ? Effect.succeed(session.worktreePath)
+            activeCheckoutOf(session).worktreePath
+              ? Effect.succeed(activeCheckoutOf(session).worktreePath!)
               : Effect.fail(new Error(`Session ${sessionId} has no workspace.`))
           )
         )
       : Effect.succeed(explicit)
 
   const baseBranchOf = (sessionId: string) =>
-    deviceSession(sessionId).pipe(Effect.map((session) => session.baseBranch))
+    deviceSession(sessionId).pipe(Effect.map((session) => activeCheckoutOf(session).baseBranch))
 
   return makeDeviceSessionCommandExecutor({
     create: (input) => run(Effect.gen(function* () {
@@ -651,16 +655,17 @@ export const makeLiveDeviceSessionCommandExecutor = (
           new Error("The source session needs a certified provider connection before continuation.")
         )
       }
+      const checkout = activeCheckoutOf(source)
       return yield* SessionStore.create({
         ...(source.environmentId === undefined ? {} : { environmentId: source.environmentId }),
         ...(requestedSessionId === undefined ? {} : { requestedSessionId }),
-        repoPath: source.repoPath ?? source.worktreePath ?? "",
-        repoName: source.repo,
+        repoPath: checkout.repoPath ?? checkout.worktreePath ?? "",
+        repoName: checkout.repo,
         title: source.title,
         connectionId: source.connectionId,
         providerId: source.providerId,
         modelId: source.modelId,
-        baseBranch: source.baseBranch ?? source.branch,
+        baseBranch: checkout.baseBranch ?? checkout.branch,
         useWorktree: true
       })
     })),
@@ -837,16 +842,17 @@ export const makeLiveDeviceSessionCommandExecutor = (
     preparePublish: (sessionId) => run(
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId)
-        if (!session.worktreePath) {
+        const checkout = activeCheckoutOf(session)
+        if (!checkout.worktreePath) {
           return yield* Effect.fail(new Error("This remote session has no worktree to publish."))
         }
-        const cwd = session.worktreePath
-        const inspection = yield* GitService.publishInspection(cwd, session.baseBranch ?? "main")
+        const cwd = checkout.worktreePath
+        const inspection = yield* GitService.publishInspection(cwd, checkout.baseBranch ?? "main")
         const validatePublishBranch = Effect.gen(function* () {
           if (session.semanticBranchPending === true || !inspection.branch) {
             return yield* Effect.fail(new Error("Finish creating the remote task branch before publishing."))
           }
-          if (inspection.branch !== session.branch || !isSessionPublishBranchReady(session, inspection.branch)) {
+          if (inspection.branch !== checkout.branch || !isSessionPublishBranchReady(session, inspection.branch)) {
             return yield* Effect.fail(new Error("The remote worktree is not on its validated session branch."))
           }
           return inspection.branch
@@ -893,12 +899,12 @@ export const makeLiveDeviceSessionCommandExecutor = (
           sessionId,
           githubSlug: `${parsed.owner}/${parsed.repo}`,
           branch,
-          baseBranch: session.baseBranch ?? "main",
+          baseBranch: checkout.baseBranch ?? "main",
           commitSha,
           commitMessage: metadata.commitMessage,
           prTitle: metadata.prTitle,
           prBody: metadata.prBody,
-          existingPrNumber: session.prNumber ?? null
+          existingPrNumber: activeCheckoutOf(session).prNumber ?? null
         })
 
       })

@@ -3,7 +3,7 @@ import type { KeyboardEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activeCheckoutOf, activityLabel, checkoutsOf, displayStatusOf, hasNoRepo, issueReferenceOf, reposLabelOf } from "@jingler/core"
+import { activeCheckoutOf, activityLabel, checkoutsOf, displayStatusOf, hasNoRepo, issueReferenceOf, reposLabelOf, sessionPrsOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
@@ -58,13 +58,17 @@ function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: str
 
 /** One "repo #N" per checkout PR for multi-repo sessions; plain "#N" otherwise; null with no PR. */
 const prLabelOf = (session: Session): string | null => {
-  const repoPrs = (session.prs ?? []).filter((pr) => pr.repo !== undefined)
+  const repoPrs = sessionPrsOf(session).filter((pr) => pr.repo !== undefined)
   if (repoPrs.length > 0) return repoPrs.map((pr) => `${pr.repo} #${pr.number}`).join(" · ")
-  return session.prNumber === null ? null : `#${session.prNumber}`
+  const { prNumber } = activeCheckoutOf(session)
+  return prNumber === null ? null : `#${prNumber}`
 }
 
 /** A session row for the sidebar list. Active state gets the blue ring. */
-const repoLabelOf = (session: Session): string => (hasNoRepo(activeCheckoutOf(session)) ? "No repo" : session.repo)
+const repoLabelOf = (session: Session): string => {
+  const checkout = activeCheckoutOf(session)
+  return hasNoRepo(checkout) ? "No repo" : checkout.repo
+}
 
 /** Every attached repo for a multi-repo session, else the single repo label. */
 const repoLabelNode = (session: Session): ReactNode =>
@@ -236,7 +240,7 @@ export function SessionRow({
             className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}
             title={session.semanticBranchPending === true ? "Task branch will be named after task understanding" : undefined}
           >
-            {session.semanticBranchPending === true ? "Naming branch…" : session.branch}
+            {session.semanticBranchPending === true ? "Naming branch…" : activeCheckoutOf(session).branch}
           </span>)
     }
 
@@ -258,7 +262,7 @@ export function SessionRow({
             >
               <PrStatusGlyph
                 pr={prState}
-                stack={session.prs?.map((layer) => ({ state: layer.state ?? "open", checks: layer.checks ?? null }))}
+                stack={sessionPrsOf(session).map((layer) => ({ state: layer.state ?? "open", checks: layer.checks ?? null }))}
               />
               <span>{prLabel}</span>
             </span>
@@ -311,7 +315,7 @@ export function SessionRow({
     return (<div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
           <Badge tone={closed ? "red" : "purple"} size="sm">
             {closed ? "Closed" : "Merged"}
-            {session.prNumber !== null ? ` #${session.prNumber}` : ""}
+            {activeCheckoutOf(session).prNumber !== null ? ` #${activeCheckoutOf(session).prNumber}` : ""}
           </Badge>
           {session.worktreeKeptReason && (
             <Badge tone="neutral" size="sm" title={`Worktree kept on disk: ${session.worktreeKeptReason}`}>
@@ -490,7 +494,7 @@ function sessionMenuItems(session: Session, h: SessionMenuHandlers): ContextMenu
     {
       label: "Copy branch",
       icon: Copy,
-      onSelect: () => void navigator.clipboard?.writeText(session.branch)
+      onSelect: () => void navigator.clipboard?.writeText(activeCheckoutOf(session).branch)
     },
     h.openInTerminal && { label: "Open in terminal", icon: SquareTerminal, onSelect: h.openInTerminal },
     h.remove && { label: "Delete", icon: Trash2, tone: "danger", separated: true, onSelect: h.remove }

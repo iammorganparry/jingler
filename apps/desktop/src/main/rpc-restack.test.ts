@@ -9,6 +9,7 @@ import {
   runExit,
   withTempRoot,
 } from "@jingler/cli-adapters/test-support";
+import { activeCheckoutOf, sessionPrsOf, type Session } from "@jingler/core";
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendStackedPr, githubRestack } from "./rpc.js";
@@ -107,12 +108,12 @@ describe("stacked PR create + Github.restack", () => {
     expect(exit._tag).toBe("Success");
     if (exit._tag !== "Success") return;
     const { stacked, unrelated, session } = exit.value as {
-      stacked: boolean; unrelated: boolean; session: { prs: Array<{ number: number }>; prNumber: number };
+      stacked: boolean; unrelated: boolean; session: Session;
     };
     expect(stacked).toBe(true);
     expect(unrelated).toBe(false);
-    expect(session.prs.map((pr) => pr.number)).toEqual([11, 12]);
-    expect(session.prNumber).toBe(12);
+    expect(sessionPrsOf(session).map((pr) => pr.number)).toEqual([11, 12]);
+    expect(activeCheckoutOf(session).prNumber).toBe(12);
   });
 
   it("retargets the next layer, rebases every layer above, and updates the stored stack", async () => {
@@ -134,7 +135,7 @@ describe("stacked PR create + Github.restack", () => {
     expect(exit._tag).toBe("Success");
     if (exit._tag !== "Success") return;
     const { restacked, session } = exit.value as {
-      restacked: Array<Layer_>; session: { prs: Array<{ number: number; base?: string; state?: string }> };
+      restacked: Array<Layer_>; session: Session;
     };
 
     expect(restacked).toEqual([
@@ -145,9 +146,9 @@ describe("stacked PR create + Github.restack", () => {
     expect(setBaseCalls).toEqual([{ number: 12, base: "main" }]);
     expect(remote(["rev-parse", "feat/b"])).not.toBe(bBefore);
     expect(remote(["log", "--format=%s", "feat/c"]).split("\n")).toEqual(["add c", "add b", "squash a", "init"]);
-    expect(session.prs.find((pr) => pr.number === 11)?.state).toBe("merged");
-    expect(session.prs.find((pr) => pr.number === 12)?.base).toBe("main");
-    expect(session.prs.find((pr) => pr.number === 13)?.base).toBe("feat/b");
+    expect(sessionPrsOf(session).find((pr) => pr.number === 11)?.state).toBe("merged");
+    expect(sessionPrsOf(session).find((pr) => pr.number === 12)?.base).toBe("main");
+    expect(sessionPrsOf(session).find((pr) => pr.number === 13)?.base).toBe("feat/b");
   });
 
   it("is a no-op when nothing sits above the merged layer", async () => {

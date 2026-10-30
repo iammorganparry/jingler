@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import { join } from "node:path"
 import { chmodSync, rmSync } from "node:fs"
 import { execFileSync } from "node:child_process"
@@ -130,9 +131,9 @@ describe("retitleSession", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(exit.value.updated.title).toBe("Add response caching")
-    expect(exit.value.updated.branch).toBe("feat/add-response-caching")
+    expect(activeCheckoutOf(exit.value.updated).branch).toBe("feat/add-response-caching")
     expect(exit.value.persisted.title).toBe("Add response caching")
-    expect(exit.value.persisted.branch).toBe("feat/add-response-caching")
+    expect(activeCheckoutOf(exit.value.persisted).branch).toBe("feat/add-response-caching")
     expect(exit.value.persisted.semanticBranchProposal).toStrictEqual({
       type: "feat",
       slug: "add-response-caching"
@@ -140,7 +141,7 @@ describe("retitleSession", () => {
     expect(exit.value.persisted.semanticBranchPending).toBe(false)
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-        cwd: exit.value.persisted.worktreePath,
+        cwd: activeCheckoutOf(exit.value.persisted).worktreePath,
         encoding: "utf-8"
       }).trim()
     ).toBe("feat/add-response-caching")
@@ -176,14 +177,14 @@ describe("retitleSession", () => {
       parts: [{ _tag: "Text", text: "Make Cmd+W close the focused editor tab" }]
     }])
     expect(exit.value.title).toBe("Close focused editor tab")
-    expect(exit.value.branch).toBe("fix/close-focused-editor-tab")
+    expect(activeCheckoutOf(exit.value).branch).toBe("fix/close-focused-editor-tab")
   })
 
   it("returns a persisted fresh session when post-create Git naming fails", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const session = yield* SessionStore.create(input({ initialPrompt: "Name this session" }))
-        rmSync(session.worktreePath!, { recursive: true, force: true })
+        rmSync(activeCheckoutOf(session).worktreePath!, { recursive: true, force: true })
         const returned = yield* retitleCreatedSessionFromPrompt(session, "Name this session", fixed("Named session"))
         return { session, returned, persisted: yield* SessionStore.get(session.id) }
       }).pipe(Effect.provide(services)),
@@ -216,7 +217,7 @@ describe("retitleSession", () => {
     expect(exit.value.returned).toEqual(exit.value.session)
     expect(exit.value.persisted.semanticBranchPending).toBe(true)
     expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: exit.value.persisted.worktreePath,
+      cwd: activeCheckoutOf(exit.value.persisted).worktreePath,
       encoding: "utf-8"
     }).trim()).toBe("feat/named-session")
   })
@@ -247,7 +248,7 @@ describe("retitleSession", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(received).toHaveLength(1)
-    expect(exit.value.branch).toBe("fix/active-chat-routing")
+    expect(activeCheckoutOf(exit.value).branch).toBe("fix/active-chat-routing")
     expect(exit.value.semanticBranchPending).toBe(false)
   })
 
@@ -291,7 +292,7 @@ describe("retitleSession", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(exit.value.title).toBe("Improve cache")
-    expect(exit.value.branch).toBe("main")
+    expect(activeCheckoutOf(exit.value).branch).toBe("main")
     expect(
       execFileSync("git", ["branch", "--list", "feat/*"], {
         cwd: repoPath,
@@ -346,9 +347,9 @@ describe("retitleSession", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.first.branch).toBe("feat/first-task")
+    expect(activeCheckoutOf(exit.value.first).branch).toBe("feat/first-task")
     expect(exit.value.second.title).toBe("Different task")
-    expect(exit.value.second.branch).toBe("feat/first-task")
+    expect(activeCheckoutOf(exit.value.second).branch).toBe("feat/first-task")
     expect(exit.value.persisted.semanticBranchProposal).toStrictEqual({
       type: "feat",
       slug: "first-task"
@@ -374,7 +375,7 @@ describe("retitleSession", () => {
 
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.branch).toBe("fix/callback-replay")
+    expect(activeCheckoutOf(exit.value).branch).toBe("fix/callback-replay")
     expect(exit.value.semanticBranchProposal).toStrictEqual({
       type: "fix",
       slug: "callback-replay"
@@ -385,7 +386,7 @@ describe("retitleSession", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const session = yield* SessionStore.create(input())
-        yield* GitService.createTaskBranch(session.worktreePath!, "fix/recovered-branch")
+        yield* GitService.createTaskBranch(activeCheckoutOf(session).worktreePath!, "fix/recovered-branch")
         return yield* retitleSession(session.id, fixed("Recovered title"))
       }).pipe(Effect.provide(services)),
       temp.layer
@@ -393,7 +394,7 @@ describe("retitleSession", () => {
 
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.branch).toBe("fix/recovered-branch")
+    expect(activeCheckoutOf(exit.value).branch).toBe("fix/recovered-branch")
     expect(exit.value.semanticBranchProposal).toStrictEqual({
       type: "fix",
       slug: "recovered-branch"
@@ -416,7 +417,7 @@ describe("retitleSession", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(exit.value.title).toBe("Pinned display")
-    expect(exit.value.branch).toBe("fix/generated-replacement")
+    expect(activeCheckoutOf(exit.value).branch).toBe("fix/generated-replacement")
   })
 
   it("decodes JSON metadata and falls back safely on malformed model output", () => {
@@ -455,7 +456,7 @@ describe("retitleSession", () => {
     expect(exit.value.persisted.semanticBranchPending).toBe(true)
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-        cwd: exit.value.persisted.worktreePath,
+        cwd: activeCheckoutOf(exit.value.persisted).worktreePath,
         encoding: "utf-8"
       }).trim()
     ).toBe("HEAD")

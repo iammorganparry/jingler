@@ -1,22 +1,17 @@
-import type { Session, SessionCheckout } from "./domain.js";
+import type { SessionCheckout, SessionPr } from "./domain.js";
 
 /** Id of the implicit checkout built from a legacy session's scalar fields. */
 export const PRIMARY_CHECKOUT_ID = "primary";
 
-type CheckoutScalars = Pick<
-  Session,
-  | "projectId"
-  | "repo"
-  | "repoPath"
-  | "worktreePath"
-  | "workspaceMode"
-  | "branch"
-  | "baseBranch"
-  | "prNumber"
-  | "githubSlug"
->;
+/** Legacy per-session copies of the active checkout; optional so the helpers never depend on them. */
+type CheckoutScalars = Omit<SessionCheckout, "id" | "prs" | "publish">;
 
-type CheckoutSession = CheckoutScalars & Pick<Session, "id" | "checkouts" | "activeCheckoutId">;
+// Structural, not `Pick<Session, …>`: `Session`'s schema calls these helpers, so referencing it here is a type cycle.
+type CheckoutSession = Partial<CheckoutScalars> & {
+  readonly id: string;
+  readonly checkouts?: ReadonlyArray<SessionCheckout>;
+  readonly activeCheckoutId?: string;
+};
 
 const defined = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
@@ -34,17 +29,17 @@ const scalarsOf = (checkout: SessionCheckout): CheckoutScalars => ({
   githubSlug: checkout.githubSlug,
 });
 
-const legacyCheckoutOf = (session: CheckoutScalars): SessionCheckout =>
+const legacyCheckoutOf = (session: Partial<CheckoutScalars>): SessionCheckout =>
   defined({
     id: PRIMARY_CHECKOUT_ID,
     projectId: session.projectId,
-    repo: session.repo,
+    repo: session.repo ?? "",
     repoPath: session.repoPath,
     worktreePath: session.worktreePath,
     workspaceMode: session.workspaceMode,
-    branch: session.branch,
+    branch: session.branch ?? "",
     baseBranch: session.baseBranch,
-    prNumber: session.prNumber,
+    prNumber: session.prNumber ?? null,
     githubSlug: session.githubSlug,
   });
 
@@ -69,6 +64,72 @@ export const migrateSessionCheckouts = <S extends CheckoutSession>(session: S): 
   session.checkouts && session.checkouts.length > 0
     ? session
     : { ...session, checkouts: [legacyCheckoutOf(session)], activeCheckoutId: PRIMARY_CHECKOUT_ID };
+
+/** A checkout's PR stack, bottom first; one persisted before stacks moved here has only `prNumber`. */
+export const checkoutPrsOf = (checkout: SessionCheckout): ReadonlyArray<SessionPr> =>
+  checkout.prs?.length ? checkout.prs : checkout.prNumber === null ? [] : [{ number: checkout.prNumber }];
+
+/** Replace a checkout's stack; `prNumber` always mirrors its top. */
+export const withCheckoutPrs = (checkout: SessionCheckout, prs: ReadonlyArray<SessionPr>): SessionCheckout => ({
+  ...checkout,
+  prs,
+  prNumber: prs.at(-1)?.number ?? null,
+});
+
+/**
+ * Every checkout's PRs, the active checkout's last (so the last entry is the
+ * active top). Repo-tagged once there are two checkouts so same numbers stay distinct.
+ */
+export const sessionPrsOf = (session: CheckoutSession): ReadonlyArray<SessionPr> => {
+  const all = checkoutsOf(session);
+  const activeId = activeCheckoutOf(session).id;
+  const ordered = [...all.filter((c) => c.id !== activeId), ...all.filter((c) => c.id === activeId)];
+  return ordered.flatMap((c) => checkoutPrsOf(c).map((pr) => (all.length > 1 ? { ...pr, repo: c.repo } : pr)));
+};
+
+/**
+ * Move a wire session's top-level `prs` onto its checkouts: a repo-tagged PR
+ * goes to the checkout of that repo, anything else to the first (primary)
+ * checkout. A no-op once any checkout carries `prs`. Expects migrated checkouts.
+ */
+export const migrateCheckoutPrs = <
+  S extends CheckoutSession & { readonly prs?: ReadonlyArray<SessionPr>; readonly publish?: SessionCheckout["publish"] },
+>(
+  session: S,
+): S => migrateCheckoutPublish(migrateCheckoutPrStacks(session));
+
+/** A wire `publish` written before checkpoints moved onto checkouts belongs to the active one. */
+const migrateCheckoutPublish = <S extends CheckoutSession & { readonly publish?: SessionCheckout["publish"] }>(session: S): S => {
+  const checkouts = checkoutsOf(session);
+  if (session.publish === undefined || checkouts.some((c) => c.publish !== undefined)) return session;
+  const activeId = activeCheckoutOf(session).id;
+  return { ...session, checkouts: checkouts.map((c) => (c.id === activeId ? { ...c, publish: session.publish } : c)) };
+};
+
+const migrateCheckoutPrStacks = <S extends CheckoutSession & { readonly prs?: ReadonlyArray<SessionPr> }>(session: S): S => {
+  const checkouts = checkoutsOf(session);
+  if (checkouts.some((c) => c.prs !== undefined)) return session;
+  const stacks = new Map(checkouts.map((c) => [c.id, [] as Array<SessionPr>]));
+  const push = (checkoutId: string, pr: SessionPr) => {
+    const stack = stacks.get(checkoutId);
+    if (stack && !stack.some((p) => p.number === pr.number)) stack.push(pr);
+  };
+  for (const { repo, ...pr } of session.prs ?? []) {
+    const home = checkouts.find((c) => repo !== undefined && c.repo === repo) ?? checkouts[0];
+    if (home) push(home.id, pr);
+  }
+  for (const c of checkouts) if (c.prNumber !== null) push(c.id, { number: c.prNumber });
+  // Older builds' `setGitHubLink` wrote only the top-level `prNumber`, never the checkout's.
+  const top = (session as { readonly prNumber?: number | null }).prNumber;
+  if (top != null) push(activeCheckoutOf(session).id, { number: top });
+  return {
+    ...session,
+    checkouts: checkouts.map((c) => {
+      const stack = stacks.get(c.id) ?? [];
+      return stack.length > 0 ? withCheckoutPrs(c, stack) : c;
+    }),
+  };
+};
 
 /** Directory the agent's tools run in: the active checkout's worktree/repo, else the session's scratch folder. */
 export const agentCwdOf = (session: CheckoutSession, scratchDir: string): string => {
@@ -154,13 +215,3 @@ export const ownedWorktreePaths = (session: CheckoutSession): ReadonlyArray<stri
 export const checkoutById = (session: CheckoutSession, checkoutId?: string): SessionCheckout =>
   (checkoutId === undefined ? undefined : checkoutsOf(session).find((c) => c.id === checkoutId)) ??
   activeCheckoutOf(session);
-
-/**
- * The session as seen through one checkout: its scalar fields mirror that
- * checkout. The active checkout returns the session itself, so legacy callers
- * see no change.
- */
-export const sessionForCheckout = <S extends CheckoutSession>(session: S, checkoutId: string): S => {
-  const checkout = checkoutById(session, checkoutId);
-  return checkout.id === activeCheckoutOf(session).id ? session : { ...session, ...scalarsOf(checkout) };
-};

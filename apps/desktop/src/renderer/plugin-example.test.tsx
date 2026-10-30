@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { LoadedPlugin } from "@jingler/core"
+import { activeCheckoutOf, type LoadedPlugin } from "@jingler/core"
 import type { Session } from "@jingler/core"
 import { PluginTabHost } from "./plugin-tab-host.js"
 import { loadPluginUi } from "./plugin-loader.js"
@@ -33,25 +33,25 @@ vi.mock("./rpc-client.js", () => ({
 
 afterEach(cleanup)
 
-const session = (over: Partial<Session> = {}): Session =>
-  ({
+const session = (over: Partial<Session> & { worktreePath?: string } = {}): Session => {
+  const { worktreePath: override, ...rest } = over
+  const worktreePath = "worktreePath" in over ? override : "/tmp/s1"
+  return {
     id: "s1",
-    repo: "trigify/api",
-    branch: "chore/s1",
+    checkouts: [{ id: "primary", repo: "trigify/api", branch: "chore/s1", prNumber: 42, baseBranch: "main", ...(worktreePath === undefined ? {} : { worktreePath }) }],
+    activeCheckoutId: "primary",
     title: "Fix auth",
     status: "idle",
     diff: { added: 0, removed: 0 },
-    prNumber: 42,
     costUsd: 0,
     tokens: 0,
     updatedAt: "2026-07-16T00:00:00.000Z",
     chats: [],
     activeChatId: "c1",
-    worktreePath: "/tmp/s1",
-    baseBranch: "main",
     mode: "auto",
-    ...over
-  }) as Session
+    ...rest
+  } as Session
+}
 
 const asLoadedPlugin = (): LoadedPlugin =>
   ({
@@ -150,7 +150,9 @@ describe("the shipped hello-tab example", () => {
     if (!result.ok) throw new Error(result.error.message)
     const tab = result.plugin.tabs[0]!
 
-    for (const s of [session(), session({ prNumber: null, worktreePath: undefined })]) {
+    const bare = session({ worktreePath: undefined })
+    expect(activeCheckoutOf(bare).worktreePath).toBeUndefined()
+    for (const s of [session(), bare]) {
       expect(tab.when({ session: s, hasPlan: false })).toBe(true)
     }
   })

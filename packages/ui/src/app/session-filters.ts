@@ -1,4 +1,5 @@
 import type { PrState, Session, SessionDisplayStatus } from "@jingler/core"
+import { activeCheckoutOf, sessionPrsOf } from "@jingler/core"
 
 /**
  * How the sidebar's session list is narrowed and arranged.
@@ -111,13 +112,17 @@ const statusRank = (s: SessionDisplayStatus): number => {
 
 /** Every repo present in `sessions`, alphabetical — the Repository submenu. */
 export const repoOptions = (sessions: ReadonlyArray<Session>): ReadonlyArray<string> =>
-  [...new Set(sessions.map((s) => s.repo))].sort((a, b) => a.localeCompare(b))
+  [...new Set(sessions.map((s) => activeCheckoutOf(s).repo))].sort((a, b) => a.localeCompare(b))
 
 /** Free-text match across the three fields a person actually types. */
-const matchesQuery = (s: Session, q: string): boolean =>
-  s.title.toLowerCase().includes(q) ||
-  s.branch.toLowerCase().includes(q) ||
-  s.repo.toLowerCase().includes(q)
+const matchesQuery = (s: Session, q: string): boolean => {
+  const checkout = activeCheckoutOf(s)
+  return (
+    s.title.toLowerCase().includes(q) ||
+    checkout.branch.toLowerCase().includes(q) ||
+    checkout.repo.toLowerCase().includes(q)
+  )
+}
 
 /**
  * The state of a session's linked PR as the persisted record knows it.
@@ -127,8 +132,9 @@ const matchesQuery = (s: Session, q: string): boolean =>
  * `prStates`) pass their own resolver to `filterSessions` instead.
  */
 export const sessionPrState = (s: Session): PrState | "none" => {
-  if (s.prNumber === null && !s.prs?.length) return "none"
-  return s.prs?.at(-1)?.state ?? "open"
+  const prs = sessionPrsOf(s)
+  if (prs.length === 0) return "none"
+  return prs.at(-1)?.state ?? "open"
 }
 
 const keeps = (
@@ -139,7 +145,7 @@ const keeps = (
 ): boolean => {
   if (filters.status === "active" && s.archived) return false
   if (filters.status === "archived" && !s.archived) return false
-  if (filters.repo !== null && s.repo !== filters.repo) return false
+  if (filters.repo !== null && activeCheckoutOf(s).repo !== filters.repo) return false
   if (filters.pr !== "any" && prStateOf(s) !== filters.pr) return false
   return !q || matchesQuery(s, q)
 }
@@ -244,9 +250,9 @@ export const groupSessions = (
 
   const byRepo = new Map<string, Array<Session>>()
   for (const s of sorted) {
-    const list = byRepo.get(s.repo)
+    const list = byRepo.get(activeCheckoutOf(s).repo)
     if (list) list.push(s)
-    else byRepo.set(s.repo, [s])
+    else byRepo.set(activeCheckoutOf(s).repo, [s])
   }
   const groups = [...byRepo].map(([key, list]) => ({ key, sessions: list }))
   if (!starredRepoNames || starredRepoNames.size === 0) return groups
@@ -331,7 +337,7 @@ export const reconcileRepo = (
   sessions: ReadonlyArray<Session>
 ): SessionFilters => {
   if (filters.repo === null || sessions.length === 0) return filters
-  return sessions.some((s) => s.repo === filters.repo) ? filters : { ...filters, repo: null }
+  return sessions.some((s) => activeCheckoutOf(s).repo === filters.repo) ? filters : { ...filters, repo: null }
 }
 
 /** Whether anything is narrowed — drives the button's "active" dot. */
@@ -412,7 +418,7 @@ export const sessionFilterAxes = (
         ...repos.map((repo) => ({
           value: repo,
           label: repo,
-          count: sessions.filter((s) => s.repo === repo).length
+          count: sessions.filter((s) => activeCheckoutOf(s).repo === repo).length
         }))
       ],
       onSelect: (v) => onChange({ ...filters, repo: v === ALL_REPOS ? null : v })

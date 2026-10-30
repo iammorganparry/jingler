@@ -1,10 +1,9 @@
+import { activeCheckoutOf } from "@jingler/core"
 import { Effect } from "effect"
 
-export interface PrimeableOffloadSession {
-  readonly id: string
+export type PrimeableOffloadSession = Parameters<typeof activeCheckoutOf>[0] & {
   readonly checkpointSafeMode?: boolean
   readonly archived?: boolean
-  readonly worktreePath?: string | null
 }
 
 /** Best-effort bounded primer; persistence succeeds independently of stale sessions. */
@@ -14,8 +13,11 @@ export const primeOffloadSessions = <E>(
 ): Effect.Effect<void> =>
   Effect.forEach(
     sessions,
-    (session) => session.worktreePath && !session.checkpointSafeMode && !session.archived
-      ? prime(session.worktreePath, session.id).pipe(Effect.ignore)
-      : Effect.void,
+    (session) => {
+      const { worktreePath } = activeCheckoutOf(session)
+      return worktreePath && !session.checkpointSafeMode && !session.archived
+        ? prime(worktreePath, session.id).pipe(Effect.ignore)
+        : Effect.void
+    },
     { concurrency: 3, discard: true }
   )

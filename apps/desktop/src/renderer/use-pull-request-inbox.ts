@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react"
 import { useMachine } from "@xstate/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { activeCheckoutOf } from "@jingler/core"
 import type {
   PrMergeMethod,
   Project,
@@ -29,8 +30,8 @@ export function pullRequestSessionTarget(
     project,
     session: sessions.find(
       (candidate) =>
-        candidate.prNumber === pr.number &&
-        (candidate.repoPath === repo.path || candidate.projectId === project?.id)
+        activeCheckoutOf(candidate).prNumber === pr.number &&
+        (activeCheckoutOf(candidate).repoPath === repo.path || activeCheckoutOf(candidate).projectId === project?.id)
     ) ?? null
   }
 }

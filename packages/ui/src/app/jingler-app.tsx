@@ -46,7 +46,7 @@ import type {
   UsageReport,
   User,
 } from "@jingler/core"
-import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
+import { activeCheckoutOf, displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import { displayStatusLabel } from "../tokens.js"
 import type { SessionCreationPhase } from "@jingler/contracts"
 import { useMachine } from "@xstate/react"
@@ -908,7 +908,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
 
   function handleFileQuickOpen(e: KeyboardEvent) {
       if (!matchFileQuickOpenChord(e)) return false
-        if (!renderFileQuickOpen || active?.worktreePath == null) return true
+        if (!renderFileQuickOpen || active == null || activeCheckoutOf(active).worktreePath == null) return true
         e.preventDefault()
         setFileQuickOpenSessionId(active.id)
         return true
@@ -1189,9 +1189,10 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
   const repoOwners = useMemo(() => {
     const owners: Record<string, string> = {}
     for (const session of sessions) {
+      const checkout = activeCheckoutOf(session)
       const repo = repos.find(
         (candidate) =>
-          candidate.path === session.repoPath || candidate.name === session.repo
+          candidate.path === checkout.repoPath || candidate.name === checkout.repo
       )
       const owner = repo?.githubSlug?.split("/")[0]
       if (owner) owners[session.id] = owner
@@ -1391,15 +1392,18 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
   const paletteItems = useMemo<ReadonlyArray<PaletteItem>>(() => {
     const items: PaletteItem[] = []
 
-    const sessionItem = (s: Session): PaletteItem => ({
+    const sessionItem = (s: Session): PaletteItem => {
+      const checkout = activeCheckoutOf(s)
+      return {
       id: `session:${s.id}`,
       kind: "session",
       label: s.title || UNTITLED_SESSION,
-      detail: `${s.repo} · ${s.branch}`,
+      detail: `${checkout.repo} · ${checkout.branch}`,
       status: displayStatusLabel[displayStatusOf(null, s.status)],
       group: s.archived ? PALETTE_GROUP.archived : PALETTE_GROUP.sessions,
       run: () => selectSession(s.id)
-    })
+      }
+    }
 
     // Pinned first: `groupPaletteItems` keeps first-seen order, and this is
     // the one group a person opens the palette FOR.

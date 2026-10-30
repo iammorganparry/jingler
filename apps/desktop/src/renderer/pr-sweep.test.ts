@@ -1,10 +1,12 @@
-import type { PrState, Session, SessionPrStatus } from "@jingler/core"
+import { Session as SessionSchema, type PrState, type Session, type SessionPrStatus } from "@jingler/core"
+import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   issuesToCloseOnMerge,
   prNotifyKey,
   prNumbersOf,
   prsToNotify,
+  prTargetsOf,
   stackLifecycle,
   worstPrStatus,
   type PrLayer
@@ -19,8 +21,8 @@ import {
  * on merge is closing an opted-in linked issue.
  */
 
-const session = (over: Partial<Session> & { id: string }): Session =>
-  ({
+const session = (over: Record<string, unknown> & { id: string }): Session =>
+  Schema.decodeUnknownSync(SessionSchema)({
     repo: "r",
     branch: `chore/${over.id}`,
     title: over.id,
@@ -31,8 +33,10 @@ const session = (over: Partial<Session> & { id: string }): Session =>
     tokens: 0,
     updatedAt: "2026-07-18T00:00:00.000Z",
     worktreePath: `/tmp/${over.id}`,
+    chats: [{ id: `c_${over.id}`, title: null, createdAt: "2026-07-18T00:00:00.000Z", updatedAt: "2026-07-18T00:00:00.000Z" }],
+    activeChatId: `c_${over.id}`,
     ...over
-  }) as unknown as Session
+  })
 
 /** A session wired for the automation: linked issue + the opt-in flag. */
 const optedIn = (id: string) =>
@@ -173,7 +177,8 @@ describe("issuesToCloseOnMerge", () => {
  */
 describe("prsToNotify", () => {
   const status = (state: PrState, checks: SessionPrStatus["checks"] = null): SessionPrStatus => ({ state, checks })
-  const layer = (number: number, state: PrState, checks: SessionPrStatus["checks"] = null): PrLayer => ({
+  const layer = (number: number, state: PrState, checks: SessionPrStatus["checks"] = null, checkoutId = "primary"): PrLayer => ({
+    checkoutId,
     number,
     status: status(state, checks)
   })
@@ -200,7 +205,7 @@ describe("prsToNotify", () => {
   })
 
   it("announces each resolution once — the poll re-runs every minute", () => {
-    expect(prsToNotify(stacks, [merged], new Set([prNotifyKey("s1", 1)]))).toStrictEqual([])
+    expect(prsToNotify(stacks, [merged], new Set([prNotifyKey("s1", "primary", 1)]))).toStrictEqual([])
   })
 
   it("a 3-PR stack produces 3 notifications, each keyed by (session, PR) and naming the layer above", () => {
@@ -213,13 +218,45 @@ describe("prsToNotify", () => {
       [481, "merged", 482],
       [482, "closed", undefined]
     ])
-    for (const n of out) seen.add(prNotifyKey("st", n.number))
+    for (const n of out) seen.add(prNotifyKey("st", n.checkoutId, n.number))
     expect(prsToNotify(layers, [stacked], seen)).toStrictEqual([])
+  })
+
+  it("notifies per checkout", () => {
+    const twoRepos = session({
+      id: "mr",
+      // The wire's top-level prNumber mirrors the active checkout's top PR.
+      prNumber: 5,
+      checkouts: [
+        { id: "api", repo: "api", branch: "a", worktreePath: "/w/api", prNumber: 5 },
+        { id: "web", repo: "web", branch: "b", worktreePath: "/w/web", prNumber: 5 }
+      ],
+      activeCheckoutId: "api"
+    })
+    expect(prTargetsOf(twoRepos)).toStrictEqual([
+      { checkoutId: "api", number: 5 },
+      { checkoutId: "web", number: 5 }
+    ])
+    const layers = { mr: [layer(5, "open", null, "api"), layer(5, "merged", null, "web")] }
+    const seen = new Set<string>()
+    const out = prsToNotify(layers, [twoRepos], seen)
+    // Same PR number in two repos: only B's merge fires, under B's key, and is not "stacked under" A's PR.
+    expect(out.map((n) => [n.checkoutId, n.number, n.state, n.stackedUnder])).toStrictEqual([["web", 5, "merged", undefined]])
+    seen.add(prNotifyKey("mr", "web", 5))
+    expect(prsToNotify(layers, [twoRepos], seen)).toStrictEqual([])
+  })
+
+  it("closes the issue only when every checkout PR is done", () => {
+    const partial = stackLifecycle([layer(5, "open", null, "api"), layer(5, "merged", null, "web")])
+    const done = stackLifecycle([layer(5, "closed", null, "api"), layer(5, "merged", null, "web")])
+    expect(partial).toBe("open")
+    expect(done).toBe("merged")
   })
 })
 
 describe("stack-aware sweep", () => {
   const layer = (number: number, state: PrState, checks: SessionPrStatus["checks"] = null): PrLayer => ({
+    checkoutId: "primary",
     number,
     status: { state, checks }
   })

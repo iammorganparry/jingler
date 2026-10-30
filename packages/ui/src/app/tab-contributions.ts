@@ -24,7 +24,7 @@
  * without mounting anything.
  */
 import type { DiffStat, Session } from "@jingler/core"
-import { workspaceModeOf } from "@jingler/core"
+import { activeCheckoutOf, workspaceModeOf } from "@jingler/core"
 import type { ReactNode } from "react"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -367,12 +367,15 @@ export const builtinTabContributions = (
     {
       id: BUILTIN_TAB.checks,
       ...meta.checks,
-      when: ({ session }) =>
-        session.prNumber != null ||
-        (session.worktreePath != null &&
-          workspaceModeOf(session) === "worktree"),
+      when: ({ session }) => {
+        const checkout = activeCheckoutOf(session)
+        return (
+          activeCheckoutOf(session).prNumber != null ||
+          (checkout.worktreePath != null && workspaceModeOf(checkout) === "worktree")
+        )
+      },
       badge: ({ session, checkCounts }) =>
-        session.prNumber != null && checkCounts && checkCounts.total > 0
+        activeCheckoutOf(session).prNumber != null && checkCounts && checkCounts.total > 0
           ? { kind: "count", text: `${checkCounts.passing}/${checkCounts.total}` }
           : undefined,
       render: (session, ctx) =>
@@ -385,7 +388,7 @@ export const builtinTabContributions = (
       // old Code Review tab was the same review against a different diff.
       id: BUILTIN_TAB.changes,
       ...meta.changes,
-      when: ({ session }) => session.prNumber != null || session.worktreePath != null,
+      when: ({ session }) => activeCheckoutOf(session).prNumber != null || activeCheckoutOf(session).worktreePath != null,
       badge: ({ diff }) =>
         diff && diff.added + diff.removed > 0
           ? { kind: "diff", added: diff.added, removed: diff.removed }

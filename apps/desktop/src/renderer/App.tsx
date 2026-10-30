@@ -40,6 +40,9 @@ import type {
 } from "@jingler/core";
 import type { SessionCreationPhase } from "@jingler/contracts";
 import {
+  activeCheckoutOf,
+  checkoutPrsOf,
+  checkoutsOf,
   clampFontScale,
   countNodesAwaitingAttention,
   DEFAULT_THEME_ID,
@@ -143,6 +146,7 @@ import {
   issuesToCloseOnMerge,
   prNotifyKey,
   prNumbersOf,
+  prTargetsOf,
   prsToNotify,
   stackLifecycle,
   worstPrStatus,
@@ -954,10 +958,11 @@ function AuthedApp({
 
   const accessForSession = useCallback(
     (session: Session) => {
+      const checkout = activeCheckoutOf(session);
       const repo = repos.find(
         (candidate) =>
-          candidate.path === session.repoPath ||
-          (session.repoPath === undefined && candidate.name === session.repo),
+          candidate.path === checkout.repoPath ||
+          (checkout.repoPath === undefined && candidate.name === checkout.repo),
       );
       return repositoryAccess(
         github.connection,
@@ -969,14 +974,15 @@ function AuthedApp({
   );
   const canUseGitHubForSession = useCallback(
     (session: Session) => {
+      const checkout = activeCheckoutOf(session);
       const repo = repos.find(
         (candidate) =>
-          candidate.path === session.repoPath ||
-          (session.repoPath === undefined && candidate.name === session.repo),
+          candidate.path === checkout.repoPath ||
+          (checkout.repoPath === undefined && candidate.name === checkout.repo),
       );
       return (
         (github.connection.cliAvailable === true &&
-          (session.worktreePath != null || repo?.githubSlug != null)) ||
+          (checkout.worktreePath != null || repo?.githubSlug != null)) ||
         accessForSession(session).status === "accessible"
       );
     },
@@ -1019,10 +1025,10 @@ function AuthedApp({
       if (
         !(autoCreate && canUseGitHubForSession(session)) ||
         session.archived ||
-        session.prNumber !== null ||
-        workspaceModeOf(session) !== "worktree" ||
+        activeCheckoutOf(session).prNumber !== null ||
+        workspaceModeOf(activeCheckoutOf(session)) !== "worktree" ||
         session.semanticBranchPending === true ||
-        session.publish?.step === "complete" ||
+        activeCheckoutOf(session).publish?.step === "complete" ||
         autoPublishCancels.current.has(session.id)
       )
         return;
@@ -1140,13 +1146,13 @@ function AuthedApp({
           );
           return session?.githubInstallationId &&
             session.githubRepositoryId &&
-            session.prNumber !== null
+            activeCheckoutOf(session).prNumber !== null
             ? {
                 sessionId: delivery.sessionId,
                 chatId: delivery.chatId,
                 installationId: session.githubInstallationId,
                 repositoryId: session.githubRepositoryId,
-                prNumber: session.prNumber,
+                prNumber: activeCheckoutOf(session).prNumber!,
                 archived: Boolean(session.archived),
               }
             : undefined;
@@ -1274,7 +1280,7 @@ function AuthedApp({
     const detect = () => {
       for (const session of sessionsRef.current) {
         if (
-          !session.worktreePath ||
+          !activeCheckoutOf(session).worktreePath ||
           session.archived ||
           !canUseGitHubForSession(session)
         ) {
@@ -1283,7 +1289,7 @@ function AuthedApp({
         void rpc
           .githubDetectPr(session.id)
           .then((prNumber) => {
-            if (prNumber !== null && prNumber !== session.prNumber) {
+            if (prNumber !== null && prNumber !== activeCheckoutOf(session).prNumber) {
               send({
                 type: "SESSION_PR_LINKED",
                 sessionId: session.id,
@@ -1364,8 +1370,7 @@ function AuthedApp({
     () =>
       sessions.filter(
         (session) =>
-          session.prNumber != null &&
-          Boolean(session.worktreePath) &&
+          prTargetsOf(session).length > 0 &&
           !session.archived &&
           canUseGitHubForSession(session),
       ),
@@ -1375,14 +1380,14 @@ function AuthedApp({
   const sweepLayers = useMemo(
     () =>
       sweepTargets.flatMap((s) =>
-        prNumbersOf(s).map((number) => ({ session: s, number })),
+        prTargetsOf(s).map(({ checkoutId, number }) => ({ session: s, checkoutId, number })),
       ),
     [sweepTargets],
   );
   const prStacks = useQueries({
-    queries: sweepLayers.map(({ session: s, number }) => ({
-      queryKey: ["pr-state", s.id, number] as const,
-      queryFn: () => rpc.githubPrState(s.id, number),
+    queries: sweepLayers.map(({ session: s, checkoutId, number }) => ({
+      queryKey: ["pr-state", s.id, checkoutId, number] as const,
+      queryFn: () => rpc.githubPrState(s.id, number, checkoutId),
       enabled: connected,
       staleTime: PR_STATE_STALE_MS,
       // Poll so a PR merged/closed on GitHub badges its session live instead of
@@ -1393,11 +1398,11 @@ function AuthedApp({
     })),
     combine: (results) => {
       const stacks: Record<string, PrLayer[]> = {};
-      sweepLayers.forEach(({ session: s, number }, i) => {
+      sweepLayers.forEach(({ session: s, checkoutId, number }, i) => {
         const status = results[i]?.data;
         if (!status) return;
         const layers = stacks[s.id] ?? [];
-        layers.push({ number, status });
+        layers.push({ checkoutId, number, status });
         stacks[s.id] = layers;
       });
       return stacks;
@@ -1439,11 +1444,18 @@ function AuthedApp({
   const sessionPrKeys = useMemo(
     () =>
       new Set(
-        sessions.flatMap((s) =>
-          visibleIds.has(s.id) && s.githubSlug
-            ? sessionPrRows(prNumbersOf(s), subagentPrNodes[s.id] ?? []).map((row) => `${s.githubSlug}#${row.number}`.toLowerCase())
-            : [],
-        ),
+        sessions.flatMap((s) => {
+          if (!visibleIds.has(s.id)) return [];
+          // Each checkout's PRs live in that checkout's repo; subagent PRs are opened from the active one.
+          const own = checkoutsOf(s).flatMap((c) =>
+            c.githubSlug ? checkoutPrsOf(c).map((pr) => `${c.githubSlug}#${pr.number}`.toLowerCase()) : [],
+          );
+          const { githubSlug } = activeCheckoutOf(s);
+          const fleet = githubSlug
+            ? sessionPrRows([], subagentPrNodes[s.id] ?? []).map((row) => `${githubSlug}#${row.number}`.toLowerCase())
+            : [];
+          return [...own, ...fleet];
+        }),
       ),
     [sessions, visibleIds, subagentPrNodes],
   );
@@ -1478,7 +1490,7 @@ function AuthedApp({
         sweepTargets.flatMap((s) => {
           const layers = prStacks[s.id] ?? [];
           const lifecycle =
-            layers.length === prNumbersOf(s).length
+            layers.length === prTargetsOf(s).length
               ? stackLifecycle(layers)
               : undefined;
           return lifecycle ? [[s.id, lifecycle] as const] : [];
@@ -1505,7 +1517,7 @@ function AuthedApp({
   );
   const autoReviews = useQueries({
     queries: reviewTargets.map((s) => ({
-      queryKey: ["auto-review", s.id, s.prNumber] as const,
+      queryKey: ["auto-review", s.id, activeCheckoutOf(s).prNumber] as const,
       queryFn: () => rpc.reviewRun(s.id, false),
       staleTime: PR_STATE_STALE_MS,
       refetchInterval: ARCHIVE_POLL_MS,
@@ -1593,12 +1605,12 @@ function AuthedApp({
     // taking it would let the genuine first result through as an edge.
     const seeding =
       !prBaselineRef.current && Object.keys(prStacks).length > 0;
-    for (const { session, number, state: prState, stackedUnder } of prsToNotify(
+    for (const { session, checkoutId, number, state: prState, stackedUnder } of prsToNotify(
       prStacks,
       sweepTargets,
       notifiedPrsRef.current,
     )) {
-      notifiedPrsRef.current.add(prNotifyKey(session.id, number));
+      notifiedPrsRef.current.add(prNotifyKey(session.id, checkoutId, number));
       if (seeding) continue;
       if (prState === "merged") recordPrEvent(session.id, "merged", number);
       const plan = prNotification(session.title, prState, number, stackedUnder);
@@ -2012,7 +2024,7 @@ function AuthedApp({
             <CheckoutHeader session={session} />
             <WorkspaceWorkflowBar
               session={session}
-              project={projectController.projects.find((project) => project.id === session.projectId)}
+              project={projectController.projects.find((project) => project.id === activeCheckoutOf(session).projectId)}
               onSession={publishSessionUpdate}
             />
           {/* The registry keeps each actor alive, but React state must remount per
@@ -2108,7 +2120,7 @@ function AuthedApp({
           return (
             <PullRequestPane
               session={session}
-              project={projectController.projects.find((project) => project.id === session.projectId)}
+              project={projectController.projects.find((project) => project.id === activeCheckoutOf(session).projectId)}
               connected={sessionConnected}
               autoDetect={autoDetect}
               viewerLogin={github.connection.user?.login}
@@ -2783,7 +2795,7 @@ function offloadSettingsStatus(state: import("xstate").SnapshotFrom<ReturnType<t
 
 function deleteSessionDescription(pendingDelete: Session | null) {
   return pendingDelete
-    ? workspaceModeOf(pendingDelete) === "direct"
+    ? workspaceModeOf(activeCheckoutOf(pendingDelete)) === "direct"
       ? `“${pendingDelete.title}” session data will be permanently removed. The repository checkout will be left untouched. This can't be undone.`
       : `“${pendingDelete.title}” and its isolated worktree will be permanently removed. This can't be undone.`
     : undefined

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { activeCheckoutOf, migrateCheckoutPrs, migrateSessionCheckouts, sessionPrsOf } from "./session-checkout.js";
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js";
 import { PlanTemplateConfig } from "./plan-document.js";
 import { ThemeConfig } from "./theme.js";
@@ -612,9 +613,8 @@ export const PublishCheckpoint = Schema.Struct({
 export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>;
 
 /**
- * One repo checkout a session works in. A session owns one or more; the scalar
- * `Session` fields (`repo`, `repoPath`, `worktreePath`, `branch`, `baseBranch`,
- * `prNumber`, `githubSlug`, `projectId`, `workspaceMode`) mirror the ACTIVE one.
+ * One repo checkout a session works in, with its own PR stack. A session owns
+ * one or more; `SessionWire`'s top-level copies mirror the ACTIVE one on disk.
  */
 export const SessionCheckout = Schema.Struct({
   id: Schema.String,
@@ -625,12 +625,22 @@ export const SessionCheckout = Schema.Struct({
   workspaceMode: Schema.optional(WorkspaceMode),
   branch: Schema.String,
   baseBranch: Schema.optional(Schema.String),
+  /** Top of `prs`; kept in step by `withCheckoutPrs`. */
   prNumber: Schema.NullOr(Schema.Number),
+  /** This checkout's PR stack, bottom layer first. Absent on checkouts persisted before PRs moved here. */
+  prs: Schema.optional(Schema.Array(SessionPr)),
   githubSlug: Schema.optional(Schema.String),
+  /** This checkout's resumable commit/push/PR publication state. */
+  publish: Schema.optional(PublishCheckpoint),
 });
 export type SessionCheckout = Schema.Schema.Type<typeof SessionCheckout>;
 
-export const Session = Schema.Struct({
+/**
+ * `Session` as written to disk and sent over RPC. It still carries the active
+ * checkout's fields at the top level so older builds and paired devices, which
+ * require `repo`/`branch`, keep reading it. In-memory code uses `Session`.
+ */
+export const SessionWire = Schema.Struct({
   routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
   /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
   checkpointSafeMode: Schema.optional(Schema.Boolean),
@@ -835,7 +845,65 @@ export const Session = Schema.Struct({
   /** Why archiving kept the worktree on disk (uncommitted or unpushed work). */
   worktreeKeptReason: Schema.optional(Schema.String),
 });
-export type Session = Schema.Schema.Type<typeof Session>;
+const {
+  projectId: _projectId,
+  repo: _repo,
+  githubSlug: _githubSlug,
+  branch: _branch,
+  worktreePath: _worktreePath,
+  workspaceMode: _workspaceMode,
+  repoPath: _repoPath,
+  baseBranch: _baseBranch,
+  prNumber: _prNumber,
+  prs: _prs,
+  publish: _publish,
+  ...sessionFields
+} = SessionWire.fields;
+
+export interface SessionWire extends Schema.Schema.Type<typeof SessionWire> {}
+export interface SessionWireEncoded extends Schema.Schema.Encoded<typeof SessionWire> {}
+// Named interfaces, not the inferred transform type: that one is too long for tsc to serialize (TS7056) in RPC contracts.
+export interface Session
+  extends Omit<
+    SessionWire,
+    | "projectId"
+    | "repo"
+    | "githubSlug"
+    | "branch"
+    | "worktreePath"
+    | "workspaceMode"
+    | "repoPath"
+    | "baseBranch"
+    | "prNumber"
+    | "prs"
+    | "publish"
+  > {}
+
+/** A session whose repos live only in `checkouts`; see `SessionWire` for the persisted shape. */
+export const Session: Schema.Schema<Session, SessionWireEncoded> = Schema.transform(SessionWire, Schema.typeSchema(Schema.Struct(sessionFields)), {
+  strict: true,
+  decode: (wire) => {
+    const {
+      projectId: _p,
+      repo: _r,
+      githubSlug: _g,
+      branch: _b,
+      worktreePath: _w,
+      workspaceMode: _m,
+      repoPath: _rp,
+      baseBranch: _bb,
+      prNumber: _pn,
+      prs: _prs,
+      publish: _publish,
+      ...session
+    } = migrateCheckoutPrs(migrateSessionCheckouts(wire));
+    return session;
+  },
+  encode: (session) => {
+    const { id: _id, prs: _prs, ...mirror } = activeCheckoutOf(session);
+    return { ...session, ...mirror, prs: sessionPrsOf(session) };
+  },
+});
 
 /** The persisted fields needed to resolve canonical and historical issue links. */
 export type SessionIssueLinks = Pick<
@@ -939,7 +1007,7 @@ export const executionTargetOf = (
 
 /** Backward-compatible workspace ownership for persisted sessions. */
 export const workspaceModeOf = (
-  session: Pick<Session, "workspaceMode">,
+  session: { readonly workspaceMode?: WorkspaceMode },
 ): WorkspaceMode => session.workspaceMode ?? "worktree";
 
 /** Backward-compatible persistence status for persisted sessions. */

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { AdversarialReview, ReviewFinding, ReviewPhase, Session } from "@jingler/core"
+import { activeCheckoutOf } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { markRouted, useRoutedEntries } from "./routed-store.js"
@@ -69,10 +70,10 @@ export function useAdversarialReview(
 ): AdversarialReviewState {
   const qc = useQueryClient()
   const { connected } = opts
-  const hasPr = session.prNumber != null
+  const hasPr = activeCheckoutOf(session).prNumber != null
 
   const query = useQuery({
-    queryKey: reviewQueryKey(session.id, session.prNumber),
+    queryKey: reviewQueryKey(session.id, activeCheckoutOf(session).prNumber),
     queryFn: () => rpc.reviewGet(session.id),
     // Nothing to read until there's a PR to have reviewed.
     enabled: hasPr && connected,
@@ -159,9 +160,9 @@ export function useAdversarialReview(
     return () => {
       cancelled = true
     }
-  }, [agentBusy, hasPr, connected, session.id, session.prNumber, qc])
+  }, [agentBusy, hasPr, connected, session.id, activeCheckoutOf(session).prNumber, qc])
 
-  const routedKeys = useRoutedEntries(session.id, session.prNumber)
+  const routedKeys = useRoutedEntries(session.id, activeCheckoutOf(session).prNumber)
 
   // Resolve the namespaced keys down to plain ids for THIS review, so the UI
   // never has to reconstruct a key format it doesn't own.
@@ -184,7 +185,7 @@ export function useAdversarialReview(
     [review, session]
   )
 
-  const { dismissedFindings } = useSessionReviewState(session.id, session.prNumber)
+  const { dismissedFindings } = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
   const dismissedFindingIds = useMemo(
     () =>
       new Set(
@@ -199,14 +200,14 @@ export function useAdversarialReview(
       const finding = review?.findings.find((f) => f.id === findingId)
       if (!finding) return
       const fingerprint = findingFingerprint(finding)
-      setFindingDismissed(session.id, session.prNumber, fingerprint, dismissed)
+      setFindingDismissed(session.id, activeCheckoutOf(session).prNumber, fingerprint, dismissed)
       if (dismissed) {
         emitFindingDismissed(finding.title, () =>
-          setFindingDismissed(session.id, session.prNumber, fingerprint, false)
+          setFindingDismissed(session.id, activeCheckoutOf(session).prNumber, fingerprint, false)
         )
       }
     },
-    [review, session.id, session.prNumber]
+    [review, session.id, activeCheckoutOf(session).prNumber]
   )
 
   return {

@@ -19,6 +19,8 @@ import type {
   SessionPrStatus
 } from "@jingler/core"
 import {
+  activeCheckoutOf,
+  sessionPrsOf,
   issueReferenceOf,
   issueReferencesOf,
   UNTITLED_SESSION
@@ -959,7 +961,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     ...(props.onCreateChat
       ? [{ id: "chat", label: "Chat", detail: "Start a new conversation", icon: MessageSquarePlus, onSelect: () => props.onCreateChat?.(sessionId) }]
       : []),
-    ...(props.onOpenFilePicker && active.worktreePath
+    ...(props.onOpenFilePicker && activeCheckoutOf(active).worktreePath
       ? [{ id: "file", label: "File", detail: "Open a repository file", icon: File, onSelect: () => props.onOpenFilePicker?.(sessionId) }]
       : []),
     ...viewLauncherItems
@@ -1046,10 +1048,10 @@ function SessionPaneBody(props: SessionPaneProps) {
   }, [paneFocused, hasChecks, pinnedHeaderItems, selectTab])
   // Context links (spec §3c): the PR and the linked issue open their view through selectTab.
   const linkChips: HeaderLinkChip[] = []
-  if (active.prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.checks)) {
+  if (activeCheckoutOf(active).prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.checks)) {
     linkChips.push({
       id: "pr",
-      label: `PR #${active.prNumber}`,
+      label: `PR #${activeCheckoutOf(active).prNumber}`,
       title: "Open pull request",
       icon: GitPullRequest,
       onOpen: () => selectTab(BUILTIN_TAB.checks)
@@ -1057,11 +1059,11 @@ function SessionPaneBody(props: SessionPaneProps) {
   }
   const prRows = sessionPrRows(
     [
-      ...(active.prs?.length ? active.prs.map((pr) => pr.number) : active.prNumber == null ? [] : [active.prNumber]),
+      ...sessionPrsOf(active).map((pr) => pr.number),
       ...(active.linkedPrs ?? [])
     ],
     props.subagentPrNodes?.[active.id] ?? [],
-    new Map((active.prs ?? []).flatMap((pr) => (pr.repo === undefined ? [] : [[pr.number, pr.repo] as const])))
+    new Map(sessionPrsOf(active).flatMap((pr) => (pr.repo === undefined ? [] : [[pr.number, pr.repo] as const])))
   )
   const linkedIssue = issueReferenceOf(active)
   const issueTab = tabs.find((tab) => linkedIssue !== undefined && tab.issueProviderId === linkedIssue.providerId)
@@ -1107,7 +1109,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   const headerIdentity = (
     <SessionHeaderIdentity
       title={active.title || UNTITLED_SESSION}
-      branch={active.branch}
+      branch={activeCheckoutOf(active).branch}
       chips={prRows.length > 1 ? linkChips.filter((chip) => chip.id !== "pr") : linkChips}
     >
       {prRows.length > 1 && (

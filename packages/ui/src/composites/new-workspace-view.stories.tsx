@@ -1,3 +1,4 @@
+import { type CheckoutFields, foldCheckout } from "../test-support"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type {
   CreateSessionInput,
@@ -168,8 +169,8 @@ const PROJECTS: ReadonlyArray<Project> = [
 ]
 
 const sidebarSession = (
-  input: Partial<Session> & Pick<Session, "id" | "title">
-): Session => ({
+  input: Partial<Session> & CheckoutFields & Pick<Session, "id" | "title">
+): Session => foldCheckout({
   repo: "jingler",
   branch: `chore/${input.id}`,
   status: "idle",

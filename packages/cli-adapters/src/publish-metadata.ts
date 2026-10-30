@@ -1,4 +1,4 @@
-import type { Message, PublishMetadata, Session } from "@jingler/core"
+import { activeCheckoutOf, type Message, type PublishMetadata, type Session } from "@jingler/core"
 import { Effect } from "effect"
 import type { AgentRuntimeShape } from "./runtime/agent/agent-runtime.js"
 import { runReadOnlyRoleText } from "./runtime/agent/read-only-role.js"
@@ -27,7 +27,7 @@ export interface PublishMetadataGenerator {
 }
 
 const readableSlug = (session: Session): string =>
-  (session.semanticBranchProposal?.slug ?? session.branch.split("/").at(-1) ?? "session-work")
+  (session.semanticBranchProposal?.slug ?? activeCheckoutOf(session).branch.split("/").at(-1) ?? "session-work")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/[-_]+/g, " ")
@@ -127,7 +127,7 @@ const publishPrompt = (input: PublishMetadataInput): string => {
     "commitMessage must be a Conventional Commit subject under 73 characters using feat, fix, refactor, docs, test, chore, perf, build, ci, style, or revert.",
     "Describe only the supplied work. Do not include commands, credentials, or markdown fences.",
     `Session: ${input.session.title}`,
-    `Branch: ${input.session.branch}`,
+    `Branch: ${activeCheckoutOf(input.session).branch}`,
     `Changed paths: ${input.changedPaths.join(", ")}`,
     `Diff summary:\n${input.diffSummary.slice(0, 8_000)}`,
     `Recent transcript:\n${transcript.slice(0, 12_000)}`

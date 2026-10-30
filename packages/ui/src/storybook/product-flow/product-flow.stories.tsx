@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type {
   ManagedResource,
@@ -200,8 +201,8 @@ const MockConversation = ({
   <ConversationView
     messages={SEED_CONVERSATION}
     mode={session.mode ?? "ask"}
-    branch={session.branch}
-    repo={session.repo}
+    branch={activeCheckoutOf(session).branch}
+    repo={activeCheckoutOf(session).repo}
     environments={FLOW_ENVIRONMENTS}
     environmentId={session.environmentId}
     providerCatalog={FLOW_PROVIDER_CATALOG}

@@ -1,3 +1,4 @@
+import { activeCheckoutOf } from "@jingler/core"
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { Project, Session } from "@jingler/core"
@@ -89,7 +90,7 @@ function Flow() {
                 <Search size={13} /> Pick a project, choose a session, then open Explorer.
               </div>
               <div className="m-auto w-full max-w-2xl rounded-xl border border-line bg-panel p-6">
-                <div className="font-mono text-[10px] text-blue">{session.repo} · {session.branch}</div>
+                <div className="font-mono text-[10px] text-blue">{activeCheckoutOf(session).repo} · {activeCheckoutOf(session).branch}</div>
                 <h2 className="mt-2 text-xl font-semibold text-text-bright">{selected ?? session.title}</h2>
                 <p className="mt-3 text-sm text-muted-foreground">
                   {selected ? "Opened from the active session's worktree Explorer." : "This is the active session content. Switch projects to verify each project restores its last selected session."}

@@ -15,17 +15,19 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
-  GitHubRelayEvent,
-  Session
+  GitHubRelayEvent
 } from "@jingler/core"
 import {
   GitHubApiError,
   issueReferenceOf,
   issueReferencesOf,
+  activeCheckoutOf,
+  sessionPrsOf,
   piEndpointId,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
+  Session,
   workspaceModeOf
 } from "@jingler/core"
 import { GitHubApi } from "./github-api.js"
@@ -35,7 +37,6 @@ import {
   SessionStore,
   migrateRepoName,
   migrateSessionChats,
-  migrateSessionPrs
 } from "./sessions.js"
 import {
   failureOf,
@@ -141,17 +142,17 @@ describe("SessionStore", () => {
         modelId
       } as CreateSessionInput).pipe(Effect.provide(services), Effect.provide(temp.layer))
     )
-    expect(created.repoPath).toBeUndefined()
-    expect(created.checkouts).toEqual([])
-    expect(created.worktreePath).toBe(join(temp.root, "sessions", created.id))
-    expect(existsSync(created.worktreePath!)).toBe(true)
+    expect(activeCheckoutOf(created).repoPath).toBeUndefined()
+    expect(created.checkouts).toHaveLength(1)
+    expect(activeCheckoutOf(created).worktreePath).toBe(join(temp.root, "sessions", created.id))
+    expect(existsSync(activeCheckoutOf(created).worktreePath!)).toBe(true)
   })
 
   it("reads legacy port assignments without losing session metadata or sibling sessions", async () => {
     const original = await Effect.runPromise(SessionStore.create(input({ title: "Legacy ports" })).pipe(Effect.provide(services), Effect.provide(temp.layer)))
     const file = join(temp.root, "sessions.json")
     const sibling = { ...original, id: "s_legacy_sibling", title: "Sibling", archived: true }
-    writeFileSync(file, JSON.stringify([{ ...original, workspacePorts: { primary: 3100, extras: { API: 4100 } } }, sibling]))
+    writeFileSync(file, JSON.stringify([{ ...Schema.encodeSync(Session)(original), workspacePorts: { primary: 3100, extras: { API: 4100 } } }, Schema.encodeSync(Session)(sibling)]))
     const restored = await Effect.runPromise(SessionStore.get(original.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
     expect(restored).toMatchObject(original)
     expect(restored).not.toHaveProperty("workspacePorts")
@@ -191,8 +192,8 @@ describe("SessionStore", () => {
     await Effect.runPromise(SessionStore.archive(session.id, "closed", true).pipe(Effect.provide(services), Effect.provide(temp.layer)))
     const archived = await Effect.runPromise(SessionStore.get(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
     expect(archived.archived).toBe(true)
-    expect(archived.worktreePath).toBe(session.worktreePath)
-    expect(existsSync(session.worktreePath!)).toBe(true)
+    expect(activeCheckoutOf(archived).worktreePath).toBe(activeCheckoutOf(session).worktreePath)
+    expect(existsSync(activeCheckoutOf(session).worktreePath!)).toBe(true)
     await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
   })
 
@@ -223,9 +224,9 @@ describe("SessionStore", () => {
     expect(result.value).toMatchObject({
       connectionId,
       providerId,
-      modelId,
-      githubSlug: "acme/trigify-app"
+      modelId
     })
+    expect(activeCheckoutOf(result.value).githubSlug).toBe("acme/trigify-app")
     expect(activeChat(result.value)).toMatchObject({ connectionId, providerId, modelId })
   })
 
@@ -311,7 +312,7 @@ describe("SessionStore", () => {
       ).toHaveLength(1)
       expect(
         result.value.sessions.filter(
-          (session) => workspaceModeOf(session) === "direct"
+          (session) => workspaceModeOf(activeCheckoutOf(session)) === "direct"
         )
       ).toHaveLength(1)
     })
@@ -335,10 +336,10 @@ describe("SessionStore", () => {
     // MAX_SLUG (100) plus the "-<base36 stamp>" suffix. Pinned tightly rather
     // than to a round number, so raising the cap has to be a deliberate edit
     // here too.
-    expect(basename(exit.value.worktreePath!).length).toBeLessThanOrEqual(100 + 1 + 12)
+    expect(basename(activeCheckoutOf(exit.value).worktreePath!).length).toBeLessThanOrEqual(100 + 1 + 12)
     // Truncation must not leave a trailing dash on the landing-pad path.
-    expect(basename(exit.value.worktreePath!)).not.toMatch(/-$/)
-    expect(existsSync(exit.value.worktreePath!)).toBe(true)
+    expect(basename(activeCheckoutOf(exit.value).worktreePath!)).not.toMatch(/-$/)
+    expect(existsSync(activeCheckoutOf(exit.value).worktreePath!)).toBe(true)
   })
 
   /**
@@ -366,10 +367,10 @@ describe("SessionStore", () => {
     expect(first._tag).toBe("Success")
     expect(second._tag).toBe("Success")
     if (first._tag !== "Success" || second._tag !== "Success") return
-    expect(first.value.worktreePath).not.toBe(second.value.worktreePath)
+    expect(activeCheckoutOf(first.value).worktreePath).not.toBe(activeCheckoutOf(second.value).worktreePath)
     // The first session's worktree was NOT reclaimed out from under it.
-    expect(existsSync(first.value.worktreePath!)).toBe(true)
-    expect(existsSync(second.value.worktreePath!)).toBe(true)
+    expect(existsSync(activeCheckoutOf(first.value).worktreePath!)).toBe(true)
+    expect(existsSync(activeCheckoutOf(second.value).worktreePath!)).toBe(true)
   })
 
   it("rejects a requested session id that is already persisted", async () => {
@@ -400,11 +401,11 @@ describe("SessionStore", () => {
     if (exit._tag !== "Success") return
     const s = exit.value
     expect(s.status).toBe("idle")
-    expect(workspaceModeOf(s)).toBe("worktree")
-    expect(s.branch).toBe("main")
+    expect(workspaceModeOf(activeCheckoutOf(s))).toBe("worktree")
+    expect(activeCheckoutOf(s).branch).toBe("main")
     expect(s.semanticBranchPending).toBe(true)
-    expect(s.baseBranch).toBe("main")
-    expect(s.worktreePath).toMatch(
+    expect(activeCheckoutOf(s).baseBranch).toBe("main")
+    expect(activeCheckoutOf(s).worktreePath).toMatch(
       new RegExp(`${join(temp.root, "worktrees", "trigify-app")}/fix-login-bug-[a-z0-9]+$`)
     )
     // An explicit title is pinned (the agent won't auto-overwrite it).
@@ -412,7 +413,7 @@ describe("SessionStore", () => {
     expect(s.title).toBe("Fix Login Bug!")
     expect(s.diff).toStrictEqual({ added: 0, removed: 0 })
     expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: s.worktreePath,
+      cwd: activeCheckoutOf(s).worktreePath,
       encoding: "utf-8"
     }).trim()).toBe("HEAD")
     expect(execFileSync("git", ["branch", "--list", "jingler/*"], {
@@ -436,10 +437,10 @@ describe("SessionStore", () => {
 
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.branch).toBe("feature/existing")
+    expect(activeCheckoutOf(exit.value).branch).toBe("feature/existing")
     expect(exit.value.semanticBranchPending).toBeUndefined()
     expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: exit.value.worktreePath,
+      cwd: activeCheckoutOf(exit.value).worktreePath,
       encoding: "utf-8"
     }).trim()).toBe("feature/existing")
   })
@@ -468,10 +469,10 @@ describe("SessionStore", () => {
 
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.workspaceMode).toBe("direct")
-    expect(exit.value.worktreePath).toBe(exit.value.repoPath)
-    expect(statSync(exit.value.worktreePath!).ino).toBe(statSync(repoPath).ino)
-    expect(exit.value.branch).toBe("feature/direct")
+    expect(activeCheckoutOf(exit.value).workspaceMode).toBe("direct")
+    expect(activeCheckoutOf(exit.value).worktreePath).toBe(activeCheckoutOf(exit.value).repoPath)
+    expect(statSync(activeCheckoutOf(exit.value).worktreePath!).ino).toBe(statSync(repoPath).ino)
+    expect(activeCheckoutOf(exit.value).branch).toBe("feature/direct")
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd: repoPath,
@@ -734,7 +735,7 @@ describe("SessionStore", () => {
       chats: _chats,
       activeChatId: _activeChatId,
       ...legacy
-    } = created.value
+    } = Schema.encodeSync(Session)(created.value)
     writeFileSync(
       join(temp.root, "sessions.json"),
       JSON.stringify([{ ...legacy, contextTokens: 190_000 }])
@@ -766,7 +767,7 @@ describe("SessionStore", () => {
     // `repo` still holding the directory's old name.
     writeFileSync(
       join(temp.root, "sessions.json"),
-      JSON.stringify([{ ...created.value, repo: "old-name" }])
+      JSON.stringify([{ ...Schema.encodeSync(Session)(created.value), repo: "old-name", checkouts: undefined, activeCheckoutId: undefined }])
     )
 
     const reread = await runExit(
@@ -775,8 +776,8 @@ describe("SessionStore", () => {
     )
     expect(reread._tag).toBe("Success")
     if (reread._tag !== "Success") return
-    expect(reread.value.repo).toBe(basename(repoPath))
-    expect(reread.value.repo).not.toBe("old-name")
+    expect(activeCheckoutOf(reread.value).repo).toBe(basename(repoPath))
+    expect(activeCheckoutOf(reread.value).repo).not.toBe("old-name")
   })
 
   it("keeps a pre-semantic established branch publishable without synthesizing metadata", async () => {
@@ -791,12 +792,12 @@ describe("SessionStore", () => {
       semanticBranchProposal: _proposal,
       workspaceMode: _workspaceMode,
       ...legacy
-    } = created.value
+    } = Schema.encodeSync(Session)(created.value)
     writeFileSync(
       join(temp.root, "sessions.json"),
       // Explicit migration fixture: releases before semantic naming persisted
       // `jingler/*`; established history remains publishable without rename.
-      JSON.stringify([{ ...legacy, branch: "jingler/historical-auth-fix" }])
+      JSON.stringify([{ ...legacy, branch: "jingler/historical-auth-fix", checkouts: undefined, activeCheckoutId: undefined }])
     )
 
     const reread = await runExit(
@@ -812,11 +813,13 @@ describe("SessionStore", () => {
 
   it("does not treat a fresh pending or direct session as branch-ready", () => {
     expect(isSessionPublishBranchReady({
+      id: "s", projectId: "p", repo: "r", prNumber: null,
       branch: "main",
       semanticBranchPending: true,
       workspaceMode: "worktree"
     }, "main")).toBe(false)
     expect(isSessionPublishBranchReady({
+      id: "s", repo: "r", prNumber: null,
       branch: "feature/direct",
       workspaceMode: "direct"
     }, "feature/direct")).toBe(false)
@@ -875,8 +878,8 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") {
-      expect(basename(exit.value.worktreePath!)).toMatch(/^session-[a-z0-9]+$/)
-      expect(exit.value.branch).toBe("main")
+      expect(basename(activeCheckoutOf(exit.value).worktreePath!)).toMatch(/^session-[a-z0-9]+$/)
+      expect(activeCheckoutOf(exit.value).branch).toBe("main")
     }
   })
 
@@ -891,12 +894,12 @@ describe("SessionStore", () => {
     // Einstein"), never a literal "Untitled session" in the sidebar.
     expect(exit.value.title).toMatch(/^[A-Z][a-z]+ [A-Z][a-z]+$/)
     expect(exit.value.autoTitle).toBe(true)
-    expect(basename(exit.value.worktreePath ?? "")).toMatch(/^[a-z]+-[a-z]+$/)
+    expect(basename(activeCheckoutOf(exit.value).worktreePath ?? "")).toMatch(/^[a-z]+-[a-z]+$/)
     expect(exit.value.title.toLowerCase().replace(" ", "-")).toBe(
-      basename(exit.value.worktreePath ?? "")
+      basename(activeCheckoutOf(exit.value).worktreePath ?? "")
     )
     const live = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: exit.value.worktreePath,
+      cwd: activeCheckoutOf(exit.value).worktreePath,
       encoding: "utf-8"
     }).trim()
     expect(live).toBe("HEAD")
@@ -915,11 +918,11 @@ describe("SessionStore", () => {
     if (created._tag !== "Success") return
     const [a, b] = created.value
     expect(a.id).not.toBe(b.id)
-    expect(a.worktreePath).not.toBe(b.worktreePath)
+    expect(activeCheckoutOf(a).worktreePath).not.toBe(activeCheckoutOf(b).worktreePath)
     for (const session of [a, b]) {
       expect(
         execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-          cwd: session.worktreePath,
+          cwd: activeCheckoutOf(session).worktreePath,
           encoding: "utf-8"
         }).trim()
       ).toBe("HEAD")
@@ -944,14 +947,14 @@ describe("SessionStore", () => {
     // setTitle updated the title but nothing structural.
     expect(afterAuto.title).toBe("Rate limit the API")
     expect(afterAuto.autoTitle).toBe(true)
-    expect(afterAuto.branch).toBe(s.branch)
+    expect(activeCheckoutOf(afterAuto).branch).toBe(activeCheckoutOf(s).branch)
     expect(afterAuto.id).toBe(s.id)
-    expect(afterAuto.worktreePath).toBe(s.worktreePath)
-    expect(afterAuto.baseBranch).toBe(s.baseBranch)
+    expect(activeCheckoutOf(afterAuto).worktreePath).toBe(activeCheckoutOf(s).worktreePath)
+    expect(activeCheckoutOf(afterAuto).baseBranch).toBe(activeCheckoutOf(s).baseBranch)
     // renameTitle pinned it.
     expect(afterRename.title).toBe("My pinned name")
     expect(afterRename.autoTitle).toBe(false)
-    expect(afterRename.branch).toBe(s.branch)
+    expect(activeCheckoutOf(afterRename).branch).toBe(activeCheckoutOf(s).branch)
   })
 
   it("prepends new sessions and persists them across a fresh read", async () => {
@@ -1003,8 +1006,30 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.branch).toBe("feat/x")
+    expect(activeCheckoutOf(exit.value).branch).toBe("feat/x")
     expect(exit.value.checkouts?.map((c) => c.branch)).toEqual(["feat/x", "feat/x"])
+  })
+
+  it("setWorktreePath updates the active checkout", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Heal Session" }))
+        const co = (id: string) => ({
+          id, projectId: "p", repo: id, repoPath: `/r/${id}`, worktreePath: `/w/${id}`,
+          workspaceMode: "worktree" as const, branch: "main", baseBranch: "main", prNumber: null
+        })
+        yield* SessionStore.setCheckouts(created.id, {
+          ...created, checkouts: [co("web"), co("api")], activeCheckoutId: "api"
+        })
+        yield* SessionStore.setWorktreePath(created.id, "/healed/api")
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.checkouts?.map((c) => c.worktreePath)).toEqual(["/w/web", "/healed/api"])
+    expect(activeCheckoutOf(exit.value).worktreePath).toBe("/healed/api")
   })
 
   it("setPrNumber links (and clears) a session's PR across a fresh read", async () => {
@@ -1024,7 +1049,7 @@ describe("SessionStore", () => {
       SessionStore.get(id).pipe(Effect.provide(SessionStore.Default)),
       temp.layer
     )
-    expect(linked._tag === "Success" && linked.value.prNumber).toBe(482)
+    expect(linked._tag === "Success" && activeCheckoutOf(linked.value).prNumber).toBe(482)
 
     // Clearing it (null) round-trips too.
     const cleared = await runExit(
@@ -1034,7 +1059,7 @@ describe("SessionStore", () => {
       }).pipe(Effect.provide(SessionStore.Default)),
       temp.layer
     )
-    expect(cleared._tag === "Success" && cleared.value.prNumber).toBe(null)
+    expect(cleared._tag === "Success" && activeCheckoutOf(cleared.value).prNumber).toBe(null)
   })
 
   it("reads a session persisted with only prNumber as a one-element stack", async () => {
@@ -1046,8 +1071,8 @@ describe("SessionStore", () => {
     persisted[0]!.prNumber = 481
     writeFileSync(file, JSON.stringify(persisted))
     const restored = await Effect.runPromise(SessionStore.get(original.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
-    expect(restored.prNumber).toBe(481)
-    expect(restored.prs).toEqual([{ number: 481 }])
+    expect(activeCheckoutOf(restored).prNumber).toBe(481)
+    expect(sessionPrsOf(restored)).toEqual([{ number: 481 }])
   })
 
   it("appends stacked PRs bottom-first, mirrors the top into prNumber, and round-trips the order", async () => {
@@ -1063,11 +1088,11 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.prs).toEqual([
+    expect(sessionPrsOf(exit.value)).toEqual([
       { number: 481, branch: "feat/a", base: "main", state: "merged" },
       { number: 482, branch: "feat/b", base: "feat/a" }
     ])
-    expect(exit.value.prNumber).toBe(482)
+    expect(activeCheckoutOf(exit.value).prNumber).toBe(482)
     const onDisk = JSON.parse(readFileSync(join(temp.root, "sessions.json"), "utf-8")) as Array<{ prs: Array<{ number: number }> }>
     expect(onDisk[0]!.prs.map((pr) => pr.number)).toEqual([481, 482])
   })
@@ -1087,9 +1112,9 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value[0].prs).toEqual([{ number: 9 }])
-    expect(exit.value[1].prNumber).toBeNull()
-    expect(exit.value[1].prs).toBeUndefined()
+    expect(sessionPrsOf(exit.value[0])).toEqual([{ number: 9 }])
+    expect(activeCheckoutOf(exit.value[1]).prNumber).toBeNull()
+    expect(sessionPrsOf(exit.value[1])).toEqual([])
   })
 
   it("clears stale App routing identity when the PR number changes", async () => {
@@ -1116,7 +1141,7 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value).toMatchObject({ prNumber: 43 })
+    expect(activeCheckoutOf(exit.value).prNumber).toBe(43)
     expect(exit.value.githubInstallationId).toBeUndefined()
     expect(exit.value.githubRepositoryId).toBeUndefined()
     expect(exit.value.githubFeedbackDeliveryIds).toBeUndefined()
@@ -1148,7 +1173,7 @@ describe("SessionStore", () => {
       SessionStore.get(exit.value).pipe(Effect.provide(SessionStore.Default)),
       temp.layer
     )
-    expect(recovered._tag === "Success" && recovered.value.publish).toMatchObject({
+    expect(recovered._tag === "Success" && activeCheckoutOf(recovered.value).publish).toMatchObject({
       step: "failed",
       branch: "fix/restart-publish",
       commitSha: "abc123",
@@ -1404,7 +1429,7 @@ describe("SessionStore", () => {
     const other = { ...chat, id: `${chat?.id}_x`, mode: "bogus" }
     writeFileSync(
       join(temp.root, "sessions.json"),
-      JSON.stringify([{ ...created.value, chats: [{ ...chat, mode: "plan" }, other] }])
+      JSON.stringify([{ ...Schema.encodeSync(Session)(created.value), chats: [{ ...chat, mode: "plan" }, other] }])
     )
     const reread = await runExit(SessionStore.get(created.value.id).pipe(Effect.provide(SessionStore.Default)), temp.layer)
     expect(reread._tag).toBe("Success")
@@ -1673,19 +1698,19 @@ describe("SessionStore", () => {
     ).toBe("Success")
     if (exit._tag !== "Success") return
     const s = exit.value
-    expect(s.prNumber).toBe(482)
+    expect(activeCheckoutOf(s).prNumber).toBe(482)
     expect(s.githubInstallationId).toBe("installation-77")
     expect(s.githubRepositoryId).toBe("repo-301")
-    expect(s.githubSlug).toBe("acme/trigify-app")
-    expect(s.branch).toBe("chore/bump")
-    expect(s.baseBranch).toBe("main")
+    expect(activeCheckoutOf(s).githubSlug).toBe("acme/trigify-app")
+    expect(activeCheckoutOf(s).branch).toBe("chore/bump")
+    expect(activeCheckoutOf(s).baseBranch).toBe("main")
     expect(s.title).toBe("Fix Auth Refresh")
     expect(activeChat(s)).toMatchObject({
       workMode: "plan",
       modelId
     })
     // The slug carries the PR number so same-titled PRs never collide.
-    expect(s.worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "fix-auth-refresh-482"))
+    expect(activeCheckoutOf(s).worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "fix-auth-refresh-482"))
 
     // Sequence: detached worktree → API metadata → fork fetch → branch resolve.
     const detach = calls.findIndex((c) => c.includes("worktree add --detach"))
@@ -1705,7 +1730,7 @@ describe("SessionStore", () => {
       SessionStore.get(s.id).pipe(Effect.provide(SessionStore.Default)),
       temp.layer
     )
-    expect(reread._tag === "Success" && reread.value.prNumber).toBe(482)
+    expect(reread._tag === "Success" && activeCheckoutOf(reread.value).prNumber).toBe(482)
   })
 
   it("createFromPr keeps initial team pickup CLI-only and never persists the account pin", async () => {
@@ -1766,9 +1791,9 @@ describe("SessionStore", () => {
     expect(second._tag).toBe("Success")
     if (first._tag !== "Success" || second._tag !== "Success") return
     // Distinct worktree paths + ids — the second PR is NOT refused as a duplicate.
-    expect(first.value.worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "update-deps-101"))
-    expect(second.value.worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "update-deps-202"))
-    expect(first.value.worktreePath).not.toBe(second.value.worktreePath)
+    expect(activeCheckoutOf(first.value).worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "update-deps-101"))
+    expect(activeCheckoutOf(second.value).worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "update-deps-202"))
+    expect(activeCheckoutOf(first.value).worktreePath).not.toBe(activeCheckoutOf(second.value).worktreePath)
     expect(first.value.id).not.toBe(second.value.id)
   })
 
@@ -1810,7 +1835,7 @@ describe("SessionStore", () => {
       ),
       env
     )
-    expect(exit._tag === "Success" && exit.value.branch).toBe("feat/from-fork")
+    expect(exit._tag === "Success" && activeCheckoutOf(exit.value).branch).toBe("feat/from-fork")
   })
 
   it("createFromPr preserves a typed API error when metadata lookup fails", async () => {
@@ -1854,7 +1879,7 @@ describe("SessionStore", () => {
       env
     )
     expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") expect(exit.value.branch).toBe("chore/bump")
+    if (exit._tag === "Success") expect(activeCheckoutOf(exit.value).branch).toBe("chore/bump")
     // The explicit preference selects the guarded ignore-other-worktrees path.
     expect(calls.some((c) => c.includes("checkout --ignore-other-worktrees chore/bump"))).toBe(true)
   })
@@ -1962,38 +1987,38 @@ describe("SessionStore", () => {
       const session = await createPushedSession()
       await run(SessionStore.archive(session.id, "merged"))
       const archived = await run(SessionStore.get(session.id))
-      expect(existsSync(session.worktreePath!)).toBe(false)
+      expect(existsSync(activeCheckoutOf(session).worktreePath!)).toBe(false)
       expect(archived.archived).toBe(true)
       expect(archived.worktreeKeptReason).toBeUndefined()
     })
 
     it("keeps a worktree with uncommitted changes and records why", async () => {
       const session = await createPushedSession()
-      writeFileSync(join(session.worktreePath!, "dirty.txt"), "wip")
+      writeFileSync(join(activeCheckoutOf(session).worktreePath!, "dirty.txt"), "wip")
       await run(SessionStore.archive(session.id, "merged"))
       const archived = await run(SessionStore.get(session.id))
-      expect(existsSync(session.worktreePath!)).toBe(true)
+      expect(existsSync(activeCheckoutOf(session).worktreePath!)).toBe(true)
       expect(archived.archived).toBe(true)
       expect(archived.worktreeKeptReason).toBe("Uncommitted changes")
     })
 
     it("keeps a worktree with unpushed commits and records why", async () => {
       const session = await createPushedSession()
-      gitIn(session.worktreePath!, "-c", "user.email=t@t.dev", "-c", "user.name=T", "commit", "--allow-empty", "-m", "local", "--no-gpg-sign")
+      gitIn(activeCheckoutOf(session).worktreePath!, "-c", "user.email=t@t.dev", "-c", "user.name=T", "commit", "--allow-empty", "-m", "local", "--no-gpg-sign")
       await run(SessionStore.archive(session.id, "merged"))
       const archived = await run(SessionStore.get(session.id))
-      expect(existsSync(session.worktreePath!)).toBe(true)
+      expect(existsSync(activeCheckoutOf(session).worktreePath!)).toBe(true)
       expect(archived.worktreeKeptReason).toBe("Commits not pushed to a remote branch")
     })
 
     it("restore recreates a removed worktree from its branch", async () => {
       const session = await createPushedSession()
       await run(SessionStore.archive(session.id, "merged"))
-      expect(existsSync(session.worktreePath!)).toBe(false)
+      expect(existsSync(activeCheckoutOf(session).worktreePath!)).toBe(false)
       await run(SessionStore.restore(session.id))
       const restored = await run(SessionStore.get(session.id))
       expect(restored.archived).toBe(false)
-      expect(existsSync(session.worktreePath!)).toBe(true)
+      expect(existsSync(activeCheckoutOf(session).worktreePath!)).toBe(true)
     })
   })
 
@@ -2004,7 +2029,7 @@ describe("SessionStore", () => {
     )
     expect(created._tag).toBe("Success")
     if (created._tag !== "Success") return
-    const worktreePath = created.value.worktreePath!
+    const worktreePath = activeCheckoutOf(created.value).worktreePath!
     expect(existsSync(worktreePath)).toBe(true)
 
     const removed = await runExit(
@@ -2035,12 +2060,12 @@ describe("SessionStore", () => {
         yield* SessionStore.setCheckouts(created.id, {
           ...created,
           checkouts: [
-            { id: "primary", repo: created.repo, repoPath: created.repoPath, worktreePath: created.worktreePath, workspaceMode: "worktree", branch: created.branch, baseBranch: created.baseBranch, prNumber: null },
+            { id: "primary", repo: activeCheckoutOf(created).repo, repoPath: activeCheckoutOf(created).repoPath, worktreePath: activeCheckoutOf(created).worktreePath, workspaceMode: "worktree", branch: activeCheckoutOf(created).branch, baseBranch: activeCheckoutOf(created).baseBranch, prNumber: null },
             { id: "co-other", repo: "other-app", repoPath: otherRepo, worktreePath: second.path, workspaceMode: "worktree", branch: second.branch, baseBranch: second.baseBranch, prNumber: null }
           ],
           activeCheckoutId: "co-other"
         })
-        const paths = [created.worktreePath!, second.path]
+        const paths = [activeCheckoutOf(created).worktreePath!, second.path]
         yield* SessionStore.remove(created.id)
         return paths
       }).pipe(Effect.provide(services)),
@@ -2114,7 +2139,7 @@ describe("SessionStore", () => {
       temp.layer
     )
     if (created._tag !== "Success") throw new Error("expected session")
-    const worktreePath = created.value.worktreePath!
+    const worktreePath = activeCheckoutOf(created.value).worktreePath!
     const rescueBranch = `chore/${basename(worktreePath)}`
     writeFileSync(join(worktreePath, "work.ts"), "saved\n")
     execFileSync("git", ["add", "work.ts"], { cwd: worktreePath })
@@ -2197,10 +2222,10 @@ describe("SessionStore", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     const s = exit.value
-    expect(s.branch).toBe("main")
+    expect(activeCheckoutOf(s).branch).toBe("main")
     expect(s.semanticBranchPending).toBe(true)
     expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: s.worktreePath,
+      cwd: activeCheckoutOf(s).worktreePath,
       encoding: "utf-8"
     }).trim()).toBe("HEAD")
     expect(issueReferenceOf(s)).toStrictEqual({
@@ -2217,7 +2242,7 @@ describe("SessionStore", () => {
     expect(s.title).toBe("Refund route 500s on a stale token")
     expect(s.autoTitle).toBe(false)
     expect(s.initialPrompt).toBe("Refund route 500s on a stale token\n\nFix the refund route.")
-    expect(s.prNumber).toBe(null)
+    expect(activeCheckoutOf(s).prNumber).toBe(null)
     expect(activeChat(s)).toMatchObject({
       workMode: "plan",
       modelId
@@ -2307,8 +2332,8 @@ describe("SessionStore", () => {
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
     expect(issueReferenceOf(result.value.first)?.id).toBe(issueReferenceOf(result.value.second)?.id)
-    expect(result.value.first.repoPath).toBe(repoPath)
-    expect(result.value.second.repoPath).toBe(otherRepoPath)
+    expect(activeCheckoutOf(result.value.first).repoPath).toBe(repoPath)
+    expect(activeCheckoutOf(result.value.second).repoPath).toBe(otherRepoPath)
   })
 
   it("createFromIssue keeps different issues whose display slugs collide", async () => {
@@ -2339,9 +2364,9 @@ describe("SessionStore", () => {
 
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
-    expect(result.value.first.worktreePath).not.toBe(result.value.second.worktreePath)
-    expect(existsSync(result.value.first.worktreePath!)).toBe(true)
-    expect(existsSync(result.value.second.worktreePath!)).toBe(true)
+    expect(activeCheckoutOf(result.value.first).worktreePath).not.toBe(activeCheckoutOf(result.value.second).worktreePath)
+    expect(existsSync(activeCheckoutOf(result.value.first).worktreePath!)).toBe(true)
+    expect(existsSync(activeCheckoutOf(result.value.second).worktreePath!)).toBe(true)
   })
 
   it("setIssue links then unlinks; clearInitialPrompt drops the one-shot prompt", async () => {
@@ -2496,10 +2521,11 @@ describe("SessionStore", () => {
     const result = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Remote mirror" }))
+        const primary = activeCheckoutOf(created)
         const remote: Session = {
           ...created,
           environmentId: "device-buildbox",
-          worktreePath: "/remote/buildbox/jingler/worktrees/remote-mirror"
+          checkouts: [{ ...primary, worktreePath: "/remote/buildbox/jingler/worktrees/remote-mirror" }]
         }
         yield* SessionStore.upsertRemote(remote)
         return yield* SessionStore.get(remote.id)
@@ -2509,7 +2535,7 @@ describe("SessionStore", () => {
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
     expect(result.value.environmentId).toBe("device-buildbox")
-    expect(result.value.worktreePath).toBe("/remote/buildbox/jingler/worktrees/remote-mirror")
+    expect(activeCheckoutOf(result.value).worktreePath).toBe("/remote/buildbox/jingler/worktrees/remote-mirror")
   })
 
   it("forgets a remote mirror without deleting a desktop path", async () => {
@@ -2534,50 +2560,6 @@ describe("SessionStore", () => {
  * headings — the old name holding every session that predated the rename, the
  * new name holding only what came after.
  */
-describe("migrateSessionPrs", () => {
-  // SAFETY: only prNumber/prs are read by the migration; the rest of a Session is irrelevant here.
-  const withPrs = (prNumber: number | null, prs?: Session["prs"]) =>
-    ({ prNumber, ...(prs ? { prs } : {}) }) as Session
-
-  it("derives a one-element stack from prNumber", () => {
-    expect(migrateSessionPrs(withPrs(7)).prs).toEqual([{ number: 7 }])
-  })
-
-  it("leaves a session with no PR untouched", () => {
-    expect(migrateSessionPrs(withPrs(null))).toEqual({ prNumber: null })
-  })
-
-  it("makes prNumber the top of an existing stack", () => {
-    const migrated = migrateSessionPrs(withPrs(1, [{ number: 1 }, { number: 2 }]))
-    expect(migrated.prNumber).toBe(2)
-    expect(migrated.prs?.map((pr) => pr.number)).toEqual([1, 2])
-  })
-})
-
-describe("migrateSessionPrs per checkout", () => {
-  const co = (id: string, repo: string, prNumber: number | null) => ({ id, repo, branch: "b", prNumber })
-  const twoRepos = (activeCheckoutId: string) =>
-    ({
-      prNumber: null,
-      activeCheckoutId,
-      checkouts: [co("web", "qa-web", 1), co("api", "qa-api", 2)]
-    }) as unknown as Session
-
-  it("lists every checkout's PR with its repo and mirrors the active one", () => {
-    const migrated = migrateSessionPrs(twoRepos("web"))
-    expect(migrated.prs).toEqual([
-      { number: 2, repo: "qa-api" },
-      { number: 1, repo: "qa-web" }
-    ])
-    expect(migrated.prNumber).toBe(1)
-  })
-
-  it("leaves single-checkout sessions without repo labels", () => {
-    const single = { prNumber: 3, activeCheckoutId: "web", checkouts: [co("web", "qa-web", 3)] } as unknown as Session
-    expect(migrateSessionPrs(single).prs).toEqual([{ number: 3 }])
-  })
-})
-
 describe("migrateRepoName", () => {
   const at = (repoPath: string | undefined, repo: string) => {
     const input = repoPath === undefined ? { id: "s1", repo } : { id: "s1", repo, repoPath }

@@ -1,7 +1,9 @@
 import {
   ProviderCatalog,
   type ReasoningEffort,
-  type Session
+  Session as SessionSchema,
+  type Session,
+  type SessionCheckout
 } from "@jingler/core"
 import { Schema } from "effect"
 
@@ -63,8 +65,19 @@ export const testProviderCatalog = (
  * `updatedAt` is a fixed date, never `new Date()`: relative-time rendering
  * ("2 hours ago") must not depend on when the suite happens to run.
  */
-export const testSession = (over: Partial<Session> & { id: string }): Session =>
-  ({
+/** Per-repo fields callers may still pass flat; they are folded into the primary checkout. */
+export type CheckoutFields = Partial<Omit<SessionCheckout, "id">>
+
+/**
+ * Decode a wire-shaped fixture (flat per-repo fields, or explicit checkouts)
+ * through the production `Session` schema, so fixtures migrate exactly as
+ * persisted sessions do and invalid ones fail loudly.
+ */
+export const foldCheckout = (flat: object): Session =>
+  Schema.decodeUnknownSync(SessionSchema)({ repo: "", branch: "", prNumber: null, ...flat })
+
+export const testSession = (over: Partial<Session> & CheckoutFields & { id: string }): Session =>
+  foldCheckout({
     repo: "gtm-grid",
     branch: `chore/${over.id}`,
     title: over.id,
@@ -88,4 +101,4 @@ export const testSession = (over: Partial<Session> & { id: string }): Session =>
     baseBranch: "main",
     mode: "auto",
     ...over
-  }) as Session
+  })

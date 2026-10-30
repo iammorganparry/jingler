@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { Session, StreamEvent } from "@jingler/core"
-import { AgentEndpointId, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import type { StreamEvent } from "@jingler/core"
+import { AgentEndpointId, Session, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Effect, Layer, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
@@ -140,15 +140,14 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
     const selectedModelId = over.modelId ?? providerModel("claude-opus-4-1")
     const session: Session = {
       id: SESSION,
-      repo: "trigify-app",
-      branch: "chore/ctx",
+      checkouts: [{ id: "primary", repo: "trigify-app", branch: "chore/ctx", prNumber: null, worktreePath: temp.root }],
+      activeCheckoutId: "primary",
       title: "Context",
       status: "idle",
       connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
       providerId: selectedProviderId,
       modelId: selectedModelId,
       diff: { added: 0, removed: 0 },
-      prNumber: null,
       costUsd: 0,
       tokens: 0,
       updatedAt: now,
@@ -163,7 +162,6 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
         ...(over.contextTokens === undefined ? {} : { contextTokens: over.contextTokens }),
       }],
       activeChatId: SESSION,
-      worktreePath: temp.root,
       // A known 200k legacy model keeps the manager's timing scenarios compact;
       // current 1M aliases are covered explicitly below.
       ...over
@@ -172,7 +170,7 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
     // git worktree, which none of these assertions need.
     yield* Effect.sync(() => {
       mkdirSync(temp.root, { recursive: true })
-      writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session], null, 2))
+      writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([Schema.encodeSync(Session)(session)], null, 2))
     })
     if (withTranscript) {
       yield* TranscriptStore.append(SESSION, {

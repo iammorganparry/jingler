@@ -33,6 +33,7 @@ function ArchivedRow({
 }) {
   const title = session.title || UNTITLED_SESSION
   const when = session.archivedAt ? relativeTime(session.archivedAt) : ""
+  const checkout = activeCheckoutOf(session)
   return (
     <li
       data-testid={`archived-row-${session.id}`}
@@ -41,7 +42,7 @@ function ArchivedRow({
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium text-text-bright">{title}</div>
         <div className="truncate font-mono text-[11px] text-dim">
-          {hasNoRepo(activeCheckoutOf(session)) ? "No repo" : `${session.repo} · ${session.branch}`}
+          {hasNoRepo(checkout) ? "No repo" : `${checkout.repo} · ${checkout.branch}`}
           {when && ` · archived ${when}`}
         </div>
       </div>

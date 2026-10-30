@@ -1,3 +1,4 @@
+import { type CheckoutFields, foldCheckout } from "../test-support"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { CSSProperties } from "react"
 import type { Repo, Session, SessionActivity, ThemeTokens } from "@jingler/core"
@@ -59,7 +60,7 @@ const repos: ReadonlyArray<Repo> = [
   { name: "gtm-grid", path: "/Users/m/repos/gtm-grid", defaultBranch: "main", currentBranch: "feat/scoring", remoteUrl: "git@github.com:trigify/gtm-grid.git", githubSlug: "trigify/gtm-grid" }
 ]
 
-const session = (value: Omit<Session, "chats" | "activeChatId">): Session => ({
+const session = (value: Omit<Session, "chats" | "activeChatId" | "checkouts" | "activeCheckoutId"> & CheckoutFields): Session => foldCheckout({
   ...value,
   chats: [
     { id: `c_${value.id}_1`, title: null, createdAt: value.updatedAt, updatedAt: value.updatedAt }

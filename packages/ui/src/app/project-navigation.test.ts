@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Project, Session } from "@jingler/core"
-import { testSession } from "../test-support.js"
+import { type CheckoutFields, testSession } from "../test-support.js"
 import { MULTI_REPO_PROJECT_ID, projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
 
 const project = (values: Partial<Project> & Pick<Project, "id" | "name" | "path">): Project => ({
@@ -10,7 +10,7 @@ const project = (values: Partial<Project> & Pick<Project, "id" | "name" | "path"
   ...values
 })
 
-const session = (values: Partial<Session> & Pick<Session, "id">): Session =>
+const session = (values: Partial<Session> & CheckoutFields & Pick<Session, "id">): Session =>
   testSession({ repo: "same", updatedAt: "2026-01-01T00:00:00.000Z", ...values })
 
 describe("project navigation", () => {

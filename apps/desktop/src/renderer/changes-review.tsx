@@ -7,7 +7,7 @@
 import { useCallback, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type { Session, SubagentFleetNode } from "@jingler/core"
-import { activeCheckoutOf, checkoutsOf, hasNoRepo, workspaceModeOf } from "@jingler/core"
+import { activeCheckoutOf, checkoutById, checkoutsOf, hasNoRepo, workspaceModeOf, sessionPrsOf } from "@jingler/core"
 import type { AgentTreeChanges } from "@jingler/ui"
 import { ChangedFilesExplorer, EmptyState, SubagentScopeBar, ReviewSidebar, checkoutLabel, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
@@ -41,7 +41,7 @@ export function useChangesReview(session: Session, connected: boolean, checkoutI
   // Read-only: the adversarial review is *run* from the Pull Request tab; its
   // findings anchor to the PR diff wherever that diff renders.
   const adversarial = useAdversarialReview(session, { connected })
-  const worktree = workspaceModeOf(session) === "worktree"
+  const worktree = workspaceModeOf(checkoutById(session, checkoutId)) === "worktree"
 
   const deslopFile = useCallback(
     // Fix in place, on this session's own worktree, through its conversation
@@ -86,7 +86,7 @@ export function useChangesReview(session: Session, connected: boolean, checkoutI
 
 /** What the Changes rail button does: show this session's changes in the Explorer. */
 export const revealSessionChanges = (session: Session): void =>
-  setReviewFilter(session.id, session.prNumber, session.prNumber != null ? "pr" : "local")
+  setReviewFilter(session.id, activeCheckoutOf(session).prNumber, activeCheckoutOf(session).prNumber != null ? "pr" : "local")
 
 /** The agent turns that changed files, and which one the Changes list is narrowed to. */
 export function useReviewTurns(session: Session) {
@@ -94,11 +94,11 @@ export function useReviewTurns(session: Session) {
   const actor = useMemo(() => getConversationActor(session), [session.id, session.activeChatId]) // eslint-disable-line react-hooks/exhaustive-deps
   const messages = useSelector(actor, (snapshot) => snapshot.context.messages)
   const turns = useMemo(() => reviewTurnsOf(messages), [messages])
-  const { turnId } = useSessionReviewState(session.id, session.prNumber)
+  const { turnId } = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
   const turn = turns.find((candidate) => candidate.id === turnId) ?? null
   const setTurn = useCallback(
-    (next: string | null) => setReviewTurn(session.id, session.prNumber, next),
-    [session.id, session.prNumber]
+    (next: string | null) => setReviewTurn(session.id, activeCheckoutOf(session).prNumber, next),
+    [session.id, activeCheckoutOf(session).prNumber]
   )
   return { turns, turn, setTurn }
 }
@@ -140,15 +140,15 @@ function CheckoutChangesList({
 }) {
   const { review, adversarial, revertFile } = useChangesReview(session, connected, checkoutId)
   const { turns, turn, setTurn } = useReviewTurns(session)
-  const { prLayer } = useSessionReviewState(session.id, session.prNumber)
+  const { prLayer } = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
   const selectLayer = useCallback(
     (next: number) => {
-      setReviewPrLayer(session.id, session.prNumber, next)
-      setReviewFilter(session.id, session.prNumber, "pr")
+      setReviewPrLayer(session.id, activeCheckoutOf(session).prNumber, next)
+      setReviewFilter(session.id, activeCheckoutOf(session).prNumber, "pr")
     },
-    [session.id, session.prNumber]
+    [session.id, activeCheckoutOf(session).prNumber]
   )
-  // The turn filter and Discard belong to the active checkout only.
+  // The turn filter belongs to the active checkout only.
   const active = checkoutId === undefined
   const agentTrees = useAgentTrees(session, review.files, active && review.source === "local")
   const { changesScope, setChangesScope } = useSubagentView(session.activeChatId)
@@ -161,8 +161,8 @@ function CheckoutChangesList({
       turns={active ? turns : []}
       turnId={active ? (turn?.id ?? null) : null}
       onTurnChange={setTurn}
-      prLayers={active ? (session.prs ?? []) : []}
-      prNumber={prLayer ?? session.prNumber}
+      prLayers={active ? sessionPrsOf(session) : []}
+      prNumber={prLayer ?? activeCheckoutOf(session).prNumber}
       onPrNumberChange={selectLayer}
       files={review.files}
       agentTrees={agentTrees}
@@ -177,7 +177,7 @@ function CheckoutChangesList({
       review={review.source === "pr" && checkoutId === undefined ? adversarial.review : null}
       activePath={activePath}
       onSelectFile={onOpenPath}
-      onDiscardFile={active && review.source === "local" ? revertFile : undefined}
+      onDiscardFile={review.source === "local" ? revertFile : undefined}
       loading={review.loading}
       error={review.error}
       onRetry={review.retry}
@@ -196,7 +196,7 @@ export function ChangesExplorerPanel({
   readonly session: Session
   readonly connected: boolean
   readonly activePath: string | null
-  readonly onOpenPath: (path: string) => void
+  readonly onOpenPath: (path: string, checkoutId?: string) => void
 }) {
   const checkouts = checkoutsOf(session)
   // An Auto session with nothing attached yet has no repo to diff against.
@@ -229,7 +229,7 @@ export function ChangesExplorerPanel({
             connected={connected}
             checkoutId={checkout.id}
             activePath={activePath}
-            onOpenPath={onOpenPath}
+            onOpenPath={(path) => onOpenPath(path, checkout.id)}
           />
         </section>
       ))}

@@ -4,7 +4,7 @@ import { readProjectConfig } from "./project-config.js"
 import { createHash } from "node:crypto"
 import type { CommandExecutor } from "@effect/platform"
 import { FileSystem, Path } from "@effect/platform"
-import { GitError, Project as ProjectSchema } from "@jingler/core"
+import { GitError, Project as ProjectSchema, checkoutsOf } from "@jingler/core"
 import type { Project, Session } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
@@ -284,13 +284,13 @@ export class ProjectService extends Effect.Service<ProjectService>()(
 
       /** Register each unique legacy repository without mutating the source sessions. */
       const backfill = (
-        sessions: ReadonlyArray<Pick<Session, "projectId" | "repoPath" | "repo" | "environmentId">>
+        sessions: ReadonlyArray<Parameters<typeof checkoutsOf>[0] & Pick<Session, "environmentId">>
       ): Effect.Effect<ReadonlyArray<Project>, GitError, ProjectStoreEnv> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
           const localSessions = sessions.filter((session) => session.environmentId === undefined)
-          const sessionProjectIds = new Set(localSessions.map((session) => session.projectId))
-          const sessionPaths = new Set(localSessions.flatMap((session) => session.repoPath ? [path.resolve(session.repoPath)] : []))
+          const sessionProjectIds = new Set(localSessions.flatMap((session) => checkoutsOf(session).map((checkout) => checkout.projectId)))
+          const sessionPaths = new Set(localSessions.flatMap((session) => checkoutsOf(session).flatMap((checkout) => checkout.repoPath ? [path.resolve(checkout.repoPath)] : [])))
           yield* lock.withPermits(1)(Effect.gen(function* () {
             const current = yield* readPersisted()
             const recovered = current.map((project) =>
@@ -303,7 +303,7 @@ export class ProjectService extends Effect.Service<ProjectService>()(
             if (recovered.some((project, index) => project !== current[index])) yield* writePersisted(recovered)
           }))
           const repositories = localSessions.flatMap((session) =>
-            session.repoPath ? [{ path: session.repoPath, name: session.repo }] : []
+            checkoutsOf(session).flatMap((checkout) => checkout.repoPath ? [{ path: checkout.repoPath, name: checkout.repo }] : [])
           )
           const unique = new Map<string, RegisterProjectInput>()
           for (const repository of repositories) {

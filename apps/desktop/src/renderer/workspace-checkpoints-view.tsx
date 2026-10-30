@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { useMachine } from "@xstate/react"
 import type { Session } from "@jingler/core"
+import { activeCheckoutOf } from "@jingler/core"
 import { Button, ConfirmDialog, Dialog, DialogContent, DialogTitle, DialogBody } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import { workspaceCheckpointsMachine } from "./workspace-checkpoints-machine.js"
@@ -20,7 +21,7 @@ export function WorkspaceCheckpointsView({ session, onSession, onClosed, returnF
   // Direct revert shows only the confirm dialog (and the list dialog as the error surface); back at the list means done.
   const direct = revertTo !== undefined
   useEffect(() => { if (direct && state.matches("ready")) onClosed() }, [direct, state, onClosed])
-  const supported = session.workspaceMode === "worktree" && !session.environmentId && session.executionLocation !== "cloud" && !session.archived
+  const supported = activeCheckoutOf(session).workspaceMode === "worktree" && !session.environmentId && session.executionLocation !== "cloud" && !session.archived
   const cancel = () => { send({ type: "CANCEL" }); if (state.matches("ready")) onClosed() }
   const { items, preview, selected, error } = state.context
   const reverting = state.matches("confirming") || state.matches("restoreFailed") || (state.matches("working") && state.context.action === "restore")
