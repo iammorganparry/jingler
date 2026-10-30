@@ -233,6 +233,16 @@ const groupByStatus = (
     }))
 }
 
+/** Repo groups in first-seen order; a multi-repo workspace is listed under each of its repos. */
+const groupByRepo = (sorted: ReadonlyArray<Session>): Array<{ key: string; sessions: Array<Session> }> => {
+  const byRepo = new Map<string, Array<Session>>()
+  for (const s of sorted) {
+    const repos = reposOf(s)
+    for (const repo of repos.length > 0 ? repos : [""]) byRepo.set(repo, [...(byRepo.get(repo) ?? []), s])
+  }
+  return [...byRepo].map(([key, list]) => ({ key, sessions: list }))
+}
+
 export const groupSessions = (
   sessions: ReadonlyArray<Session>,
   filters: SessionFilters,
@@ -251,16 +261,7 @@ export const groupSessions = (
     return groupByStatus(sorted, statusOf)
   }
 
-  const byRepo = new Map<string, Array<Session>>()
-  for (const s of sorted) {
-    // A multi-repo workspace is listed under each of its repos.
-    for (const repo of reposOf(s).length > 0 ? reposOf(s) : [""]) {
-      const list = byRepo.get(repo)
-      if (list) list.push(s)
-      else byRepo.set(repo, [s])
-    }
-  }
-  const groups = [...byRepo].map(([key, list]) => ({ key, sessions: list }))
+  const groups = groupByRepo(sorted)
   if (!starredRepoNames || starredRepoNames.size === 0) return groups
   // Stable sort: starred repo groups float to the top, order otherwise kept —
   // which means repos stay in first-seen order rather than jumping alphabetical.
