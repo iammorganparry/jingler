@@ -271,21 +271,28 @@ export interface SessionConversationProps {
  * first-launch empty state. Everything belonging to ONE session (its tab bar,
  * tab body and docks) lives in `SessionPane`, which is what the grid multiplies.
  */
+/** The active workspace's project (New workspace default), missing repo folders, and the active one's missing project. */
+export const workspaceProjectState = (activeSession: Session | null, projects: ReadonlyArray<Project>) => {
+  const missing = projects.filter((project) => project.availability === "missing")
+  const checkout = activeSession ? activeCheckoutOf(activeSession) : undefined
+  // A checkout records its projectId only when created from one; older or "This checkout" ones match by path.
+  const activeProjectId = checkout
+    ? (projects.find((project) => project.id === checkout.projectId) ??
+        projects.find((project) => project.path === checkout.repoPath))?.id
+    : undefined
+  const activeMissingProject = activeSession
+    ? missing.find((project) => checkoutsOf(activeSession).some((c) => c.projectId === project.id || c.repoPath === project.path))
+    : undefined
+  return { activeProjectId, missingRepoPaths: new Set(missing.map((project) => project.path)), activeMissingProject }
+}
+
 export function SessionConversation(props: SessionConversationProps) {
   const projects = props.projects ?? []
   const activeSession = props.sessions.find((session) => session.id === props.activeSessionId) ?? null
-  // New workspace defaults to the repo you're looking at.
-  const activeProjectId = activeSession ? activeCheckoutOf(activeSession).projectId : undefined
-  const missingProjects = projects.filter((project) => project.availability === "missing")
-  const missingRepoPaths = useMemo(
-    () => new Set(projects.filter((project) => project.availability === "missing").map((project) => project.path)),
-    [projects]
+  const { activeProjectId, missingRepoPaths, activeMissingProject } = useMemo(
+    () => workspaceProjectState(activeSession, projects),
+    [activeSession, projects]
   )
-  const activeMissingProject = activeSession
-    ? missingProjects.find((project) =>
-        checkoutsOf(activeSession).some((c) => c.projectId === project.id || c.repoPath === project.path)
-      )
-    : undefined
   const filterActions: Array<FilterMenuAction> = [
     ...(props.onAddProject ? [{ id: "add-repo", label: "Add repo…", onSelect: props.onAddProject }] : []),
     ...(props.onImportSessions ? [{ id: "import-sessions", label: "Import sessions…", onSelect: props.onImportSessions }] : []),

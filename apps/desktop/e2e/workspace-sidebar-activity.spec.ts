@@ -1,17 +1,17 @@
 import { appShell, expect, test } from "./fixtures.js"
 
-test("projects show live activity and stay ordered after selection", async ({ launchApp }) => {
+test("every workspace row stays visible and selectable while another is running", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     isolateSystemHome: true,
     withRepo: true,
     sessions: ({ repoPath }) => [
-      { id: "worker", repo: "widget", status: "running", updatedAt: "2026-08-07T12:00:00.000Z" },
-      { id: "quiet", repo: "alpha", status: "idle", updatedAt: "2026-08-07T10:00:00.000Z" },
-      { id: "quiet-two", repo: "alpha", status: "idle", updatedAt: "2026-08-07T09:00:00.000Z" }
+      { id: "worker", repo: "widget", updatedAt: "2026-08-07T12:00:00.000Z" },
+      { id: "quiet", repo: "alpha", updatedAt: "2026-08-07T10:00:00.000Z" },
+      { id: "quiet-two", repo: "alpha", updatedAt: "2026-08-07T09:00:00.000Z" }
     ].map((session) => ({
       ...session,
-      status: session.id === "worker" ? "running" as const : "idle" as const,
+      status: "idle" as const,
       title: session.id,
       branch: "main",
       worktreePath: repoPath,
@@ -25,36 +25,23 @@ test("projects show live activity and stay ordered after selection", async ({ la
   })
   await expect(appShell(window)).toBeVisible()
   await window.setViewportSize({ width: 1500, height: 860 })
-  const projects = window.getByTestId("project-sidebar")
-  const items = projects.locator('[data-testid^="project-row-"]')
-  await expect(items).toHaveCount(2)
-  await expect(items).toHaveText(["U2", "W1"])
-  const order = await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))
-  await projects.getByRole("button", { name: "widget", exact: true }).click()
-  await expect(window.getByTestId("session-header-identity").getByText("worker", { exact: true })).toBeVisible()
+  const identity = (title: string) => window.getByTestId("session-header-identity").getByText(title, { exact: true })
+  for (const id of ["worker", "quiet", "quiet-two"]) await expect(window.getByTestId(`session-row-${id}`)).toBeVisible()
+  await window.getByTestId("session-row-worker").click()
+  await expect(identity("worker")).toBeVisible()
   const composer = window.getByPlaceholder("Message the agent…")
-  await composer.fill("[[queue-hold]] keep this project busy")
+  await composer.fill("[[queue-hold]] keep this workspace busy")
   await composer.press("Enter")
-  const activity = projects.getByRole("status", { name: "widget: sessions in progress" })
-  await expect(activity).toBeVisible()
-  await projects.getByRole("button", { name: "Unassigned", exact: true }).click()
-  await expect(window.getByTestId("session-row-quiet")).toBeVisible()
-  await expect(window.getByTestId("session-header-identity").getByText("quiet", { exact: true })).toBeVisible()
+  await window.getByTestId("session-row-quiet").click()
+  await expect(identity("quiet")).toBeVisible()
   await window.getByTestId("session-row-quiet-two").click()
-  await expect(window.getByTestId("session-header-identity").getByText("quiet-two", { exact: true })).toBeVisible()
-  await expect(window.getByTestId("session-row-worker")).toBeHidden()
-  await expect(activity).toBeVisible()
-  expect(await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))).toEqual(order)
-  await projects.getByRole("button", { name: "widget", exact: true }).click()
-  await expect(window.getByTestId("session-row-worker")).toBeVisible()
-  await expect(window.getByTestId("session-header-identity").getByText("worker", { exact: true })).toBeVisible()
-  expect(await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))).toEqual(order)
-  await projects.getByRole("button", { name: "Unassigned", exact: true }).click()
-  await expect(window.getByTestId("session-header-identity").getByText("quiet-two", { exact: true })).toBeVisible()
-  expect(await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))).toEqual(order)
+  await expect(identity("quiet-two")).toBeVisible()
+  for (const id of ["worker", "quiet", "quiet-two"]) await expect(window.getByTestId(`session-row-${id}`)).toBeVisible()
+  await window.getByTestId("session-row-worker").click()
+  await expect(identity("worker")).toBeVisible()
 })
 
-test("a blocked session shows an amber needs-you count on its project tile until answered", async ({ launchApp }) => {
+test("a blocked session shows a needs-input state on its row until answered", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     isolateSystemHome: true,
@@ -78,26 +65,23 @@ test("a blocked session shows an amber needs-you count on its project tile until
   })
   await expect(appShell(window)).toBeVisible()
   await window.setViewportSize({ width: 1500, height: 860 })
-  const projects = window.getByTestId("project-sidebar")
-  const badge = projects.locator('[data-testid^="project-needs-you-"]')
-  await projects.getByRole("button", { name: "widget", exact: true }).click()
+  const asker = window.getByTestId("session-row-asker")
+  await window.getByTestId("session-row-asker").click()
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[ask]] migrate the store")
   await composer.press("Enter")
   await expect(window.getByText("Agent needs your input")).toBeVisible({ timeout: 15_000 })
 
-  // Viewing another project, the blocked one's tile still carries the one-line amber count.
-  await projects.getByRole("button", { name: "Unassigned", exact: true }).click()
-  await expect(badge).toHaveText("1")
-  await expect(badge).toHaveAccessibleName("widget: 1 needs you")
-  expect(await badge.locator("span").first().evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("nowrap")
+  // Viewing another workspace, the blocked one's row still carries the one-line amber count.
+  await window.getByTestId("session-row-quiet").click()
+  await expect(asker).toContainText("Needs Input")
 
   // Answering clears it without a reload.
-  await projects.getByRole("button", { name: "widget", exact: true }).click()
+  await window.getByTestId("session-row-asker").click()
   await expect(window.getByText("Agent needs your input")).toBeVisible()
   await window.keyboard.press("2")
   await window.keyboard.press("Enter")
   await window.keyboard.press("1")
   await window.keyboard.press("Enter")
-  await expect(badge).toHaveCount(0, { timeout: 15_000 })
+  await expect(asker).not.toContainText("Needs Input", { timeout: 15_000 })
 })

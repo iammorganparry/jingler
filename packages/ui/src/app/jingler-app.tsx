@@ -68,7 +68,8 @@ import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
 import type { PaneContribution } from "./pane-contributions.js"
 import {
   type ConversationPaneCtx,
-  SessionConversation
+  SessionConversation,
+  workspaceProjectState
 } from "../screens/session-conversation.js"
 import type { SessionChatActions } from "./session-tree.js"
 import { openTab } from "./editor-layout.js"
@@ -823,6 +824,15 @@ function getActiveTabContext(active: Session) {
     }
   }
 
+  /** The project New workspace opens on: an explicit pick, else the active workspace's repo, else the last repo used. */
+  function newWorkspaceDefaultProjectId() {
+    return (
+      selectedProjectId ??
+      workspaceProjectState(sessions.find((s) => s.id === selected) ?? null, projects).activeProjectId ??
+      projects.find((project) => project.path === defaultRepoPath)?.id
+    )
+  }
+
   function renderNewWorkspace() {
 
 
@@ -844,7 +854,7 @@ function getActiveTabContext(active: Session) {
               onConnectIssueProvider={() => openSettings("plugins")}
               onOpenSession={selectSession}
               environmentStartup={pendingEnvironmentSession}
-              defaultProjectId={selectedProjectId ?? projects.find((project) => project.path === defaultRepoPath)?.id}
+              defaultProjectId={newWorkspaceDefaultProjectId()}
               requestedProjectId={requestedNewSession?.projectId}
               requestedPr={requestedNewSession?.pr}
               requestedIssue={requestedNewSession?.issue}
@@ -1086,6 +1096,8 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, rep
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
+    // A plain open defaults to the active workspace's repo, not whichever project was last picked.
+    setSelectedProjectId(null)
     setNewOpen(true)
   }, [])
   const startWithPrompt = useCallback(({ projectId, ...prefill }: HomeStart) => {

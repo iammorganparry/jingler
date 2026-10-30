@@ -63,3 +63,11 @@ it("routes Explorer files through the reveal callback", () => {
   fireEvent.click(screen.getByRole("button", { name: "index.ts" }))
   expect(open).toHaveBeenCalledWith("a1", "src/index.ts")
 })
+
+it("defaults a new workspace by repo path when the checkout has no projectId", () => {
+  const forProject = vi.fn()
+  const bare = testSession({ id: "p1", repoPath: "/repos/alpha", title: "Path only" })
+  render(<SessionConversation projects={projects} sessions={[bare]} activeSessionId="p1" onSelectSession={() => {}} onNewSessionForProject={forProject} showEmpty />)
+  fireEvent.click(screen.getAllByTestId("new-session")[0]!)
+  expect(forProject).toHaveBeenCalledWith("alpha")
+})

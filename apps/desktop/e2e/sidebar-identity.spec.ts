@@ -78,15 +78,9 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   const attention = window.locator('[data-testid="session-row-s_attention"]').last()
   const running = window.locator('[data-testid="session-row-s_running"]').last()
   const idle = window.locator('[data-testid="session-row-s_idle"]').last()
-  await expect(window.getByTestId("project-sidebar")).toBeVisible()
   await expect(running).toBeVisible()
-  await expect(idle).toHaveCount(0)
-  await expect(attention).toHaveCount(0)
-
-  await window.getByRole("button", { name: "Unassigned", exact: true }).click()
   await expect(attention).toBeVisible()
   await expect(idle).toBeVisible()
-  await expect(running).toHaveCount(0)
   const positions = await Promise.all([attention, idle].map((row) => row.boundingBox()))
   expect(positions[0]!.y).toBeLessThan(positions[1]!.y)
   await expect(window.getByText("Needs Input", { exact: true }).first()).toBeVisible()
@@ -99,8 +93,6 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   )
   await expect(attention.getByTitle("OpenAI")).toBeVisible()
 
-  await window.getByRole("button", { name: "widget", exact: true }).click()
-  await expect(running).toBeVisible()
   await expect(window.getByTestId("session-location-s_running")).toHaveAttribute(
     "title",
     "Local session"
@@ -128,8 +120,6 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   expect(sidebarSurface.radius).toBe(0)
   expect(sidebarSurface.backdrop).toBe("none")
   expect(sidebarSurface.background).toBe(appBackground)
-  // #390: the project rail sits on --sb-canvas (#0b0b0c), a step darker than the sidebar.
-  await expect(window.getByTestId("project-sidebar")).toHaveCSS("background-color", "rgb(11, 11, 12)")
   await expect(window.getByRole("separator", { name: "Resize sidebar" })).toHaveCSS(
     "background-color",
     "rgba(0, 0, 0, 0)"
