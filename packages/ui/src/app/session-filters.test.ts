@@ -357,3 +357,21 @@ describe("repoOptions", () => {
     expect(repoOptions(SESSIONS)).toStrictEqual(["gtm-grid", "jingler"])
   })
 })
+
+describe("project-rail filter migration", () => {
+  it("adopts a per-project entry into the shared key without its repo filter", () => {
+    localStorage.setItem(
+      `${FILTERS_STORAGE_KEY}.proj-a`,
+      JSON.stringify({ status: "all", repo: "jingler", pr: "open", groupBy: "status", sortBy: "name" })
+    )
+    expect(loadFilters()).toStrictEqual({ status: "all", repo: null, pr: "open", groupBy: "status", sortBy: "name" })
+    expect(localStorage.getItem(`${FILTERS_STORAGE_KEY}.proj-a`)).toBeNull()
+    expect(JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)!).repo).toBeNull()
+  })
+
+  it("leaves an existing shared entry alone", () => {
+    saveFilters({ ...DEFAULT_FILTERS, sortBy: "name" })
+    localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-a`, JSON.stringify({ sortBy: "status" }))
+    expect(loadFilters().sortBy).toBe("name")
+  })
+})

@@ -301,10 +301,34 @@ const isPr = (v: unknown): v is PrFilter => typeof v === "string" && v in PR_LAB
  * currently exist — that check belongs at render time, where the session list is
  * known. See `reconcileRepo`.
  */
+/**
+ * One-time carry-over from the project rail era: filters were saved per project
+ * (`<key>.<projectId>`). The flat workspace list reads the shared key, so adopt a
+ * per-project entry there — minus its repo filter, which scoped one project — and
+ * drop the rest.
+ */
+const migrateProjectFilters = (): string | null => {
+  const prefix = `${FILTERS_STORAGE_KEY}.`
+  const keys = Object.keys(localStorage).filter((key) => key.startsWith(prefix))
+  if (keys.length === 0) return null
+  const raw = localStorage.getItem(keys[0]!)
+  for (const key of keys) localStorage.removeItem(key)
+  if (raw === null) return null
+  try {
+    const migrated = JSON.stringify({ ...(JSON.parse(raw) as object), repo: null })
+    localStorage.setItem(FILTERS_STORAGE_KEY, migrated)
+    return migrated
+  } catch {
+    return null
+  }
+}
+
 export const loadFilters = (projectId?: string): SessionFilters => {
   try {
     const raw =
-      localStorage.getItem(filtersKey(projectId)) ?? localStorage.getItem(FILTERS_STORAGE_KEY)
+      localStorage.getItem(filtersKey(projectId)) ??
+      localStorage.getItem(FILTERS_STORAGE_KEY) ??
+      (projectId === undefined ? migrateProjectFilters() : null)
     if (raw === null) return DEFAULT_FILTERS
     const parsed = JSON.parse(raw) as Partial<SessionFilters>
     return {
