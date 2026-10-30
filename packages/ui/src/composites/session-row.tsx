@@ -57,6 +57,21 @@ function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: str
   )
 }
 
+/** Amber count of questions waiting on the operator; nothing at zero. */
+function NeedsYouCount({ session, count }: { readonly session: Session; readonly count: number }) {
+  if (count <= 0) return null
+  return (
+    <span
+      data-testid={`session-needs-you-${session.id}`}
+      role="status"
+      aria-label={`${session.title}: ${count} need${count === 1 ? "s" : ""} you`}
+      className="shrink-0"
+    >
+      <Badge tone="yellow" size="xs">{count}</Badge>
+    </span>
+  )
+}
+
 /** One "repo #N" per checkout PR for multi-repo sessions; plain "#N" otherwise; null with no PR. */
 const prLabelOf = (session: Session): string | null => {
   const repoPrs = sessionPrsOf(session).filter((pr) => pr.repo !== undefined)
@@ -83,6 +98,7 @@ export function SessionRow({
   interrupted,
   prState,
   subagentCount = 0,
+  needsYouCount = 0,
   active = false,
   onSelect,
   onRename,
@@ -119,6 +135,8 @@ export function SessionRow({
   prState?: SessionPrStatus | null
   /** Running subagents in this session; the `· N agents` hint is hidden at zero. */
   subagentCount?: number
+  /** Subagent questions waiting on the operator; an amber count, hidden at zero. */
+  needsYouCount?: number
   active?: boolean
   onSelect?: (id: string) => void
   /** Manual rename (double-click the title) — pins the auto-generated name. */
@@ -175,6 +193,7 @@ export function SessionRow({
             {label}
             {age ? ` ${age}` : ""}
           </span>
+          <NeedsYouCount session={session} count={needsYouCount} />
           {subagentCount > 0 && (
             <span
               data-testid={`session-subagent-count-${session.id}`}

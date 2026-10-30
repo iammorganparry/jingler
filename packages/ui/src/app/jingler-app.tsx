@@ -615,6 +615,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         chatActivities={chatActivities}
         prStates={prStates}
         subagentCounts={subagentCounts}
+        subagentAttentionCounts={subagentAttentionCounts}
         repoOwners={repoOwners}
         liveDiff={liveDiff}
         fileDiffs={props.fileDiffs}

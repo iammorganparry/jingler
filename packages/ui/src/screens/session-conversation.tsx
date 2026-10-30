@@ -451,6 +451,7 @@ export function SessionConversation(props: SessionConversationProps) {
         interruptedSessions={props.interruptedSessions}
         prStates={props.prStates}
         subagentCounts={props.subagentCounts}
+        subagentAttentionCounts={props.subagentAttentionCounts}
         repoOwners={props.repoOwners}
         onNewSession={openNewSession}
         user={props.user}

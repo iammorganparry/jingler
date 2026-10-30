@@ -164,6 +164,14 @@ describe("SessionRow per-checkout PRs", () => {
     expect(screen.queryByText("qa-api #2 · qa-web #1")).toBeNull()
   })
 
+  it("shows an amber needs-you count only when something is waiting", () => {
+    const session = testSession({ id: "asker", title: "asker" })
+    const { rerender } = render(<SessionRow session={session} needsYouCount={0} />)
+    expect(screen.queryByTestId("session-needs-you-asker")).toBeNull()
+    rerender(<SessionRow session={session} needsYouCount={2} />)
+    expect(screen.getByRole("status", { name: "asker: 2 need you" }).textContent).toBe("2")
+  })
+
   it("marks a checkout whose folder is missing", () => {
     const session = testSession({
       id: "missing",

@@ -122,6 +122,8 @@ export interface SessionSidebarProps {
   prStates?: Record<string, SessionPrStatus>
   /** Running subagent count per session id, shown as `· N agents` on the row. */
   subagentCounts?: Readonly<Record<string, number>>
+  /** Pending subagent questions per session, shown as an amber count on the row. */
+  subagentAttentionCounts?: Readonly<Record<string, number>>
   /** GitHub owner login per session, used for repository avatars. */
   repoOwners?: Readonly<Record<string, string>>
   /** Open the New Session view (header "+" / ⌘N). */
@@ -399,6 +401,7 @@ function SidebarBody({
   interruptedSessions,
   prStates,
   subagentCounts,
+  subagentAttentionCounts,
   repoOwners,
   onNewSession,
   user,
@@ -774,6 +777,7 @@ return (renderExpandedGroupHeading())
         interrupted={interruptedSessions?.has(s.id)}
         prState={prStates?.[s.id]}
         subagentCount={subagentCounts?.[s.id]}
+        needsYouCount={subagentAttentionCounts?.[s.id]}
         active={s.id === activeSessionId}
         onSelect={onSelect}
         onRename={onRename}
