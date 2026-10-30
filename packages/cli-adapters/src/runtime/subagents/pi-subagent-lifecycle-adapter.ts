@@ -910,6 +910,14 @@ export class PiSubagentLifecycleAdapter {
       ))
     }
     const rpc = controlRpcFor(request, message, (runId) => this.#state().asyncStarts.get(runId)?.mode === "single")
+    // Recorded before dispatch: the process can exit before the stop reply arrives.
+    // Child-scoped stops leave the enclosing run to finish normally.
+    const wholeRunStop = request.action === "stop" &&
+      typeof rpc.params === "object" && rpc.params !== null && "runId" in rpc.params &&
+      !("childId" in rpc.params) && typeof rpc.params.runId === "string"
+      ? rpc.params.runId
+      : null
+    if (wholeRunStop !== null) this.#stopRequested.add(wholeRunStop)
     return this.#request(rpc.method, rpc.params, request.requestId).pipe(
       Effect.map((reply) => {
         if (request.action === "reply") this.#clearAttention(request, replyTo)
@@ -922,7 +930,7 @@ export class PiSubagentLifecycleAdapter {
           "runId" in reply.data && typeof reply.data.runId === "string"
           ? reply.data.runId
           : null
-        if (stoppedRunId !== null) this.#stopRequested.add(stoppedRunId)
+        if (wholeRunStop !== null && stoppedRunId !== null) this.#stopRequested.add(stoppedRunId)
         return this.#outcome(
           request,
           sequence,
@@ -934,6 +942,7 @@ export class PiSubagentLifecycleAdapter {
         )
       }),
       Effect.catchAll((error) => {
+        if (wholeRunStop !== null) this.#stopRequested.delete(wholeRunStop)
         const failure = controlFailure(error)
         return Effect.succeed(this.#outcome(
           request,

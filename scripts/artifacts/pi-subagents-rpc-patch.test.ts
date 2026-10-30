@@ -143,8 +143,17 @@ describe("Jingler pi-subagents compatibility patch", () => {
       const child = await factory.create({
         cwd: ${JSON.stringify(root)}, storage: { kind: "memory" }, model: "test/model",
         extensionPaths: [], ambientExtensions: false, hooks: [], noSkills: true, noContextFiles: true,
+        parentProviderRegistry: { getRegisteredProviderIds: () => ["parent-only"] },
+        signal: new AbortController().signal,
         runtime: { parentSessionId: ${JSON.stringify(parent)}, agent: ${JSON.stringify(agent)}, fanoutChild: false, depth: 1, waitTool: { enabled: false }, fast: false }
       });
+      const aborted = await factory.create({
+        cwd: ${JSON.stringify(root)}, storage: { kind: "memory" }, model: "test/model",
+        extensionPaths: [], ambientExtensions: false, hooks: [], noSkills: true, noContextFiles: true,
+        signal: AbortSignal.abort(new Error("startup cancelled")),
+        runtime: { parentSessionId: ${JSON.stringify(parent)}, agent: ${JSON.stringify(agent)}, fanoutChild: false, depth: 1, waitTool: { enabled: false }, fast: false }
+      }).then(() => "started", (error) => error.message);
+      if (aborted !== "startup cancelled") throw new Error("startup abort was not forwarded: " + aborted);
       const events = [];
       child.subscribe((event) => events.push(event));
       await child.prompt("hello");
