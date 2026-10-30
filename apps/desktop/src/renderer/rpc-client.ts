@@ -111,6 +111,7 @@ import type {
   ProviderId,
   ProviderModelId,
   JinglerSubagentName,
+  SubagentFleetEvent,
   CodexLoginMethod,
   DetectedResourceCandidate,
   McpConfigEntry,
@@ -211,7 +212,8 @@ const clientPromise = Promise.all([
   // GitHub RPCs span both groups: connection/replay operations live in the
   // core group while review and publish operations live in the review group.
   // A shallow spread would discard the core half of the namespace.
-  Github: { ...core.Github, ...review.Github }
+  Github: { ...core.Github, ...review.Github },
+  Agent: { ...core.Agent, ...review.Agent }
 }))
 
 const assetListClientEffect = RpcClient.make(AssetListRpcs)
@@ -1415,6 +1417,27 @@ export const rpc = {
       if (cancelled) return
       fiber = coreRuntime.runFork(
         client.Review.watch({ sessionId, chatId }).pipe(
+          Stream.runForEach((event) => Effect.sync(() => onEvent(event)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
+
+  agentWatchSubagentFleet: (
+    sessionId: string,
+    chatId: string,
+    onEvent: (event: SubagentFleetEvent) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = coreRuntime.runFork(
+        client.Agent.watchSubagentFleet({ sessionId, chatId }).pipe(
           Stream.runForEach((event) => Effect.sync(() => onEvent(event)))
         )
       )

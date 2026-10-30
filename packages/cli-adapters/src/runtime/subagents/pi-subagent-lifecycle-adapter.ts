@@ -229,7 +229,7 @@ const statusFrom = (
     readonly error?: string
   }
 ): SubagentFleetStatus => {
-  if (value.stopped || value.interrupted) return "stopped"
+  if (value.stopped || value.interrupted || value.state === "stopped") return "stopped"
   if (value.state === "paused") return "paused"
   if (value.state === "queued" || value.state === "pending") return "queued"
   if (value.state === "running") return "running"
@@ -261,9 +261,24 @@ const artifactsFor = (child: typeof CompletionChild.Type): ReadonlyArray<Subagen
     : [])
 ]
 
+/** A run's status once its process is gone: a stop we asked for wins over a vanished process. */
+const terminalStatus = (
+  current: SubagentFleetStatus,
+  state: string,
+  stopped: boolean,
+  settledWorkflow: boolean
+): SubagentFleetStatus => {
+  if (stopped) return "stopped"
+  if (state !== "observed" || current !== "running") return current
+  return settledWorkflow ? "completed" : "unknown"
+}
+
+const STEP_CHILD_ID = /^(.+):step:(\d+)$/u
+
 const controlRpcFor = (
   request: SubagentFleetControlRequest,
-  message: string
+  message: string,
+  isSingleRun: (runId: string) => boolean
 ): { readonly method: string; readonly params: SubagentJsonValue } => {
   switch (request.action) {
     case "follow-up":
@@ -274,6 +289,16 @@ const controlRpcFor = (
       return { method: "reply", params: { requestId: request.replyTo ?? "", message } }
     case "resume":
       return { method: "resume", params: { runId: request.runId, message } }
+    case "stop": {
+      // Children without their own run id are fleet nodes `<run>:step:N`. A single run's only step is
+      // stopped as the whole run: pi-subagents settles a child-scoped stop of it as "failed".
+      const step = STEP_CHILD_ID.exec(request.runId)
+      if (!step) return { method: "stop", params: { runId: request.runId } }
+      return {
+        method: "stop",
+        params: isSingleRun(step[1]!) ? { runId: step[1]! } : { runId: step[1]!, childId: `step:${step[2]}` }
+      }
+    }
     default:
       return { method: request.action, params: { runId: request.runId } }
   }
@@ -392,6 +417,8 @@ export class PiSubagentLifecycleAdapter {
   readonly #supervision: SubagentSupervisionServiceShape
   readonly #transcripts: PiSubagentTranscriptReaderShape
   readonly #trustedSessionRoots: ReadonlySet<string>
+  // The process can exit before pi-subagents publishes the stopped completion; remember who we stopped.
+  readonly #stopRequested = new Set<string>()
 
   constructor(options: PiSubagentLifecycleAdapterOptions) {
     this.#events = options.events
@@ -882,7 +909,7 @@ export class PiSubagentLifecycleAdapter {
         "Supervisor request does not belong to this child run"
       ))
     }
-    const rpc = controlRpcFor(request, message)
+    const rpc = controlRpcFor(request, message, (runId) => this.#state().asyncStarts.get(runId)?.mode === "single")
     return this.#request(rpc.method, rpc.params, request.requestId).pipe(
       Effect.map((reply) => {
         if (request.action === "reply") this.#clearAttention(request, replyTo)
@@ -895,6 +922,7 @@ export class PiSubagentLifecycleAdapter {
           "runId" in reply.data && typeof reply.data.runId === "string"
           ? reply.data.runId
           : null
+        if (stoppedRunId !== null) this.#stopRequested.add(stoppedRunId)
         return this.#outcome(
           request,
           sequence,
@@ -1457,6 +1485,14 @@ export class PiSubagentLifecycleAdapter {
     }, false)
   }
 
+  #workflowSettled(existing: SubagentFleetNode): boolean {
+    if (existing.nodeKind !== "workflow") return false
+    const children = this.#state().tree.nodes.filter((node) => node.parentId === existing.id)
+    return children.length > 0 && children.every(
+      (child) => child.status === "completed" || child.terminal !== null
+    )
+  }
+
   #onProcessTerminal(payload: unknown): void {
     const terminal = Option.getOrUndefined(
       Schema.decodeUnknownOption(ProcessTerminal)(payload)
@@ -1468,20 +1504,13 @@ export class PiSubagentLifecycleAdapter {
     )
     if (!existing) return
     const now = terminal.observedAt ?? this.#now()
+    const stopped = this.#stopRequested.delete(terminal.runId) &&
+      (existing.status === "running" || existing.status === "unknown")
     // A workflow root is never settled by its own completion event (results
     // are keyed to child run ids), so its process ending used to decay a
     // still-"running" root to "unknown" even when every child had finished.
     // If all its registered children settled cleanly, the workflow did too.
-    const settledWorkflow =
-      existing.nodeKind === "workflow" &&
-      (() => {
-        const children = this.#state().tree.nodes.filter(
-          (node) => node.parentId === existing.id
-        )
-        return children.length > 0 && children.every(
-          (child) => child.status === "completed" || child.terminal !== null
-        )
-      })()
+    const settledWorkflow = this.#workflowSettled(existing)
     this.#publish({
       _tag: "Upsert",
       version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -1490,9 +1519,10 @@ export class PiSubagentLifecycleAdapter {
       node: {
         ...existing,
         ...this.#identity(existing.subagentId, existing.orchestrationRunId, existing.nodeKind),
-        status: terminal.state === "observed" && existing.status === "running"
-          ? settledWorkflow ? "completed" : "unknown"
-          : existing.status,
+        status: terminalStatus(existing.status, terminal.state, stopped, settledWorkflow),
+        ...(stopped
+          ? { terminal: { reason: "stopped" as const, summary: "Subagent stopped.", at: now, retryable: false } }
+          : {}),
         updatedAt: now,
         completedAt: existing.completedAt ?? now,
         currentTool: null

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { chmod, cp, mkdir, open, readdir, readFile, rm, stat } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { promisify } from "node:util"
 import { build } from "esbuild"
 
@@ -46,7 +46,7 @@ await build({
   outfile: resolve(payload, "runtime-assets/jingler-claude-cli-provider.mjs")
 })
 await build({
-  entryPoints: [resolve(root, "node_modules/pi-subagents/src/runs/shared/process-child-session-worker.ts")],
+  entryPoints: [resolve(root, "node_modules/pi-subagents/src/runs/shared/process-child-session-worker.js")],
   bundle: true,
   platform: "node",
   mainFields: ["module", "main"],
@@ -83,7 +83,8 @@ const copyPackage = async (name) => {
   const manifest = JSON.parse(await readFile(resolve(source, "package.json"), "utf8"))
   const destination = resolve(payload, "node_modules", name)
   await mkdir(dirname(destination), { recursive: true })
-  await cp(source, destination, { recursive: true, dereference: true })
+  // .bin shims can dangle once pnpm hoists their target; the payload never runs them.
+  await cp(source, destination, { recursive: true, dereference: true, filter: (path) => basename(path) !== ".bin" })
   for (const dependency of Object.keys(manifest.dependencies ?? {})) {
     await copyPackage(dependency)
   }

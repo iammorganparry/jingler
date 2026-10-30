@@ -6,14 +6,16 @@ import type {
   Api,
   AssistantMessage,
   AssistantMessageEvent,
-  Context,
+  JsonObject,
   Model,
   SimpleStreamOptions,
   TextContent,
   ThinkingContent,
   ToolCall,
+  TranscriptContext,
   Usage
 } from "@earendil-works/pi-ai"
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai"
 import { lazyStream } from "@earendil-works/pi-ai/api/lazy"
 import { Option, Schema } from "effect"
 import { execFileText, trackChild } from "../../child-registry.js"
@@ -225,9 +227,10 @@ type ClaudeInputContent =
 
 // The three Pi message variants are clearer serialized together than behind dispatch helpers.
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: protocol serialization stays auditable here.
-function transcriptContent(context: Context): ReadonlyArray<ClaudeInputContent> {
+function transcriptContent(context: TranscriptContext): ReadonlyArray<ClaudeInputContent> {
   const content: Array<ClaudeInputContent> = []
   for (const message of context.messages) {
+    if (message.role === "system") continue
     if (message.role === "user") {
       content.push({ type: "text", text: "<jingler-message role=\"user\">" })
       if (typeof message.content === "string") content.push({ type: "text", text: message.content })
@@ -268,7 +271,7 @@ function transcriptContent(context: Context): ReadonlyArray<ClaudeInputContent> 
   return content
 }
 
-const inputLine = (context: Context): string => JSON.stringify({
+const inputLine = (context: TranscriptContext): string => JSON.stringify({
   type: "user",
   message: { role: "user", content: transcriptContent(context) },
   parent_tool_use_id: null,
@@ -282,16 +285,16 @@ const effortArgs = (reasoning: SimpleStreamOptions["reasoning"]): ReadonlyArray<
   return ["--effort", "high"]
 }
 
-const systemPrompt = (context: Context): string => {
-  const prompt = context.systemPrompt ?? ""
-  if (!context.tools?.some(({ name }) => name === "mcp_search")) return prompt
+const systemPrompt = (context: TranscriptContext): string => {
+  const prompt = getCurrentSystemPrompt(context.messages)
+  if (!getCurrentTools(context.messages).some(({ name }) => name === "mcp_search")) return prompt
   const policy = "Jingler's configured MCP services are available through mcp_search and mcp_call. When the user asks to use or inspect a named service, call mcp_search for that service before taking other action, then use mcp_call as needed. Never claim to have used a service without a successful tool result."
   return prompt.length === 0 ? policy : `${prompt}\n\n${policy}`
 }
 
 export const claudeCliArguments = (
   model: Model<Api>,
-  context: Context,
+  context: TranscriptContext,
   options: SimpleStreamOptions,
   mcpConfigPath: string
 ): ReadonlyArray<string> => [
@@ -432,7 +435,8 @@ const toolEvents = (
     type: "toolCall",
     id: call.id,
     name: call.name,
-    arguments: call.arguments
+    // MCP tool arguments arrive as parsed JSON.
+    arguments: call.arguments as JsonObject
   }
   const index = partial.content.length
   partial.content.push(toolCall)
@@ -552,7 +556,7 @@ const terminateProcess = async (
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: splitting it would hide ordering constraints.
 async function* runClaudeCli(
   model: Model<Api>,
-  context: Context,
+  context: TranscriptContext,
   options: SimpleStreamOptions,
   providerOptions: ClaudeCliProviderOptions
 ): AsyncGenerator<AssistantMessageEvent> {
@@ -571,7 +575,7 @@ async function* runClaudeCli(
     await (providerOptions.checkAuth ?? ((signal) =>
       checkClaudeSubscription(binary, environment, signal)))(options.signal)
     if (options.signal?.aborted) throw new Error("Claude CLI request was aborted")
-    relay = await (providerOptions.startToolRelay ?? startClaudeCliToolRelay)(context.tools ?? [])
+    relay = await (providerOptions.startToolRelay ?? startClaudeCliToolRelay)(getCurrentTools(context.messages))
     if (options.signal?.aborted) throw new Error("Claude CLI request was aborted")
     child = trackChild((providerOptions.spawnProcess ?? spawn)(
       binary,
@@ -599,7 +603,7 @@ async function* runClaudeCli(
     options.signal?.addEventListener("abort", onAbort, { once: true })
     if (options.signal?.aborted) onAbort()
     if (!child.stdin.writableEnded) child.stdin.end(`${inputLine(context)}\n`)
-    const rescue = makeClaudeCliToolRescue(new Set((context.tools ?? []).map(({ name }) => name)))
+    const rescue = makeClaudeCliToolRescue(new Set(getCurrentTools(context.messages).map(({ name }) => name)))
     for await (const event of streamClaudeOutput(child, partial, output, rescue)) yield event
     if (toolCall === null && output.rescued !== null) {
       toolCall = output.rescued
@@ -630,7 +634,7 @@ async function* runClaudeCli(
 
 async function* runClaudeCliOrAbort(
   model: Model<Api>,
-  context: Context,
+  context: TranscriptContext,
   options: SimpleStreamOptions,
   providerOptions: ClaudeCliProviderOptions
 ): AsyncGenerator<AssistantMessageEvent> {
@@ -649,7 +653,7 @@ export const createClaudeCliStreamSimple = (
   providerOptions: ClaudeCliProviderOptions = {}
 ) => (
   model: Model<Api>,
-  context: Context,
+  context: TranscriptContext,
   options: SimpleStreamOptions = {}
 ) => lazyStream(
   model,

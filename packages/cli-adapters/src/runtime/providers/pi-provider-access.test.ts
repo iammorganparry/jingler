@@ -19,20 +19,16 @@ const codexBinary = fileURLToPath(new URL("../codex/fixtures/app-server.mjs", im
 afterEach(() => vi.unstubAllEnvs())
 
 describe("Jingler model additions", () => {
-  it("adds GPT-6 Astra to the configured Codex route", async () => {
+  it("keeps the configured Codex route when adding CLI models", async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false })
     runtime.registerProvider("openai-codex", { baseUrl: "https://codex-proxy.example.com" })
 
-    await registerJinglerModels(runtime, { binary: codexBinary })
-
-    expect(runtime.getModel("openai-codex", "gpt-6-astra")).toMatchObject({
-      baseUrl: "https://codex-proxy.example.com",
-      contextWindow: 1_050_000,
-      maxTokens: 128_000,
-      reasoning: true,
-      input: ["text", "image"],
-      cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 }
+    await registerJinglerModels(runtime, {
+      binary: codexBinary,
+      environment: { ...process.env, CODEX_HOME: "latest-models" }
     })
+
+    expect(runtime.getModel("openai-codex", "gpt-6.2-sol")?.baseUrl).toBe("https://codex-proxy.example.com")
   })
 
   it("registers models advertised by the installed Codex CLI for PI execution", async () => {
@@ -42,8 +38,8 @@ describe("Jingler model additions", () => {
       environment: { ...process.env, CODEX_HOME: "latest-models" }
     })
 
-    expect(runtime.getModel("openai-codex", "gpt-6.1-sol")).toMatchObject({
-      name: "GPT-6.1 Sol",
+    expect(runtime.getModel("openai-codex", "gpt-6.2-sol")).toMatchObject({
+      name: "GPT-6.2 Sol",
       api: "openai-codex-responses",
       baseUrl: "https://chatgpt.com/backend-api",
       contextWindow: 272_000,
@@ -88,8 +84,8 @@ describe("Jingler model additions", () => {
       discoverPiModels(credentials, connection, new AbortController().signal)
     )
     expect(models).toContainEqual(expect.objectContaining({
-      id: "openai-codex/gpt-6.1-sol",
-      label: "GPT-6.1 Sol"
+      id: "openai-codex/gpt-6.2-sol",
+      label: "GPT-6.2 Sol"
     }))
   })
 

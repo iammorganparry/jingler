@@ -74,6 +74,8 @@ const h = vi.hoisted(() => ({
   chatBusy: false,
   /** Push reviewer events into the machine, as ReviewService's stream would. */
   reviewCb: null as null | ((event: unknown) => void),
+  /** Push post-turn fleet events into the machine, as Agent.watchSubagentFleet would. */
+  fleetWatchCb: null as null | ((event: unknown) => void),
   // Same, for the skills probe — it spawns the harness, so nothing may wait on it.
   skillsGate: Promise.resolve() as Promise<void>,
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
@@ -150,6 +152,12 @@ vi.mock("./rpc-client.js", () => ({
       h.reviewCb = onEvent
       return () => {
         h.reviewCb = null
+      }
+    },
+    agentWatchSubagentFleet: (_sessionId: string, _chatId: string, onEvent: (event: unknown) => void) => {
+      h.fleetWatchCb = onEvent
+      return () => {
+        h.fleetWatchCb = null
       }
     },
     agentDecideGate: async () => {},
@@ -1439,6 +1447,26 @@ describe("conversationMachine — talking to the main agent while sub-agents run
 
     expect(actor.getSnapshot().context.subagentFleetEvents).toEqual([recovery])
     actor.stop()
+  })
+
+  it("folds post-turn fleet watch events while idle", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    expect(h.fleetWatchCb).not.toBeNull()
+    const late = {
+      _tag: "Remove" as const,
+      version: 2 as const,
+      eventId: "late-settle",
+      occurredAt: 42,
+      registryRevision: 42,
+      id: "pi-parent-1/retained-run"
+    }
+
+    h.fleetWatchCb?.(late)
+
+    expect(actor.getSnapshot().context.subagentFleetEvents).toEqual([late])
+    actor.stop()
+    expect(h.fleetWatchCb).toBeNull()
   })
 
   it("does not evict a fleet tombstone while its stale upsert is retained", () => {

@@ -563,7 +563,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       // Pi throws on a prompt that lands mid-turn; queue it behind that turn instead.
       streamingBehavior: "followUp"
     }),
-    steer: (text) => session.steer(text),
+    steer: (text) => session.steer(text).then(() => undefined),
     interrupt: () => session.abort(),
     dispose: () => disposeAll([
       () => lifecycle.stop(),

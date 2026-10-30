@@ -6,6 +6,7 @@ import type {
 } from "@jingler/core"
 import { Effect } from "effect"
 import { mcpCapabilityFingerprint } from "../tools/mcp-tools.js"
+import { publishChatFleetEvent } from "./subagent-fleet-hub.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
@@ -86,11 +87,17 @@ export interface RetainedPiSession {
  * lease belong to one turn. Each acquire repoints this stable facade so a
  * retained session never calls the ended turn's mailbox or stale MCP endpoint.
  */
+type ChatRef = { readonly sessionId: string; readonly chatId: string }
+
 const publishDetachedEvent = (
   context: AgentRuntimeContext,
+  chat: ChatRef,
   event: StreamEvent
 ): Effect.Effect<void> => {
   switch (event._tag) {
+    // The ended turn's stream is gone; retained children still settle, so route them to the chat's watchers.
+    case "SubagentFleetChanged":
+      return Effect.sync(() => publishChatFleetEvent(chat.sessionId, chat.chatId, event.event))
     case "BackgroundTaskStarted":
     case "BackgroundTaskProgress":
     case "BackgroundTaskSettled":
@@ -103,11 +110,11 @@ const publishDetachedEvent = (
 
 import { liveCheckoutHost } from "../tools/checkout-tools.js"
 
-const detachedPiSessionContext = (context: AgentRuntimeContext): AgentRuntimeContext => ({
+const detachedPiSessionContext = (context: AgentRuntimeContext, chat: ChatRef): AgentRuntimeContext => ({
   mcp: context.mcp === undefined
     ? undefined
     : { browser: null, configured: context.mcp.configured },
-  publishEvent: (event) => publishDetachedEvent(context, event),
+  publishEvent: (event) => publishDetachedEvent(context, chat, event),
   recordUsage: context.recordUsage,
   registerBackgroundStop: context.registerBackgroundStop,
   canUseTool: context.canUseTool,
@@ -198,7 +205,7 @@ export class RetainedPiSessionRegistry {
     const descriptor: NativeRecoveryDescriptor = {
       owner,
       spec,
-      context: detachedPiSessionContext(context),
+      context: detachedPiSessionContext(context, owner),
       factory
     }
     this.#replaceRecovery(owner.continuationAlias, descriptor)
@@ -269,7 +276,7 @@ export class RetainedPiSessionRegistry {
     if (existing?.sessionId === owner.sessionId && existing.chatId === owner.chatId) {
       return Effect.succeed(existing)
     }
-    const detached = detachedPiSessionContext(context)
+    const detached = detachedPiSessionContext(context, owner)
     const contextHolder = { current: detached }
     const continuationSpec: AgentRunSpec = {
       ...spec,
@@ -425,7 +432,7 @@ export class RetainedPiSessionRegistry {
             return retained
           } catch (cause) {
             retained.activeTurns = 0
-            retained.contextHolder.current = detachedPiSessionContext(context)
+            retained.contextHolder.current = detachedPiSessionContext(context, retained)
             await this.#reconcileLifetime(retained)
             throw cause
           }
@@ -768,7 +775,7 @@ export class RetainedPiSessionRegistry {
   async release(record: RetainedPiSession): Promise<void> {
     record.activeTurns = Math.max(0, record.activeTurns - 1)
     if (record.activeTurns > 0 || record.disposing) return
-    record.contextHolder.current = detachedPiSessionContext(record.contextHolder.current)
+    record.contextHolder.current = detachedPiSessionContext(record.contextHolder.current, record)
     await this.#reconcileLifetime(record)
   }
 

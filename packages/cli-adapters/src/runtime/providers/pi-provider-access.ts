@@ -73,25 +73,6 @@ const isolatedCredentialStore = (
 
 const TRAILING_SLASH = /\/$/u
 
-const ASTRA_MODEL = {
-  id: "gpt-6-astra",
-  name: "GPT-6 Astra",
-  api: "openai-codex-responses" as const,
-  reasoning: true,
-  thinkingLevelMap: { minimal: "low", xhigh: "xhigh", max: "max" } as const,
-  input: ["text", "image"] as Array<"text" | "image">,
-  cost: {
-    input: 10,
-    output: 50,
-    cacheRead: 1,
-    cacheWrite: 12.5,
-    tiers: [{ inputTokensAbove: 272_000, input: 20, output: 75, cacheRead: 2, cacheWrite: 25 }]
-  },
-  contextWindow: 1_050_000,
-  maxTokens: 128_000,
-  compat: { supportsOpenAIGrammarTools: true, supportsToolSearch: true }
-}
-
 const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
 const cliThinkingLevelMap = (
@@ -148,13 +129,7 @@ export const registerJinglerModels = async (
 ): Promise<void> => {
   const codex = runtime.getProvider("openai-codex")
   if (codex === undefined) return
-  if (!codex.getModels().some(({ id }) => id === ASTRA_MODEL.id)) {
-    runtime.registerProvider("openai-codex", {
-      ...runtime.getRegisteredProviderConfig("openai-codex"),
-      models: [...codex.getModels(), ASTRA_MODEL]
-    })
-  }
-  const models = runtime.getProvider("openai-codex")!.getModels()
+  const models = codex.getModels()
   const catalog = await readCodexModelCatalog({ timeoutMs: 5_000, ...options }).catch(() => [])
   runtime.registerProvider("openai-codex", {
     ...runtime.getRegisteredProviderConfig("openai-codex"),

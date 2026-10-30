@@ -838,6 +838,112 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
+  it("stops a single run's step as the whole run, and a multi-step run's step by childId", async () => {
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentRuntimeSessionId: parent,
+      controlJournal: null,
+      emit: () => undefined,
+      now: () => 35
+    })
+    adapter.start()
+    events.emit("subagent:async-started", { id: "single-run", sessionId: parent, agent: "worker", mode: "single" })
+    events.emit("subagent:async-started", { id: "chain-run", sessionId: parent, agent: "worker", mode: "chain" })
+    const sent: unknown[] = []
+    const unsubscribe = events.on("subagents:rpc:v1:request", (request) => {
+      if (!request || typeof request !== "object" || !("requestId" in request) || !("params" in request)) return
+      sent.push(request.params)
+      events.emit(`subagents:rpc:v1:reply:${String(request.requestId)}`, {
+        version: 1,
+        requestId: request.requestId,
+        method: "stop",
+        success: true,
+        data: { state: "stopping" }
+      })
+    })
+    const stop = (runId: string) => adapter.control({
+      version: 2,
+      requestId: `stop-${runId}`,
+      parentRuntimeSessionId: parent,
+      runId,
+      action: "stop",
+      message: null,
+      replyTo: null
+    })
+
+    await stop("single-run:step:0")
+    await stop("chain-run:step:1")
+    await stop("own-run-id")
+    expect(sent).toEqual([
+      { runId: "single-run" },
+      { runId: "chain-run", childId: "step:1" },
+      { runId: "own-run-id" }
+    ])
+    unsubscribe()
+    adapter.stop()
+  })
+
+  it("settles a stopped run as stopped when its process exits before the completion", async () => {
+    const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentRuntimeSessionId: parent,
+      controlJournal: null,
+      emit: (event) => emitted.push(event),
+      now: () => 50
+    })
+    adapter.start()
+    events.emit("subagent:async-started", { id: "stopped-run", sessionId: parent, agent: "worker", mode: "single" })
+    const unsubscribe = events.on("subagents:rpc:v1:request", (request) => {
+      if (!request || typeof request !== "object" || !("requestId" in request)) return
+      events.emit(`subagents:rpc:v1:reply:${String(request.requestId)}`, {
+        version: 1,
+        requestId: request.requestId,
+        method: "stop",
+        success: true,
+        data: { runId: "stopped-run", state: "stopping" }
+      })
+    })
+    await adapter.control({
+      version: 2,
+      requestId: "stop-run",
+      parentRuntimeSessionId: parent,
+      runId: "stopped-run",
+      action: "stop",
+      message: null,
+      replyTo: null
+    })
+    events.emit("subagent:process-terminal", { runId: "stopped-run", state: "observed", observedAt: 60 })
+
+    const settled = emitted.filter((event) => event._tag === "Upsert" && event.node.subagentId === "stopped-run").at(-1)
+    expect(settled?._tag === "Upsert" ? settled.node : null).toMatchObject({
+      status: "stopped",
+      terminal: { reason: "stopped" }
+    })
+    unsubscribe()
+    adapter.stop()
+  })
+
+  it("still decays an un-stopped run whose process vanished to unknown", () => {
+    const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentRuntimeSessionId: parent,
+      controlJournal: null,
+      emit: (event) => emitted.push(event),
+      now: () => 50
+    })
+    adapter.start()
+    events.emit("subagent:async-started", { id: "crashed-run", sessionId: parent, agent: "worker", mode: "single" })
+    events.emit("subagent:process-terminal", { runId: "crashed-run", state: "observed", observedAt: 60 })
+    const settled = emitted.filter((event) => event._tag === "Upsert" && event.node.subagentId === "crashed-run").at(-1)
+    expect(settled?._tag === "Upsert" ? settled.node.status : null).toBe("unknown")
+    adapter.stop()
+  })
+
   it("settles a delivered control deterministically across child completion", async () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({

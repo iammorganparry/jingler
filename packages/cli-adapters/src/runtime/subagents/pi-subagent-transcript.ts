@@ -47,7 +47,7 @@ const toolTarget = (argumentsValue: unknown): string | null => {
   return from !== null && to !== null ? `${from} → ${to}` : null
 }
 
-const textOf = (message: PiMessage): string => {
+const textOf = (message: Exclude<PiMessage, { readonly role: "system" }>): string => {
   if (message.role === "user") {
     return typeof message.content === "string"
       ? message.content
@@ -88,7 +88,7 @@ const toolResult = (
 }
 
 const partsOf = (
-  message: Exclude<PiMessage, { readonly role: "toolResult" }>
+  message: Exclude<PiMessage, { readonly role: "toolResult" | "system" }>
 ): ReadonlyArray<ContentPart> => {
   if (message.role === "user") {
     const content = typeof message.content === "string"
@@ -159,6 +159,7 @@ export const appendPiMessagesToJingler = (
   const projected: Array<Message> = [...previous]
   for (const [index, message] of messages.entries()) {
     const messageIndex = indexOffset + index
+    if (message.role === "system") continue
     if (message.role === "toolResult") {
       appendStandaloneToolResult(projected, message, messageIndex)
       continue

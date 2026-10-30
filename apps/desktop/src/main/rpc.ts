@@ -5,6 +5,7 @@ import { TerminalError } from "@jingler/core";
 import { workspaceEnvironment } from "@jingler/cli-adapters/workspace-environment";
 import { BUILTIN_SKILLS } from "@jingler/cli-adapters"
 import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
+import { watchChatFleet } from "@jingler/cli-adapters/runtime/agent/subagent-fleet-hub"
 import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
 /**
  * RPC transport — the crux of the app.
@@ -6179,6 +6180,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),
   // Unwrapped from the service like `Terminal.attach` — the reviewer outlives any
   // one watcher, so the stream attaches to it rather than starting it.
+  "Agent.watchSubagentFleet": ({ sessionId, chatId }) =>
+    interruptOnPageGone(watchChatFleet(sessionId, chatId)),
   "Review.watch": ({ sessionId, chatId }) =>
     interruptOnPageGone(
       Stream.unwrap(

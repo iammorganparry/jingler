@@ -28,8 +28,8 @@
   },
   "dependencies": {
     "@dietrichgebert/ponytail": "4.9.0",
-    "@earendil-works/pi-ai": "0.84.1",
-    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "@effect/platform": "^0.96.2",
     "@effect/platform-node": "^0.107.0",
     "@effect/rpc": "^0.75.1",
@@ -46,7 +46,7 @@
     "effect": "^3.21.4",
     "electron-updater": "^6.3.9",
     "jiti": "^2.7.0",
-    "pi-subagents": "0.65.0",
+    "pi-subagents": "0.84.0",
     "ws": "^8.18.0",
     "xstate": "^5.32.4"
   },
