@@ -238,7 +238,11 @@ const groupByRepo = (sorted: ReadonlyArray<Session>): Array<{ key: string; sessi
   const byRepo = new Map<string, Array<Session>>()
   for (const s of sorted) {
     const repos = reposOf(s)
-    for (const repo of repos.length > 0 ? repos : [""]) byRepo.set(repo, [...(byRepo.get(repo) ?? []), s])
+    for (const repo of repos.length > 0 ? repos : [""]) {
+      const list = byRepo.get(repo)
+      if (list) list.push(s)
+      else byRepo.set(repo, [s])
+    }
   }
   return [...byRepo].map(([key, list]) => ({ key, sessions: list }))
 }
@@ -310,17 +314,23 @@ const isPr = (v: unknown): v is PrFilter => typeof v === "string" && v in PR_LAB
 const migrateProjectFilters = (): string | null => {
   const prefix = `${FILTERS_STORAGE_KEY}.`
   const keys = Object.keys(localStorage).filter((key) => key.startsWith(prefix))
-  if (keys.length === 0) return null
-  const raw = localStorage.getItem(keys[0]!)
-  for (const key of keys) localStorage.removeItem(key)
-  if (raw === null) return null
-  try {
-    const migrated = JSON.stringify({ ...(JSON.parse(raw) as object), repo: null })
-    localStorage.setItem(FILTERS_STORAGE_KEY, migrated)
-    return migrated
-  } catch {
-    return null
+  let migrated: string | null = null
+  for (const key of keys) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) ?? "null") as unknown
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        migrated = JSON.stringify({ ...parsed, repo: null })
+        break
+      }
+    } catch {
+      // Malformed entry: try the next project's.
+    }
   }
+  if (migrated === null) return null
+  // Old keys go only once the shared entry is safely written.
+  localStorage.setItem(FILTERS_STORAGE_KEY, migrated)
+  for (const key of keys) localStorage.removeItem(key)
+  return migrated
 }
 
 export const loadFilters = (projectId?: string): SessionFilters => {

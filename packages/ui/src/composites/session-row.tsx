@@ -2,8 +2,8 @@ import { useEffect, useState } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
-import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activeCheckoutOf, activityLabel, checkoutsOf, displayStatusOf, hasNoRepo, issueReferenceOf, reposLabelOf, sessionPrsOf } from "@jingler/core"
+import type { Environment, SessionCheckout, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
+import { activeCheckoutOf, activityLabel, checkoutPrsOf, checkoutsOf, displayStatusOf, hasNoRepo, issueReferenceOf, reposLabelOf, sessionPrsOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
@@ -56,6 +56,9 @@ function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: str
     </span>
   )
 }
+
+/** `missingRepoPaths` key: a folder path on one machine (undefined = this desktop). */
+export const missingRepoKey = (environmentId: string | undefined, path: string): string => `${environmentId ?? ""}\u0000${path}`
 
 /** Amber count of questions waiting on the operator; nothing at zero. */
 function NeedsYouCount({ session, count }: { readonly session: Session; readonly count: number }) {
@@ -152,7 +155,7 @@ export function SessionRow({
   /** Whether the row's chat tree is shown. Absent hides the chevron. */
   expanded?: boolean
   onToggleExpanded?: (id: string) => void
-  /** Registered repo folders that are gone from disk; their chips render dashed red. */
+  /** Registered repo folders gone from disk, as `missingRepoKey`s; their chips render dashed red. */
   missingRepoPaths?: ReadonlySet<string>
   className?: string
 }) {
@@ -258,13 +261,20 @@ export function SessionRow({
         </div>)
   }
 
+  /** The live poll covers the active checkout's top PR; others use their persisted top layer. */
+  function checkoutPrStatus(c: SessionCheckout): SessionPrStatus | null {
+    if (c.id === activeCheckoutOf(session).id && prState) return prState
+    const top = checkoutPrsOf(c).at(-1)
+    return top ? { state: top.state ?? "open", checks: top.checks ?? null } : null
+  }
+
   /** One chip per attached repo; only multi-repo workspaces, single-repo rows already name their repo. */
   function renderRepoChips() {
     const real = checkoutsOf(session).filter((c) => !hasNoRepo(c))
     if (real.length < 2) return null
     return (<div data-testid={`session-repo-chips-${session.id}`} className="flex min-w-0 flex-wrap gap-1">
           {real.map((c) => (
-            <RepoChip key={c.id} repo={c.repo} prNumber={c.prNumber} missing={missingRepoPaths?.has(c.repoPath ?? "") ?? false} />
+            <RepoChip key={c.id} repo={c.repo} prNumber={c.prNumber} pr={checkoutPrStatus(c)} missing={c.repoPath !== undefined && (missingRepoPaths?.has(missingRepoKey(session.environmentId, c.repoPath)) ?? false)} />
           ))}
         </div>)
   }

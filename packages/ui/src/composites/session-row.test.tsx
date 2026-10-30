@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { testSession } from "../test-support.js"
-import { SessionRow } from "./session-row.js"
+import { missingRepoKey, SessionRow } from "./session-row.js"
 
 afterEach(cleanup)
 
@@ -181,8 +181,36 @@ describe("SessionRow per-checkout PRs", () => {
       ],
       activeCheckoutId: "web"
     })
-    render(<SessionRow session={session} missingRepoPaths={new Set(["/r/api"])} />)
+    render(<SessionRow session={session} missingRepoPaths={new Set([missingRepoKey(undefined, "/r/api")])} />)
     expect(screen.getByTestId("repo-chip-qa-api").dataset.missing).toBe("true")
     expect(screen.getByTestId("repo-chip-qa-web").dataset.missing).toBeUndefined()
+  })
+
+  it("does not mark a checkout missing when only another machine's same path is gone", () => {
+    const session = testSession({
+      id: "remote-path",
+      checkouts: [
+        { ...co("web", "qa-web", null), repoPath: "/r/web" },
+        { ...co("api", "qa-api", null), repoPath: "/r/api" }
+      ],
+      activeCheckoutId: "web"
+    })
+    render(<SessionRow session={session} missingRepoPaths={new Set([missingRepoKey("mini", "/r/api")])} />)
+    expect(screen.getByTestId("repo-chip-qa-api").dataset.missing).toBeUndefined()
+  })
+
+  it("shows each checkout's own PR status: live for the active one, persisted for the rest", () => {
+    const session = testSession({
+      id: "pr-status",
+      checkouts: [
+        co("web", "qa-web", 1),
+        { ...co("api", "qa-api", 2), prs: [{ number: 2, state: "merged" as const, checks: "pass" as const }] }
+      ],
+      activeCheckoutId: "web"
+    })
+    render(<SessionRow session={session} prState={{ state: "open", checks: "fail" }} />)
+    const glyphOf = (repo: string) => screen.getByTestId(`repo-chip-${repo}`).querySelector("[data-testid=pr-glyph]") as HTMLElement
+    expect(glyphOf("qa-web").dataset.checks).toBe("fail")
+    expect(glyphOf("qa-api").dataset.state).toBe("merged")
   })
 })

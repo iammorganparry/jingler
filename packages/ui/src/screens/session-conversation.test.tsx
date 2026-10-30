@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import type { Project } from "@jingler/core"
 import { testSession } from "../test-support.js"
-import { SessionConversation } from "./session-conversation.js"
+import { SessionConversation, workspaceProjectState } from "./session-conversation.js"
 
 const projects: Project[] = ["alpha", "beta"].map((id) => ({
   id, name: id, path: `/repos/${id}`, availability: id === "beta" ? "missing" : "available",
@@ -70,4 +70,17 @@ it("defaults a new workspace by repo path when the checkout has no projectId", (
   render(<SessionConversation projects={projects} sessions={[bare]} activeSessionId="p1" onSelectSession={() => {}} onNewSessionForProject={forProject} showEmpty />)
   fireEvent.click(screen.getAllByTestId("new-session")[0]!)
   expect(forProject).toHaveBeenCalledWith("alpha")
+})
+
+it("matches projects by path only on the session's own machine", () => {
+  const twin: Project[] = [
+    { id: "remote", environmentId: "mini", name: "alpha", path: "/repos/alpha", availability: "missing", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    { id: "local", name: "alpha", path: "/repos/alpha", availability: "available", createdAt: "2026-01-01", updatedAt: "2026-01-01" }
+  ]
+  const local = testSession({ id: "l", repoPath: "/repos/alpha" })
+  expect(workspaceProjectState(local, twin).activeProjectId).toBe("local")
+  expect(workspaceProjectState(local, twin).activeMissingProject).toBeUndefined()
+  const remote = testSession({ id: "r", repoPath: "/repos/alpha", environmentId: "mini" })
+  expect(workspaceProjectState(remote, twin).activeProjectId).toBe("remote")
+  expect(workspaceProjectState(remote, twin).activeMissingProject?.id).toBe("remote")
 })

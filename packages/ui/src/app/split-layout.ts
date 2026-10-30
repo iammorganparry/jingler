@@ -174,7 +174,7 @@ const replaceGroup = (ws: Workspace, groupId: string, next: SplitGroup | null): 
       // neighbour: closing the last group in the sidebar should land on the one
       // above it, not jump to the top.
       (next?.id ?? groups[index]?.id ?? groups[index - 1]?.id ?? groups[0]?.id ?? null)
-    : (ws.activeGroupId ?? groups[0]?.id ?? null)
+    : ws.activeGroupId // null is Home: removing a background group keeps it there.
   return { groups, activeGroupId }
 }
 
@@ -498,11 +498,10 @@ export const prune = (ws: Workspace, knownIds: ReadonlySet<string>): Workspace =
     }
     groups.push(next)
   }
-  const activeGroupId =
-    activeId ??
-    // Same landing order as `replaceGroup`: whatever took its place, then its
-    // neighbour above, then the top.
-    (activeAt === -1 ? (groups[0]?.id ?? null) : (groups[activeAt]?.id ?? groups[activeAt - 1]?.id ?? groups[0]?.id ?? null))
+  // Home (null) stays Home. Otherwise same landing order as `replaceGroup`:
+  // whatever took its place, then its neighbour above, then the top.
+  const landing = activeAt === -1 ? groups[0]?.id : (groups[activeAt]?.id ?? groups[activeAt - 1]?.id ?? groups[0]?.id)
+  const activeGroupId = ws.activeGroupId === null ? null : (activeId ?? landing ?? null)
   return { groups, activeGroupId }
 }
 
@@ -654,7 +653,9 @@ export const load = (): Workspace => {
     const activePane = Array.isArray(storedActive?.panes) ? storedActive.panes[storedActive.focused] : undefined
     const activeGroupId = (isPane(activePane)
       ? groups.find((group) => group.panes.some((pane) => pane.sessionId === activePane.sessionId))
-      : groups.find((group) => group.id === parsed.activeGroupId))?.id ?? groups[0]!.id
+      : groups.find((group) => group.id === parsed.activeGroupId))?.id ??
+      // A stored null is Home on purpose; only a stale id falls back to the first group.
+      (parsed.activeGroupId === null ? null : groups[0]!.id)
     // Sessions no longer split: a stored multi-pane group explodes into one
     // group per session, keeping the focused pane's session on screen.
     return groups

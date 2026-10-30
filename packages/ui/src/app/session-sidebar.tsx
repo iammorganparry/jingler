@@ -1,6 +1,7 @@
 import { Spin } from "../components/spin.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import * as React from "react"
+import { LayoutGroup } from "motion/react"
 import type { DiffStat, Environment, PrState, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, Usage, User } from "@jingler/core"
 import { displayStatusOf, sessionPrsOf, UNTITLED_SESSION } from "@jingler/core"
 import {
@@ -58,6 +59,10 @@ import {
   sessionPrState,
   type SessionFilters
 } from "./session-filters.js"
+
+
+/** Live activity kinds that mean the workspace itself is blocked on the operator. */
+const NEEDS_YOU_KINDS: ReadonlySet<string> = new Set(["needs-input", "needs-approval"])
 
 export type SidebarUpdateKind = "available" | "downloading" | "downloaded" | "failed" | "manual"
 
@@ -643,7 +648,11 @@ return (renderExpandedGroupHeading())
                 </Badge>
               </div>
               {!collapsed && (
-                <div className="mb-1 flex flex-col gap-[3px]">{group.sessions.map(renderEntry)}</div>
+                // A multi-repo workspace is drawn under each of its repos; the group id
+                // namespaces its layoutId so motion doesn't pair the two rows.
+                <LayoutGroup id={filters.groupBy === "repo" ? `repo-${key}` : undefined}>
+                  <div className="mb-1 flex flex-col gap-[3px]">{group.sessions.map(renderEntry)}</div>
+                </LayoutGroup>
               )}
             </div>
             )
@@ -769,7 +778,7 @@ return (renderExpandedGroupHeading())
         interrupted={interruptedSessions?.has(s.id)}
         prState={prStates?.[s.id]}
         subagentCount={subagentCounts?.[s.id]}
-        needsYouCount={subagentAttentionCounts?.[s.id]}
+        needsYouCount={(NEEDS_YOU_KINDS.has(liveActivity?.[s.id]?.kind ?? "") ? 1 : 0) + (subagentAttentionCounts?.[s.id] ?? 0)}
         active={s.id === activeSessionId}
         onSelect={onSelect}
         onRename={onRename}

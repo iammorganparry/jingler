@@ -16,6 +16,7 @@ import type {
 } from "@jingler/core"
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
 import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
+import { missingRepoKey } from "../composites/session-row.js"
 import { SessionSidebar, type SidebarReleaseNotes, type SidebarUpdate } from "../app/session-sidebar.js"
 import { MissingFolderBanner } from "../app/missing-folder-banner.js"
 import { activeCheckoutOf, checkoutsOf } from "@jingler/core"
@@ -274,16 +275,18 @@ export interface SessionConversationProps {
 /** The active workspace's project (New workspace default), missing repo folders, and the active one's missing project. */
 export const workspaceProjectState = (activeSession: Session | null, projects: ReadonlyArray<Project>) => {
   const missing = projects.filter((project) => project.availability === "missing")
-  const checkout = activeSession ? activeCheckoutOf(activeSession) : undefined
+  const missingRepoPaths = new Set(missing.map((project) => missingRepoKey(project.environmentId, project.path)))
+  if (!activeSession) return { activeProjectId: undefined, missingRepoPaths, activeMissingProject: undefined }
+  // Local and remote projects can share a path, so path fallbacks only match the session's own machine.
+  const sameEnv = (project: Project) => project.environmentId === activeSession.environmentId
+  const checkout = activeCheckoutOf(activeSession)
   // A checkout records its projectId only when created from one; older or "This checkout" ones match by path.
-  const activeProjectId = checkout
-    ? (projects.find((project) => project.id === checkout.projectId) ??
-        projects.find((project) => project.path === checkout.repoPath))?.id
-    : undefined
-  const activeMissingProject = activeSession
-    ? missing.find((project) => checkoutsOf(activeSession).some((c) => c.projectId === project.id || c.repoPath === project.path))
-    : undefined
-  return { activeProjectId, missingRepoPaths: new Set(missing.map((project) => project.path)), activeMissingProject }
+  const activeProjectId = (projects.find((project) => project.id === checkout.projectId) ??
+    projects.find((project) => sameEnv(project) && project.path === checkout.repoPath))?.id
+  const activeMissingProject = missing.find((project) =>
+    checkoutsOf(activeSession).some((c) => c.projectId === project.id || (sameEnv(project) && c.repoPath === project.path))
+  )
+  return { activeProjectId, missingRepoPaths, activeMissingProject }
 }
 
 export function SessionConversation(props: SessionConversationProps) {

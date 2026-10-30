@@ -369,6 +369,20 @@ describe("project-rail filter migration", () => {
     expect(JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)!).repo).toBeNull()
   })
 
+  it("skips a malformed entry and keeps old keys until the shared one is written", () => {
+    localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-a`, "{not json")
+    localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-b`, JSON.stringify({ sortBy: "name" }))
+    expect(loadFilters().sortBy).toBe("name")
+    expect(localStorage.getItem(`${FILTERS_STORAGE_KEY}.proj-b`)).toBeNull()
+    expect(JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)!).sortBy).toBe("name")
+  })
+
+  it("keeps every old key when no entry is usable", () => {
+    localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-a`, "{not json")
+    expect(loadFilters()).toStrictEqual(DEFAULT_FILTERS)
+    expect(localStorage.getItem(`${FILTERS_STORAGE_KEY}.proj-a`)).toBe("{not json")
+  })
+
   it("leaves an existing shared entry alone", () => {
     saveFilters({ ...DEFAULT_FILTERS, sortBy: "name" })
     localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-a`, JSON.stringify({ sortBy: "status" }))
