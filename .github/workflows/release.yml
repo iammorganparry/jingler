@@ -166,8 +166,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The Mac minis: no hosted-image brownouts or retirements. Being
+          # persistent, they need the signing cleanup step at the end of the job.
           - label: macOS arm64
-            os: macos-14
+            os: [self-hosted, macOS, ARM64, jingler]
             args: "--mac --arm64"
             artifact: desktop-mac-arm64
             optional: false
@@ -273,6 +275,11 @@ jobs:
         with:
           path: .cache/whisper.cpp
           key: whisper-cpp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/distribution/build-whisper.mjs') }}
+      # Hosted images ship cmake; the Mac minis get it from Homebrew on first use.
+      - name: Ensure cmake
+        if: runner.os == 'macOS'
+        shell: bash
+        run: command -v cmake >/dev/null || /opt/homebrew/bin/brew install cmake
       - name: Build whisper-cli
         run: node scripts/distribution/build-whisper.mjs
 
@@ -343,6 +350,15 @@ jobs:
             exit 1
           fi
           spctl -a -vv "$APP"
+
+      # Self-hosted runners outlive the job: drop the signing keychain (which
+      # also takes it off the search list) and the decoded App Store Connect key.
+      - name: Remove signing material
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/jingler-signing.keychain-db" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/cert.p12"
 
       - name: Inspect desktop and device artifacts
         shell: bash
