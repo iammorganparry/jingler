@@ -159,6 +159,26 @@ describe("groupSessions", () => {
     expect(groupSessions([], DEFAULT_FILTERS, idle)).toStrictEqual([])
   })
 
+  it("lists a two-repo workspace under each of its repos", () => {
+    const both = s({
+      id: "mr",
+      title: "Both",
+      checkouts: [
+        { id: "a", repo: "jingler", branch: "b", prNumber: null },
+        { id: "b", repo: "gtm-grid", branch: "b", prNumber: null }
+      ],
+      activeCheckoutId: "a"
+    })
+    expect(filterSessions([both], "", { ...DEFAULT_FILTERS, repo: "gtm-grid" }).map((x) => x.id)).toStrictEqual(["mr"])
+    expect(filterSessions([both], "", { ...DEFAULT_FILTERS, repo: "jingler" }).map((x) => x.id)).toStrictEqual(["mr"])
+    const groups = groupSessions([both], { ...DEFAULT_FILTERS, groupBy: "repo" }, idle)
+    expect(groups.map((g) => [g.key, g.sessions.map((x) => x.id)])).toStrictEqual([
+      ["jingler", ["mr"]],
+      ["gtm-grid", ["mr"]]
+    ])
+    expect(repoOptions([both])).toStrictEqual(["gtm-grid", "jingler"])
+  })
+
   it("groups by repo in first-seen order", () => {
     const out = groupSessions(active, { ...DEFAULT_FILTERS, groupBy: "repo" }, idle)
     expect(out.map((g) => g.key)).toStrictEqual(["jingler", "gtm-grid"])
