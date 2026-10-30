@@ -132,8 +132,7 @@ test("#509: a held subagent's question bumps the sidebar needs-you count and lig
   await expect(appShell(window)).toBeVisible()
   await window.setViewportSize({ width: 1500, height: 860 })
 
-  const projects = window.getByTestId("project-sidebar")
-  await projects.getByRole("button", { name: "widget", exact: true }).click()
+  await window.locator('[data-testid^="session-row-"]').first().click()
 
   const composer = window.getByPlaceholder("Message the agent…")
   // The rail needs two turns to render, so finish one turn before asking (see chat.spec.ts).
@@ -145,14 +144,11 @@ test("#509: a held subagent's question bumps the sidebar needs-you count and lig
   await composer.press("Enter")
   await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
 
-  // Sidebar needs-you badge: viewing another project, the blocked one's tile carries the count.
-  await projects.getByRole("button", { name: "Unassigned", exact: true }).click()
-  const badge = projects.locator('[data-testid^="project-needs-you-"]')
+  // Sidebar needs-you badge: the blocked workspace's row carries the count.
+  const badge = window.getByTestId("session-needs-you-s_subagents_ask")
   await expect(badge).toHaveText("1")
-  await expect(badge).toHaveAccessibleName("widget: 1 needs you")
 
   // Latest turn's rail tick is amber for the pending subagent question.
-  await projects.getByRole("button", { name: "widget", exact: true }).click()
   const rail = window.getByRole("navigation", { name: "Message navigation" })
   const tick = rail.locator('[data-slot="preview-rail-item"]').last()
   await expect(tick.locator('[data-slot="preview-rail-tick"]')).toHaveAttribute("data-kind", "needs-you")

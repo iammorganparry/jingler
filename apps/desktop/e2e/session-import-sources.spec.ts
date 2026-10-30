@@ -119,7 +119,8 @@ test("imports sessions from all four sources", async ({ launchApp }) => {
 
   await expect(appShell(launched.window)).toBeVisible()
 
-  const importButton = launched.window.getByRole("button", { name: "Import sessions…" })
+  await launched.window.getByTestId("session-filter-menu").click()
+  const importButton = launched.window.getByRole("menuitem", { name: "Import sessions…" })
   await importButton.click()
 
   const dialog = launched.window.getByRole("dialog")

@@ -1,80 +1,56 @@
-import { useState } from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import type { Project } from "@jingler/core"
 import { testSession } from "../test-support.js"
-import { SessionConversation } from "./session-conversation.js"
-import { resetEditorLayouts } from "../app/editor-layout-machine.js"
+import { SessionConversation, workspaceProjectState } from "./session-conversation.js"
 
-const projects: Project[] = ["alpha", "beta", "empty"].map((id) => ({
-  id, name: id, path: `/repos/${id}`, availability: "available",
+const projects: Project[] = ["alpha", "beta"].map((id) => ({
+  id, name: id, path: `/repos/${id}`, availability: id === "beta" ? "missing" : "available",
   createdAt: "2026-01-01", updatedAt: "2026-01-01"
 }))
 const sessions = [
-  testSession({ id: "a1", projectId: "alpha", title: "Alpha one" }),
-  testSession({ id: "a2", projectId: "alpha", title: "Alpha two" }),
-  testSession({ id: "b1", projectId: "beta", title: "Beta one", updatedAt: "2026-01-01" }),
-  testSession({ id: "b2", projectId: "beta", title: "Beta two", updatedAt: "2026-02-01" }),
-  testSession({ id: "b3", projectId: "beta", title: "Archived beta", updatedAt: "2026-03-01", archived: true })
+  testSession({ id: "a1", projectId: "alpha", repoPath: "/repos/alpha", title: "Alpha one" }),
+  testSession({ id: "b1", projectId: "beta", repoPath: "/repos/beta", title: "Beta one" }),
+  testSession({
+    id: "ab",
+    title: "Both",
+    checkouts: [
+      { id: "a", projectId: "alpha", repo: "alpha", repoPath: "/repos/alpha", branch: "b", prNumber: null },
+      { id: "b", projectId: "beta", repo: "beta", repoPath: "/repos/beta", branch: "b", prNumber: null }
+    ],
+    activeCheckoutId: "a"
+  })
 ]
-
-function Navigation({ showEmpty = true }: { showEmpty?: boolean }) {
-  const [active, setActive] = useState("a1")
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
-  const [currentSessions, setCurrentSessions] = useState(sessions)
-  return <>
-    <output aria-label="Active session">{active}</output>
-    <output aria-label="Selected project">{selectedProjectId}</output>
-    <button type="button" onClick={() => setCurrentSessions((current) => current.map((session) =>
-      session.id === "a1" ? { ...session, updatedAt: "2026-08-01T00:00:00.000Z" } : session
-    ))}>Update Alpha</button>
-    <button type="button" onClick={() => setCurrentSessions((current) => current.map((session) =>
-      session.id === "b1" ? { ...session, archived: true } : session
-    ))}>Archive Beta one</button>
-    <button type="button" onClick={() => setCurrentSessions((current) => current.filter((session) => session.id !== "b1"))}>Delete Beta one</button>
-    <SessionConversation projects={projects} sessions={currentSessions} activeSessionId={active}
-      selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId}
-      onSelectSession={setActive} showEmpty={showEmpty} renderConversation={(session) => <div data-testid="session-content">{session.id}</div>} />
-  </>
-}
 
 afterEach(() => {
   cleanup()
   localStorage.clear()
 })
 
-it("opens the newest active session on first visit and restores the last viewed session on return", () => {
-  render(<Navigation />)
-  fireEvent.click(screen.getByRole("button", { name: "beta" }))
-  expect(screen.queryByTestId("session-row-a1")).toBeNull()
-  expect(screen.getByLabelText("Active session").textContent).toBe("b2")
-  fireEvent.click(screen.getByTestId("session-row-b1"))
-  expect(screen.getByLabelText("Active session").textContent).toBe("b1")
-  fireEvent.click(screen.getByRole("button", { name: "alpha" }))
-  expect(screen.getByLabelText("Active session").textContent).toBe("a1")
-  fireEvent.click(screen.getByRole("button", { name: "Update Alpha" }))
-  fireEvent.click(screen.getByRole("button", { name: "beta" }))
-  expect(screen.getByLabelText("Active session").textContent).toBe("b1")
+it("lists every workspace in one flat list, with no project rail", () => {
+  render(<SessionConversation projects={projects} sessions={sessions} activeSessionId="a1" onSelectSession={() => {}} showEmpty />)
+  expect(screen.queryByTestId("project-sidebar")).toBeNull()
+  for (const id of ["a1", "b1", "ab"]) expect(screen.getByTestId(`session-row-${id}`)).toBeDefined()
 })
 
-it.each(["Archive Beta one", "Delete Beta one"])("falls back when the remembered session is unavailable: %s", (action) => {
-  render(<Navigation />)
-  fireEvent.click(screen.getByRole("button", { name: "beta" }))
-  fireEvent.click(screen.getByTestId("session-row-b1"))
-  fireEvent.click(screen.getByRole("button", { name: "alpha" }))
-  fireEvent.click(screen.getByRole("button", { name: action }))
-  fireEvent.click(screen.getByRole("button", { name: "beta" }))
-  expect(screen.getByLabelText("Active session").textContent).toBe("b2")
+it("marks a multi-repo workspace's chip when that repo's folder is missing", () => {
+  render(<SessionConversation projects={projects} sessions={sessions} activeSessionId="a1" onSelectSession={() => {}} showEmpty />)
+  expect(screen.getByTestId("repo-chip-beta").dataset.missing).toBe("true")
+  expect(screen.getByTestId("repo-chip-alpha").dataset.missing).toBeUndefined()
 })
 
-it("shows an empty project instead of the previous project's conversation", () => {
-  render(<Navigation showEmpty={false} />)
-  expect(screen.getByTestId("session-content").textContent).toBe("a1")
-  fireEvent.click(screen.getByRole("button", { name: "empty" }))
-  expect(screen.getByLabelText("Selected project").textContent).toBe("empty")
-  expect(screen.getByLabelText("Active session").textContent).toBe("a1")
-  expect(screen.queryByTestId("session-content")).toBeNull()
-  expect(screen.getByRole("textbox", { name: "What should we build?" })).toBeTruthy()
+it("shows the missing-folder banner only for the active workspace's missing repo", () => {
+  const { rerender } = render(<SessionConversation projects={projects} sessions={sessions} activeSessionId="a1" onSelectSession={() => {}} onLocateProject={() => {}} showEmpty />)
+  expect(screen.queryByText("beta: folder not found")).toBeNull()
+  rerender(<SessionConversation projects={projects} sessions={sessions} activeSessionId="b1" onSelectSession={() => {}} onLocateProject={() => {}} showEmpty />)
+  expect(screen.getByText("beta: folder not found")).toBeDefined()
+})
+
+it("starts a new workspace in the active workspace's repo", () => {
+  const forProject = vi.fn()
+  render(<SessionConversation projects={projects} sessions={sessions} activeSessionId="a1" onSelectSession={() => {}} onNewSessionForProject={forProject} showEmpty />)
+  fireEvent.click(screen.getAllByTestId("new-session")[0]!)
+  expect(forProject).toHaveBeenCalledWith("alpha")
 })
 
 it("routes Explorer files through the reveal callback", () => {
@@ -86,4 +62,25 @@ it("routes Explorer files through the reveal callback", () => {
   fireEvent.click(screen.getByRole("tab", { name: "Explorer" }))
   fireEvent.click(screen.getByRole("button", { name: "index.ts" }))
   expect(open).toHaveBeenCalledWith("a1", "src/index.ts")
+})
+
+it("defaults a new workspace by repo path when the checkout has no projectId", () => {
+  const forProject = vi.fn()
+  const bare = testSession({ id: "p1", repoPath: "/repos/alpha", title: "Path only" })
+  render(<SessionConversation projects={projects} sessions={[bare]} activeSessionId="p1" onSelectSession={() => {}} onNewSessionForProject={forProject} showEmpty />)
+  fireEvent.click(screen.getAllByTestId("new-session")[0]!)
+  expect(forProject).toHaveBeenCalledWith("alpha")
+})
+
+it("matches projects by path only on the session's own machine", () => {
+  const twin: Project[] = [
+    { id: "remote", environmentId: "mini", name: "alpha", path: "/repos/alpha", availability: "missing", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    { id: "local", name: "alpha", path: "/repos/alpha", availability: "available", createdAt: "2026-01-01", updatedAt: "2026-01-01" }
+  ]
+  const local = testSession({ id: "l", repoPath: "/repos/alpha" })
+  expect(workspaceProjectState(local, twin).activeProjectId).toBe("local")
+  expect(workspaceProjectState(local, twin).activeMissingProject).toBeUndefined()
+  const remote = testSession({ id: "r", repoPath: "/repos/alpha", environmentId: "mini" })
+  expect(workspaceProjectState(remote, twin).activeProjectId).toBe("remote")
+  expect(workspaceProjectState(remote, twin).activeMissingProject?.id).toBe("remote")
 })

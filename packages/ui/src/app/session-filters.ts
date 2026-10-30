@@ -1,5 +1,10 @@
 import type { PrState, Session, SessionDisplayStatus } from "@jingler/core"
-import { activeCheckoutOf, sessionPrsOf } from "@jingler/core"
+import { checkoutsOf, sessionPrsOf, type SessionCheckout } from "@jingler/core"
+
+/** Every repo a workspace works in; a two-repo workspace belongs under both. */
+export const reposOf = (s: Session): ReadonlyArray<string> => [
+  ...new Set(checkoutsOf(s).map((c: SessionCheckout) => c.repo).filter((repo) => repo !== ""))
+]
 
 /**
  * How the sidebar's session list is narrowed and arranged.
@@ -112,15 +117,13 @@ const statusRank = (s: SessionDisplayStatus): number => {
 
 /** Every repo present in `sessions`, alphabetical — the Repository submenu. */
 export const repoOptions = (sessions: ReadonlyArray<Session>): ReadonlyArray<string> =>
-  [...new Set(sessions.map((s) => activeCheckoutOf(s).repo))].sort((a, b) => a.localeCompare(b))
+  [...new Set(sessions.flatMap(reposOf))].sort((a, b) => a.localeCompare(b))
 
 /** Free-text match across the three fields a person actually types. */
 const matchesQuery = (s: Session, q: string): boolean => {
-  const checkout = activeCheckoutOf(s)
   return (
     s.title.toLowerCase().includes(q) ||
-    checkout.branch.toLowerCase().includes(q) ||
-    checkout.repo.toLowerCase().includes(q)
+    checkoutsOf(s).some((c) => c.branch.toLowerCase().includes(q) || c.repo.toLowerCase().includes(q))
   )
 }
 
@@ -145,7 +148,7 @@ const keeps = (
 ): boolean => {
   if (filters.status === "active" && s.archived) return false
   if (filters.status === "archived" && !s.archived) return false
-  if (filters.repo !== null && activeCheckoutOf(s).repo !== filters.repo) return false
+  if (filters.repo !== null && !reposOf(s).includes(filters.repo)) return false
   if (filters.pr !== "any" && prStateOf(s) !== filters.pr) return false
   return !q || matchesQuery(s, q)
 }
@@ -230,6 +233,20 @@ const groupByStatus = (
     }))
 }
 
+/** Repo groups in first-seen order; a multi-repo workspace is listed under each of its repos. */
+const groupByRepo = (sorted: ReadonlyArray<Session>): Array<{ key: string; sessions: Array<Session> }> => {
+  const byRepo = new Map<string, Array<Session>>()
+  for (const s of sorted) {
+    const repos = reposOf(s)
+    for (const repo of repos.length > 0 ? repos : [""]) {
+      const list = byRepo.get(repo)
+      if (list) list.push(s)
+      else byRepo.set(repo, [s])
+    }
+  }
+  return [...byRepo].map(([key, list]) => ({ key, sessions: list }))
+}
+
 export const groupSessions = (
   sessions: ReadonlyArray<Session>,
   filters: SessionFilters,
@@ -248,13 +265,7 @@ export const groupSessions = (
     return groupByStatus(sorted, statusOf)
   }
 
-  const byRepo = new Map<string, Array<Session>>()
-  for (const s of sorted) {
-    const list = byRepo.get(activeCheckoutOf(s).repo)
-    if (list) list.push(s)
-    else byRepo.set(activeCheckoutOf(s).repo, [s])
-  }
-  const groups = [...byRepo].map(([key, list]) => ({ key, sessions: list }))
+  const groups = groupByRepo(sorted)
   if (!starredRepoNames || starredRepoNames.size === 0) return groups
   // Stable sort: starred repo groups float to the top, order otherwise kept —
   // which means repos stay in first-seen order rather than jumping alphabetical.
@@ -294,10 +305,40 @@ const isPr = (v: unknown): v is PrFilter => typeof v === "string" && v in PR_LAB
  * currently exist — that check belongs at render time, where the session list is
  * known. See `reconcileRepo`.
  */
+/**
+ * One-time carry-over from the project rail era: filters were saved per project
+ * (`<key>.<projectId>`). The flat workspace list reads the shared key, so adopt a
+ * per-project entry there — minus its repo filter, which scoped one project — and
+ * drop the rest.
+ */
+const migrateProjectFilters = (): string | null => {
+  const prefix = `${FILTERS_STORAGE_KEY}.`
+  const keys = Object.keys(localStorage).filter((key) => key.startsWith(prefix))
+  let migrated: string | null = null
+  for (const key of keys) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) ?? "null") as unknown
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        migrated = JSON.stringify({ ...parsed, repo: null })
+        break
+      }
+    } catch {
+      // Malformed entry: try the next project's.
+    }
+  }
+  if (migrated === null) return null
+  // Old keys go only once the shared entry is safely written.
+  localStorage.setItem(FILTERS_STORAGE_KEY, migrated)
+  for (const key of keys) localStorage.removeItem(key)
+  return migrated
+}
+
 export const loadFilters = (projectId?: string): SessionFilters => {
   try {
     const raw =
-      localStorage.getItem(filtersKey(projectId)) ?? localStorage.getItem(FILTERS_STORAGE_KEY)
+      localStorage.getItem(filtersKey(projectId)) ??
+      localStorage.getItem(FILTERS_STORAGE_KEY) ??
+      (projectId === undefined ? migrateProjectFilters() : null)
     if (raw === null) return DEFAULT_FILTERS
     const parsed = JSON.parse(raw) as Partial<SessionFilters>
     return {
@@ -337,7 +378,7 @@ export const reconcileRepo = (
   sessions: ReadonlyArray<Session>
 ): SessionFilters => {
   if (filters.repo === null || sessions.length === 0) return filters
-  return sessions.some((s) => activeCheckoutOf(s).repo === filters.repo) ? filters : { ...filters, repo: null }
+  return sessions.some((s) => reposOf(s).includes(filters.repo!)) ? filters : { ...filters, repo: null }
 }
 
 /** Whether anything is narrowed — drives the button's "active" dot. */
@@ -418,7 +459,7 @@ export const sessionFilterAxes = (
         ...repos.map((repo) => ({
           value: repo,
           label: repo,
-          count: sessions.filter((s) => activeCheckoutOf(s).repo === repo).length
+          count: sessions.filter((s) => reposOf(s).includes(repo)).length
         }))
       ],
       onSelect: (v) => onChange({ ...filters, repo: v === ALL_REPOS ? null : v })

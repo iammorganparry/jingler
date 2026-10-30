@@ -621,3 +621,36 @@ describe("SessionSidebar session tree", () => {
     expect(screen.queryByTestId("session-tree-s1")).toBeNull()
   })
 })
+
+describe("needs-you count", () => {
+  const renderWith = (kind: "needs-input" | "running" | undefined, children: number) =>
+    render(<SessionSidebar activeSessionId={null} onSelect={() => {}} onRename={() => {}} defaultFilters={DEFAULT_FILTERS}
+      sessions={[session({ id: "w", title: "w" })]}
+      liveActivity={kind ? { w: { kind, verb: kind, target: null } } : {}}
+      subagentAttentionCounts={{ w: children }} />)
+
+  it("counts the workspace's own request, its children's, and both", () => {
+    renderWith("needs-input", 0)
+    expect(screen.getByTestId("session-needs-you-w").textContent).toBe("1")
+    cleanup()
+    renderWith("running", 2)
+    expect(screen.getByTestId("session-needs-you-w").textContent).toBe("2")
+    cleanup()
+    renderWith("needs-input", 2)
+    expect(screen.getByTestId("session-needs-you-w").textContent).toBe("3")
+  })
+})
+
+it("lists a multi-repo workspace under each of its repos", () => {
+  const both = session({
+    id: "both",
+    checkouts: [
+      { id: "a", repo: "alpha", branch: "b", prNumber: null },
+      { id: "b", repo: "beta", branch: "b", prNumber: null }
+    ],
+    activeCheckoutId: "a"
+  })
+  render(<SessionSidebar activeSessionId={null} onSelect={() => {}} onRename={() => {}}
+    defaultFilters={{ ...DEFAULT_FILTERS, groupBy: "repo" }} sessions={[both]} />)
+  expect(screen.getAllByTestId("session-row-both")).toHaveLength(2)
+})

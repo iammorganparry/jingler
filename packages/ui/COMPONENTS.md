@@ -45,7 +45,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | FileChangeList | `components/file-change-list.tsx` | List of changed files with on-demand per-file diffs. | — | no | — |
 | FileChip | `components/file-chip.tsx` | Inline file link with Material icon and diff evidence. | path, added, removed, onOpen, className, children | yes | — |
 | FileIcon | `components/file-icon.tsx` | Material Icon Theme glyph chosen from a file name. | — | no | — |
-| FilterMenu | `components/filter-menu.tsx` | Menu of filter axes, each opening a value flyout. | — | no | — |
+| FilterMenu | `components/filter-menu.tsx` | Menu of filter axes, each opening a value flyout, plus optional command rows below a separator. | axes, actions, align | no | workspace sidebar |
 | GithubMark | `components/github-mark.tsx` | GitHub octocat mark. | — | no | — |
 | HoverCard | `components/hover-card.tsx` | Detail popover on hover intent and focus; elevated surface, r8, 150ms delay, Esc closes. | — | no | #374 (2.9) |
 | HtmlPreview | `components/html-preview.tsx` | Opt-in preview for an html fenced block in agent output. | — | yes | — |
@@ -67,6 +67,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | OAuthButton | `components/oauth-button.tsx` | OAuth provider button (GitHub octocat etc.). | provider, mode, onClick, disabled, className | no | — |
 | PierreFileTree | `components/pierre-file-tree.tsx` | Large repository file tree (Pierre). | paths, gitStatus, path, status, selectedPaths, focusedPath | no | — |
 | Pill | `components/pill.tsx` | Status lozenge with optional leading dot. One line by construction (nowrap, shrink-0). | children, dot, pulse, className, title | yes | #361 (1.3) |
+| RepoChip | `components/repo-chip.tsx` | One checkout of a workspace: short repo name, PR glyph + number, diff +/-; dashed red when the folder is missing. One line (nowrap, shrink-0). | repo, prNumber, pr, added, removed, missing | yes | workspace sidebar |
+| MissingFolderBanner | `app/missing-folder-banner.tsx` | Lane banner for a registered repo whose folder is gone, with a Locate action. | project, onLocate | no | workspace sidebar |
 | ProviderIcon | `components/provider-icon.tsx` | Brand marks for agent providers (Claude, Codex…); providerLabel/providerColor helpers. | — | no | — |
 | HarnessCard | `composites/harness-card.tsx` | Agent harness row: real provider logo, name, detail and a one-line status pill (Ready / Signing in… / Needs attention / Signed out). | providerId, name, detail, status | yes | #475 (9.5) |
 | ProviderSignedOutCard, ProviderResumeCard, ProviderLimitBanner, ProviderAccountChoice | `composites/provider-recovery-cards.tsx` | Chat recovery states: signed-out Reconnect, Resume run, "Limited until HH:MM" banner, signed-in account radio choice. | title, message, limit, accounts, onUse | yes | #419 (5.13) |
@@ -236,7 +238,6 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | EditorGroups | `app/editor-groups.tsx` | Split tree of editor groups. | onOpenCheckpoints, sessionId, layout, revision, describe, renderBody | no | — |
 | JinglerApp | `app/jingler-app.tsx` | Top-level app composition. | onOpenCheckpoints, sessions, user, update, releaseNotes, onSignOut | yes | — |
 | PreviewDock, PreviewToggleButton | `app/preview-dock.tsx` | Browser preview dock and toggle: IconButtonGroup nav (back · forward · reload · open external; back/forward disabled without history), URL field, device-width group, loading spin, load-error InlineError with Retry. ⌘⇧B toggles. | embedded, dock, onDockChange, visible, onToggle, url, canGoBack, canGoForward, onBack, onForward, onOpenExternal, loading, error | yes | #468 (8.9) |
-| ProjectSidebar | `app/project-sidebar.tsx` | 56px project rail. | — | no | — |
 | SessionPrsChip | `app/session-prs-chip.tsx` | Header chip for a session's open PRs, main + subagents: `PRs · N ▾`; popover row shows PR number, owning agent, branch (mono), state word; row opens that PR's view. | rows, onSelect | yes | #561 (6.28) |
 | SessionSidebar | `app/session-sidebar.tsx` | Sessions and Explorer sidebar. | search, workspaceView, forceCollapsed, expandRequest, onWorkspaceViewChange, explorer | yes | — |
 | SessionSplit | `app/session-split.tsx` | Chat + content split layout. | onOpenCheckpoints, group, sessions, emptyState, renderConversation, session | no | — |

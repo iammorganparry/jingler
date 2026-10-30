@@ -154,12 +154,18 @@ test("the filter/sort menu and a row context menu are fully keyboard operable", 
   })
   await expect(appShell(window)).toBeVisible()
 
-  // Open the filter menu from the keyboard: End jumps to the last axis row, Sort by.
+  // Open the filter menu from the keyboard: End jumps to the last action, and
+  // ArrowUp walks back past the actions to the last axis row, Sort by.
   await window.getByTestId("session-filter-menu").focus()
   await window.keyboard.press("Enter")
   await expect(window.getByRole("menuitem", { name: /^Status/ })).toBeVisible()
   await window.keyboard.press("End")
-  await expect(window.getByRole("menuitem", { name: /^Sort by/ })).toBeFocused()
+  await expect(window.getByRole("menuitem", { name: "Manage repos…" })).toBeFocused()
+  const sortBy = window.getByRole("menuitem", { name: /^Sort by/ })
+  for (let i = 0; i < 8 && !(await sortBy.evaluate((el) => el === document.activeElement)); i++) {
+    await window.keyboard.press("ArrowUp")
+  }
+  await expect(sortBy).toBeFocused()
   await window.keyboard.press("ArrowRight")
   await expect(window.getByRole("menuitem", { name: /^Recency/ })).toBeFocused()
   await window.keyboard.press("ArrowDown")
@@ -167,17 +173,13 @@ test("the filter/sort menu and a row context menu are fully keyboard operable", 
   await window.keyboard.press("Enter")
   await expect(window.getByRole("menu")).toHaveCount(0)
 
-  // The choice shows on the closed row and persists under this project's key.
+  // The choice shows on the closed row and persists under the shared key.
   await window.getByTestId("session-filter-menu").focus()
   await window.keyboard.press("Enter")
   await expect(window.getByRole("menuitem", { name: /^Sort by\s*Name/ })).toBeVisible()
   await window.keyboard.press("Escape")
-  const stored = await window.evaluate(() =>
-    Object.keys(localStorage)
-      .filter((key) => key.startsWith("sb.sidebar.filters.v2."))
-      .map((key) => JSON.parse(localStorage.getItem(key) ?? "{}").sortBy)
-  )
-  expect(stored).toContain("name")
+  const stored = await window.evaluate(() => JSON.parse(localStorage.getItem("sb.sidebar.filters.v2") ?? "{}").sortBy)
+  expect(stored).toBe("name")
 
   // A row's context menu opens with the keyboard and Rename is first.
   const row = window.getByTestId("session-row-s_running")

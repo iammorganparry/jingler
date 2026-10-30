@@ -1,6 +1,7 @@
 import { Spin } from "../components/spin.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import * as React from "react"
+import { LayoutGroup } from "motion/react"
 import type { DiffStat, Environment, PrState, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, Usage, User } from "@jingler/core"
 import { displayStatusOf, sessionPrsOf, UNTITLED_SESSION } from "@jingler/core"
 import {
@@ -11,6 +12,8 @@ import {
   ExternalLink,
   GitBranch,
   CircleDot,
+  House,
+  type LucideIcon,
   GitPullRequest,
   Layers,
   LoaderCircle,
@@ -32,7 +35,7 @@ import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { StatusDot } from "../components/status-dot.js"
-import { FilterMenu } from "../components/filter-menu.js"
+import { FilterMenu, type FilterMenuAction } from "../components/filter-menu.js"
 import { HoverCard } from "../components/hover-card.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 import { SessionRow } from "../composites/session-row.js"
@@ -56,6 +59,10 @@ import {
   sessionPrState,
   type SessionFilters
 } from "./session-filters.js"
+
+
+/** Live activity kinds that mean the workspace itself is blocked on the operator. */
+const NEEDS_YOU_KINDS: ReadonlySet<string> = new Set(["needs-input", "needs-approval"])
 
 export type SidebarUpdateKind = "available" | "downloading" | "downloaded" | "failed" | "manual"
 
@@ -122,6 +129,8 @@ export interface SessionSidebarProps {
   prStates?: Record<string, SessionPrStatus>
   /** Running subagent count per session id, shown as `· N agents` on the row. */
   subagentCounts?: Readonly<Record<string, number>>
+  /** Pending subagent questions per session, shown as an amber count on the row. */
+  subagentAttentionCounts?: Readonly<Record<string, number>>
   /** GitHub owner login per session, used for repository avatars. */
   repoOwners?: Readonly<Record<string, string>>
   /** Open the New Session view (header "+" / ⌘N). */
@@ -161,6 +170,10 @@ export interface SessionSidebarProps {
   releaseNotes?: SidebarReleaseNotes
   /** Every version's notes behind the account menu's "What's new" item. */
   whatsNew?: readonly WhatsNewEntry[]
+  /** Home is on screen: no workspace pane is active. */
+  homeActive?: boolean
+  /** Show Home without closing any pane or chat. */
+  onOpenHome?: () => void
   /** Global open pull requests across the connected GitHub App. */
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
@@ -179,6 +192,10 @@ export interface SessionSidebarProps {
   defaultFilters?: SessionFilters
   /** The project whose sessions this lists — filter and sort choices persist per project. */
   projectId?: string
+  /** Registered repo folders that are gone from disk; their row chips render dashed red. */
+  missingRepoPaths?: ReadonlySet<string>
+  /** Command rows under the filter axes: Add repo…, Import sessions…, Manage repos. */
+  filterActions?: ReadonlyArray<FilterMenuAction>
   /** A notice pinned under the header, e.g. the selected project's missing-folder banner. */
   notice?: React.ReactNode
   /** Open a session's worktree in a terminal (row context menu). */
@@ -371,6 +388,34 @@ function ReleaseNotesCard({ releaseNotes }: { releaseNotes: SidebarReleaseNotes 
  * the hover overlay — the same markup both times, so the expanded rail can't
  * drift out of sync with the docked sidebar it is meant to be.
  */
+/** One top-level sidebar destination (Home, Pull requests, Issues); hidden without a handler. */
+function SidebarNavLink({ testId, label, Icon, active, onOpen }: {
+  readonly testId: string
+  readonly label: string
+  readonly Icon: LucideIcon
+  readonly active?: boolean
+  readonly onOpen?: () => void
+}) {
+  if (!onOpen) return null
+  return (
+    <div className="px-2 pb-2">
+      <button
+        type="button"
+        data-testid={testId}
+        aria-current={active ? "page" : undefined}
+        onClick={onOpen}
+        className={cn(
+          "flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          active ? "bg-surface text-text-bright" : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+        )}
+      >
+        <Icon size={15} className={active ? "text-text-bright" : undefined} />
+        <span className="flex-1">{label}</span>
+      </button>
+    </div>
+  )
+}
+
 function SidebarBody({
   width,
   onResize,
@@ -395,6 +440,7 @@ function SidebarBody({
   interruptedSessions,
   prStates,
   subagentCounts,
+  subagentAttentionCounts,
   repoOwners,
   onNewSession,
   user,
@@ -415,8 +461,12 @@ function SidebarBody({
   whatsNew,
   defaultFilters,
   projectId,
+  missingRepoPaths,
+  filterActions,
   notice,
   onOpenInTerminal,
+  homeActive,
+  onOpenHome,
   pullRequestsActive = false,
   onOpenPullRequests,
   issuesActive = false,
@@ -598,57 +648,17 @@ return (renderExpandedGroupHeading())
                 </Badge>
               </div>
               {!collapsed && (
-                <div className="mb-1 flex flex-col gap-[3px]">{group.sessions.map(renderEntry)}</div>
+                // A multi-repo workspace is drawn under each of its repos; the group id
+                // namespaces its layoutId so motion doesn't pair the two rows.
+                <LayoutGroup id={filters.groupBy === "repo" ? `repo-${key}` : undefined}>
+                  <div className="mb-1 flex flex-col gap-[3px]">{group.sessions.map(renderEntry)}</div>
+                </LayoutGroup>
               )}
             </div>
             )
           }) satisfies  Parameters<typeof groups.map>[0]
 
-  function renderIssuesLink() {
-    return (onOpenIssues && (
-        <div className="px-2 pb-2">
-          <button
-            type="button"
-            data-testid="issues-sidebar-item"
-            aria-current={issuesActive ? "page" : undefined}
-            onClick={onOpenIssues}
-            className={cn(
-              "flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              issuesActive
-                ? "bg-surface text-text-bright"
-                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
-            )}
-          >
-            <CircleDot size={15} className={issuesActive ? "text-text-bright" : undefined} />
-            <span className="flex-1">Issues</span>
-            
-          </button>
-        </div>
-      ))
-  }
 
-  function renderPullRequestsLink() {
-    return (onOpenPullRequests && (
-        <div className="px-2 pb-2">
-          <button
-            type="button"
-            data-testid="pull-requests-sidebar-item"
-            aria-current={pullRequestsActive ? "page" : undefined}
-            onClick={onOpenPullRequests}
-            className={cn(
-              "flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              pullRequestsActive
-                ? "bg-surface text-text-bright"
-                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
-            )}
-          >
-            <GitPullRequest size={15} className={pullRequestsActive ? "text-text-bright" : undefined} />
-            <span className="flex-1">Pull requests</span>
-            
-          </button>
-        </div>
-      ))
-  }
 
   const [filters, setFiltersState] = React.useState<SessionFilters>(
     () => defaultFilters ?? loadFilters(projectId)
@@ -768,6 +778,7 @@ return (renderExpandedGroupHeading())
         interrupted={interruptedSessions?.has(s.id)}
         prState={prStates?.[s.id]}
         subagentCount={subagentCounts?.[s.id]}
+        needsYouCount={(NEEDS_YOU_KINDS.has(liveActivity?.[s.id]?.kind ?? "") ? 1 : 0) + (subagentAttentionCounts?.[s.id] ?? 0)}
         active={s.id === activeSessionId}
         onSelect={onSelect}
         onRename={onRename}
@@ -777,6 +788,7 @@ return (renderExpandedGroupHeading())
         onOpenInTerminal={onOpenInTerminal}
         expanded={open}
         onToggleExpanded={s.id === activeSessionId ? undefined : toggleExpanded}
+        missingRepoPaths={missingRepoPaths}
       />
       {open && (
         <SessionTree
@@ -867,7 +879,7 @@ return (renderExpandedGroupHeading())
           about finding one. The spacer keeps them pinned right.
         */}
         <div className="min-w-0 flex-1" />
-        <FilterMenu axes={axes}>
+        <FilterMenu axes={axes} actions={filterActions}>
           <button
             type="button"
             aria-label="Filter and sort sessions"
@@ -931,8 +943,9 @@ return (renderExpandedGroupHeading())
         <div className="min-h-0 flex-1 border-t border-hairline">{explorer}</div>
       ) : (
         <>
-      {renderPullRequestsLink()}
-      {renderIssuesLink()}
+      <SidebarNavLink testId="home-sidebar-item" label="Home" Icon={House} active={homeActive} onOpen={onOpenHome} />
+      <SidebarNavLink testId="pull-requests-sidebar-item" label="Pull requests" Icon={GitPullRequest} active={pullRequestsActive} onOpen={onOpenPullRequests} />
+      <SidebarNavLink testId="issues-sidebar-item" label="Issues" Icon={CircleDot} active={issuesActive} onOpen={onOpenIssues} />
       <ArchivedEntry sessions={sessions} onRestore={onRestore} onDelete={onDelete} />
 
       {renderPendingEnvironment()}

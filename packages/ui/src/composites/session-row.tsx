@@ -2,8 +2,8 @@ import { useEffect, useState } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
-import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activeCheckoutOf, activityLabel, checkoutsOf, displayStatusOf, hasNoRepo, issueReferenceOf, reposLabelOf, sessionPrsOf } from "@jingler/core"
+import type { Environment, SessionCheckout, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
+import { activeCheckoutOf, activityLabel, checkoutPrsOf, checkoutsOf, displayStatusOf, hasNoRepo, issueReferenceOf, reposLabelOf, sessionPrsOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
@@ -22,6 +22,7 @@ import { relativeTime } from "../lib/relative-time.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
 import { Badge } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
+import { RepoChip } from "../components/repo-chip.js"
 import { ThinkingOrb } from "../components/loading.js"
 import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
@@ -56,6 +57,24 @@ function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: str
   )
 }
 
+/** `missingRepoPaths` key: a folder path on one machine (undefined = this desktop). */
+export const missingRepoKey = (environmentId: string | undefined, path: string): string => `${environmentId ?? ""}\u0000${path}`
+
+/** Amber count of questions waiting on the operator; nothing at zero. */
+function NeedsYouCount({ session, count }: { readonly session: Session; readonly count: number }) {
+  if (count <= 0) return null
+  return (
+    <span
+      data-testid={`session-needs-you-${session.id}`}
+      role="status"
+      aria-label={`${session.title}: ${count} need${count === 1 ? "s" : ""} you`}
+      className="shrink-0"
+    >
+      <Badge tone="yellow" size="xs">{count}</Badge>
+    </span>
+  )
+}
+
 /** One "repo #N" per checkout PR for multi-repo sessions; plain "#N" otherwise; null with no PR. */
 const prLabelOf = (session: Session): string | null => {
   const repoPrs = sessionPrsOf(session).filter((pr) => pr.repo !== undefined)
@@ -82,6 +101,7 @@ export function SessionRow({
   interrupted,
   prState,
   subagentCount = 0,
+  needsYouCount = 0,
   active = false,
   onSelect,
   onRename,
@@ -91,6 +111,7 @@ export function SessionRow({
   onOpenInTerminal,
   expanded,
   onToggleExpanded,
+  missingRepoPaths,
   className
 }: {
   session: Session
@@ -117,6 +138,8 @@ export function SessionRow({
   prState?: SessionPrStatus | null
   /** Running subagents in this session; the `· N agents` hint is hidden at zero. */
   subagentCount?: number
+  /** Subagent questions waiting on the operator; an amber count, hidden at zero. */
+  needsYouCount?: number
   active?: boolean
   onSelect?: (id: string) => void
   /** Manual rename (double-click the title) — pins the auto-generated name. */
@@ -132,6 +155,8 @@ export function SessionRow({
   /** Whether the row's chat tree is shown. Absent hides the chevron. */
   expanded?: boolean
   onToggleExpanded?: (id: string) => void
+  /** Registered repo folders gone from disk, as `missingRepoKey`s; their chips render dashed red. */
+  missingRepoPaths?: ReadonlySet<string>
   className?: string
 }) {
   const prLabel = prLabelOf(session)
@@ -171,6 +196,7 @@ export function SessionRow({
             {label}
             {age ? ` ${age}` : ""}
           </span>
+          <NeedsYouCount session={session} count={needsYouCount} />
           {subagentCount > 0 && (
             <span
               data-testid={`session-subagent-count-${session.id}`}
@@ -181,6 +207,7 @@ export function SessionRow({
           )}
         </div>
         {renderEditableSessionTitle()}
+        {renderRepoChips()}
         {renderActiveMetadata()}
       </div>
     </motion.div>)
@@ -234,6 +261,24 @@ export function SessionRow({
         </div>)
   }
 
+  /** The live poll covers the active checkout's top PR; others use their persisted top layer. */
+  function checkoutPrStatus(c: SessionCheckout): SessionPrStatus | null {
+    if (c.id === activeCheckoutOf(session).id && prState) return prState
+    const top = checkoutPrsOf(c).at(-1)
+    return top ? { state: top.state ?? "open", checks: top.checks ?? null } : null
+  }
+
+  /** One chip per attached repo; only multi-repo workspaces, single-repo rows already name their repo. */
+  function renderRepoChips() {
+    const real = checkoutsOf(session).filter((c) => !hasNoRepo(c))
+    if (real.length < 2) return null
+    return (<div data-testid={`session-repo-chips-${session.id}`} className="flex min-w-0 flex-wrap gap-1">
+          {real.map((c) => (
+            <RepoChip key={c.id} repo={c.repo} prNumber={c.prNumber} pr={checkoutPrStatus(c)} missing={c.repoPath !== undefined && (missingRepoPaths?.has(missingRepoKey(session.environmentId, c.repoPath)) ?? false)} />
+          ))}
+        </div>)
+  }
+
   function renderActiveMetadata() {
     function renderBranchLabel() {
       return (<span
@@ -255,7 +300,7 @@ export function SessionRow({
               {linkedIssue.identifier}
             </span>
           )}
-          {prLabel !== null && (
+          {prLabel !== null && checkoutsOf(session).length < 2 && (
             <span
               className="flex shrink-0 items-center gap-1 whitespace-nowrap"
               title={`Pull request ${prLabel}`}

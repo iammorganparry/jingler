@@ -28,7 +28,7 @@ const sessions: ReadonlyArray<Session> = [
   testSession({ id: "memory-worker", projectId: "memory", repo: "jingler-memory", repoPath: projects[1]!.path, title: "Review publish worker", branch: "chore/publish-worker", updatedAt: "2026-09-08T14:00:00Z" })
 ]
 
-const files = ["packages/ui/src/app/project-sidebar.tsx", "packages/ui/src/app/session-sidebar.tsx", "apps/desktop/src/renderer/file-browser-view.tsx"]
+const files = ["packages/ui/src/app/session-sidebar.tsx", "apps/desktop/src/renderer/file-browser-view.tsx"]
 
 function Explorer({ onOpenPath }: { onOpenPath: (path: string) => void }) {
   return (

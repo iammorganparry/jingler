@@ -40,8 +40,9 @@ test("imports a Claude Code session from disk", async ({ launchApp }) => {
 
   await expect(appShell(launched.window)).toBeVisible()
 
-  // Click "Import sessions…" button in the sidebar
-  const importButton = launched.window.getByRole("button", { name: "Import sessions…" })
+  // "Import sessions…" lives in the sidebar filter menu
+  await launched.window.getByTestId("session-filter-menu").click()
+  const importButton = launched.window.getByRole("menuitem", { name: "Import sessions…" })
   await importButton.click()
 
   // Wait for the dialog to appear and scan to complete

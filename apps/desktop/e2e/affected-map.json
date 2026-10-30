@@ -366,8 +366,6 @@
   },
   {
     "paths": [
-      "packages/ui/src/app/project-sidebar.tsx",
-      "packages/ui/src/app/project-navigation.ts",
       "packages/ui/src/app/session-sidebar.tsx",
       "packages/ui/src/app/session-tree.tsx",
       "packages/ui/src/app/session-filters.ts",
@@ -395,7 +393,8 @@
     "specs": [
       "sidebar-identity.spec.ts",
       "sidebar-attention-layout.spec.ts",
-      "project-sidebar-activity.spec.ts",
+      "workspace-sidebar-activity.spec.ts",
+      "workspace-sidebar.spec.ts",
       "projects-and-workspaces.spec.ts",
       "archived-list.spec.ts",
       "command-palette.spec.ts",

@@ -9,7 +9,6 @@ test("Home composer hands prompt + project to New workspace; starters preselect 
   await window.getByTestId("new-session").click()
   await addProject(window, repoPath)
   await window.getByRole("button", { name: "Close new session", exact: true }).click()
-  await window.getByRole("navigation", { name: "Projects" }).getByRole("button", { name: "widget", exact: true }).click()
 
   await expect(window.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ })).toBeVisible()
   const composer = window.getByRole("textbox", { name: "What should we build?" })

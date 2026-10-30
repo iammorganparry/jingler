@@ -159,6 +159,26 @@ describe("groupSessions", () => {
     expect(groupSessions([], DEFAULT_FILTERS, idle)).toStrictEqual([])
   })
 
+  it("lists a two-repo workspace under each of its repos", () => {
+    const both = s({
+      id: "mr",
+      title: "Both",
+      checkouts: [
+        { id: "a", repo: "jingler", branch: "b", prNumber: null },
+        { id: "b", repo: "gtm-grid", branch: "b", prNumber: null }
+      ],
+      activeCheckoutId: "a"
+    })
+    expect(filterSessions([both], "", { ...DEFAULT_FILTERS, repo: "gtm-grid" }).map((x) => x.id)).toStrictEqual(["mr"])
+    expect(filterSessions([both], "", { ...DEFAULT_FILTERS, repo: "jingler" }).map((x) => x.id)).toStrictEqual(["mr"])
+    const groups = groupSessions([both], { ...DEFAULT_FILTERS, groupBy: "repo" }, idle)
+    expect(groups.map((g) => [g.key, g.sessions.map((x) => x.id)])).toStrictEqual([
+      ["jingler", ["mr"]],
+      ["gtm-grid", ["mr"]]
+    ])
+    expect(repoOptions([both])).toStrictEqual(["gtm-grid", "jingler"])
+  })
+
   it("groups by repo in first-seen order", () => {
     const out = groupSessions(active, { ...DEFAULT_FILTERS, groupBy: "repo" }, idle)
     expect(out.map((g) => g.key)).toStrictEqual(["jingler", "gtm-grid"])
@@ -335,5 +355,37 @@ describe("sessionFilterAxes", () => {
 describe("repoOptions", () => {
   it("de-duplicates and sorts alphabetically", () => {
     expect(repoOptions(SESSIONS)).toStrictEqual(["gtm-grid", "jingler"])
+  })
+})
+
+describe("project-rail filter migration", () => {
+  it("adopts a per-project entry into the shared key without its repo filter", () => {
+    localStorage.setItem(
+      `${FILTERS_STORAGE_KEY}.proj-a`,
+      JSON.stringify({ status: "all", repo: "jingler", pr: "open", groupBy: "status", sortBy: "name" })
+    )
+    expect(loadFilters()).toStrictEqual({ status: "all", repo: null, pr: "open", groupBy: "status", sortBy: "name" })
+    expect(localStorage.getItem(`${FILTERS_STORAGE_KEY}.proj-a`)).toBeNull()
+    expect(JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)!).repo).toBeNull()
+  })
+
+  it("skips a malformed entry and keeps old keys until the shared one is written", () => {
+    localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-a`, "{not json")
+    localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-b`, JSON.stringify({ sortBy: "name" }))
+    expect(loadFilters().sortBy).toBe("name")
+    expect(localStorage.getItem(`${FILTERS_STORAGE_KEY}.proj-b`)).toBeNull()
+    expect(JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)!).sortBy).toBe("name")
+  })
+
+  it("keeps every old key when no entry is usable", () => {
+    localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-a`, "{not json")
+    expect(loadFilters()).toStrictEqual(DEFAULT_FILTERS)
+    expect(localStorage.getItem(`${FILTERS_STORAGE_KEY}.proj-a`)).toBe("{not json")
+  })
+
+  it("leaves an existing shared entry alone", () => {
+    saveFilters({ ...DEFAULT_FILTERS, sortBy: "name" })
+    localStorage.setItem(`${FILTERS_STORAGE_KEY}.proj-a`, JSON.stringify({ sortBy: "status" }))
+    expect(loadFilters().sortBy).toBe("name")
   })
 })

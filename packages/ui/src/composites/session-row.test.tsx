@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { testSession } from "../test-support.js"
-import { SessionRow } from "./session-row.js"
+import { missingRepoKey, SessionRow } from "./session-row.js"
 
 afterEach(cleanup)
 
@@ -145,7 +145,7 @@ describe("SessionRow multi-repo count", () => {
 })
 
 describe("SessionRow per-checkout PRs", () => {
-  const co = (id: string, repo: string, prNumber: number) => ({ id, repo, branch: "b", prNumber })
+  const co = (id: string, repo: string, prNumber: number | null) => ({ id, repo, branch: "b", prNumber })
 
   it("labels every checkout's PR with its repo", () => {
     const session = testSession({
@@ -159,6 +159,58 @@ describe("SessionRow per-checkout PRs", () => {
       ]
     })
     render(<SessionRow session={session} />)
-    expect(screen.getByText("qa-api #2 · qa-web #1")).toBeDefined()
+    expect(screen.getByTestId("repo-chip-qa-web").textContent).toContain("qa-web #1")
+    expect(screen.getByTestId("repo-chip-qa-api").textContent).toContain("qa-api #2")
+    expect(screen.queryByText("qa-api #2 · qa-web #1")).toBeNull()
+  })
+
+  it("shows an amber needs-you count only when something is waiting", () => {
+    const session = testSession({ id: "asker", title: "asker" })
+    const { rerender } = render(<SessionRow session={session} needsYouCount={0} />)
+    expect(screen.queryByTestId("session-needs-you-asker")).toBeNull()
+    rerender(<SessionRow session={session} needsYouCount={2} />)
+    expect(screen.getByRole("status", { name: "asker: 2 need you" }).textContent).toBe("2")
+  })
+
+  it("marks a checkout whose folder is missing", () => {
+    const session = testSession({
+      id: "missing",
+      checkouts: [
+        { ...co("web", "qa-web", null), repoPath: "/r/web" },
+        { ...co("api", "qa-api", null), repoPath: "/r/api" }
+      ],
+      activeCheckoutId: "web"
+    })
+    render(<SessionRow session={session} missingRepoPaths={new Set([missingRepoKey(undefined, "/r/api")])} />)
+    expect(screen.getByTestId("repo-chip-qa-api").dataset.missing).toBe("true")
+    expect(screen.getByTestId("repo-chip-qa-web").dataset.missing).toBeUndefined()
+  })
+
+  it("does not mark a checkout missing when only another machine's same path is gone", () => {
+    const session = testSession({
+      id: "remote-path",
+      checkouts: [
+        { ...co("web", "qa-web", null), repoPath: "/r/web" },
+        { ...co("api", "qa-api", null), repoPath: "/r/api" }
+      ],
+      activeCheckoutId: "web"
+    })
+    render(<SessionRow session={session} missingRepoPaths={new Set([missingRepoKey("mini", "/r/api")])} />)
+    expect(screen.getByTestId("repo-chip-qa-api").dataset.missing).toBeUndefined()
+  })
+
+  it("shows each checkout's own PR status: live for the active one, persisted for the rest", () => {
+    const session = testSession({
+      id: "pr-status",
+      checkouts: [
+        co("web", "qa-web", 1),
+        { ...co("api", "qa-api", 2), prs: [{ number: 2, state: "merged" as const, checks: "pass" as const }] }
+      ],
+      activeCheckoutId: "web"
+    })
+    render(<SessionRow session={session} prState={{ state: "open", checks: "fail" }} />)
+    const glyphOf = (repo: string) => screen.getByTestId(`repo-chip-${repo}`).querySelector("[data-testid=pr-glyph]") as HTMLElement
+    expect(glyphOf("qa-web").dataset.checks).toBe("fail")
+    expect(glyphOf("qa-api").dataset.state).toBe("merged")
   })
 })
