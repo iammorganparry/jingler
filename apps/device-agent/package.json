@@ -11,13 +11,13 @@
   },
   "dependencies": {
     "@dietrichgebert/ponytail": "4.9.0",
-    "@earendil-works/pi-ai": "0.84.1",
-    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "@effect/platform-node": "^0.107.0",
     "@jingler/cli-adapters": "workspace:*",
     "@jingler/core": "workspace:*",
     "effect": "^3.21.4",
-    "pi-subagents": "0.65.0",
+    "pi-subagents": "0.84.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

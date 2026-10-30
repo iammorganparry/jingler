@@ -14,17 +14,22 @@ const CHANGED_PATCH_LINE = /^[+-](?![+-])/u
 
 describe("Jingler pi-subagents compatibility patch", () => {
   it("contains only Jingler host compatibility changes", async () => {
-    const patch = await readFile("patches/pi-subagents@0.65.0.patch", "utf8")
+    const patch = await readFile("patches/pi-subagents@0.84.0.patch", "utf8")
     const files = [...patch.matchAll(/^diff --git a\/(.+?) b\//gmu)]
       .map(([, file]) => file)
+    // pi loads bundle/index.js; src/ is the copy the process worker bundles from.
     expect(files).toEqual([
-      "src/extension/index.ts",
-      "src/extension/rpc.ts",
-      "src/intercom/native-supervisor-channel.ts",
-      "src/runs/background/async-execution.ts",
-      "src/runs/foreground/execution.ts",
-      "src/runs/shared/process-child-session-worker.ts",
-      "src/runs/shared/process-child-session.ts"
+      "bundle/chunk-235AWJUQ.js",
+      "bundle/chunk-7BWGNDNK.js",
+      "bundle/chunk-DZDETGRJ.js",
+      "bundle/chunk-JG4QKI5M.js",
+      "src/extension/index.js",
+      "src/extension/rpc.js",
+      "src/intercom/native-supervisor-channel.js",
+      "src/runs/background/async-execution.js",
+      "src/runs/foreground/execution.js",
+      "src/runs/shared/process-child-session-worker.js",
+      "src/runs/shared/process-child-session.js",
     ])
     expect(patch).toContain("resolveFleetControlParams")
     expect(patch.split("\n").filter((line) => CHANGED_PATCH_LINE.test(line)).join("\n"))
@@ -33,7 +38,7 @@ describe("Jingler pi-subagents compatibility patch", () => {
 
   it("drops a cached UI context after Pi replaces its session", async () => {
     const contextUrl = pathToFileURL(
-      resolve("node_modules/pi-subagents/src/shared/extension-context.ts")
+      resolve("node_modules/pi-subagents/src/shared/extension-context.js")
     ).href
     const script = `
       import { createJiti } from "jiti";
@@ -48,7 +53,7 @@ describe("Jingler pi-subagents compatibility patch", () => {
   }, 15_000)
 
   it("acknowledges a native supervisor reply without an active model turn", async () => {
-    const rpcUrl = pathToFileURL(resolve("node_modules/pi-subagents/src/extension/rpc.ts")).href
+    const rpcUrl = pathToFileURL(resolve("node_modules/pi-subagents/src/extension/rpc.js")).href
     const piUrl = pathToFileURL(
       resolve("node_modules/@earendil-works/pi-coding-agent/dist/index.js")
     ).href
@@ -90,6 +95,8 @@ describe("Jingler pi-subagents compatibility patch", () => {
       writeFile(join(agentDir, "auth.json"), "{}", { mode: 0o600 }),
       writeFile(join(agentDir, `capability-${agent}.json`), "{}", { mode: 0o600 }),
       writeFile(fakePi, `
+        export const getLanguageFromPath = () => undefined;
+        export const highlightCode = (code) => [code];
         export const convertToLlm = () => { throw new Error("Unexpected model conversion in credential fixture"); };
         export const createReadOnlyTools = () => { throw new Error("Unexpected review tools in credential fixture"); };
         export const ModelRuntime = { create: async () => ({ registerProvider() {}, registerNativeProvider() {} }) };
@@ -120,14 +127,14 @@ describe("Jingler pi-subagents compatibility patch", () => {
     ])
     const workerBundle = join(root, "process-worker.mjs")
     await build({
-      entryPoints: [resolve("node_modules/pi-subagents/src/runs/shared/process-child-session-worker.ts")],
+      entryPoints: [resolve("node_modules/pi-subagents/src/runs/shared/process-child-session-worker.js")],
       bundle: true, platform: "node", format: "esm", target: "node24",
       banner: { js: `import { createRequire as fixtureCreateRequire } from "node:module"; const require = fixtureCreateRequire(${JSON.stringify(pathToFileURL(resolve("package.json")).href)});` },
       alias: { "@earendil-works/pi-coding-agent": fakePi },
       outfile: workerBundle
     })
     const factoryUrl = pathToFileURL(
-      resolve("node_modules/pi-subagents/src/runs/shared/process-child-session.ts")
+      resolve("node_modules/pi-subagents/src/runs/shared/process-child-session.js")
     ).href
     const script = `
       import { createJiti } from "jiti";
@@ -136,8 +143,17 @@ describe("Jingler pi-subagents compatibility patch", () => {
       const child = await factory.create({
         cwd: ${JSON.stringify(root)}, storage: { kind: "memory" }, model: "test/model",
         extensionPaths: [], ambientExtensions: false, hooks: [], noSkills: true, noContextFiles: true,
+        parentProviderRegistry: { getRegisteredProviderIds: () => ["parent-only"] },
+        signal: new AbortController().signal,
         runtime: { parentSessionId: ${JSON.stringify(parent)}, agent: ${JSON.stringify(agent)}, fanoutChild: false, depth: 1, waitTool: { enabled: false }, fast: false }
       });
+      const aborted = await factory.create({
+        cwd: ${JSON.stringify(root)}, storage: { kind: "memory" }, model: "test/model",
+        extensionPaths: [], ambientExtensions: false, hooks: [], noSkills: true, noContextFiles: true,
+        signal: AbortSignal.abort(new Error("startup cancelled")),
+        runtime: { parentSessionId: ${JSON.stringify(parent)}, agent: ${JSON.stringify(agent)}, fanoutChild: false, depth: 1, waitTool: { enabled: false }, fast: false }
+      }).then(() => "started", (error) => error.message);
+      if (aborted !== "startup cancelled") throw new Error("startup abort was not forwarded: " + aborted);
       const events = [];
       child.subscribe((event) => events.push(event));
       await child.prompt("hello");
@@ -224,7 +240,7 @@ if (process.argv.includes("auth")) {
       outfile: providerBundle
     })
     const factoryUrl = pathToFileURL(
-      resolve("node_modules/pi-subagents/src/runs/shared/process-child-session.ts")
+      resolve("node_modules/pi-subagents/src/runs/shared/process-child-session.js")
     ).href
     const script = `
       import { createJiti } from "jiti";

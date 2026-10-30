@@ -7,7 +7,7 @@ import {
   type StreamEvent,
   type UsageFact
 } from "@jingler/core"
-import { Effect } from "effect"
+import { Chunk, Effect, Fiber, Stream } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
   AgentRuntimeError,
@@ -21,6 +21,7 @@ import {
   retainedPiFleetHandlers,
   RetainedPiSessionRegistry
 } from "./retained-pi-session-registry.js"
+import { watchChatFleet } from "./subagent-fleet-hub.js"
 
 const endpointId = AgentEndpointId.make("desktop:pi:native-sidecar")
 const spec: AgentRunSpec = {
@@ -349,6 +350,20 @@ describe("retained native PI sidecars", () => {
       risk: "network"
     }))).resolves.toBe("allow")
     expect(durablePermission).toHaveBeenCalledOnce()
+
+    // A retained child settling after the turn reaches the chat's fleet watchers, not the ended turn.
+    const fleetEvent: StreamEvent = {
+      _tag: "SubagentFleetChanged",
+      event: { _tag: "Remove", version: 2, eventId: "late-remove", occurredAt: 1, registryRevision: 1, id: "pi-native-parent/child-1" }
+    }
+    const watched = await Effect.runPromise(Effect.gen(function* () {
+      const fiber = yield* Effect.fork(Stream.runCollect(Stream.take(watchChatFleet(spec.sessionId, spec.chatId), 1)))
+      yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+      yield* capturedContext.publishEvent(fleetEvent)
+      return Chunk.toReadonlyArray(yield* Fiber.join(fiber))
+    }))
+    expect(watched).toEqual([fleetEvent.event])
+    expect(endedPublish).not.toHaveBeenCalledWith(fleetEvent)
 
     const nextBrowser = { name: "browser", url: "http://127.0.0.1:2", headers: {} }
     const second = await Effect.runPromise(sessions.acquireByChat(spec, {

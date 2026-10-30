@@ -546,6 +546,7 @@ type ConversationEvent =
   | { type: "PR_EVENT_RECORDED"; message: Message }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
   | { type: "REVIEW_EVENT"; event: StreamEvent }
+  | { type: "FLEET_WATCH_EVENT"; event: SubagentFleetEvent }
   | { type: "REFRESH_DIFF" }
   | { type: "STOP" }
   /** Kill ONE live sub-agent (its tab's ×), leaving the turn running. */
@@ -871,6 +872,14 @@ const reviewStream = fromCallback<ConversationEvent, { sessionId: string; chatId
     )
 )
 
+/** Fleet events that arrive after this chat's turn ended (retained children settling). */
+const fleetWatchStream = fromCallback<ConversationEvent, { sessionId: string; chatId: string }>(
+  ({ sendBack, input }) =>
+    rpc.agentWatchSubagentFleet(input.sessionId, input.chatId, (event) =>
+      sendBack({ type: "FLEET_WATCH_EVENT", event })
+    )
+)
+
 const patchLast = (
   messages: ReadonlyArray<Message>,
   fn: (last: Message) => Message
@@ -1060,6 +1069,7 @@ export const conversationMachine = setup({
     agentStream,
     refreshDiff,
     reviewStream,
+    fleetWatchStream,
     stopAgent
   },
   guards: {
@@ -1583,6 +1593,11 @@ export const conversationMachine = setup({
             ...context.subagentFleetEvents,
             ...event.events
           ]) }
+        : {}
+    ),
+    applyFleetWatchEvent: assign(({ context, event }) =>
+      event.type === "FLEET_WATCH_EVENT"
+        ? { subagentFleetEvents: boundedFleetEvents([...context.subagentFleetEvents, event.event]) }
         : {}
     ),
     applySettled: assign(({ context }) => {
@@ -2115,10 +2130,16 @@ export const conversationMachine = setup({
   entry: ["loadSkills", "loadWorkspaceMeta"],
   // Watch the reviewer for the machine's whole life — a review is not part of a
   // turn, so it can start, run and finish in any state.
-  invoke: {
-    src: "reviewStream",
-    input: ({ context }) => ({ sessionId: context.session.id, chatId: context.chatId })
-  },
+  invoke: [
+    {
+      src: "reviewStream",
+      input: ({ context }) => ({ sessionId: context.session.id, chatId: context.chatId })
+    },
+    {
+      src: "fleetWatchStream",
+      input: ({ context }) => ({ sessionId: context.session.id, chatId: context.chatId })
+    }
+  ],
   // All three can land in any state — they race nothing. SKILLS_LOADED belongs
   // here for the same reason CATALOG_LOADED does: now that the `/` menu is
   // fetched out of band, its reply can arrive while the transcript is still
@@ -2135,6 +2156,7 @@ export const conversationMachine = setup({
     WORKSPACE_META_LOADED: { actions: "applyWorkspaceMeta" },
     REVIEW_EVENT: { actions: "applyReview" },
     RECOVER_SUBAGENT_FLEET: { actions: "recoverSubagentFleet" },
+    FLEET_WATCH_EVENT: { actions: "applyFleetWatchEvent" },
     SET_REASONING: { actions: "persistReasoning" },
     SET_MODEL: { actions: "persistProviderModel" },
     MODEL_PERSISTED: { actions: "reconcileSession" },

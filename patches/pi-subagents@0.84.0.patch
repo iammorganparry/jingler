@@ -1,0 +1,687 @@
+diff --git a/bundle/chunk-235AWJUQ.js b/bundle/chunk-235AWJUQ.js
+index 0d0a121fb7e3a228ea4cf62875e1418ae5be198f..8221b3852c23baddc37fa82823a88f22d836f418 100644
+--- a/bundle/chunk-235AWJUQ.js
++++ b/bundle/chunk-235AWJUQ.js
+@@ -30,6 +30,8 @@ import {
+   deliverSubagentResultIntercomEvent,
+   deriveChildSessionName,
+   disposeChildSessions,
++  setChildSessionFactory,
++  setChildSessionFactoryModule,
+   editableAgentConfig,
+   externalJobBridgeEligibility,
+   flattenSubagentToolOptions,
+@@ -62,6 +64,7 @@ import {
+   workflowResumeClaimState,
+   workflowResumeRefusal
+ } from "./chunk-DZDETGRJ.js";
++import { createProcessChildSessionFactory, processChildSessionFactoryModule } from "../src/runs/shared/process-child-session.js";
+ import {
+   CONTACT_SUPERVISOR_TOOL_NAME,
+   NATIVE_SUPERVISOR_TOOL_NAME,
+@@ -7138,7 +7141,7 @@ var SUBAGENT_RPC_PROTOCOL_VERSION = 1;
+ var SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
+ var SUBAGENT_RPC_READY_EVENT = "subagents:rpc:v1:ready";
+ var SUBAGENT_RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
+-var SUBAGENT_RPC_METHODS = ["ping", "status", "manage", "spawn", "steer", "interrupt", "stop", "resume", "cost"];
++var SUBAGENT_RPC_METHODS = ["ping", "status", "manage", "spawn", "steer", "interrupt", "stop", "resume", "cost", "reply"];
+ var SUBAGENT_RPC_MANAGEMENT_ACTIONS = [
+   "schedule.list",
+   "schedule.show",
+@@ -7645,9 +7648,26 @@ function stopAsyncRun(params, options, ctx) {
+     message: child ? `Stop requested for child ${child.id} in async run ${runId}.` : `Stop requested for async run ${runId}.`
+   };
+ }
++function resolveFleetControlParams(params, keyState) {
++  if (!isRecord4(params)) return params;
++  const target = typeof params.id === "string" ? params.id : typeof params.runId === "string" ? params.runId : void 0;
++  if (!target) return params;
++  const internalKey = [...keyState.keys].find(([, publicKey]) => publicKey === target)?.[0];
++  const match = internalKey ? /^(?:async|foreground):([^:]+)(?::(\d+))?$/.exec(internalKey) : null;
++  if (!match) return params;
++  const { id: _id, runId: _runId, index: _index, ...rest } = params;
++  return { ...rest, runId: match[1], ...match[2] === void 0 ? {} : { index: Number(match[2]) } };
++}
+ async function handleRequest(request, options, fleetKeys) {
+   const ctx = options.getContext();
+   if (request.method === "ping") return pingData(ctx, options);
++  if (request.method === "reply") {
++    const input = assertRecordParams(request.params, "reply");
++    if (typeof input.requestId !== "string" || !input.requestId.trim()) throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty requestId.");
++    if (typeof input.message !== "string" || !input.message.trim()) throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty message.");
++    if (!options.replySupervisor) throw new SubagentRpcError("invalid_state", "Supervisor reply is unavailable.");
++    return options.replySupervisor(input.requestId.trim(), input.message.trim());
++  }
+   if (!ctx) throw new SubagentRpcError("no_active_session", "No active extension context for subagent RPC.");
+   if (request.method === "manage") {
+     return executeChecked(options, ctx, request.requestId, request.method, manageParams(request.params, options));
+@@ -7693,16 +7713,16 @@ async function handleRequest(request, options, fleetKeys) {
+     };
+   }
+   if (request.method === "steer") {
+-    return executeChecked(options, ctx, request.requestId, request.method, steerParams(request.params));
++    return executeChecked(options, ctx, request.requestId, request.method, steerParams(resolveFleetControlParams(request.params, fleetKeys)));
+   }
+   if (request.method === "interrupt") {
+-    return executeChecked(options, ctx, request.requestId, request.method, { action: "interrupt", ...normalizeTargetParams(request.params, "interrupt") });
++    return executeChecked(options, ctx, request.requestId, request.method, { action: "interrupt", ...normalizeTargetParams(resolveFleetControlParams(request.params, fleetKeys), "interrupt") });
+   }
+   if (request.method === "stop") {
+-    return stopAsyncRun(request.params, options, ctx);
++    return stopAsyncRun(resolveFleetControlParams(request.params, fleetKeys), options, ctx);
+   }
+   if (request.method === "resume") {
+-    return executeChecked(options, ctx, request.requestId, request.method, resumeParams(request.params));
++    return executeChecked(options, ctx, request.requestId, request.method, resumeParams(resolveFleetControlParams(request.params, fleetKeys)));
+   }
+   if (request.method === "cost") {
+     if (request.params !== void 0 && !isRecord4(request.params)) throw new SubagentRpcError("invalid_params", "RPC cost params must be an object when provided.");
+@@ -8488,6 +8508,10 @@ function registerSubagentExtension(pi) {
+   if (process.env[SUBAGENT_CHILD_ENV] === "1") {
+     return;
+   }
++  if (process.env.JINGLER_SUBAGENT_PROCESS_ISOLATION === "1") {
++    setChildSessionFactory(createProcessChildSessionFactory());
++    setChildSessionFactoryModule(processChildSessionFactoryModule);
++  }
+   const runtimeRegistry = getRuntimeRegistry();
+   setMainThinkingLevelSource(() => readMainThinkingLevel(() => pi.getThinkingLevel()));
+   DIRS.results = ensureAccessibleDir(DIRS.results);
+@@ -8874,6 +8898,8 @@ ${close}` }]
+     }
+   };
+   const executeSubagentCollapsed = (id, params, signal, onUpdate, ctx) => {
++    state.lastUiContext = ctx;
++    supervisorChannel.start();
+     if (ctx.hasUI) ctx.ui.setToolsExpanded(false);
+     return executeSubagentReady(id, params, signal, onUpdate, ctx);
+   };
+@@ -8898,7 +8924,8 @@ ${close}` }]
+     getContext: () => state.lastUiContext,
+     execute: executeSubagentReady,
+     state,
+-    disabledFeatures
++    disabledFeatures,
++    replySupervisor: (requestId, message) => supervisorChannel.reply(requestId, message)
+   });
+   const parameters = createSubagentParamsSchema(disabledFeatures);
+   const tool = {
+diff --git a/bundle/chunk-7BWGNDNK.js b/bundle/chunk-7BWGNDNK.js
+index daed66a3ba1127137ddf4792b325c230ee166f7e..c194fa565b978b4b0677df9635791e0f33f74dcd 100644
+--- a/bundle/chunk-7BWGNDNK.js
++++ b/bundle/chunk-7BWGNDNK.js
+@@ -793,6 +793,8 @@ function createNativeSupervisorChannel(pi, state, deps = {}) {
+             ...request.childTarget ? { childTarget: request.childTarget } : {},
+             ...request.interview !== void 0 ? { interview: request.interview } : {},
+             requestBody: request.message,
++            requestedAt: request.createdAt,
++            deadlineAt: request.expiresAt ?? null,
+             replyHint: supervisorReplyHint(request.id)
+           }
+         }, { triggerTurn: true });
+@@ -971,6 +973,17 @@ function createNativeSupervisorChannel(pi, state, deps = {}) {
+     deferredWatcherRefresh.unref?.();
+   };
+   return {
++    reply: (requestId, message2) => {
++      refreshPendingRequests(pending, state, observeRequestLifecycle, runState);
++      const request = pending.get(requestId);
++      if (!request) throw new Error(`No pending supervisor request found for replyTo '${requestId}'.`);
++      const reply = writeReply(request, message2);
++      appendSupervisorReplyEntry(pi, request, reply);
++      pending.delete(request.id);
++      observeRequestLifecycle(request, "resolved");
++      clearForegroundSupervisorAttention(request, pending, state);
++      return { requestId: request.id, runId: request.runId, agent: request.agent };
++    },
+     registerTools: registerParentTools,
+     activateTransport: () => {
+       if (!started) return;
+diff --git a/bundle/chunk-DZDETGRJ.js b/bundle/chunk-DZDETGRJ.js
+index 8c8bcd392d244191dbb69e12bddc2915ebcd2771..633a5ca0afb2553394931356e16207d9e3a71c68 100644
+--- a/bundle/chunk-DZDETGRJ.js
++++ b/bundle/chunk-DZDETGRJ.js
+@@ -7735,6 +7735,12 @@ function createLazyPlacementFactory(local) {
+ function childSessionFactoryModule() {
+   return activeFactoryModule;
+ }
++function setChildSessionFactory(factory) {
++  activeFactory = factory;
++}
++function setChildSessionFactoryModule(modulePath) {
++  activeFactoryModule = modulePath;
++}
+ async function disposeChildSessions() {
+   const factory = activeFactory;
+   if (!factory) return;
+@@ -8611,6 +8617,8 @@ export {
+   childSessionHasQueuedMessages,
+   childSessionFactory,
+   childSessionFactoryModule,
++  setChildSessionFactory,
++  setChildSessionFactoryModule,
+   disposeChildSessions,
+   WORKFLOW_RUNTIME_REPLACED_STOP_NOTICE,
+   runtimeReplacedAbortReason,
+diff --git a/bundle/chunk-JG4QKI5M.js b/bundle/chunk-JG4QKI5M.js
+index 14c9307813b3fb268a5a012a17667f1d47eac9e2..7598e6959e47429f0323eba6c0c5c511f11ac55e 100644
+--- a/bundle/chunk-JG4QKI5M.js
++++ b/bundle/chunk-JG4QKI5M.js
+@@ -1873,7 +1873,7 @@ function spawnRunner(cfg, suffix, cwd, initialStatus, initialStatusPath, launchP
+   if (inconsistentParent) return { error: "Background runner steps have inconsistent parent session identities." };
+   const binaryHost = resolveBunPiExecutable();
+   if (!binaryHost && "error" in piPackageSelection) throw piPackageSelection.error;
+-  const nodeExecutable = resolveNodeExecutable();
++  const nodeExecutable = process.env.JINGLER_SUBAGENT_NODE?.trim() || resolveNodeExecutable();
+   const nativeRunnerSupported = supportsNativeRunner(nodeExecutable);
+   const runner = asyncRunnerSourcePath();
+   const runnerIsJavaScript = path5.extname(runner) === ".js";
+@@ -1941,6 +1941,7 @@ function spawnRunner(cfg, suffix, cwd, initialStatus, initialStatusPath, launchP
+     const runnerEnv = {
+       ...omitGitRoutingEnv(omitExtensionBindingsEnv(process.env)),
+       ...childCacheRetentionEnv(),
++      ...process.env.PI_SUBAGENT_ELECTRON_RUN_AS_NODE === "1" ? { ELECTRON_RUN_AS_NODE: "1" } : {},
+       [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: binaryHost ? void 0 : piPackageRoot,
+       // npm must override inherited bundled layouts (#2071); binaries retain release assets.
+       PI_PACKAGE_DIR: binaryHost ? process.env.PI_PACKAGE_DIR : piPackageRoot,
+@@ -5489,6 +5490,7 @@ ${shared.acceptancePrompt}` : shared.systemPrompt,
+       receiptProgress.status = "detached";
+       receiptProgress.durationMs = Date.now() - startTime;
+       const receipt = snapshotResult(result2, receiptProgress);
++      if (!receipt.sessionFile && options.sessionFile && existsSync4(options.sessionFile)) receipt.sessionFile = options.sessionFile;
+       receipt.exitCode = -2;
+       receipt.detached = true;
+       receipt.detachedReason = reason;
+diff --git a/src/extension/index.js b/src/extension/index.js
+index 8fe3baf5e77f7f8c7b0281ac12e43f99fa810f78..9594906cd1e6de2c7c8d9967fe5fb4ccdf4ddeb0 100644
+--- a/src/extension/index.js
++++ b/src/extension/index.js
+@@ -67,7 +67,8 @@ import registerSubagentNotify from "../runs/background/notify.js";
+ import { createParentWake } from "../shared/parent-wake.js";
+ import { handleSubagentSteeringNotice } from "./steering-notices.js";
+ import { SUBAGENT_CHILD_ENV, SUBAGENT_PARENT_SESSION_ENV } from "../runs/shared/child-runtime-config.js";
+-import { disposeChildSessions } from "../runs/shared/child-session.js";
++import { disposeChildSessions, setChildSessionFactory, setChildSessionFactoryModule } from "../runs/shared/child-session.js";
++import { createProcessChildSessionFactory, processChildSessionFactoryModule } from "../runs/shared/process-child-session.js";
+ import { resolveCurrentSubagentCapabilityCeiling } from "../runs/shared/capability-ceiling.js";
+ import { loadConfig, resolveAsyncByDefault, resolveScheduledStoreRoot } from "./config.js";
+ import { buildSubagentToolDescription, buildSubagentToolPromptMetadata } from "./tool-description.js";
+@@ -225,6 +226,10 @@ export default function registerSubagentExtension(pi) {
+     if (process.env[SUBAGENT_CHILD_ENV] === "1") {
+         return;
+     }
++    if (process.env.JINGLER_SUBAGENT_PROCESS_ISOLATION === "1") {
++        setChildSessionFactory(createProcessChildSessionFactory());
++        setChildSessionFactoryModule(processChildSessionFactoryModule);
++    }
+     const runtimeRegistry = getRuntimeRegistry();
+     setMainThinkingLevelSource(() => readMainThinkingLevel(() => pi.getThinkingLevel()));
+     DIRS.results = ensureAccessibleDir(DIRS.results);
+@@ -660,6 +665,8 @@ export default function registerSubagentExtension(pi) {
+         }
+     };
+     const executeSubagentCollapsed = (id, params, signal, onUpdate, ctx) => {
++        state.lastUiContext = ctx;
++        supervisorChannel.start();
+         if (ctx.hasUI)
+             ctx.ui.setToolsExpanded(false);
+         return executeSubagentReady(id, params, signal, onUpdate, ctx);
+@@ -687,6 +694,7 @@ export default function registerSubagentExtension(pi) {
+         execute: executeSubagentReady,
+         state,
+         disabledFeatures,
++        replySupervisor: (requestId, message) => supervisorChannel.reply(requestId, message),
+     });
+     const parameters = createSubagentParamsSchema(disabledFeatures);
+     const tool = {
+diff --git a/src/extension/rpc.js b/src/extension/rpc.js
+index 9d0a758359f989a52aae12101dd6774dba68d2ec..2c92db4d2837859c69261a6dc244f15367e3be6f 100644
+--- a/src/extension/rpc.js
++++ b/src/extension/rpc.js
+@@ -18,7 +18,7 @@ export const SUBAGENT_RPC_PROTOCOL_VERSION = 1;
+ export const SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
+ export const SUBAGENT_RPC_READY_EVENT = "subagents:rpc:v1:ready";
+ export const SUBAGENT_RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
+-export const SUBAGENT_RPC_METHODS = ["ping", "status", "manage", "spawn", "steer", "interrupt", "stop", "resume", "cost"];
++export const SUBAGENT_RPC_METHODS = ["ping", "status", "manage", "spawn", "steer", "interrupt", "stop", "resume", "cost", "reply"];
+ export const SUBAGENT_RPC_MANAGEMENT_ACTIONS = [
+     "schedule.list",
+     "schedule.show",
+@@ -589,10 +589,33 @@ function stopAsyncRun(params, options, ctx) {
+         message: child ? `Stop requested for child ${child.id} in async run ${runId}.` : `Stop requested for async run ${runId}.`,
+     };
+ }
++function resolveFleetControlParams(params, keyState) {
++    if (!isRecord(params))
++        return params;
++    const target = typeof params.id === "string" ? params.id : typeof params.runId === "string" ? params.runId : undefined;
++    if (!target)
++        return params;
++    const internalKey = [...keyState.keys].find(([, publicKey]) => publicKey === target)?.[0];
++    const match = internalKey ? /^(?:async|foreground):([^:]+)(?::(\d+))?$/.exec(internalKey) : null;
++    if (!match)
++        return params;
++    const { id: _id, runId: _runId, index: _index, ...rest } = params;
++    return { ...rest, runId: match[1], ...(match[2] === undefined ? {} : { index: Number(match[2]) }) };
++}
+ async function handleRequest(request, options, fleetKeys) {
+     const ctx = options.getContext();
+     if (request.method === "ping")
+         return pingData(ctx, options);
++    if (request.method === "reply") {
++        const input = assertRecordParams(request.params, "reply");
++        if (typeof input.requestId !== "string" || !input.requestId.trim())
++            throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty requestId.");
++        if (typeof input.message !== "string" || !input.message.trim())
++            throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty message.");
++        if (!options.replySupervisor)
++            throw new SubagentRpcError("invalid_state", "Supervisor reply is unavailable.");
++        return options.replySupervisor(input.requestId.trim(), input.message.trim());
++    }
+     if (!ctx)
+         throw new SubagentRpcError("no_active_session", "No active extension context for subagent RPC.");
+     if (request.method === "manage") {
+@@ -630,17 +653,18 @@ async function handleRequest(request, options, fleetKeys) {
+             asyncSnapshot: buildAsyncStatusSnapshotForState(options.state, sessionId),
+         };
+     }
++    const controlParams = resolveFleetControlParams(request.params, fleetKeys);
+     if (request.method === "steer") {
+-        return executeChecked(options, ctx, request.requestId, request.method, steerParams(request.params));
++        return executeChecked(options, ctx, request.requestId, request.method, steerParams(controlParams));
+     }
+     if (request.method === "interrupt") {
+-        return executeChecked(options, ctx, request.requestId, request.method, { action: "interrupt", ...normalizeTargetParams(request.params, "interrupt") });
++        return executeChecked(options, ctx, request.requestId, request.method, { action: "interrupt", ...normalizeTargetParams(controlParams, "interrupt") });
+     }
+     if (request.method === "stop") {
+-        return stopAsyncRun(request.params, options, ctx);
++        return stopAsyncRun(controlParams, options, ctx);
+     }
+     if (request.method === "resume") {
+-        return executeChecked(options, ctx, request.requestId, request.method, resumeParams(request.params));
++        return executeChecked(options, ctx, request.requestId, request.method, resumeParams(controlParams));
+     }
+     if (request.method === "cost") {
+         // The same parent-plus-child accounting `/subagent-cost` renders, as data.
+diff --git a/src/intercom/native-supervisor-channel.js b/src/intercom/native-supervisor-channel.js
+index 071cdd5be2715e0cfa9dfa1a560e3cad91079b71..2fad3d2c29f1abbf492c6e77695053d89d189e99 100644
+--- a/src/intercom/native-supervisor-channel.js
++++ b/src/intercom/native-supervisor-channel.js
+@@ -811,6 +811,8 @@ export function createNativeSupervisorChannel(pi, state, deps = {}) {
+                         ...(request.childTarget ? { childTarget: request.childTarget } : {}),
+                         ...(request.interview !== undefined ? { interview: request.interview } : {}),
+                         requestBody: request.message,
++                        requestedAt: request.createdAt,
++                        deadlineAt: request.expiresAt ?? null,
+                         replyHint: supervisorReplyHint(request.id),
+                     },
+                 }, { triggerTurn: true });
+@@ -1017,6 +1019,18 @@ export function createNativeSupervisorChannel(pi, state, deps = {}) {
+         deferredWatcherRefresh.unref?.();
+     };
+     return {
++        reply: (requestId, message) => {
++            refreshPendingRequests(pending, state, observeRequestLifecycle, runState);
++            const request = pending.get(requestId);
++            if (!request)
++                throw new Error(`No pending supervisor request found for replyTo '${requestId}'.`);
++            const reply = writeReply(request, message);
++            appendSupervisorReplyEntry(pi, request, reply);
++            pending.delete(request.id);
++            observeRequestLifecycle(request, "resolved");
++            clearForegroundSupervisorAttention(request, pending, state);
++            return { requestId: request.id, runId: request.runId, agent: request.agent };
++        },
+         registerTools: registerParentTools,
+         activateTransport: () => {
+             if (!started)
+diff --git a/src/runs/background/async-execution.js b/src/runs/background/async-execution.js
+index a6be3d181f5b19523e71d283b62d51250823b785..b0a5237e1ea4a9a898726ab8d963bb48c7161c5b 100644
+--- a/src/runs/background/async-execution.js
++++ b/src/runs/background/async-execution.js
+@@ -420,7 +420,7 @@ function spawnRunner(cfg, suffix, cwd, initialStatus, initialStatusPath, launchP
+     const binaryHost = resolveBunPiExecutable();
+     if (!binaryHost && "error" in piPackageSelection)
+         throw piPackageSelection.error;
+-    const nodeExecutable = resolveNodeExecutable();
++    const nodeExecutable = process.env.JINGLER_SUBAGENT_NODE?.trim() || resolveNodeExecutable();
+     const nativeRunnerSupported = supportsNativeRunner(nodeExecutable);
+     const runner = asyncRunnerSourcePath();
+     const runnerIsJavaScript = path.extname(runner) === ".js";
+@@ -517,6 +517,7 @@ function spawnRunner(cfg, suffix, cwd, initialStatus, initialStatusPath, launchP
+         const runnerEnv = {
+             ...omitGitRoutingEnv(omitExtensionBindingsEnv(process.env)),
+             ...childCacheRetentionEnv(),
++            ...(process.env.PI_SUBAGENT_ELECTRON_RUN_AS_NODE === "1" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+             [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: binaryHost ? undefined : piPackageRoot,
+             // npm must override inherited bundled layouts (#2071); binaries retain release assets.
+             PI_PACKAGE_DIR: binaryHost ? process.env.PI_PACKAGE_DIR : piPackageRoot,
+diff --git a/src/runs/foreground/execution.js b/src/runs/foreground/execution.js
+index 729391a9a1d71093696634cbc295a8aa5fcc5c61..e49df0451c0dd121c8fb99b835d086e1976b1c71 100644
+--- a/src/runs/foreground/execution.js
++++ b/src/runs/foreground/execution.js
+@@ -515,6 +515,8 @@ async function runSingleAttempt(runtimeCwd, agent, task, model, options, shared)
+             receiptProgress.status = "detached";
+             receiptProgress.durationMs = Date.now() - startTime;
+             const receipt = snapshotResult(result, receiptProgress);
++            if (!receipt.sessionFile && options.sessionFile && existsSync(options.sessionFile))
++                receipt.sessionFile = options.sessionFile;
+             receipt.exitCode = -2;
+             receipt.detached = true;
+             receipt.detachedReason = reason;
+diff --git a/src/runs/shared/process-child-session-worker.js b/src/runs/shared/process-child-session-worker.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..68960d0e8c8bfc8cd1e2a93a017bfbbcc4a676f6
+--- /dev/null
++++ b/src/runs/shared/process-child-session-worker.js
+@@ -0,0 +1,84 @@
++import { createInterface } from "node:readline";
++import { createChildHooks } from "./child-hooks.js";
++import {
++  createDefaultChildSessionFactory
++} from "./child-session.js";
++const send = (value) => {
++  process.stdout.write(`${JSON.stringify(value)}
++`);
++};
++let session;
++let factory;
++const respond = async (message) => {
++  const id = typeof message.id === "string" ? message.id : void 0;
++  try {
++    if (message.type === "init") {
++      const launch = message.launch;
++      const runtime = launch.runtime;
++      if (runtime.structuredOutput) {
++        runtime.structuredOutput.capture = (value, acceptanceReport) => send({ type: "callback", callback: "structuredOutput", value, acceptanceReport });
++      }
++      runtime.watchdogStatus = (event) => send({ type: "callback", callback: "watchdogStatus", event });
++      runtime.toolDiagnostic = (diagnostic) => send({ type: "callback", callback: "toolDiagnostic", diagnostic });
++      runtime.runtimeAcknowledgements = (ids) => send({ type: "callback", callback: "runtimeAcknowledgements", ids });
++      launch.hooks = createChildHooks(runtime);
++      launch.onExtensionError = (error) => send({
++        type: "callback",
++        callback: "extensionError",
++        error: {
++          extensionPath: error.extensionPath,
++          event: error.event,
++          message: error.error instanceof Error ? error.error.message : String(error.error)
++        }
++      });
++      factory = createDefaultChildSessionFactory({ loadPiCodingAgent: () => import("@earendil-works/pi-coding-agent") });
++      session = await factory.create(launch);
++      session.subscribe((event) => send({ type: "event", event }));
++      send({
++        type: "ready",
++        sessionFile: session.sessionFile,
++        sessionId: session.sessionId,
++        modelId: session.modelId
++      });
++      return;
++    }
++    if (!session) throw new Error("Child session is not initialized");
++    if (message.type === "prompt") await session.prompt(String(message.text ?? ""));
++    else if (message.type === "steer") await session.steer(String(message.text ?? ""));
++    else if (message.type === "followUp") await session.followUp(String(message.text ?? ""));
++    else if (message.type === "abort") await session.abort();
++    else if (message.type === "dispose") {
++      await session.dispose();
++      await factory?.dispose();
++    } else throw new Error(`Unknown child session command: ${String(message.type)}`);
++    if (id && message.type === "dispose") {
++      process.stdout.write(
++        `${JSON.stringify({ type: "response", id, success: true })}
++`,
++        () => process.exit(0)
++      );
++      return;
++    }
++    if (id) send({ type: "response", id, success: true });
++  } catch (error) {
++    if (id) send({
++      type: "response",
++      id,
++      success: false,
++      error: error instanceof Error ? error.message : String(error)
++    });
++    else send({ type: "fatal", error: error instanceof Error ? error.message : String(error) });
++  }
++};
++const lines = createInterface({ input: process.stdin });
++lines.on("line", (line) => {
++  let message;
++  try {
++    message = JSON.parse(line);
++  } catch {
++    send({ type: "fatal", error: "Malformed child session command" });
++    return;
++  }
++  if (!message || typeof message !== "object" || Array.isArray(message)) return;
++  void respond(message);
++});
+diff --git a/src/runs/shared/process-child-session.js b/src/runs/shared/process-child-session.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..beac51fb7fa9c2e596eb0c8583b67dc781d99527
+--- /dev/null
++++ b/src/runs/shared/process-child-session.js
+@@ -0,0 +1,219 @@
++import { spawn } from "node:child_process";
++import { createHash } from "node:crypto";
++import * as fs from "node:fs";
++import * as path from "node:path";
++import { createInterface } from "node:readline";
++import { fileURLToPath } from "node:url";
++const SAFE_AGENT = /^[a-z][a-z0-9-]*$/u;
++const isolatedChildEnvironment = (launch) => {
++  const env = { ...process.env, ...launch.processEnv };
++  for (const key of [
++    "ANTHROPIC_API_KEY",
++    "ANTHROPIC_AUTH_TOKEN",
++    "ANTHROPIC_BASE_URL",
++    "CLAUDE_CODE_USE_BEDROCK",
++    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
++    "CLAUDE_CODE_USE_VERTEX",
++    "CLAUDE_CODE_USE_FOUNDRY"
++  ]) delete env[key];
++  const root = env.JINGLER_SUBAGENT_CREDENTIAL_ROOT;
++  const parent = launch.runtime.parentSessionId ?? launch.runtime.orchestratorSessionId;
++  const agent = launch.runtime.agent;
++  if (!root || !parent || !agent || !SAFE_AGENT.test(agent)) {
++    throw new Error("Jingler child credentials require a valid parent session and agent");
++  }
++  const agentDir = path.join(root, createHash("sha256").update(parent).digest("hex"));
++  const authPath = path.join(agentDir, "auth.json");
++  const capabilityPath = path.join(agentDir, `capability-${agent}.json`);
++  for (const file of [authPath, capabilityPath]) {
++    const stat = fs.statSync(file);
++    if (process.platform !== "win32" && (stat.mode & 511) !== 384) {
++      throw new Error(`Jingler child credential permissions are not restricted: ${file}`);
++    }
++  }
++  env.PI_CODING_AGENT_DIR = agentDir;
++  env.JINGLER_SUBAGENT_CAPABILITY = capabilityPath;
++  env.PI_SUBAGENT_CHILD = "1";
++  env.PI_SUBAGENT_PARENT_SESSION = parent;
++  if (env.PI_SUBAGENT_ELECTRON_RUN_AS_NODE === "1") env.ELECTRON_RUN_AS_NODE = "1";
++  delete env.JINGLER_SUBAGENT_CREDENTIAL_ROOT;
++  return env;
++};
++const serializableLaunch = (launch) => ({
++  ...launch,
++  hooks: [],
++  onExtensionError: void 0,
++  // Process-local: a registry's methods and an AbortSignal do not survive JSON. The worker
++  // resolves providers from its own extensions; startup cancellation is forwarded below.
++  parentProviderRegistry: void 0,
++  signal: void 0,
++  runtime: {
++    ...launch.runtime,
++    watchdogStatus: void 0,
++    toolDiagnostic: void 0,
++    runtimeAcknowledgements: void 0,
++    ...launch.runtime.structuredOutput ? { structuredOutput: { ...launch.runtime.structuredOutput, capture: void 0 } } : {}
++  }
++});
++const startChild = (launch) => new Promise((resolve, reject) => {
++  if (launch.signal?.aborted) {
++    reject(launch.signal.reason instanceof Error ? launch.signal.reason : new Error("Child session startup aborted"));
++    return;
++  }
++  const node = process.env.JINGLER_SUBAGENT_NODE ?? process.execPath;
++  const fixtureWorker = process.env.JINGLER_SUBAGENT_PROCESS_WORKER?.trim();
++  const worker = fileURLToPath(new URL("./process-child-session-worker.js", import.meta.url));
++  const child = spawn(
++    node,
++    fixtureWorker ? [fixtureWorker] : [worker],
++    {
++      cwd: launch.cwd,
++      env: isolatedChildEnvironment(launch),
++      stdio: ["pipe", "pipe", "pipe"],
++      windowsHide: true
++    }
++  );
++  const listeners = /* @__PURE__ */ new Set();
++  const pending = /* @__PURE__ */ new Map();
++  const messages = [];
++  let sequence = 0;
++  let ready = false;
++  let disposed = false;
++  let stderr = "";
++  const command = (type, text) => {
++    if (disposed) return Promise.reject(new Error("Child session is disposed"));
++    const id = `command-${++sequence}`;
++    child.stdin.write(`${JSON.stringify({ id, type, ...text === void 0 ? {} : { text } })}
++`);
++    return new Promise((resolveCommand, rejectCommand) => {
++      pending.set(id, { resolve: resolveCommand, reject: rejectCommand });
++    });
++  };
++  const fail = (error, terminate = false) => {
++    if (!ready) reject(error);
++    for (const waiter of pending.values()) waiter.reject(error);
++    pending.clear();
++    if (terminate && child.exitCode === null) child.kill("SIGTERM");
++  };
++  const startupTimer = setTimeout(() => {
++    fail(new Error(stderr.trim() || "Child session did not start within 10 seconds"), true);
++  }, 1e4);
++  startupTimer.unref?.();
++  const abortStartup = () => {
++    if (!ready) fail(launch.signal?.reason instanceof Error ? launch.signal.reason : new Error("Child session startup aborted"), true);
++  };
++  launch.signal?.addEventListener("abort", abortStartup, { once: true });
++  child.stderr.on("data", (chunk) => {
++    stderr = `${stderr}${chunk.toString("utf8")}`.slice(-64 * 1024);
++  });
++  child.on("error", (error) => fail(error, true));
++  child.stdin.on("error", (error) => fail(error, true));
++  child.on("close", (code) => {
++    clearTimeout(startupTimer);
++    launch.signal?.removeEventListener("abort", abortStartup);
++    const unfinished = !ready || pending.size > 0;
++    disposed = true;
++    if (code !== 0 || unfinished) {
++      fail(new Error(stderr.trim() || `Child session exited with code ${code}`));
++    }
++  });
++  createInterface({ input: child.stdout }).on("line", (line) => {
++    let message;
++    try {
++      message = JSON.parse(line);
++    } catch {
++      fail(new Error("Child session emitted malformed JSON"), true);
++      return;
++    }
++    if (message.type === "event") {
++      const event = message.event;
++      if ((event.type === "message_end" || event.type === "tool_result_end") && event.message) {
++        messages.push(event.message);
++      }
++      for (const listener of listeners) listener(event);
++      return;
++    }
++    if (message.type === "callback") {
++      if (message.callback === "watchdogStatus") launch.runtime.watchdogStatus?.(message.event);
++      else if (message.callback === "toolDiagnostic") launch.runtime.toolDiagnostic?.(message.diagnostic);
++      else if (message.callback === "runtimeAcknowledgements") launch.runtime.runtimeAcknowledgements?.(message.ids);
++      else if (message.callback === "structuredOutput") launch.runtime.structuredOutput?.capture(message.value, message.acceptanceReport);
++      else if (message.callback === "extensionError") {
++        const error = message.error;
++        launch.onExtensionError?.({ ...error, error: new Error(error.message) });
++      }
++      return;
++    }
++    if (message.type === "response" && typeof message.id === "string") {
++      const waiter = pending.get(message.id);
++      if (!waiter) return;
++      pending.delete(message.id);
++      if (message.success === true) waiter.resolve();
++      else waiter.reject(new Error(String(message.error ?? "Child session command failed")));
++      return;
++    }
++    if (message.type === "fatal") {
++      fail(new Error(String(message.error ?? "Child session failed")), true);
++      return;
++    }
++    if (message.type !== "ready") return;
++    clearTimeout(startupTimer);
++    launch.signal?.removeEventListener("abort", abortStartup);
++    ready = true;
++    const session = {
++      subscribe: (listener) => {
++        listeners.add(listener);
++        return () => listeners.delete(listener);
++      },
++      prompt: (text) => command("prompt", text),
++      steer: (text) => command("steer", text),
++      followUp: (text) => command("followUp", text),
++      abort: () => command("abort"),
++      dispose: async () => {
++        if (disposed) return;
++        await command("dispose").catch(() => {
++        });
++        disposed = true;
++        if (child.exitCode === null) child.kill("SIGTERM");
++      },
++      get messages() {
++        return messages;
++      },
++      sessionFile: typeof message.sessionFile === "string" ? message.sessionFile : void 0,
++      sessionId: String(message.sessionId ?? ""),
++      modelId: typeof message.modelId === "string" ? message.modelId : void 0
++    };
++    resolve(session);
++  });
++  child.stdin.write(`${JSON.stringify({ type: "init", launch: serializableLaunch(launch) })}
++`);
++});
++const processChildSessionFactoryModule = fileURLToPath(import.meta.url);
++const createProcessChildSessionFactory = () => {
++  const live = /* @__PURE__ */ new Set();
++  return {
++    create: async (launch) => {
++      const child = await startChild(launch);
++      live.add(child);
++      const dispose = child.dispose;
++      child.dispose = async () => {
++        live.delete(child);
++        await dispose();
++      };
++      return child;
++    },
++    dispose: async () => {
++      const attached = [...live].filter((child) => !child.detached);
++      for (const child of attached) child.shutDown = true;
++      await Promise.allSettled(attached.map((child) => child.abort()));
++      await Promise.allSettled(attached.map((child) => child.dispose()));
++    }
++  };
++};
++var pcs_default = createProcessChildSessionFactory;
++export {
++  createProcessChildSessionFactory,
++  pcs_default as default,
++  isolatedChildEnvironment,
++  processChildSessionFactoryModule
++};

@@ -2,7 +2,7 @@ import { chmod, mkdtemp, writeFile } from "node:fs/promises"
 import { latestClaudeCliRateLimits, resetClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Type, fauxProvider, type AssistantMessageEvent, type Context } from "@earendil-works/pi-ai"
+import { Type, fauxProvider, normalizeContext, type AssistantMessageEvent, type Context } from "@earendil-works/pi-ai"
 import { describe, expect, it } from "vitest"
 import {
   checkClaudeSubscription,
@@ -12,7 +12,7 @@ import {
 } from "./claude-cli-provider.js"
 
 const model = fauxProvider({ provider: "anthropic", api: "anthropic-messages" }).getModel()
-const context: Context = {
+const rawContext: Context = {
   systemPrompt: "Use only the supplied tools.",
   messages: [{ role: "user", content: "Inspect package.json", timestamp: 1 }],
   tools: [{
@@ -21,6 +21,7 @@ const context: Context = {
     parameters: Type.Object({ path: Type.String() })
   }]
 }
+const context = normalizeContext(rawContext)
 
 const executable = async (body: string): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), "jingler-claude-cli-"))
@@ -45,14 +46,14 @@ describe("Claude CLI provider relay", () => {
       messages: [{ role: "user", content: "Call probe_echo and reply with its word.", timestamp: 1 }]
     }
     const stream = createClaudeCliStreamSimple()
-    const first = await stream(liveModel, liveContext, { signal: AbortSignal.timeout(60_000) }).result()
+    const first = await stream(liveModel, normalizeContext(liveContext), { signal: AbortSignal.timeout(60_000) }).result()
     expect(first.stopReason).toBe("toolUse")
     const call = first.content.find((part) => part.type === "toolCall")!
     expect(call?.name).toBe("probe_echo")
-    const second = await stream(liveModel, { ...liveContext, messages: [
+    const second = await stream(liveModel, normalizeContext({ ...liveContext, messages: [
       ...liveContext.messages, first,
       { role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: "JINGLER_TOOL_RESULT_73" }], isError: false, timestamp: 2 }
-    ] }, { signal: AbortSignal.timeout(60_000) }).result()
+    ] }), { signal: AbortSignal.timeout(60_000) }).result()
     expect(second.stopReason).toBe("stop")
     expect(second.content.filter((part) => part.type === "text").map((part) => part.text).join(""))
       .toContain("JINGLER_TOOL_RESULT_73")
@@ -71,14 +72,14 @@ describe("Claude CLI provider relay", () => {
   })
 
   it("requires Claude to use a named Jingler MCP service before other work", () => {
-    const mcpContext: Context = {
-      ...context,
-      tools: [...(context.tools ?? []), {
+    const mcpContext = normalizeContext({
+      ...rawContext,
+      tools: [...(rawContext.tools ?? []), {
         name: "mcp_search",
         description: "Discover configured MCP capabilities. Servers: paper",
         parameters: Type.Object({ query: Type.String() })
       }]
-    }
+    })
     const args = claudeCliArguments(model, mcpContext, {}, "/tmp/mcp.json")
     const prompt = args[args.indexOf("--system-prompt") + 1]
     expect(prompt).toContain("When the user asks to use or inspect a named service")
@@ -211,10 +212,10 @@ setInterval(() => {}, 1000)
         toolCall: new Promise(() => {}),
         close: async () => {}
       })
-    })(model, {
-      ...context,
+    })(model, normalizeContext({
+      ...rawContext,
       tools: [{ name: "command_execute", description: "Run a command.", parameters: { type: "object", properties: {} } } as never]
-    })
+    }))
     const events = await collect(stream)
     const done = events.at(-1)
     expect(done?.type === "done" ? done.reason : null).toBe("toolUse")

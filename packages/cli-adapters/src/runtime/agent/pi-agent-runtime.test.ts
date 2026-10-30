@@ -92,7 +92,7 @@ const settlingHandle = (fleet: { childActive: boolean }): PiSessionHandle => ({
   modelId: "anthropic/claude-sonnet",
   contextWindow: 200_000,
   subscribe: (next) => {
-    queueMicrotask(() => next({ type: "agent_settled" }))
+    queueMicrotask(() => next({ type: "agent_settled", aborted: false }))
     return vi.fn()
   },
   prompt: async () => undefined,
@@ -172,7 +172,7 @@ describe("PiAgentRuntime", () => {
             delta: "hello"
           } as never
         })
-        listener?.({ type: "agent_settled" })
+        listener?.({ type: "agent_settled", aborted: false })
       },
       steer: async () => undefined,
       interrupt: async () => undefined,
@@ -211,7 +211,7 @@ describe("PiAgentRuntime", () => {
             delta: "hello"
           } as never
         })
-        listener?.({ type: "agent_settled" })
+        listener?.({ type: "agent_settled", aborted: false })
       },
       steer: async () => undefined,
       interrupt: async () => undefined,
@@ -256,7 +256,7 @@ describe("PiAgentRuntime", () => {
           attempt: 1,
           success: true
         })
-        listener?.({ type: "agent_settled" })
+        listener?.({ type: "agent_settled", aborted: false })
       },
       steer: async () => undefined,
       interrupt: async () => undefined,
@@ -296,7 +296,7 @@ describe("PiAgentRuntime", () => {
             errorMessage: "provider unavailable"
           } as never
         })
-        listener?.({ type: "agent_settled" })
+        listener?.({ type: "agent_settled", aborted: false })
       },
       steer: async () => undefined,
       interrupt: async () => undefined,
@@ -321,7 +321,7 @@ describe("PiAgentRuntime", () => {
     let childActive = true
     const dispose = vi.fn()
     const prompt = vi.fn(async () => {
-      listener?.({ type: "agent_settled" })
+      listener?.({ type: "agent_settled", aborted: false })
     })
     const controlSubagent = vi.fn(fleetSeams.controlSubagent)
     const handle: PiSessionHandle = {
@@ -453,7 +453,7 @@ describe("PiAgentRuntime", () => {
           summary: "The callback follows the retained session.",
           sections: []
         }) ?? Effect.void)
-        listener?.({ type: "agent_settled" })
+        listener?.({ type: "agent_settled", aborted: false })
       },
       steer: async () => undefined,
       interrupt: async () => undefined,
@@ -750,7 +750,7 @@ describe("PiAgentRuntime", () => {
             }
           }
         } as never)
-        next({ type: "agent_settled" })
+        next({ type: "agent_settled", aborted: false })
         return vi.fn()
       },
       prompt: async () => undefined,
@@ -786,7 +786,7 @@ describe("PiAgentRuntime reconciliation", () => {
         return vi.fn()
       },
       prompt: async () => {
-        listener?.({ type: "agent_settled" })
+        listener?.({ type: "agent_settled", aborted: false })
       },
       steer: async () => undefined,
       interrupt: async () => undefined,

@@ -50,7 +50,7 @@
       "@homebridge/node-pty-prebuilt-multiarch"
     ],
     "patchedDependencies": {
-      "pi-subagents@0.65.0": "patches/pi-subagents@0.65.0.patch"
+      "pi-subagents@0.84.0": "patches/pi-subagents@0.84.0.patch"
     }
   }
 }

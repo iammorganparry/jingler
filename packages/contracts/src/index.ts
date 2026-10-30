@@ -100,6 +100,7 @@ import {
   StreamEvent,
   SubagentFleetControlOutcome,
   SubagentFleetControlRequest,
+  SubagentFleetEvent,
   SubagentFleetSnapshot,
   TerminalChunk,
   TerminalInfo,
@@ -1891,6 +1892,13 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * else's run. Ownership is the chat that was the session's `activeChatId` when
    * the review STARTED; only that chat's watcher receives the run's events.
    */
+  /** Fleet events for one chat that arrive after its turn ended (retained children settling). */
+  Rpc.make("Agent.watchSubagentFleet", {
+    success: SubagentFleetEvent,
+    stream: true,
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
   Rpc.make("Review.watch", {
     success: StreamEvent,
     stream: true,
@@ -3080,7 +3088,12 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 ) {}
 
 /** The complete server contract; split clients still share this one IPC surface. */
-export const JinglerRpcs = JinglerCoreRpcs.merge(
+// Explicit: the inferred merge type is too large for tsc to serialize (TS7056).
+export const JinglerRpcs: RpcGroup.RpcGroup<
+  | RpcGroup.Rpcs<typeof JinglerCoreRpcs>
+  | RpcGroup.Rpcs<typeof JinglerReviewRpcs>
+  | RpcGroup.Rpcs<typeof AssetListRpcs>
+> = JinglerCoreRpcs.merge(
   JinglerReviewRpcs,
   AssetListRpcs
 )

@@ -15,8 +15,10 @@ import { PONYTAIL_EXTENSION_PATH } from "../resources/ponytail-resources.js"
 
 const require = createRequire(import.meta.url)
 export const PI_SUBAGENTS_EXTENSION_PATH = require.resolve("pi-subagents")
-const PI_SUBAGENTS_AGENT_DIR = join(
+// The entry is bundle/index.js; the agent profiles sit at the package root.
+const PI_SUBAGENTS_AGENT_DIR = resolve(
   dirname(PI_SUBAGENTS_EXTENSION_PATH),
+  "..",
   "agents"
 )
 const BUILTIN_AGENTS = JINGLER_SUBAGENT_NAMES.filter(
@@ -50,7 +52,6 @@ const PiSubagentConfig = Schema.Struct({
   maxSubagentSpawnsPerRun: Schema.Number,
   maxSubagentSpawnsPerSession: Schema.Number,
   missions: Schema.Struct({ enabled: Schema.Boolean }),
-  modelExclusions: Schema.Struct({ defaultTtlMs: Schema.Number }),
   timeoutMs: Schema.Number,
   toolDescriptionMode: Schema.Literal("compact")
 })
@@ -71,10 +72,6 @@ const CONFIG = {
   maxSubagentSpawnsPerRun: 8,
   maxSubagentSpawnsPerSession: 64,
   missions: { enabled: false },
-  // pi-subagents bans a model for 24h after one retryable failure, so a single
-  // "Connection error" blip made every later child skip it until tomorrow.
-  // A configured TTL also shortens bans already on disk.
-  modelExclusions: { defaultTtlMs: 5 * 60_000 },
   timeoutMs: 3_600_000,
   toolDescriptionMode: "compact"
 } as const
