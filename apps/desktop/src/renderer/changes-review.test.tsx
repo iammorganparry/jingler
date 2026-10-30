@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Session } from "@jingler/core"
+import { activeCheckoutOf, type Session } from "@jingler/core"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { PropsWithChildren, ReactElement } from "react"
@@ -46,9 +46,8 @@ const patch = [
 const session = {
   id: "s1",
   title: "Refresh expired sessions",
-  prNumber: null,
-  worktreePath: "/repo/.worktrees/s1",
-  workspaceMode: "worktree"
+  checkouts: [{ id: "primary", repo: "r", branch: "b", prNumber: null, worktreePath: "/repo/.worktrees/s1", workspaceMode: "worktree" }],
+  activeCheckoutId: "primary"
 } as unknown as Session
 
 let queryClient: QueryClient
@@ -60,7 +59,7 @@ const wrapper = ({ children }: PropsWithChildren): ReactElement => (
 
 const renderReview = async () => {
   // Reviewing is what turns the diff queries on.
-  setReviewFilter(session.id, session.prNumber, "local")
+  setReviewFilter(session.id, activeCheckoutOf(session).prNumber, "local")
   const hook = renderHook(() => useChangesReview(session, true), { wrapper })
   // The uncommitted diff is what comments are written against.
   await waitFor(() => expect(hook.result.current.review.files).toHaveLength(1))
@@ -103,7 +102,10 @@ describe("review data fetching", () => {
   })
 
   it("reads PR threads on their own key, never the Pull Request tab's", async () => {
-    const prSession = { ...session, prNumber: 7 } as Session
+    const prSession = {
+      ...session,
+      checkouts: [{ ...activeCheckoutOf(session), prNumber: 7, prs: [{ number: 7 }] }]
+    } as Session
     vi.mocked(rpc.githubPr).mockResolvedValue({ reviewThreads: [] } as never)
     setReviewFilter(prSession.id, 7, "pr")
     renderHook(() => useChangesReview(prSession, true), { wrapper })

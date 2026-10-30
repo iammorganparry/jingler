@@ -43,7 +43,6 @@ const session = (over: Partial<Session> & { worktreePath?: string } = {}): Sessi
     title: "Fix auth",
     status: "idle",
     diff: { added: 0, removed: 0 },
-    prNumber: 42,
     costUsd: 0,
     tokens: 0,
     updatedAt: "2026-07-16T00:00:00.000Z",
@@ -151,7 +150,7 @@ describe("the shipped hello-tab example", () => {
     if (!result.ok) throw new Error(result.error.message)
     const tab = result.plugin.tabs[0]!
 
-    const bare = session({ prNumber: null, worktreePath: undefined })
+    const bare = session({ worktreePath: undefined })
     expect(activeCheckoutOf(bare).worktreePath).toBeUndefined()
     for (const s of [session(), bare]) {
       expect(tab.when({ session: s, hasPlan: false })).toBe(true)

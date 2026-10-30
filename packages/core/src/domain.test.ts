@@ -416,7 +416,7 @@ describe("Session", () => {
   });
 
   it("round-trips the optional workspace and persistence fields when present", () => {
-    const { repo, branch, ...rest } = base;
+    const { repo, branch, prNumber: _prNumber, ...rest } = base;
     const withWorktree: Session = {
       ...rest,
       checkouts: [

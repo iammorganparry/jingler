@@ -1,4 +1,4 @@
-import { activeCheckoutOf, Session as SessionSchema } from "@jingler/core"
+import { activeCheckoutOf, sessionPrsOf, Session as SessionSchema } from "@jingler/core"
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -136,7 +136,6 @@ describe("publish branch verification", () => {
     title: "Publish session",
     status: "idle",
     diff: { added: 0, removed: 0 },
-    prNumber: null,
     costUsd: 0,
     tokens: 0,
     updatedAt: "2026-08-10T00:00:00.000Z",
@@ -355,7 +354,8 @@ describe("reconcileRelaySessionRoutes", () => {
     ({
       id: "session-1",
       archived: false,
-      prNumber: 42,
+      checkouts: [{ id: "primary", repo: "r", branch: "b", prNumber: 42, worktreePath: "/tmp/wt" }],
+      activeCheckoutId: "primary",
       githubInstallationId: "99",
       githubRepositoryId: "200",
       ...patch,
@@ -405,7 +405,7 @@ describe("reconcileRelaySessionRoutes", () => {
     await expect(
       reconcileRelaySessionRoutes(
         async () => [linkedSession({
-          prNumber: 43,
+          checkouts: [{ id: "primary", repo: "r", branch: "b", prNumber: 43, worktreePath: "/tmp/wt" }],
           githubInstallationId: undefined,
           githubRepositoryId: undefined,
         })],
@@ -1520,7 +1520,7 @@ describe("RPC handlers", () => {
       await expect(Effect.runPromise(githubDetectPr("cli-only").pipe(Effect.provide(github))))
         .resolves.toBe(44);
       const linked = await Effect.runPromise(SessionStore.get("cli-only").pipe(Effect.provide(github)));
-      expect(linked.prNumber).toBe(44);
+      expect(activeCheckoutOf(linked).prNumber).toBe(44);
       expect(activeCheckoutOf(linked).branch).toBe("fix/cli");
       expect(linked.githubInstallationId).toBeUndefined();
       expect(linked.githubRepositoryId).toBeUndefined();
@@ -1559,8 +1559,8 @@ describe("RPC handlers", () => {
       await Effect.runPromise(githubDetectPr("two-repos").pipe(Effect.provide(github)));
       const linked = await Effect.runPromise(SessionStore.get("two-repos").pipe(Effect.provide(github)));
       expect(linked.checkouts?.map((c) => [c.id, c.prNumber])).toEqual([["web", 1], ["api", 2]]);
-      expect(linked.prNumber).toBe(1);
-      expect(linked.prs).toEqual([{ number: 2, repo: "qa-api" }, { number: 1, repo: "qa-web" }]);
+      expect(activeCheckoutOf(linked).prNumber).toBe(1);
+      expect(sessionPrsOf(linked)).toEqual([{ number: 2, repo: "qa-api" }, { number: 1, repo: "qa-web" }]);
     });
 
     it("synchronizes the live branch and replacement PR route before returning", async () => {
@@ -1633,8 +1633,8 @@ describe("RPC handlers", () => {
         SessionStore.get("replacement-session").pipe(Effect.provide(github)),
       );
       expect(activeCheckoutOf(replaced).branch).toBe("fix/replacement-pr");
+      expect(activeCheckoutOf(replaced).prNumber).toBe(43);
       expect(replaced).toMatchObject({
-        prNumber: 43,
         githubInstallationId: "99",
         githubRepositoryId: "200",
       });

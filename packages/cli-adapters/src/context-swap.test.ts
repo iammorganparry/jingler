@@ -116,7 +116,6 @@ const seed = (over: Partial<Session> = {}) =>
       providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
       modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
       diff: { added: 0, removed: 0 },
-      prNumber: null,
       costUsd: 0,
       // The two numbers deliberately differ, and by orders of magnitude.
       //

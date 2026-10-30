@@ -30,7 +30,7 @@ export function pullRequestSessionTarget(
     project,
     session: sessions.find(
       (candidate) =>
-        candidate.prNumber === pr.number &&
+        activeCheckoutOf(candidate).prNumber === pr.number &&
         (activeCheckoutOf(candidate).repoPath === repo.path || activeCheckoutOf(candidate).projectId === project?.id)
     ) ?? null
   }

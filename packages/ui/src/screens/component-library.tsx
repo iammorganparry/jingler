@@ -38,7 +38,6 @@ const demoSession: Session = {
   title: "Refactor auth flow",
   status: "thinking",
   diff: { added: 313, removed: 23 },
-  prNumber: 482,
   costUsd: 1.24,
   tokens: 218000,
   updatedAt: "2026-07-11T09:41:00.000Z",

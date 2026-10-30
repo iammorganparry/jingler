@@ -22,6 +22,7 @@ import {
   issueReferenceOf,
   issueReferencesOf,
   activeCheckoutOf,
+  sessionPrsOf,
   piEndpointId,
   ProviderConnectionId,
   ProviderId,
@@ -36,7 +37,6 @@ import {
   SessionStore,
   migrateRepoName,
   migrateSessionChats,
-  migrateSessionPrs
 } from "./sessions.js"
 import {
   failureOf,
@@ -1049,7 +1049,7 @@ describe("SessionStore", () => {
       SessionStore.get(id).pipe(Effect.provide(SessionStore.Default)),
       temp.layer
     )
-    expect(linked._tag === "Success" && linked.value.prNumber).toBe(482)
+    expect(linked._tag === "Success" && activeCheckoutOf(linked.value).prNumber).toBe(482)
 
     // Clearing it (null) round-trips too.
     const cleared = await runExit(
@@ -1059,7 +1059,7 @@ describe("SessionStore", () => {
       }).pipe(Effect.provide(SessionStore.Default)),
       temp.layer
     )
-    expect(cleared._tag === "Success" && cleared.value.prNumber).toBe(null)
+    expect(cleared._tag === "Success" && activeCheckoutOf(cleared.value).prNumber).toBe(null)
   })
 
   it("reads a session persisted with only prNumber as a one-element stack", async () => {
@@ -1071,8 +1071,8 @@ describe("SessionStore", () => {
     persisted[0]!.prNumber = 481
     writeFileSync(file, JSON.stringify(persisted))
     const restored = await Effect.runPromise(SessionStore.get(original.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
-    expect(restored.prNumber).toBe(481)
-    expect(restored.prs).toEqual([{ number: 481 }])
+    expect(activeCheckoutOf(restored).prNumber).toBe(481)
+    expect(sessionPrsOf(restored)).toEqual([{ number: 481 }])
   })
 
   it("appends stacked PRs bottom-first, mirrors the top into prNumber, and round-trips the order", async () => {
@@ -1088,11 +1088,11 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.prs).toEqual([
+    expect(sessionPrsOf(exit.value)).toEqual([
       { number: 481, branch: "feat/a", base: "main", state: "merged" },
       { number: 482, branch: "feat/b", base: "feat/a" }
     ])
-    expect(exit.value.prNumber).toBe(482)
+    expect(activeCheckoutOf(exit.value).prNumber).toBe(482)
     const onDisk = JSON.parse(readFileSync(join(temp.root, "sessions.json"), "utf-8")) as Array<{ prs: Array<{ number: number }> }>
     expect(onDisk[0]!.prs.map((pr) => pr.number)).toEqual([481, 482])
   })
@@ -1112,9 +1112,9 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value[0].prs).toEqual([{ number: 9 }])
-    expect(exit.value[1].prNumber).toBeNull()
-    expect(exit.value[1].prs).toBeUndefined()
+    expect(sessionPrsOf(exit.value[0])).toEqual([{ number: 9 }])
+    expect(activeCheckoutOf(exit.value[1]).prNumber).toBeNull()
+    expect(sessionPrsOf(exit.value[1])).toEqual([])
   })
 
   it("clears stale App routing identity when the PR number changes", async () => {
@@ -1141,7 +1141,7 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value).toMatchObject({ prNumber: 43 })
+    expect(activeCheckoutOf(exit.value).prNumber).toBe(43)
     expect(exit.value.githubInstallationId).toBeUndefined()
     expect(exit.value.githubRepositoryId).toBeUndefined()
     expect(exit.value.githubFeedbackDeliveryIds).toBeUndefined()
@@ -1698,7 +1698,7 @@ describe("SessionStore", () => {
     ).toBe("Success")
     if (exit._tag !== "Success") return
     const s = exit.value
-    expect(s.prNumber).toBe(482)
+    expect(activeCheckoutOf(s).prNumber).toBe(482)
     expect(s.githubInstallationId).toBe("installation-77")
     expect(s.githubRepositoryId).toBe("repo-301")
     expect(activeCheckoutOf(s).githubSlug).toBe("acme/trigify-app")
@@ -1730,7 +1730,7 @@ describe("SessionStore", () => {
       SessionStore.get(s.id).pipe(Effect.provide(SessionStore.Default)),
       temp.layer
     )
-    expect(reread._tag === "Success" && reread.value.prNumber).toBe(482)
+    expect(reread._tag === "Success" && activeCheckoutOf(reread.value).prNumber).toBe(482)
   })
 
   it("createFromPr keeps initial team pickup CLI-only and never persists the account pin", async () => {
@@ -2242,7 +2242,7 @@ describe("SessionStore", () => {
     expect(s.title).toBe("Refund route 500s on a stale token")
     expect(s.autoTitle).toBe(false)
     expect(s.initialPrompt).toBe("Refund route 500s on a stale token\n\nFix the refund route.")
-    expect(s.prNumber).toBe(null)
+    expect(activeCheckoutOf(s).prNumber).toBe(null)
     expect(activeChat(s)).toMatchObject({
       workMode: "plan",
       modelId
@@ -2560,50 +2560,6 @@ describe("SessionStore", () => {
  * headings — the old name holding every session that predated the rename, the
  * new name holding only what came after.
  */
-describe("migrateSessionPrs", () => {
-  // SAFETY: only prNumber/prs are read by the migration; the rest of a Session is irrelevant here.
-  const withPrs = (prNumber: number | null, prs?: Session["prs"]) =>
-    ({ prNumber, ...(prs ? { prs } : {}) }) as Session
-
-  it("derives a one-element stack from prNumber", () => {
-    expect(migrateSessionPrs(withPrs(7)).prs).toEqual([{ number: 7 }])
-  })
-
-  it("leaves a session with no PR untouched", () => {
-    expect(migrateSessionPrs(withPrs(null))).toEqual({ prNumber: null })
-  })
-
-  it("makes prNumber the top of an existing stack", () => {
-    const migrated = migrateSessionPrs(withPrs(1, [{ number: 1 }, { number: 2 }]))
-    expect(migrated.prNumber).toBe(2)
-    expect(migrated.prs?.map((pr) => pr.number)).toEqual([1, 2])
-  })
-})
-
-describe("migrateSessionPrs per checkout", () => {
-  const co = (id: string, repo: string, prNumber: number | null) => ({ id, repo, branch: "b", prNumber })
-  const twoRepos = (activeCheckoutId: string) =>
-    ({
-      prNumber: null,
-      activeCheckoutId,
-      checkouts: [co("web", "qa-web", 1), co("api", "qa-api", 2)]
-    }) as unknown as Session
-
-  it("lists every checkout's PR with its repo and mirrors the active one", () => {
-    const migrated = migrateSessionPrs(twoRepos("web"))
-    expect(migrated.prs).toEqual([
-      { number: 2, repo: "qa-api" },
-      { number: 1, repo: "qa-web" }
-    ])
-    expect(migrated.prNumber).toBe(1)
-  })
-
-  it("leaves single-checkout sessions without repo labels", () => {
-    const single = { prNumber: 3, activeCheckoutId: "web", checkouts: [co("web", "qa-web", 3)] } as unknown as Session
-    expect(migrateSessionPrs(single).prs).toEqual([{ number: 3 }])
-  })
-})
-
 describe("migrateRepoName", () => {
   const at = (repoPath: string | undefined, repo: string) => {
     const input = repoPath === undefined ? { id: "s1", repo } : { id: "s1", repo, repoPath }

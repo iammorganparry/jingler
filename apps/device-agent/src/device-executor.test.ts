@@ -47,7 +47,6 @@ const resultSession: Session = {
   title: "Device session",
   status: "idle",
   diff: { added: 0, removed: 0 },
-  prNumber: null,
   costUsd: 0,
   tokens: 0,
   updatedAt: "2026-08-09T00:00:00.000Z",

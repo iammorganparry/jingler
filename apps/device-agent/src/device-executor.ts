@@ -904,7 +904,7 @@ export const makeLiveDeviceSessionCommandExecutor = (
           commitMessage: metadata.commitMessage,
           prTitle: metadata.prTitle,
           prBody: metadata.prBody,
-          existingPrNumber: session.prNumber ?? null
+          existingPrNumber: activeCheckoutOf(session).prNumber ?? null
         })
 
       })

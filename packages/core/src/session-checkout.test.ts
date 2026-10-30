@@ -6,6 +6,7 @@ import {
   agentCwdOf,
   checkoutsOf,
   hasNoRepo,
+  migrateCheckoutPrs,
   migrateSessionCheckouts,
   ownedWorktreePaths,
   PRIMARY_CHECKOUT_ID,
@@ -36,8 +37,7 @@ const web: SessionCheckout = {
   prNumber: 7,
 };
 
-describe("Session wire format", () => {
-  const wire = {
+const wire = () => ({
     id: "s1",
     repo: "api",
     repoPath: "/r/api",
@@ -53,17 +53,19 @@ describe("Session wire format", () => {
     updatedAt: "2026-07-11T10:00:00.000Z",
     chats: [{ id: "c1", title: null, createdAt: "2026-07-11T10:00:00.000Z", updatedAt: "2026-07-11T10:00:00.000Z" }],
     activeChatId: "c1",
-  };
+});
+
+describe("Session wire format", () => {
 
   it("decodes legacy scalars into a primary checkout and strips them", () => {
-    const session = Schema.decodeUnknownSync(Session)(wire);
+    const session = Schema.decodeUnknownSync(Session)(wire());
     expect(activeCheckoutOf(session)).toMatchObject({ id: PRIMARY_CHECKOUT_ID, repo: "api", worktreePath: "/w/api", baseBranch: "main" });
     expect(session).not.toHaveProperty("repo");
     expect(session).not.toHaveProperty("worktreePath");
   });
 
   it("encodes the active checkout back to top-level fields for older readers", () => {
-    const session = reduceCheckouts(Schema.decodeUnknownSync(Session)(wire), { type: "attach", checkout: web });
+    const session = reduceCheckouts(Schema.decodeUnknownSync(Session)(wire()), { type: "attach", checkout: web });
     const encoded = Schema.encodeSync(Session)(session);
     expect(encoded).toMatchObject({ repo: "web", worktreePath: "/w/web", branch: "feat/b", activeCheckoutId: "co-web" });
     expect(Schema.decodeUnknownSync(Session)(encoded).checkouts).toHaveLength(2);
@@ -161,6 +163,35 @@ describe("Auto (zero-checkout) sessions", () => {
 
   it("agentCwdOf prefers a legacy session's worktree/repo over the scratch fallback", () => {
     expect(agentCwdOf(legacy, "/scratch/s1")).toBe("/w/api");
+  });
+});
+
+describe("checkout PRs", () => {
+  it("migrates session prs onto checkouts", () => {
+    const legacyWire = {
+      id: "s1",
+      checkouts: [{ ...web, id: "co-api", repo: "api", prNumber: null }, web],
+      activeCheckoutId: "co-web",
+      prs: [{ number: 3, repo: "api", state: "open" as const }, { number: 7, repo: "web" }, { number: 11 }],
+    };
+    const migrated = migrateCheckoutPrs(legacyWire);
+    expect(checkoutsOf(migrated).map((c) => [c.id, c.prs, c.prNumber])).toEqual([
+      ["co-api", [{ number: 3, state: "open" }, { number: 11 }], 11],
+      ["co-web", [{ number: 7 }], 7],
+    ]);
+    expect(migrateCheckoutPrs(migrated)).toBe(migrated);
+  });
+
+  it("round-trips through the wire with repo-tagged session prs and the active top as prNumber", () => {
+    const session = reduceCheckouts(
+      Schema.decodeUnknownSync(Session)({ ...wire(), prNumber: 5 }),
+      { type: "attach", checkout: web },
+    );
+    expect(session).not.toHaveProperty("prs");
+    const encoded = Schema.encodeSync(Session)(session);
+    expect(encoded.prNumber).toBe(7);
+    expect(encoded.prs).toEqual([{ number: 5, repo: "api" }, { number: 7, repo: "web" }]);
+    expect(checkoutsOf(Schema.decodeUnknownSync(Session)(encoded)).map((c) => c.prNumber)).toEqual([5, 7]);
   });
 });
 

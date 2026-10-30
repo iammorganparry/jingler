@@ -370,12 +370,12 @@ export const builtinTabContributions = (
       when: ({ session }) => {
         const checkout = activeCheckoutOf(session)
         return (
-          session.prNumber != null ||
+          activeCheckoutOf(session).prNumber != null ||
           (checkout.worktreePath != null && workspaceModeOf(checkout) === "worktree")
         )
       },
       badge: ({ session, checkCounts }) =>
-        session.prNumber != null && checkCounts && checkCounts.total > 0
+        activeCheckoutOf(session).prNumber != null && checkCounts && checkCounts.total > 0
           ? { kind: "count", text: `${checkCounts.passing}/${checkCounts.total}` }
           : undefined,
       render: (session, ctx) =>
@@ -388,7 +388,7 @@ export const builtinTabContributions = (
       // old Code Review tab was the same review against a different diff.
       id: BUILTIN_TAB.changes,
       ...meta.changes,
-      when: ({ session }) => session.prNumber != null || activeCheckoutOf(session).worktreePath != null,
+      when: ({ session }) => activeCheckoutOf(session).prNumber != null || activeCheckoutOf(session).worktreePath != null,
       badge: ({ diff }) =>
         diff && diff.added + diff.removed > 0
           ? { kind: "diff", added: diff.added, removed: diff.removed }

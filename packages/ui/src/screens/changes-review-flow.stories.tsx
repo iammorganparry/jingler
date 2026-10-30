@@ -73,7 +73,6 @@ const prSession: Session = {
   ...localSession,
   id: "changes-pr",
   title: "Refresh expired sessions",
-  prNumber: 482,
   checkouts: [{ ...activeCheckoutOf(localSession), branch: "feat/session-refresh", prNumber: 482 }]
 }
 
@@ -119,7 +118,7 @@ const initialFlow = (setup: FlowSetup) => ({
  * work, and the filter shows the source actually listed.
  */
 const sourceFor = (filter: ExplorerFilter, session: Session, connected: boolean): ReviewSource =>
-  filter === "pr" && session.prNumber !== null && connected ? "pr" : "local"
+  filter === "pr" && activeCheckoutOf(session).prNumber !== null && connected ? "pr" : "local"
 
 const changeSet = (setup: FlowSetup, source: ReviewSource, reverted: ReadonlySet<string>) => {
   if (setup.empty) return []
@@ -205,7 +204,7 @@ function FlowExplorer({ flow }: { readonly flow: FlowState }) {
       filter={flow.shownFilter}
       onFilterChange={flow.setFilter}
       localAvailable
-      prAvailable={flow.session.prNumber !== null}
+      prAvailable={activeCheckoutOf(flow.session).prNumber !== null}
     >
       {flow.filter === "all" ? (
         <AssetRepositoryTree
@@ -317,7 +316,7 @@ function FlowTray({ flow }: { readonly flow: FlowState }) {
 }
 
 function FlowConversation({ flow }: { readonly flow: FlowState }) {
-  const target = flow.session.prNumber !== null ? "pull request" : "uncommitted"
+  const target = activeCheckoutOf(flow.session).prNumber !== null ? "pull request" : "uncommitted"
   return (
     <div className="flex h-full flex-col gap-3 bg-canvas p-8 text-[12.5px] text-muted-foreground">
       <div className="flex items-center gap-2 text-dim">
@@ -352,7 +351,7 @@ function ChangesReviewFlow(setup: FlowSetup) {
           sidebarCollapsed={flow.focused}
           onRevealChanges={() => {
             flow.setFocused(false)
-            flow.setFilter(flow.session.prNumber !== null ? "pr" : "local")
+            flow.setFilter(activeCheckoutOf(flow.session).prNumber !== null ? "pr" : "local")
           }}
           selectTabRequest={flow.tabRequest}
           onTabRequestHandled={flow.clearTabRequest}

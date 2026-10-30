@@ -97,7 +97,7 @@ export const installPluginHost = (
                 repo: checkout.repo,
                 branch: checkout.branch,
                 title: session.title,
-                prNumber: session.prNumber ?? null
+                prNumber: checkout.prNumber ?? null
               }
               return checkout.worktreePath
                 ? { ...snapshot, worktreePath: checkout.worktreePath }

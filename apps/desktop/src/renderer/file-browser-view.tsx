@@ -200,7 +200,7 @@ function useExplorerAgentActivity(session: Session): AssetAgentActivity {
 export function FileBrowserExplorer({ session, connected = false, onOpenPath }: FileBrowserExplorerProps) {
   const browser = useFileBrowser(session.id, activeCheckoutOf(session).worktreePath)
   const agentActivity = useExplorerAgentActivity(session)
-  const { filter } = useSessionReviewState(session.id, session.prNumber)
+  const { filter } = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
   // Show the diff actually listed: a PR with nothing fetchable (GitHub offline)
   // falls back to the uncommitted changes, and the control must not claim "PR".
   const { source, files } = useReview(session)
@@ -234,12 +234,12 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
       branch={activeCheckoutOf(session).branch}
       worktreePath={activeCheckoutOf(session).worktreePath}
       filter={shownFilter}
-      onFilterChange={(next) => setReviewFilter(session.id, session.prNumber, next)}
+      onFilterChange={(next) => setReviewFilter(session.id, activeCheckoutOf(session).prNumber, next)}
       localAvailable={activeCheckoutOf(session).worktreePath != null}
-      prAvailable={session.prNumber != null}
+      prAvailable={activeCheckoutOf(session).prNumber != null}
       localCount={localCount}
       prCount={prCount}
-      prNumber={session.prNumber ?? undefined}
+      prNumber={activeCheckoutOf(session).prNumber ?? undefined}
     >
         {filter !== "all" ? (
           <ChangesExplorerPanel

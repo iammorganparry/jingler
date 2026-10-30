@@ -1632,7 +1632,7 @@ function renderMainConversation({
     archived={session.archived
       ? {
         reason: session.archiveReason ?? "merged",
-        prNumber: session.prNumber,
+        prNumber: activeCheckoutOf(session).prNumber,
         base: checkout.baseBranch,
         onRestore: () => onRestore?.(session.id),
         onDelete: () => onDelete?.(session.id)

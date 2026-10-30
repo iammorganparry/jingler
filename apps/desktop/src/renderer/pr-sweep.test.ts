@@ -1,4 +1,5 @@
-import type { PrState, Session, SessionPrStatus } from "@jingler/core"
+import { Session as SessionSchema, type PrState, type Session, type SessionPrStatus } from "@jingler/core"
+import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   issuesToCloseOnMerge,
@@ -19,8 +20,8 @@ import {
  * on merge is closing an opted-in linked issue.
  */
 
-const session = (over: Partial<Session> & { id: string }): Session =>
-  ({
+const session = (over: Record<string, unknown> & { id: string }): Session =>
+  Schema.decodeUnknownSync(SessionSchema)({
     repo: "r",
     branch: `chore/${over.id}`,
     title: over.id,
@@ -31,8 +32,10 @@ const session = (over: Partial<Session> & { id: string }): Session =>
     tokens: 0,
     updatedAt: "2026-07-18T00:00:00.000Z",
     worktreePath: `/tmp/${over.id}`,
+    chats: [{ id: `c_${over.id}`, title: null, createdAt: "2026-07-18T00:00:00.000Z", updatedAt: "2026-07-18T00:00:00.000Z" }],
+    activeChatId: `c_${over.id}`,
     ...over
-  }) as unknown as Session
+  })
 
 /** A session wired for the automation: linked issue + the opt-in flag. */
 const optedIn = (id: string) =>

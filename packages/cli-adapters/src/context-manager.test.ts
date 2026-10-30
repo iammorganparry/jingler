@@ -148,7 +148,6 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
       providerId: selectedProviderId,
       modelId: selectedModelId,
       diff: { added: 0, removed: 0 },
-      prNumber: null,
       costUsd: 0,
       tokens: 0,
       updatedAt: now,

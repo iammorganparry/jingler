@@ -1022,7 +1022,7 @@ function AuthedApp({
       if (
         !(autoCreate && canUseGitHubForSession(session)) ||
         session.archived ||
-        session.prNumber !== null ||
+        activeCheckoutOf(session).prNumber !== null ||
         workspaceModeOf(activeCheckoutOf(session)) !== "worktree" ||
         session.semanticBranchPending === true ||
         session.publish?.step === "complete" ||
@@ -1143,13 +1143,13 @@ function AuthedApp({
           );
           return session?.githubInstallationId &&
             session.githubRepositoryId &&
-            session.prNumber !== null
+            activeCheckoutOf(session).prNumber !== null
             ? {
                 sessionId: delivery.sessionId,
                 chatId: delivery.chatId,
                 installationId: session.githubInstallationId,
                 repositoryId: session.githubRepositoryId,
-                prNumber: session.prNumber,
+                prNumber: activeCheckoutOf(session).prNumber!,
                 archived: Boolean(session.archived),
               }
             : undefined;
@@ -1286,7 +1286,7 @@ function AuthedApp({
         void rpc
           .githubDetectPr(session.id)
           .then((prNumber) => {
-            if (prNumber !== null && prNumber !== session.prNumber) {
+            if (prNumber !== null && prNumber !== activeCheckoutOf(session).prNumber) {
               send({
                 type: "SESSION_PR_LINKED",
                 sessionId: session.id,
@@ -1367,7 +1367,7 @@ function AuthedApp({
     () =>
       sessions.filter(
         (session) =>
-          session.prNumber != null &&
+          activeCheckoutOf(session).prNumber != null &&
           Boolean(activeCheckoutOf(session).worktreePath) &&
           !session.archived &&
           canUseGitHubForSession(session),
@@ -1509,7 +1509,7 @@ function AuthedApp({
   );
   const autoReviews = useQueries({
     queries: reviewTargets.map((s) => ({
-      queryKey: ["auto-review", s.id, s.prNumber] as const,
+      queryKey: ["auto-review", s.id, activeCheckoutOf(s).prNumber] as const,
       queryFn: () => rpc.reviewRun(s.id, false),
       staleTime: PR_STATE_STALE_MS,
       refetchInterval: ARCHIVE_POLL_MS,

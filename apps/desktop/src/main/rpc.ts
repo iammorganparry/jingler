@@ -177,6 +177,7 @@ import {
   WebSearchError,
   applyImportResolutions,
   type McpImportResolution,
+  sessionPrsOf,
 } from "@jingler/core";
 import type {
   BrowserBounds,
@@ -700,7 +701,7 @@ const resolveCheckoutSession = (sessionId: string, checkoutId?: string) =>
 type SessionWithPr = Session & { readonly prNumber: number };
 
 const hasActivePr = (session: Session | null): session is SessionWithPr =>
-  session !== null && session.prNumber !== null;
+  session !== null && activeCheckoutOf(session).prNumber !== null;
 
 const resolvePiCreateInput = <Input extends {
   readonly runtimeId?: "pi" | "claude" | "codex" | "opencode"
@@ -1760,18 +1761,18 @@ export const githubIssueCommentBySlug = (input: {
 
 /** A layer must belong to the session's stack; anything else is not ours to read. */
 const ownsPr = (
-  session: { prNumber: number | null; prs?: ReadonlyArray<{ number: number }> },
+  session: Session,
   number: number,
-): boolean => number === session.prNumber || (session.prs ?? []).some((pr) => pr.number === number);
+): boolean => number === activeCheckoutOf(session).prNumber || sessionPrsOf(session).some((pr) => pr.number === number);
 
 export const githubPr = (sessionId: string, number?: number, checkoutId?: string) =>
   Effect.gen(function* () {
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return null;
     const { session, checkout } = resolved;
-    if (!checkout.worktreePath || session.prNumber === null) return null;
+    if (!checkout.worktreePath || activeCheckoutOf(session).prNumber === null) return null;
     if (number !== undefined && !ownsPr(session, number)) return null;
-    return yield* GitHubApi.prView(checkout.worktreePath, number ?? session.prNumber);
+    return yield* GitHubApi.prView(checkout.worktreePath, number ?? activeCheckoutOf(session).prNumber!);
   });
 
 /**
@@ -1785,9 +1786,9 @@ export const githubPrState = (sessionId: string, number?: number, checkoutId?: s
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return null;
     const { session, checkout } = resolved;
-    if (!checkout.worktreePath || session.prNumber === null) return null;
+    if (!checkout.worktreePath || activeCheckoutOf(session).prNumber === null) return null;
     if (number !== undefined && !ownsPr(session, number)) return null;
-    return yield* GitHubApi.prState(checkout.worktreePath, number ?? session.prNumber);
+    return yield* GitHubApi.prState(checkout.worktreePath, number ?? activeCheckoutOf(session).prNumber!);
   });
 
 /**
@@ -2030,13 +2031,13 @@ export const restoreSession = (sessionId: string) =>
       linkedRelaySession(session) &&
       session.githubInstallationId &&
       session.githubRepositoryId &&
-      session.prNumber !== null
+      activeCheckoutOf(session).prNumber !== null
     ) {
       yield* GitHubAuth.upsertSessionRoute({
         sessionId: session.id,
         installationId: session.githubInstallationId,
         repositoryId: session.githubRepositoryId,
-        pullRequestNumber: session.prNumber,
+        pullRequestNumber: activeCheckoutOf(session).prNumber!,
       }).pipe(Effect.ignore);
     }
     return session;
@@ -2056,7 +2057,7 @@ export const recordPrEvent = (sessionId: string, kind: "opened" | "merged", numb
     const message = prEventMessage({
       kind,
       number,
-      prs: session.prs ?? [],
+      prs: sessionPrsOf(session),
       now: new Date().toISOString(),
     });
     if (existing.some((m) => m.id === message.id)) return null;
@@ -2109,8 +2110,8 @@ export const setSessionPersistent = (sessionId: string, persistent: boolean) =>
 
 /** The PR a files/diff read targets: the requested stack layer, else the top PR; null if not in the stack. */
 const layerPrNumber = (session: Session, requested: number | undefined): number | null => {
-  if (requested === undefined) return session.prNumber;
-  return session.prNumber === requested || session.prs?.some((pr) => pr.number === requested) === true
+  if (requested === undefined) return activeCheckoutOf(session).prNumber;
+  return activeCheckoutOf(session).prNumber === requested || sessionPrsOf(session).some((pr) => pr.number === requested)
     ? requested
     : null;
 };
@@ -2145,7 +2146,7 @@ export const reviewGet = (sessionId: string) =>
     const session = yield* sessionWithPr(sessionId);
     if (session === null) return null;
     const review = yield* ReviewStore.get(sessionId);
-    return review?.prNumber === session.prNumber ? review : null;
+    return review?.prNumber === activeCheckoutOf(session).prNumber ? review : null;
   });
 
 /**
@@ -2186,7 +2187,7 @@ export const reviewMarkRouted = (sessionId: string) =>
     const session = yield* sessionWithPr(sessionId);
     if (session === null) return null;
     const review = yield* ReviewStore.get(sessionId);
-    if (review === null || review.prNumber !== session.prNumber) return null;
+    if (review === null || review.prNumber !== activeCheckoutOf(session).prNumber) return null;
     if (review.routedAt !== null) return review.routedAt;
     const now = yield* Effect.sync(() => new Date().toISOString());
     yield* ReviewStore.set(sessionId, { ...review, routedAt: now }).pipe(
@@ -2216,7 +2217,7 @@ export const reviewReconcile = (sessionId: string) =>
     const checkout = activeCheckoutOf(session);
     if (!checkout.worktreePath) return null;
     const review = yield* ReviewStore.get(sessionId);
-    if (review === null || review.prNumber !== session.prNumber) return null;
+    if (review === null || review.prNumber !== activeCheckoutOf(session).prNumber) return null;
 
     const commits = yield* GitService.commitsSince(
       checkout.worktreePath,
@@ -2327,7 +2328,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     const locations = yield* reviewLocations(session, checkout.worktreePath, configured);
     const headSha = yield* GitHubApi.prHeadSha(
       locations.githubTarget,
-      session.prNumber,
+      activeCheckoutOf(session).prNumber!,
     );
     if (headSha === null) {
       return yield* Effect.fail(
@@ -2343,7 +2344,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     if (
       !force &&
       prior !== null &&
-      prior.prNumber === session.prNumber &&
+      prior.prNumber === activeCheckoutOf(session).prNumber &&
       prior.headSha === headSha
     ) {
       return prior;
@@ -2359,12 +2360,12 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     }
     const diff = yield* GitHubApi.prDiff(
       locations.githubTarget,
-      session.prNumber,
+      activeCheckoutOf(session).prNumber!,
     );
 
     const review = yield* ReviewService.run({
       sessionId,
-      prNumber: session.prNumber,
+      prNumber: activeCheckoutOf(session).prNumber!,
       headSha,
       cwd: locations.cwd,
       repo: checkout.repo,
@@ -2394,7 +2395,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     const posted = postToPr
       ? yield* postReviewToPr(
           locations.githubTarget,
-          session.prNumber,
+          activeCheckoutOf(session).prNumber!,
           routedReview,
           diff,
         )
@@ -2602,7 +2603,7 @@ const hydrateGitHubSessionLinks = (
     for (const session of sessions) {
       const checkout = activeCheckoutOf(session);
       if (
-        session.prNumber === null ||
+        activeCheckoutOf(session).prNumber === null ||
         !checkout.worktreePath ||
         (session.githubInstallationId && session.githubRepositoryId)
       ) {
@@ -2614,7 +2615,7 @@ const hydrateGitHubSessionLinks = (
           await link(session.id, {
             installationId: resolved.installationId,
             repositoryId: resolved.id,
-            prNumber: session.prNumber,
+            prNumber: activeCheckoutOf(session).prNumber!,
           });
         }
       } catch {
@@ -2625,7 +2626,7 @@ const hydrateGitHubSessionLinks = (
 
 const linkedRelaySession = (session: Session): boolean =>
   !session.archived &&
-  session.prNumber !== null &&
+  activeCheckoutOf(session).prNumber !== null &&
   Boolean(session.githubInstallationId && session.githubRepositoryId);
 
 export const reconcileRelaySessionRoutes = async (
@@ -2653,7 +2654,7 @@ export const reconcileRelaySessionRoutes = async (
       route &&
       route.installationId === session.githubInstallationId &&
       route.repositoryId === session.githubRepositoryId &&
-      route.pullRequestNumber === session.prNumber
+      route.pullRequestNumber === activeCheckoutOf(session).prNumber
     ) {
       continue;
     }
@@ -2670,7 +2671,7 @@ export const reconcileRelaySessionRoutes = async (
       session !== undefined &&
       route.installationId === session.githubInstallationId &&
       route.repositoryId === session.githubRepositoryId &&
-      route.pullRequestNumber === session.prNumber
+      route.pullRequestNumber === activeCheckoutOf(session).prNumber
     );
   });
 };
@@ -2796,7 +2797,7 @@ export const githubEvents = () =>
                   sessionId: session.id,
                   installationId: session.githubInstallationId!,
                   repositoryId: session.githubRepositoryId!,
-                  pullRequestNumber: session.prNumber!,
+                  pullRequestNumber: activeCheckoutOf(session).prNumber!,
                 }),
               ),
           );
@@ -2847,7 +2848,7 @@ export const githubEvents = () =>
                       SessionStore.claimGitHubFeedback(session.id, {
                         installationId: session.githubInstallationId!,
                         repositoryId: session.githubRepositoryId!,
-                        prNumber: session.prNumber!,
+                        prNumber: activeCheckoutOf(session).prNumber!,
                         deliveryId: event.deliveryId,
                         semanticKey: event.semanticKey,
                         event,
@@ -3014,7 +3015,7 @@ export const appendStackedPr = (
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
-    if (!(session.prs ?? []).some((layer) => layer.branch === pr.base)) return false;
+    if (!sessionPrsOf(session).some((layer) => layer.branch === pr.base)) return false;
     yield* SessionStore.appendPr(sessionId, pr);
     return true;
   });
@@ -3130,7 +3131,7 @@ export const githubPublish = (sessionId: string, base?: string) =>
                 session.publish,
                 {
                   // A stacked layer is a new PR on a new branch: never adopt the lower layer's PR.
-                  knownPrNumber: base === undefined ? session.prNumber : null,
+                  knownPrNumber: base === undefined ? activeCheckoutOf(session).prNumber : null,
                   inspect: async () => {
                     const inspection = await run(
                       GitService.publishInspection(
@@ -3487,7 +3488,7 @@ export const githubComment = (input: {
     if (!input.toGithub) return;
     const session = yield* resolveSession(input.sessionId);
     const checkout = session && activeCheckoutOf(session);
-    if (!session || !checkout?.worktreePath || session.prNumber === null) {
+    if (!session || !checkout?.worktreePath || activeCheckoutOf(session).prNumber === null) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -3497,7 +3498,7 @@ export const githubComment = (input: {
     }
     yield* GitHubApi.prComment(
       checkout.worktreePath,
-      session.prNumber,
+      activeCheckoutOf(session).prNumber!,
       input.body,
     );
   });
@@ -3570,8 +3571,8 @@ const resolveReviewTarget = (input: {
     }
     const session = yield* resolveSession(input.sessionId);
     const checkout = session && activeCheckoutOf(session);
-    return session && checkout?.worktreePath && session.prNumber !== null
-      ? { cwd: checkout.worktreePath, number: session.prNumber }
+    return session && checkout?.worktreePath && activeCheckoutOf(session).prNumber !== null
+      ? { cwd: checkout.worktreePath, number: activeCheckoutOf(session).prNumber! }
       : null;
   });
 
@@ -3613,7 +3614,7 @@ export const githubReview = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     const checkout = session && activeCheckoutOf(session);
-    if (!session || !checkout?.worktreePath || session.prNumber === null) {
+    if (!session || !checkout?.worktreePath || activeCheckoutOf(session).prNumber === null) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -3623,7 +3624,7 @@ export const githubReview = (input: {
     }
     yield* GitHubApi.prReview(
       checkout.worktreePath,
-      session.prNumber,
+      activeCheckoutOf(session).prNumber!,
       input.kind,
       input.body,
     );
@@ -3662,7 +3663,7 @@ export const githubReplyToThread = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     const checkout = session && activeCheckoutOf(session);
-    if (!session || !checkout?.worktreePath || session.prNumber === null) {
+    if (!session || !checkout?.worktreePath || activeCheckoutOf(session).prNumber === null) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -3672,7 +3673,7 @@ export const githubReplyToThread = (input: {
     }
     yield* GitHubApi.replyToThread(
       checkout.worktreePath,
-      session.prNumber,
+      activeCheckoutOf(session).prNumber!,
       input.commentId,
       input.body,
     );
@@ -3686,7 +3687,7 @@ export const githubMerge = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     const checkout = session && activeCheckoutOf(session);
-    if (!session || !checkout?.worktreePath || session.prNumber === null) {
+    if (!session || !checkout?.worktreePath || activeCheckoutOf(session).prNumber === null) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -3696,7 +3697,7 @@ export const githubMerge = (input: {
     }
     yield* GitHubApi.prMerge(
       checkout.worktreePath,
-      session.prNumber,
+      activeCheckoutOf(session).prNumber!,
       input.method,
     );
   });
@@ -3706,7 +3707,7 @@ export const githubMarkReady = (input: { sessionId: string }) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     const checkout = session && activeCheckoutOf(session);
-    if (!session || !checkout?.worktreePath || session.prNumber === null) {
+    if (!session || !checkout?.worktreePath || activeCheckoutOf(session).prNumber === null) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -3714,7 +3715,7 @@ export const githubMarkReady = (input: { sessionId: string }) =>
         }),
       );
     }
-    yield* GitHubApi.prReady(checkout.worktreePath, session.prNumber);
+    yield* GitHubApi.prReady(checkout.worktreePath, activeCheckoutOf(session).prNumber!);
   });
 
 /** `Github.updateBranch` handler — merge the base into the PR's head on GitHub. */
@@ -3722,7 +3723,7 @@ export const githubUpdateBranch = (input: { sessionId: string }) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     const checkout = session && activeCheckoutOf(session);
-    if (!session || !checkout?.worktreePath || session.prNumber === null) {
+    if (!session || !checkout?.worktreePath || activeCheckoutOf(session).prNumber === null) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -3730,7 +3731,7 @@ export const githubUpdateBranch = (input: { sessionId: string }) =>
         }),
       );
     }
-    yield* GitHubApi.prUpdateBranch(checkout.worktreePath, session.prNumber);
+    yield* GitHubApi.prUpdateBranch(checkout.worktreePath, activeCheckoutOf(session).prNumber!);
   });
 
 /** Pick the merged layer and the layers above it, or fail when the stack cannot be restacked. */
@@ -3738,7 +3739,7 @@ const restackSelection = (
   session: Session,
   mergedPr: number,
 ): Effect.Effect<{ merged: SessionPr; above: ReadonlyArray<SessionPr> }, GitHubApiError> => {
-  const prs = session.prs ?? [];
+  const prs = sessionPrsOf(session);
   const at = prs.findIndex((layer) => layer.number === mergedPr);
   const merged = prs[at];
   const invalid = (message: string) =>

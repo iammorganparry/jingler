@@ -200,7 +200,7 @@ describe("appMachine first-run coordination", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     const running: Session = {
       id: "retry", checkouts: [{ id: "primary", repo: "widget", branch: "main", prNumber: null }], activeCheckoutId: "primary", title: "Preparing",
-      status: "idle", diff: { added: 0, removed: 0 }, prNumber: null,
+      status: "idle", diff: { added: 0, removed: 0 },
       costUsd: 0, tokens: 0, chats: [], activeChatId: "chat-1",
       updatedAt: "2026-08-08T08:00:03.000Z",
       workspaceLifecycle: { status: "setup-running", updatedAt: "2026-08-08T08:00:01.000Z" },

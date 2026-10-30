@@ -4,7 +4,7 @@
  * `usePullRequest`.
  */
 import type { Project, Session } from "@jingler/core"
-import { activeCheckoutOf, workspaceModeOf } from "@jingler/core"
+import { activeCheckoutOf, workspaceModeOf, sessionPrsOf } from "@jingler/core"
 import { PullRequestView } from "@jingler/ui"
 import { PrFilesPanel } from "./pr-files-panel.js"
 import { CheckoutChecks } from "./checkout-checks.js"
@@ -55,7 +55,7 @@ export function PullRequestPane({
   // Viewing a child that opened a PR: show that PR, read-only like any non-session layer.
   const childPr = scopedPrNumber(useViewedChild(session.id, session.activeChatId), changesScope)
   const shownPr = childPr ?? requestedPr ?? stack.selected
-  const viewingLowerLayer = shownPr !== null && shownPr !== session.prNumber
+  const viewingLowerLayer = shownPr !== null && shownPr !== activeCheckoutOf(session).prNumber
   const {
     pr,
     busy,
@@ -111,7 +111,7 @@ export function PullRequestPane({
       publishing={publish.publishing}
       branch={checkout.branch}
       baseBranch={checkout.baseBranch ?? pr?.baseRefName}
-      prs={session.prs}
+      prs={sessionPrsOf(session)}
       stack={stack.nav && {
         ...stack.nav,
         selected: shownPr ?? stack.nav.selected,
@@ -145,7 +145,7 @@ export function PullRequestPane({
       onReplyToThread={replyToThread}
       onOpenOnGithub={openOnGithub}
       onOpenFiles={onOpenFiles}
-      filesPanel={<PrFilesPanel session={session} prNumber={stack.selected ?? session.prNumber} connected={connected} />}
+      filesPanel={<PrFilesPanel session={session} prNumber={stack.selected ?? activeCheckoutOf(session).prNumber} connected={connected} />}
       conflictedFiles={conflictedFiles}
       onResolveConflicts={resolveConflicts}
       review={{

@@ -41,7 +41,7 @@ import {
   UNTITLED_SESSION,
   workspaceModeOf
 } from "@jingler/core"
-import { PRIMARY_CHECKOUT_ID, Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths, reduceCheckouts } from "@jingler/core"
+import { PRIMARY_CHECKOUT_ID, Session as SessionSchema, activeCheckoutOf, checkoutPrsOf, checkoutsOf, migrateSessionCheckouts, sessionPrsOf, withCheckoutPrs, ownedWorktreePaths, reduceCheckouts } from "@jingler/core"
 import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, type Path } from "@effect/platform"
@@ -413,27 +413,6 @@ export const migrateSessionIssue = (session: Session): Session => {
   return withCanonicalIssues(session, linkedIssues, selected)
 }
 
-/**
- * A multi-checkout session tracks one PR per checkout: `prs` lists them (active
- * checkout last, repo-labelled) after any stack layers that belong to none, and
- * `prNumber` keeps mirroring the ACTIVE checkout. Returns the session itself when no checkout has a PR.
- */
-const prsFromCheckouts = (session: Session): Session => {
-  const checkouts = session.checkouts ?? []
-  const withPr = checkouts.filter((c) => c.prNumber !== null)
-  if (withPr.length === 0) return session
-  const owned = new Set(withPr.map((c) => c.prNumber))
-  const entry = (c: (typeof checkouts)[number]): SessionPr => ({
-    ...(session.prs?.find((pr) => pr.number === c.prNumber) ?? {}),
-    number: c.prNumber as number,
-    repo: c.repo
-  })
-  const ordered = [...withPr.filter((c) => c.id !== session.activeCheckoutId), ...withPr.filter((c) => c.id === session.activeCheckoutId)]
-  const prs = [...(session.prs ?? []).filter((pr) => !owned.has(pr.number)), ...ordered.map(entry)]
-  const active = checkouts.find((c) => c.id === session.activeCheckoutId)
-  return { ...session, prs, prNumber: active ? active.prNumber : session.prNumber }
-}
-
 /** Set the scalar `branch` and keep the active checkout's own record in step (labels read the checkout). */
 const withActiveCheckoutBranch = <S extends Session>(session: S, branch: string): S => ({
   ...session,
@@ -443,21 +422,11 @@ const withActiveCheckoutBranch = <S extends Session>(session: S, branch: string)
     : {})
 })
 
-/**
- * Keep `prs` (the stack, bottom first) and `prNumber` (its top) consistent.
- * Sessions persisted before stacks existed have only `prNumber`; they read as a
- * one-element stack. Deterministic, so it is safe on every read and write.
- */
-export const migrateSessionPrs = (session: Session): Session => {
-  const withPrs = session.checkouts && session.checkouts.length > 1 ? prsFromCheckouts(session) : session
-  if (withPrs !== session) return withPrs
-  const prs = session.prs ?? []
-  if (prs.length > 0) {
-    const top = prs[prs.length - 1]!.number
-    return session.prNumber === top && session.prs === prs ? session : { ...session, prs, prNumber: top }
-  }
-  if (session.prNumber === null) return session
-  return { ...session, prs: [{ number: session.prNumber }] }
+/** Apply `edit` to the active checkout's PR stack; `prNumber` follows its top. */
+const editActivePrs = (session: Session, edit: (prs: ReadonlyArray<SessionPr>) => ReadonlyArray<SessionPr>): Session => {
+  const active = activeCheckoutOf(session)
+  const next = withCheckoutPrs(active, edit(checkoutPrsOf(active)))
+  return reduceCheckouts(session, { type: "update", checkoutId: active.id, patch: { prs: next.prs, prNumber: next.prNumber } })
 }
 
 /**
@@ -639,7 +608,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* fs
             .makeDirectory(paths.root, { recursive: true })
             .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create ~/jingler", cause })))
-          const encoded = yield* Schema.encode(SessionArray)(sessions.map((session) => migrateSessionPrs(migrateSessionIssue(session)))).pipe(
+          const encoded = yield* Schema.encode(SessionArray)(sessions.map(migrateSessionIssue)).pipe(
             Effect.mapError((cause) => new GitError({ message: "Failed to encode sessions", cause }))
           )
           // Write-then-RENAME, never write in place.
@@ -835,7 +804,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               status: "idle",
               ...selection,
               diff: { added: 0, removed: 0 },
-              prNumber: null,
               costUsd: 0,
               tokens: 0,
               updatedAt: now,
@@ -884,7 +852,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             status: "idle",
             ...selection,
             diff: { added: 0, removed: 0 },
-            prNumber: null,
             costUsd: 0,
             tokens: 0,
             updatedAt: now,
@@ -1078,7 +1045,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               workspaceMode: "worktree",
               repoPath: worktree.repoPath,
               baseBranch: input.pr.baseRefName,
-              prNumber: input.pr.number
+              prNumber: input.pr.number,
+              prs: [{ number: input.pr.number }]
             }],
             activeCheckoutId: PRIMARY_CHECKOUT_ID,
             title: input.pr.title,
@@ -1088,7 +1056,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             status: "idle",
             ...selection,
             diff: { added: 0, removed: 0 },
-            prNumber: input.pr.number,
             ...propertiesWhen(repository.installationId !== undefined, {
               githubInstallationId: repository.installationId
             }),
@@ -1217,7 +1184,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             status: "idle",
             ...selection,
             diff: { added: 0, removed: 0 },
-            prNumber: null,
             linkedIssues: [{
               providerId: input.issue.providerId,
               id: input.issue.id,
@@ -1820,7 +1786,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       /** Link a PR number without App routing; changing PRs clears stale realtime identity. */
       const setPrNumber = (id: string, prNumber: number | null) =>
         update(id, (session) => {
-          if (session.prNumber === prNumber) return session
+          if (activeCheckoutOf(session).prNumber === prNumber) return session
           const {
             githubInstallationId: _installationId,
             githubRepositoryId: _repositoryId,
@@ -1828,10 +1794,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             githubFeedbackSemanticKeys: _semanticKeys,
             ...unlinked
           } = session
-          const { prs: _prs, ...single } = unlinked
-          // Keep the active checkout's own record in step with the scalar mirror.
-          const checkouts = single.checkouts?.map((c) => (c.id === single.activeCheckoutId ? { ...c, prNumber } : c))
-          return migrateSessionPrs({ ...single, prNumber, ...(checkouts ? { checkouts } : {}) })
+          return editActivePrs(unlinked, () => (prNumber === null ? [] : [{ number: prNumber }]))
         })
 
       /** Record the live branch of one specific checkout (not necessarily the active one). */
@@ -1841,27 +1804,30 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       /** Link a PR to one specific checkout (not necessarily the active one). */
       const setCheckoutPr = (id: string, checkoutId: string, prNumber: number | null) =>
         update(id, (session) =>
-          migrateSessionPrs(reduceCheckouts(session, { type: "update", checkoutId, patch: { prNumber } }))
+          reduceCheckouts(session, {
+            type: "update",
+            checkoutId,
+            patch: { prNumber, prs: prNumber === null ? [] : [{ number: prNumber }] }
+          })
         )
 
-      /** Add a PR on top of the stack (or update it in place when `number` is already in it). */
+      /** Add a PR on top of the active checkout's stack (or update it in place when `number` is already in it). */
       const appendPr = (id: string, pr: SessionPr) =>
-        update(id, (session) => {
-          const prs = session.prs ?? []
-          const at = prs.findIndex((existing) => existing.number === pr.number)
-          const next = at === -1 ? [...prs, pr] : prs.map((existing, i) => (i === at ? { ...existing, ...pr } : existing))
-          return migrateSessionPrs({ ...session, prs: next })
-        })
+        update(id, (session) =>
+          editActivePrs(session, (prs) => {
+            const at = prs.findIndex((existing) => existing.number === pr.number)
+            return at === -1 ? [...prs, pr] : prs.map((existing, i) => (i === at ? { ...existing, ...pr } : existing))
+          })
+        )
 
       /**
-       * Link a PR the agent opened elsewhere. Becomes the primary PR only when the
-       * session has none; otherwise it sits in `linkedPrs`, outside the stack.
+       * Link a PR the agent opened elsewhere. Becomes the active checkout's PR only
+       * when it has none; otherwise it sits in `linkedPrs`, outside every stack.
        */
       const linkAgentPr = (id: string, number: number) =>
         update(id, (session) => {
-          if ((session.linkedPrs ?? []).includes(number) || (session.prs ?? []).some((pr) => pr.number === number)) return session
-          if (session.prNumber === number) return session
-          if (session.prNumber === null && !session.prs?.length) return migrateSessionPrs({ ...session, prNumber: number })
+          if ((session.linkedPrs ?? []).includes(number) || sessionPrsOf(session).some((pr) => pr.number === number)) return session
+          if (activeCheckoutOf(session).prNumber === null) return editActivePrs(session, () => [{ number }])
           return { ...session, linkedPrs: [...(session.linkedPrs ?? []), number] }
         })
 
@@ -1875,16 +1841,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           readonly branch?: string
         }
       ) =>
-        update(id, (session) => {
-          const { prs: _prs, ...single } = session
-          return migrateSessionPrs({
-            ...single,
-            ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
-            prNumber: link.prNumber,
-            githubInstallationId: link.installationId,
-            githubRepositoryId: link.repositoryId
-          })
-        })
+        update(id, (session) =>
+          reduceCheckouts(
+            { ...session, githubInstallationId: link.installationId, githubRepositoryId: link.repositoryId },
+            {
+              type: "update",
+              checkoutId: activeCheckoutOf(session).id,
+              patch: {
+                ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
+                prNumber: link.prNumber,
+                prs: [{ number: link.prNumber }]
+              }
+            }
+          )
+        )
 
     /**
      * Exactly-once claim, validated and persisted atomically before the
@@ -2383,7 +2353,7 @@ function* reconcileFeedbackOutbox(
       !session.archived &&
       session.githubInstallationId === entry.installationId &&
       session.githubRepositoryId === entry.repositoryId &&
-      session.prNumber === entry.prNumber
+      activeCheckoutOf(session).prNumber === entry.prNumber
     if (!linked) {
       changed = true
       continue
@@ -2433,7 +2403,7 @@ function* claimSessionFeedback(
     session.archived ||
     session.githubInstallationId !== input.installationId ||
     session.githubRepositoryId !== input.repositoryId ||
-    session.prNumber !== input.prNumber ||
+    activeCheckoutOf(session).prNumber !== input.prNumber ||
     input.event.installationId !== input.installationId ||
     input.event.repository.id !== input.repositoryId ||
     input.event.pullRequest?.number !== input.prNumber
@@ -2545,7 +2515,7 @@ function* readPersistedSessions(fs: FileSystem.FileSystem) {
       migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
     )
     if (Either.isRight(decoded)) {
-      const session = migrateSessionCheckouts(migrateSessionPrs(decoded.right))
+      const session = decoded.right
       updateWorkspaceReadiness(session)
       sessions.push(session)
     }

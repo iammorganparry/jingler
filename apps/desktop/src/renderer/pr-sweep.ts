@@ -1,4 +1,4 @@
-import { issueReferenceForProvider, type PrState, type Session, type SessionPrStatus } from "@jingler/core"
+import { issueReferenceForProvider, type PrState, type Session, type SessionPrStatus, sessionPrsOf } from "@jingler/core"
 
 /**
  * Session ids whose linked PR has MERGED and whose linked issue should now be
@@ -41,7 +41,7 @@ export interface PrLayer {
 
 /** PR numbers to poll for a session, bottom of the stack first. A pre-stack session reads as one PR. */
 export const prNumbersOf = (session: Session): ReadonlyArray<number> =>
-  session.prs?.length ? session.prs.map((pr) => pr.number) : session.prNumber === null ? [] : [session.prNumber]
+  sessionPrsOf(session).map((pr) => pr.number)
 
 /** Dedupe key for "already announced": one notification per (session, PR), never per session. */
 export const prNotifyKey = (sessionId: string, prNumber: number): string => `${sessionId}#${prNumber}`

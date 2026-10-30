@@ -2,7 +2,7 @@ import { Spin } from "../components/spin.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import * as React from "react"
 import type { DiffStat, Environment, PrState, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, Usage, User } from "@jingler/core"
-import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
+import { displayStatusOf, sessionPrsOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
   CircleAlert,
@@ -673,7 +673,7 @@ return (renderExpandedGroupHeading())
   // the persisted record.
   const prStateOf = React.useCallback(
     (s: Session): PrState | "none" =>
-      s.prNumber === null && !s.prs?.length ? "none" : (prStates?.[s.id]?.state ?? sessionPrState(s)),
+      sessionPrsOf(s).length === 0 ? "none" : (prStates?.[s.id]?.state ?? sessionPrState(s)),
     [prStates]
   )
 
@@ -1071,7 +1071,7 @@ function SessionRail({
             activity={liveActivity?.[s.id]}
             interrupted={interruptedSessions?.has(s.id)}
             prState={prStates?.[s.id]}
-            stack={s.prs}
+            stack={sessionPrsOf(s)}
           />
         }
       >

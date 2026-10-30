@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { activeCheckoutOf, migrateSessionCheckouts } from "./session-checkout.js";
+import { activeCheckoutOf, migrateCheckoutPrs, migrateSessionCheckouts, sessionPrsOf } from "./session-checkout.js";
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js";
 import { PlanTemplateConfig } from "./plan-document.js";
 import { ThemeConfig } from "./theme.js";
@@ -613,9 +613,8 @@ export const PublishCheckpoint = Schema.Struct({
 export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>;
 
 /**
- * One repo checkout a session works in. A session owns one or more; the scalar
- * `Session` fields (`repo`, `repoPath`, `worktreePath`, `branch`, `baseBranch`,
- * `prNumber`, `githubSlug`, `projectId`, `workspaceMode`) mirror the ACTIVE one.
+ * One repo checkout a session works in, with its own PR stack. A session owns
+ * one or more; `SessionWire`'s top-level copies mirror the ACTIVE one on disk.
  */
 export const SessionCheckout = Schema.Struct({
   id: Schema.String,
@@ -626,7 +625,10 @@ export const SessionCheckout = Schema.Struct({
   workspaceMode: Schema.optional(WorkspaceMode),
   branch: Schema.String,
   baseBranch: Schema.optional(Schema.String),
+  /** Top of `prs`; kept in step by `withCheckoutPrs`. */
   prNumber: Schema.NullOr(Schema.Number),
+  /** This checkout's PR stack, bottom layer first. Absent on checkouts persisted before PRs moved here. */
+  prs: Schema.optional(Schema.Array(SessionPr)),
   githubSlug: Schema.optional(Schema.String),
 });
 export type SessionCheckout = Schema.Schema.Type<typeof SessionCheckout>;
@@ -850,6 +852,8 @@ const {
   workspaceMode: _workspaceMode,
   repoPath: _repoPath,
   baseBranch: _baseBranch,
+  prNumber: _prNumber,
+  prs: _prs,
   ...sessionFields
 } = SessionWire.fields;
 
@@ -859,7 +863,16 @@ export interface SessionWireEncoded extends Schema.Schema.Encoded<typeof Session
 export interface Session
   extends Omit<
     SessionWire,
-    "projectId" | "repo" | "githubSlug" | "branch" | "worktreePath" | "workspaceMode" | "repoPath" | "baseBranch"
+    | "projectId"
+    | "repo"
+    | "githubSlug"
+    | "branch"
+    | "worktreePath"
+    | "workspaceMode"
+    | "repoPath"
+    | "baseBranch"
+    | "prNumber"
+    | "prs"
   > {}
 
 /** A session whose repos live only in `checkouts`; see `SessionWire` for the persisted shape. */
@@ -875,13 +888,15 @@ export const Session: Schema.Schema<Session, SessionWireEncoded> = Schema.transf
       workspaceMode: _m,
       repoPath: _rp,
       baseBranch: _bb,
+      prNumber: _pn,
+      prs: _prs,
       ...session
-    } = migrateSessionCheckouts(wire);
+    } = migrateCheckoutPrs(migrateSessionCheckouts(wire));
     return session;
   },
   encode: (session) => {
-    const { id: _id, prNumber: _pr, ...mirror } = activeCheckoutOf(session);
-    return { ...session, ...mirror };
+    const { id: _id, prs: _prs, ...mirror } = activeCheckoutOf(session);
+    return { ...session, ...mirror, prs: sessionPrsOf(session) };
   },
 });
 

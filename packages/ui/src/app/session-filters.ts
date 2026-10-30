@@ -1,5 +1,5 @@
 import type { PrState, Session, SessionDisplayStatus } from "@jingler/core"
-import { activeCheckoutOf } from "@jingler/core"
+import { activeCheckoutOf, sessionPrsOf } from "@jingler/core"
 
 /**
  * How the sidebar's session list is narrowed and arranged.
@@ -132,8 +132,9 @@ const matchesQuery = (s: Session, q: string): boolean => {
  * `prStates`) pass their own resolver to `filterSessions` instead.
  */
 export const sessionPrState = (s: Session): PrState | "none" => {
-  if (s.prNumber === null && !s.prs?.length) return "none"
-  return s.prs?.at(-1)?.state ?? "open"
+  const prs = sessionPrsOf(s)
+  if (prs.length === 0) return "none"
+  return prs.at(-1)?.state ?? "open"
 }
 
 const keeps = (

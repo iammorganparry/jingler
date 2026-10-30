@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useMachine } from "@xstate/react"
-import { activeCheckoutOf, conflictResolutionPrompt, type PrMergeMethod, type Session } from "@jingler/core"
+import { activeCheckoutOf, conflictResolutionPrompt, type PrMergeMethod, type Session, sessionPrsOf } from "@jingler/core"
 import type { PrStackNav } from "@jingler/ui"
 import { prStackMachine, type PrStackEvent } from "./pr-stack-machine.js"
 import { prNumbersOf } from "./pr-sweep.js"
@@ -62,12 +62,12 @@ async function mergeLayer(args: {
 export function usePrStack(session: Session, connected: boolean): { selected: number | null; nav: PrStackNav | undefined } {
   const numbers = prNumbersOf(session)
   const key = numbers.join(",")
-  const [snapshot, send] = useMachine(prStackMachine, { input: { numbers, current: session.prNumber ?? undefined } })
+  const [snapshot, send] = useMachine(prStackMachine, { input: { numbers, current: activeCheckoutOf(session).prNumber ?? undefined } })
   useEffect(() => {
-    send({ type: "STACK_CHANGED", numbers, current: session.prNumber ?? undefined })
+    send({ type: "STACK_CHANGED", numbers, current: activeCheckoutOf(session).prNumber ?? undefined })
     // `key` stands for `numbers`, which is a fresh array every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, session.prNumber, send])
+  }, [key, activeCheckoutOf(session).prNumber, send])
 
   const statuses = useQueries({
     queries: numbers.map((number) => ({
@@ -82,12 +82,12 @@ export function usePrStack(session: Session, connected: boolean): { selected: nu
   const layers = useMemo(
     () =>
       numbers.map((number, index) => {
-        const pr = session.prs?.find((candidate) => candidate.number === number)
+        const pr = sessionPrsOf(session).find((candidate) => candidate.number === number)
         const status = statuses[index]
         return { number, branch: pr?.branch, state: status?.state ?? pr?.state, checks: status ? status.checks : pr?.checks }
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key, session.prs, statuses]
+    [key, session, statuses]
   )
 
   const qc = useQueryClient()
@@ -108,7 +108,7 @@ export function usePrStack(session: Session, connected: boolean): { selected: nu
         if (failure) return send({ type: "MERGE_FAILED", message: failure })
         await qc.invalidateQueries({ queryKey: ["pr-state", session.id] })
       }
-      void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+      void qc.invalidateQueries({ queryKey: prKey(session.id, activeCheckoutOf(session).prNumber) })
     },
     [session, mergeMethod, qc, send]
   )

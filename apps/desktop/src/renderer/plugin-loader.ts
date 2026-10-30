@@ -97,7 +97,7 @@ export const toSessionSnapshot = (session: Session): SessionSnapshot => {
     branch: checkout.branch,
     title: session.title,
     ...(session.providerId === undefined ? {} : { providerId: session.providerId }),
-    prNumber: session.prNumber ?? null,
+    prNumber: activeCheckoutOf(session).prNumber ?? null,
     ...(session.issueNumber != null ? { issueNumber: session.issueNumber } : {}),
     ...(linkedIssue ? { linkedIssue } : {}),
     linkedIssues,
@@ -205,7 +205,7 @@ const visibilityPredicate = (
   }
   switch (when) {
     case "hasPr":
-      return ({ session }) => session.prNumber != null
+      return ({ session }) => activeCheckoutOf(session).prNumber != null
     case "hasWorktree":
       return ({ session }) => activeCheckoutOf(session).worktreePath != null
     case "hasIssue":
