@@ -1,4 +1,4 @@
-import { issueReferenceForProvider, type PrState, type Session, type SessionPrStatus, sessionPrsOf } from "@jingler/core"
+import { checkoutPrsOf, checkoutsOf, issueReferenceForProvider, sessionPrsOf, type PrState, type Session, type SessionPrStatus } from "@jingler/core"
 
 /**
  * Session ids whose linked PR has MERGED and whose linked issue should now be
@@ -35,20 +35,28 @@ import { issueReferenceForProvider, type PrState, type Session, type SessionPrSt
  */
 /** One PR in a session's stack with its last polled status. */
 export interface PrLayer {
+  readonly checkoutId: string
   readonly number: number
   readonly status: SessionPrStatus
 }
 
-/** PR numbers to poll for a session, bottom of the stack first. A pre-stack session reads as one PR. */
-export const prNumbersOf = (session: Session): ReadonlyArray<number> =>
-  sessionPrsOf(session).map((pr) => pr.number)
+/** Every PR to poll, checkout by checkout, each stack bottom first; only checkouts with a worktree to ask GitHub from. */
+export const prTargetsOf = (session: Session): ReadonlyArray<{ readonly checkoutId: string; readonly number: number }> =>
+  checkoutsOf(session).flatMap((c) =>
+    c.worktreePath ? checkoutPrsOf(c).map((pr) => ({ checkoutId: c.id, number: pr.number })) : []
+  )
 
-/** Dedupe key for "already announced": one notification per (session, PR), never per session. */
-export const prNotifyKey = (sessionId: string, prNumber: number): string => `${sessionId}#${prNumber}`
+/** PR numbers to poll for a session, bottom of the stack first. A pre-stack session reads as one PR. */
+export const prNumbersOf = (session: Session): ReadonlyArray<number> => sessionPrsOf(session).map((pr) => pr.number)
+
+/** Dedupe key for "already announced": one notification per (session, checkout, PR); repos can share PR numbers. */
+export const prNotifyKey = (sessionId: string, checkoutId: string, prNumber: number): string =>
+  `${sessionId}#${checkoutId}#${prNumber}`
 
 /** A PR layer that has just RESOLVED, and how. `stackedUnder` is the next layer up, when there is one. */
 export interface ResolvedPr {
   readonly session: Session
+  readonly checkoutId: string
   readonly number: number
   readonly state: "merged" | "closed"
   readonly stackedUnder?: number
@@ -63,9 +71,10 @@ export const prsToNotify = (
     (stacks[session.id] ?? []).flatMap((layer, index, layers) => {
       const state = layer.status.state
       if (state !== "merged" && state !== "closed") return []
-      if (alreadyNotified.has(prNotifyKey(session.id, layer.number))) return []
-      const above = layers[index + 1]
-      return [{ session, number: layer.number, state, ...(above ? { stackedUnder: above.number } : {}) }]
+      if (alreadyNotified.has(prNotifyKey(session.id, layer.checkoutId, layer.number))) return []
+      // The layer above is the next one in the SAME checkout; another repo's PR is not stacked on this one.
+      const above = layers.slice(index + 1).find((next) => next.checkoutId === layer.checkoutId)
+      return [{ session, checkoutId: layer.checkoutId, number: layer.number, state, ...(above ? { stackedUnder: above.number } : {}) }]
     })
   )
 

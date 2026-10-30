@@ -148,6 +148,7 @@ import {
   reduceCheckouts,
   activeCheckoutOf,
   checkoutById,
+  checkoutPrsOf,
   PRIMARY_CHECKOUT_ID,
   checkoutsOf,
   sessionForCheckout,
@@ -1759,20 +1760,18 @@ export const githubIssueCommentBySlug = (input: {
         }),
       );
 
-/** A layer must belong to the session's stack; anything else is not ours to read. */
-const ownsPr = (
-  session: Session,
-  number: number,
-): boolean => number === activeCheckoutOf(session).prNumber || sessionPrsOf(session).some((pr) => pr.number === number);
+/** A layer must belong to this checkout's stack; anything else is not ours to read. */
+const ownsPr = (checkout: SessionCheckout, number: number): boolean =>
+  checkoutPrsOf(checkout).some((pr) => pr.number === number);
 
 export const githubPr = (sessionId: string, number?: number, checkoutId?: string) =>
   Effect.gen(function* () {
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return null;
     const { session, checkout } = resolved;
-    if (!checkout.worktreePath || activeCheckoutOf(session).prNumber === null) return null;
-    if (number !== undefined && !ownsPr(session, number)) return null;
-    return yield* GitHubApi.prView(checkout.worktreePath, number ?? activeCheckoutOf(session).prNumber!);
+    if (!checkout.worktreePath || checkout.prNumber === null) return null;
+    if (number !== undefined && !ownsPr(checkout, number)) return null;
+    return yield* GitHubApi.prView(checkout.worktreePath, number ?? checkout.prNumber);
   });
 
 /**
@@ -1786,9 +1785,9 @@ export const githubPrState = (sessionId: string, number?: number, checkoutId?: s
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return null;
     const { session, checkout } = resolved;
-    if (!checkout.worktreePath || activeCheckoutOf(session).prNumber === null) return null;
-    if (number !== undefined && !ownsPr(session, number)) return null;
-    return yield* GitHubApi.prState(checkout.worktreePath, number ?? activeCheckoutOf(session).prNumber!);
+    if (!checkout.worktreePath || checkout.prNumber === null) return null;
+    if (number !== undefined && !ownsPr(checkout, number)) return null;
+    return yield* GitHubApi.prState(checkout.worktreePath, number ?? checkout.prNumber);
   });
 
 /**

@@ -144,6 +144,7 @@ import {
   issuesToCloseOnMerge,
   prNotifyKey,
   prNumbersOf,
+  prTargetsOf,
   prsToNotify,
   stackLifecycle,
   worstPrStatus,
@@ -1367,8 +1368,7 @@ function AuthedApp({
     () =>
       sessions.filter(
         (session) =>
-          activeCheckoutOf(session).prNumber != null &&
-          Boolean(activeCheckoutOf(session).worktreePath) &&
+          prTargetsOf(session).length > 0 &&
           !session.archived &&
           canUseGitHubForSession(session),
       ),
@@ -1378,14 +1378,14 @@ function AuthedApp({
   const sweepLayers = useMemo(
     () =>
       sweepTargets.flatMap((s) =>
-        prNumbersOf(s).map((number) => ({ session: s, number })),
+        prTargetsOf(s).map(({ checkoutId, number }) => ({ session: s, checkoutId, number })),
       ),
     [sweepTargets],
   );
   const prStacks = useQueries({
-    queries: sweepLayers.map(({ session: s, number }) => ({
-      queryKey: ["pr-state", s.id, number] as const,
-      queryFn: () => rpc.githubPrState(s.id, number),
+    queries: sweepLayers.map(({ session: s, checkoutId, number }) => ({
+      queryKey: ["pr-state", s.id, checkoutId, number] as const,
+      queryFn: () => rpc.githubPrState(s.id, number, checkoutId),
       enabled: connected,
       staleTime: PR_STATE_STALE_MS,
       // Poll so a PR merged/closed on GitHub badges its session live instead of
@@ -1396,11 +1396,11 @@ function AuthedApp({
     })),
     combine: (results) => {
       const stacks: Record<string, PrLayer[]> = {};
-      sweepLayers.forEach(({ session: s, number }, i) => {
+      sweepLayers.forEach(({ session: s, checkoutId, number }, i) => {
         const status = results[i]?.data;
         if (!status) return;
         const layers = stacks[s.id] ?? [];
-        layers.push({ number, status });
+        layers.push({ checkoutId, number, status });
         stacks[s.id] = layers;
       });
       return stacks;
@@ -1482,7 +1482,7 @@ function AuthedApp({
         sweepTargets.flatMap((s) => {
           const layers = prStacks[s.id] ?? [];
           const lifecycle =
-            layers.length === prNumbersOf(s).length
+            layers.length === prTargetsOf(s).length
               ? stackLifecycle(layers)
               : undefined;
           return lifecycle ? [[s.id, lifecycle] as const] : [];
@@ -1597,12 +1597,12 @@ function AuthedApp({
     // taking it would let the genuine first result through as an edge.
     const seeding =
       !prBaselineRef.current && Object.keys(prStacks).length > 0;
-    for (const { session, number, state: prState, stackedUnder } of prsToNotify(
+    for (const { session, checkoutId, number, state: prState, stackedUnder } of prsToNotify(
       prStacks,
       sweepTargets,
       notifiedPrsRef.current,
     )) {
-      notifiedPrsRef.current.add(prNotifyKey(session.id, number));
+      notifiedPrsRef.current.add(prNotifyKey(session.id, checkoutId, number));
       if (seeding) continue;
       if (prState === "merged") recordPrEvent(session.id, "merged", number);
       const plan = prNotification(session.title, prState, number, stackedUnder);
