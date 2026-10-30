@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.13.1
+
+### Patch Changes
+
+- 1147a76: Update the bundled Pi runtime to 1.4 and pi-subagents to 0.84. Stopping a background Claude subagent after its parent turn ends now shows it as stopped instead of unknown.
+  - @jingler/plannotator-ext@0.13.1
+
 ## 0.13.0
 
 ### Minor Changes
