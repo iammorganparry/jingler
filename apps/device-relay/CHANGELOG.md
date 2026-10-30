@@ -1,5 +1,11 @@
 # @jingler/device-relay
 
+## 0.14.0
+
+### Patch Changes
+
+- @jingler/core@0.14.0
+
 ## 0.13.1
 
 ### Patch Changes
