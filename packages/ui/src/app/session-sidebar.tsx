@@ -179,6 +179,8 @@ export interface SessionSidebarProps {
   defaultFilters?: SessionFilters
   /** The project whose sessions this lists — filter and sort choices persist per project. */
   projectId?: string
+  /** Registered repo folders that are gone from disk; their row chips render dashed red. */
+  missingRepoPaths?: ReadonlySet<string>
   /** A notice pinned under the header, e.g. the selected project's missing-folder banner. */
   notice?: React.ReactNode
   /** Open a session's worktree in a terminal (row context menu). */
@@ -415,6 +417,7 @@ function SidebarBody({
   whatsNew,
   defaultFilters,
   projectId,
+  missingRepoPaths,
   notice,
   onOpenInTerminal,
   pullRequestsActive = false,
@@ -777,6 +780,7 @@ return (renderExpandedGroupHeading())
         onOpenInTerminal={onOpenInTerminal}
         expanded={open}
         onToggleExpanded={s.id === activeSessionId ? undefined : toggleExpanded}
+        missingRepoPaths={missingRepoPaths}
       />
       {open && (
         <SessionTree

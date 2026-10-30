@@ -145,7 +145,7 @@ describe("SessionRow multi-repo count", () => {
 })
 
 describe("SessionRow per-checkout PRs", () => {
-  const co = (id: string, repo: string, prNumber: number) => ({ id, repo, branch: "b", prNumber })
+  const co = (id: string, repo: string, prNumber: number | null) => ({ id, repo, branch: "b", prNumber })
 
   it("labels every checkout's PR with its repo", () => {
     const session = testSession({
