@@ -79,7 +79,7 @@ const requiredDeviceEntries = [
   "./node_modules/@dietrichgebert/ponytail/skills/ponytail-debt/SKILL.md",
   "./node_modules/@dietrichgebert/ponytail/skills/ponytail-gain/SKILL.md",
   "./node_modules/@dietrichgebert/ponytail/skills/ponytail-help/SKILL.md",
-  "./node_modules/pi-subagents/index.ts",
+  "./node_modules/pi-subagents/bundle/index.js",
   "./node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
 ]
 const issues = [

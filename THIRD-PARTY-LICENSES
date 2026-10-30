@@ -33,7 +33,7 @@ SOFTWARE.
 Pi / pi
 -------
 
-Packages: @earendil-works/pi-ai@0.84.1, @earendil-works/pi-coding-agent@0.84.1
+Packages: @earendil-works/pi-ai@1.4.0, @earendil-works/pi-coding-agent@1.4.0
 Upstream: https://github.com/earendil-works/pi
 License: MIT
 
