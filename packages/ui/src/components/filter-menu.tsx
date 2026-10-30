@@ -88,6 +88,13 @@ function Axis<T extends string>({ axis }: { axis: FilterAxis<T> }) {
   )
 }
 
+/** A plain command row below the axes, e.g. "Add repo…". */
+export interface FilterMenuAction {
+  readonly id: string
+  readonly label: string
+  readonly onSelect: () => void
+}
+
 /**
  * The filter menu. `children` is the trigger.
  *
@@ -98,10 +105,12 @@ function Axis<T extends string>({ axis }: { axis: FilterAxis<T> }) {
 export function FilterMenu({
   axes,
   children,
+  actions = [],
   align = "start"
 }: {
   axes: ReadonlyArray<FilterAxis<never>> | ReadonlyArray<FilterAxis<string>>
   children: React.ReactNode
+  actions?: ReadonlyArray<FilterMenuAction>
   align?: "start" | "end"
 }) {
   return (
@@ -114,6 +123,12 @@ export function FilterMenu({
               {axis.separated && i > 0 && <DropdownMenu.Separator className="my-1 h-px bg-line" />}
               <Axis axis={axis} />
             </React.Fragment>
+          ))}
+          {actions.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-line" />}
+          {actions.map((action) => (
+            <DropdownMenu.Item key={action.id} data-testid={`filter-action-${action.id}`} onSelect={action.onSelect} className={ROW}>
+              {action.label}
+            </DropdownMenu.Item>
           ))}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

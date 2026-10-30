@@ -104,7 +104,7 @@ import {
   viewPaletteItems
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
-/** Live activity kinds that mean a workspace is blocked on the operator — same set `project-sidebar.tsx` badges. */
+/** Live activity kinds that mean a workspace is blocked on the operator — same set the sidebar badges. */
 const NEEDS_YOU_ACTIVITY_KINDS: ReadonlySet<string> = new Set(["needs-input", "needs-approval"])
 import { environmentSessionStartupMachine } from "./environment-session-startup-machine.js"
 import {
@@ -568,10 +568,6 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         }
         sessions={sessions}
         projects={projects}
-        selectedProjectId={selectedProjectId}
-        onSelectProject={setSelectedProjectId}
-        projectsLoading={props.projectsLoading}
-        projectOwners={projectOwners}
         onAddProject={getAddProjectAction()}
         onImportSessions={props.onImportSessions}
         {...getProjectMenuProps()}

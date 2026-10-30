@@ -17,8 +17,9 @@ import type {
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
 import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
 import { SessionSidebar, type SidebarReleaseNotes, type SidebarUpdate } from "../app/session-sidebar.js"
-import { MissingFolderBanner, ProjectSidebar } from "../app/project-sidebar.js"
-import { MULTI_REPO_PROJECT_ID, projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
+import { MissingFolderBanner } from "../app/missing-folder-banner.js"
+import { activeCheckoutOf, checkoutsOf } from "@jingler/core"
+import type { FilterMenuAction } from "../components/filter-menu.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation, type HomeStart } from "./empty-conversation.js"
@@ -38,10 +39,6 @@ export interface SessionConversationProps {
   search?: ReactNode
   sessions: ReadonlyArray<Session>
   projects?: ReadonlyArray<Project>
-  selectedProjectId?: string | null
-  onSelectProject?: (projectId: string) => void
-  projectsLoading?: boolean
-  projectOwners?: Readonly<Record<string, string>>
   onAddProject?: () => void
   onImportSessions?: () => void
   onNewSessionForProject?: (projectId: string) => void
@@ -275,15 +272,25 @@ export interface SessionConversationProps {
 export function SessionConversation(props: SessionConversationProps) {
   const projects = props.projects ?? []
   const activeSession = props.sessions.find((session) => session.id === props.activeSessionId) ?? null
-  const activeSessionProjectId = activeSession
-    ? projectIdForSession(activeSession, projects)
-    : null
-  const [localProjectId, setLocalProjectId] = useState(
-    () => activeSessionProjectId ?? projects[0]?.id ?? UNASSIGNED_PROJECT_ID
+  // New workspace defaults to the repo you're looking at.
+  const activeProjectId = activeSession ? activeCheckoutOf(activeSession).projectId : undefined
+  const missingProjects = projects.filter((project) => project.availability === "missing")
+  const missingRepoPaths = useMemo(
+    () => new Set(projects.filter((project) => project.availability === "missing").map((project) => project.path)),
+    [projects]
   )
-  const selectedProjectId = props.selectedProjectId ?? localProjectId
-  const selectedProject = projects.find((project) => project.id === selectedProjectId)
-  const setSelectedProjectId = props.onSelectProject ?? setLocalProjectId
+  const activeMissingProject = activeSession
+    ? missingProjects.find((project) =>
+        checkoutsOf(activeSession).some((c) => c.projectId === project.id || c.repoPath === project.path)
+      )
+    : undefined
+  const filterActions: Array<FilterMenuAction> = [
+    ...(props.onAddProject ? [{ id: "add-repo", label: "Add repo…", onSelect: props.onAddProject }] : []),
+    ...(props.onImportSessions ? [{ id: "import-sessions", label: "Import sessions…", onSelect: props.onImportSessions }] : []),
+    ...(props.onOpenProjectSettings
+      ? [{ id: "manage-repos", label: "Manage repos…", onSelect: () => props.onOpenProjectSettings?.(activeProjectId ?? projects[0]?.id ?? "") }]
+      : [])
+  ]
   const [workspaceView, setWorkspaceViewState] = useState<"sessions" | "explorer">(
     props.initialWorkspaceView ?? "sessions"
   )
@@ -316,31 +323,9 @@ export function SessionConversation(props: SessionConversationProps) {
     [onRevealChangesProp]
   )
 
-  const lastSessionIds = useRef(new Map<string, string>())
-  useEffect(() => {
-    if (activeSessionProjectId !== null && props.activeSessionId !== null) {
-      lastSessionIds.current.set(activeSessionProjectId, props.activeSessionId)
-      setSelectedProjectId(activeSessionProjectId)
-    }
-  }, [activeSessionProjectId, props.activeSessionId, setSelectedProjectId])
-
-  const projectSessions = useMemo(
-    () => sessionsForProject(props.sessions, projects, selectedProjectId),
-    [props.sessions, projects, selectedProjectId]
-  )
-
-  const selectProject = (projectId: string) => {
-    setSelectedProjectId(projectId)
-    const candidates = sessionsForProject(props.sessions, projects, projectId).filter((session) => !session.archived)
-    const lastId = lastSessionIds.current.get(projectId)
-    const session = candidates.find((candidate) => candidate.id === lastId) ??
-      candidates.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-    if (session) props.onSelectSession(session.id)
-  }
-
   const openNewSession = () => {
-    if (selectedProjectId !== UNASSIGNED_PROJECT_ID && selectedProjectId !== MULTI_REPO_PROJECT_ID && props.onNewSessionForProject) {
-      props.onNewSessionForProject(selectedProjectId)
+    if (activeProjectId && props.onNewSessionForProject) {
+      props.onNewSessionForProject(activeProjectId)
       return
     }
     props.onNewSession?.()
@@ -350,24 +335,19 @@ export function SessionConversation(props: SessionConversationProps) {
            if (props.pullRequestsView) return (props.pullRequestsView)
            if (props.issuesView) return (props.issuesView)
            if (props.settingsView) return (props.settingsView)
-           if (props.showEmpty || activeSessionProjectId !== selectedProjectId) return (<EmptyConversation
+           if (props.showEmpty) return (<EmptyConversation
             version={props.version}
             onNewSession={openNewSession}
             onStartWithPrompt={props.onStartWithPrompt}
             loadBranches={props.loadBranches}
             projects={projects}
-            selectedProjectId={selectedProjectId}
+            selectedProjectId={activeProjectId ?? null}
             userName={props.user?.name}
             sessions={props.sessions}
             liveActivity={props.liveActivity}
             allowFor={props.allowFor}
             importCard={props.importCard}
-            onOpenSession={(sessionId) => {
-              // The session may already be active while another project is selected: switch the project too.
-              const session = props.sessions.find((candidate) => candidate.id === sessionId)
-              if (session) setSelectedProjectId(projectIdForSession(session, projects))
-              props.onSelectSession(sessionId)
-            }}
+            onOpenSession={props.onSelectSession}
           />)
            return (<SessionSplit
             onOpenCheckpoints={props.onOpenCheckpoints}
@@ -432,23 +412,6 @@ export function SessionConversation(props: SessionConversationProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 bg-panel">
-      {props.projects !== undefined ? (
-        <ProjectSidebar
-          projects={projects}
-          sessions={props.sessions}
-          activeProjectId={selectedProjectId}
-          liveActivity={props.liveActivity}
-          subagentAttentionCounts={props.subagentAttentionCounts}
-          projectOwners={props.projectOwners}
-          loading={props.projectsLoading}
-          onSelect={selectProject}
-          onAddProject={props.onAddProject}
-          onImportSessions={props.onImportSessions}
-          onOpenSettings={props.onOpenProjectSettings}
-          onRemove={props.onRemoveProject}
-          onLocate={props.onLocateProject}
-        />
-      ) : null}
       <SessionSidebar
         search={props.search}
         workspaceView={workspaceView}
@@ -456,15 +419,16 @@ export function SessionConversation(props: SessionConversationProps) {
         expandRequest={sidebarExpandRequest}
         onWorkspaceViewChange={setWorkspaceView}
         explorer={
-          activeSession && projectIdForSession(activeSession, projects) === selectedProjectId
+          activeSession
             ? props.renderExplorer?.(activeSession, (path) =>
                 props.onOpenExplorerFile?.(activeSession.id, path)
               )
             : <div className="p-4 text-[12px] text-dim">Select a session to explore its worktree.</div>
         }
-        sessions={projectSessions}
-        projectId={selectedProjectId}
-        notice={<MissingFolderBanner project={selectedProject} onLocate={props.onLocateProject} />}
+        sessions={props.sessions}
+        missingRepoPaths={missingRepoPaths}
+        filterActions={filterActions}
+        notice={<MissingFolderBanner project={activeMissingProject} onLocate={props.onLocateProject} />}
         onOpenInTerminal={props.onOpenSessionTerminal}
         environments={props.environments}
         activeSessionId={props.activeSessionId}

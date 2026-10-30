@@ -32,7 +32,7 @@ import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { StatusDot } from "../components/status-dot.js"
-import { FilterMenu } from "../components/filter-menu.js"
+import { FilterMenu, type FilterMenuAction } from "../components/filter-menu.js"
 import { HoverCard } from "../components/hover-card.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 import { SessionRow } from "../composites/session-row.js"
@@ -181,6 +181,8 @@ export interface SessionSidebarProps {
   projectId?: string
   /** Registered repo folders that are gone from disk; their row chips render dashed red. */
   missingRepoPaths?: ReadonlySet<string>
+  /** Command rows under the filter axes: Add repo…, Import sessions…, Manage repos. */
+  filterActions?: ReadonlyArray<FilterMenuAction>
   /** A notice pinned under the header, e.g. the selected project's missing-folder banner. */
   notice?: React.ReactNode
   /** Open a session's worktree in a terminal (row context menu). */
@@ -418,6 +420,7 @@ function SidebarBody({
   defaultFilters,
   projectId,
   missingRepoPaths,
+  filterActions,
   notice,
   onOpenInTerminal,
   pullRequestsActive = false,
@@ -871,7 +874,7 @@ return (renderExpandedGroupHeading())
           about finding one. The spacer keeps them pinned right.
         */}
         <div className="min-w-0 flex-1" />
-        <FilterMenu axes={axes}>
+        <FilterMenu axes={axes} actions={filterActions}>
           <button
             type="button"
             aria-label="Filter and sort sessions"
