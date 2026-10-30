@@ -215,15 +215,3 @@ export const ownedWorktreePaths = (session: CheckoutSession): ReadonlyArray<stri
 export const checkoutById = (session: CheckoutSession, checkoutId?: string): SessionCheckout =>
   (checkoutId === undefined ? undefined : checkoutsOf(session).find((c) => c.id === checkoutId)) ??
   activeCheckoutOf(session);
-
-/**
- * The session as seen through one checkout: its scalar fields mirror that
- * checkout. The active checkout returns the session itself, so legacy callers
- * see no change.
- */
-export const sessionForCheckout = <S extends CheckoutSession>(session: S, checkoutId: string): S => {
-  const checkout = checkoutById(session, checkoutId);
-  return checkout.id === activeCheckoutOf(session).id
-    ? session
-    : { ...session, ...scalarsOf(checkout), activeCheckoutId: checkout.id };
-};

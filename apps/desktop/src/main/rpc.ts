@@ -151,7 +151,6 @@ import {
   checkoutPrsOf,
   PRIMARY_CHECKOUT_ID,
   checkoutsOf,
-  sessionForCheckout,
   createWorkspaceProvisioningPlan,
   defaultModeFor,
   WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema,
@@ -691,10 +690,7 @@ const resolveSession = (sessionId: string) =>
 const resolveCheckoutSession = (sessionId: string, checkoutId?: string) =>
   resolveSession(sessionId).pipe(
     Effect.map((session) =>
-      session && {
-        session: checkoutId !== undefined ? sessionForCheckout(session, checkoutId) : session,
-        checkout: checkoutById(session, checkoutId),
-      },
+      session && { session, checkout: checkoutById(session, checkoutId) },
     ),
   );
 
@@ -1767,7 +1763,7 @@ export const githubPr = (sessionId: string, number?: number, checkoutId?: string
   Effect.gen(function* () {
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return null;
-    const { session, checkout } = resolved;
+    const { checkout } = resolved;
     if (!checkout.worktreePath || checkout.prNumber === null) return null;
     if (number !== undefined && !ownsPr(checkout, number)) return null;
     return yield* GitHubApi.prView(checkout.worktreePath, number ?? checkout.prNumber);
@@ -1783,7 +1779,7 @@ export const githubPrState = (sessionId: string, number?: number, checkoutId?: s
   Effect.gen(function* () {
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return null;
-    const { session, checkout } = resolved;
+    const { checkout } = resolved;
     if (!checkout.worktreePath || checkout.prNumber === null) return null;
     if (number !== undefined && !ownsPr(checkout, number)) return null;
     return yield* GitHubApi.prState(checkout.worktreePath, number ?? checkout.prNumber);
@@ -2110,9 +2106,9 @@ export const setSessionPersistent = (sessionId: string, persistent: boolean) =>
   );
 
 /** The PR a files/diff read targets: the requested stack layer, else the top PR; null if not in the stack. */
-const layerPrNumber = (session: Session, requested: number | undefined): number | null => {
-  if (requested === undefined) return activeCheckoutOf(session).prNumber;
-  return checkoutPrsOf(activeCheckoutOf(session)).some((pr) => pr.number === requested)
+const layerPrNumber = (checkout: SessionCheckout, requested: number | undefined): number | null => {
+  if (requested === undefined) return checkout.prNumber;
+  return checkoutPrsOf(checkout).some((pr) => pr.number === requested)
     ? requested
     : null;
 };
@@ -2122,9 +2118,9 @@ export const githubFiles = (sessionId: string, prNumber?: number, checkoutId?: s
   Effect.gen(function* () {
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return [];
-    const { session, checkout } = resolved;
+    const { checkout } = resolved;
     if (!checkout.worktreePath) return [];
-    const number = layerPrNumber(session, prNumber);
+    const number = layerPrNumber(checkout, prNumber);
     if (number === null) return [];
     return yield* GitHubApi.prFiles(checkout.worktreePath, number);
   });
@@ -2134,9 +2130,9 @@ export const githubDiff = (sessionId: string, prNumber?: number, checkoutId?: st
   Effect.gen(function* () {
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return "";
-    const { session, checkout } = resolved;
+    const { checkout } = resolved;
     if (!checkout.worktreePath) return "";
-    const number = layerPrNumber(session, prNumber);
+    const number = layerPrNumber(checkout, prNumber);
     if (number === null) return "";
     return yield* GitHubApi.prDiff(checkout.worktreePath, number);
   });
