@@ -178,7 +178,6 @@ import {
   WebSearchError,
   applyImportResolutions,
   type McpImportResolution,
-  sessionPrsOf,
 } from "@jingler/core";
 import type {
   BrowserBounds,
@@ -2056,7 +2055,10 @@ export const recordPrEvent = (sessionId: string, kind: "opened" | "merged", numb
     const message = prEventMessage({
       kind,
       number,
-      prs: sessionPrsOf(session),
+      // The stack this PR sits in: its own checkout's, so another repo's PR is never "stacked on".
+      prs: checkoutPrsOf(
+        checkoutsOf(session).find((c) => checkoutPrsOf(c).some((pr) => pr.number === number)) ?? activeCheckoutOf(session),
+      ),
       now: new Date().toISOString(),
     });
     if (existing.some((m) => m.id === message.id)) return null;
@@ -2110,7 +2112,7 @@ export const setSessionPersistent = (sessionId: string, persistent: boolean) =>
 /** The PR a files/diff read targets: the requested stack layer, else the top PR; null if not in the stack. */
 const layerPrNumber = (session: Session, requested: number | undefined): number | null => {
   if (requested === undefined) return activeCheckoutOf(session).prNumber;
-  return activeCheckoutOf(session).prNumber === requested || sessionPrsOf(session).some((pr) => pr.number === requested)
+  return checkoutPrsOf(activeCheckoutOf(session)).some((pr) => pr.number === requested)
     ? requested
     : null;
 };
@@ -3014,7 +3016,7 @@ export const appendStackedPr = (
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
-    if (!sessionPrsOf(session).some((layer) => layer.branch === pr.base)) return false;
+    if (!checkoutPrsOf(activeCheckoutOf(session)).some((layer) => layer.branch === pr.base)) return false;
     yield* SessionStore.appendPr(sessionId, pr);
     return true;
   });
@@ -3738,7 +3740,7 @@ const restackSelection = (
   session: Session,
   mergedPr: number,
 ): Effect.Effect<{ merged: SessionPr; above: ReadonlyArray<SessionPr> }, GitHubApiError> => {
-  const prs = sessionPrsOf(session);
+  const prs = checkoutPrsOf(activeCheckoutOf(session));
   const at = prs.findIndex((layer) => layer.number === mergedPr);
   const merged = prs[at];
   const invalid = (message: string) =>

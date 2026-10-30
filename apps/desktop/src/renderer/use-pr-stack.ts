@@ -6,10 +6,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useMachine } from "@xstate/react"
-import { activeCheckoutOf, conflictResolutionPrompt, type PrMergeMethod, type Session, sessionPrsOf } from "@jingler/core"
+import { activeCheckoutOf, checkoutPrsOf, conflictResolutionPrompt, type PrMergeMethod, type Session } from "@jingler/core"
 import type { PrStackNav } from "@jingler/ui"
 import { prStackMachine, type PrStackEvent } from "./pr-stack-machine.js"
-import { prNumbersOf } from "./pr-sweep.js"
 import { prKey } from "./use-pull-request.js"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
@@ -60,19 +59,22 @@ async function mergeLayer(args: {
 }
 
 export function usePrStack(session: Session, connected: boolean): { selected: number | null; nav: PrStackNav | undefined } {
-  const numbers = prNumbersOf(session)
-  const key = numbers.join(",")
-  const [snapshot, send] = useMachine(prStackMachine, { input: { numbers, current: activeCheckoutOf(session).prNumber ?? undefined } })
+  // The stack is the ACTIVE checkout's: merging or restacking never crosses repos.
+  const checkout = activeCheckoutOf(session)
+  const stackPrs = checkoutPrsOf(checkout)
+  const numbers = stackPrs.map((pr) => pr.number)
+  const key = `${checkout.id}:${numbers.join(",")}`
+  const [snapshot, send] = useMachine(prStackMachine, { input: { numbers, current: checkout.prNumber ?? undefined } })
   useEffect(() => {
-    send({ type: "STACK_CHANGED", numbers, current: activeCheckoutOf(session).prNumber ?? undefined })
+    send({ type: "STACK_CHANGED", numbers, current: checkout.prNumber ?? undefined })
     // `key` stands for `numbers`, which is a fresh array every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, activeCheckoutOf(session).prNumber, send])
+  }, [key, checkout.prNumber, send])
 
   const statuses = useQueries({
     queries: numbers.map((number) => ({
-      queryKey: ["pr-state", session.id, number] as const,
-      queryFn: () => rpc.githubPrState(session.id, number),
+      queryKey: ["pr-state", session.id, checkout.id, number] as const,
+      queryFn: () => rpc.githubPrState(session.id, number, checkout.id),
       enabled: connected && numbers.length > 1,
       staleTime: PR_STATE_STALE_MS
     })),
@@ -82,7 +84,7 @@ export function usePrStack(session: Session, connected: boolean): { selected: nu
   const layers = useMemo(
     () =>
       numbers.map((number, index) => {
-        const pr = sessionPrsOf(session).find((candidate) => candidate.number === number)
+        const pr = stackPrs.find((candidate) => candidate.number === number)
         const status = statuses[index]
         return { number, branch: pr?.branch, state: status?.state ?? pr?.state, checks: status ? status.checks : pr?.checks }
       }),

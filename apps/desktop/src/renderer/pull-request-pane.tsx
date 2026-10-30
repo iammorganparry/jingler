@@ -4,7 +4,7 @@
  * `usePullRequest`.
  */
 import type { Project, Session } from "@jingler/core"
-import { activeCheckoutOf, workspaceModeOf, sessionPrsOf } from "@jingler/core"
+import { activeCheckoutOf, checkoutPrsOf, workspaceModeOf } from "@jingler/core"
 import { PullRequestView } from "@jingler/ui"
 import { PrFilesPanel } from "./pr-files-panel.js"
 import { CheckoutChecks } from "./checkout-checks.js"
@@ -111,7 +111,7 @@ export function PullRequestPane({
       publishing={publish.publishing}
       branch={checkout.branch}
       baseBranch={checkout.baseBranch ?? pr?.baseRefName}
-      prs={sessionPrsOf(session)}
+      prs={checkoutPrsOf(checkout)}
       stack={stack.nav && {
         ...stack.nav,
         selected: shownPr ?? stack.nav.selected,
