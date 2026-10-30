@@ -1173,7 +1173,7 @@ describe("SessionStore", () => {
       SessionStore.get(exit.value).pipe(Effect.provide(SessionStore.Default)),
       temp.layer
     )
-    expect(recovered._tag === "Success" && recovered.value.publish).toMatchObject({
+    expect(recovered._tag === "Success" && activeCheckoutOf(recovered.value).publish).toMatchObject({
       step: "failed",
       branch: "fix/restart-publish",
       commitSha: "abc123",

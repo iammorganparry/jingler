@@ -630,6 +630,8 @@ export const SessionCheckout = Schema.Struct({
   /** This checkout's PR stack, bottom layer first. Absent on checkouts persisted before PRs moved here. */
   prs: Schema.optional(Schema.Array(SessionPr)),
   githubSlug: Schema.optional(Schema.String),
+  /** This checkout's resumable commit/push/PR publication state. */
+  publish: Schema.optional(PublishCheckpoint),
 });
 export type SessionCheckout = Schema.Schema.Type<typeof SessionCheckout>;
 
@@ -854,6 +856,7 @@ const {
   baseBranch: _baseBranch,
   prNumber: _prNumber,
   prs: _prs,
+  publish: _publish,
   ...sessionFields
 } = SessionWire.fields;
 
@@ -873,6 +876,7 @@ export interface Session
     | "baseBranch"
     | "prNumber"
     | "prs"
+    | "publish"
   > {}
 
 /** A session whose repos live only in `checkouts`; see `SessionWire` for the persisted shape. */
@@ -890,6 +894,7 @@ export const Session: Schema.Schema<Session, SessionWireEncoded> = Schema.transf
       baseBranch: _bb,
       prNumber: _pn,
       prs: _prs,
+      publish: _publish,
       ...session
     } = migrateCheckoutPrs(migrateSessionCheckouts(wire));
     return session;

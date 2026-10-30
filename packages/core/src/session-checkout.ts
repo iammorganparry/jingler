@@ -4,7 +4,7 @@ import type { SessionCheckout, SessionPr } from "./domain.js";
 export const PRIMARY_CHECKOUT_ID = "primary";
 
 /** Legacy per-session copies of the active checkout; optional so the helpers never depend on them. */
-type CheckoutScalars = Omit<SessionCheckout, "id" | "prs">;
+type CheckoutScalars = Omit<SessionCheckout, "id" | "prs" | "publish">;
 
 // Structural, not `Pick<Session, …>`: `Session`'s schema calls these helpers, so referencing it here is a type cycle.
 type CheckoutSession = Partial<CheckoutScalars> & {
@@ -92,9 +92,21 @@ export const sessionPrsOf = (session: CheckoutSession): ReadonlyArray<SessionPr>
  * goes to the checkout of that repo, anything else to the first (primary)
  * checkout. A no-op once any checkout carries `prs`. Expects migrated checkouts.
  */
-export const migrateCheckoutPrs = <S extends CheckoutSession & { readonly prs?: ReadonlyArray<SessionPr> }>(
+export const migrateCheckoutPrs = <
+  S extends CheckoutSession & { readonly prs?: ReadonlyArray<SessionPr>; readonly publish?: SessionCheckout["publish"] },
+>(
   session: S,
-): S => {
+): S => migrateCheckoutPublish(migrateCheckoutPrStacks(session));
+
+/** A wire `publish` written before checkpoints moved onto checkouts belongs to the active one. */
+const migrateCheckoutPublish = <S extends CheckoutSession & { readonly publish?: SessionCheckout["publish"] }>(session: S): S => {
+  const checkouts = checkoutsOf(session);
+  if (session.publish === undefined || checkouts.some((c) => c.publish !== undefined)) return session;
+  const activeId = activeCheckoutOf(session).id;
+  return { ...session, checkouts: checkouts.map((c) => (c.id === activeId ? { ...c, publish: session.publish } : c)) };
+};
+
+const migrateCheckoutPrStacks = <S extends CheckoutSession & { readonly prs?: ReadonlyArray<SessionPr> }>(session: S): S => {
   const checkouts = checkoutsOf(session);
   if (checkouts.some((c) => c.prs !== undefined)) return session;
   const stacks = new Map(checkouts.map((c) => [c.id, [] as Array<SessionPr>]));

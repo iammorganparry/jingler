@@ -3,7 +3,7 @@
  * (keyed by session id) when the PR tab is active; owns its data via
  * `usePullRequest`.
  */
-import type { Project, Session } from "@jingler/core"
+import type { Project, Session, SessionCheckout } from "@jingler/core"
 import { activeCheckoutOf, checkoutPrsOf, workspaceModeOf } from "@jingler/core"
 import { PullRequestView } from "@jingler/ui"
 import { PrFilesPanel } from "./pr-files-panel.js"
@@ -42,7 +42,7 @@ export function PullRequestPane({
   connectionActionLabel?: string
   onConnectGithub: () => void
   onPrLinked: (sessionId: string, prNumber: number) => void
-  onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<Session["publish"]>) => void
+  onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<SessionCheckout["publish"]>) => void
   onOpenFiles: () => void
   /** Publishes a workspace lifecycle update (retry/skip setup) back to the session list. */
   onSession: (session: Session) => void

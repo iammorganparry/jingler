@@ -195,6 +195,16 @@ describe("checkout PRs", () => {
   });
 });
 
+describe("checkout publish", () => {
+  it("moves a wire publish onto the active checkout and mirrors it back", () => {
+    const publish = { step: "failed" as const, completed: [], updatedAt: "2026-07-11T10:00:00.000Z" };
+    const session = Schema.decodeUnknownSync(Session)({ ...wire(), publish });
+    expect(session).not.toHaveProperty("publish");
+    expect(activeCheckoutOf(session).publish).toEqual(publish);
+    expect(Schema.encodeSync(Session)(session).publish).toEqual(publish);
+  });
+});
+
 describe("reposLabelOf", () => {
   it("names one repo, every repo once a second is attached, and No repo for Auto", () => {
     expect(reposLabelOf(legacy)).toBe("api");

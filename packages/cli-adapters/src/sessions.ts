@@ -21,6 +21,7 @@ import type {
   ProviderModelId,
   RuntimeContinuation,
   Session,
+  SessionCheckout,
   SessionPr,
   SettledSessionStatus,
   WorkspaceLifecycle,
@@ -2011,8 +2012,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         }))
 
       /** Persist an authoritative publication checkpoint for restart-safe retries. */
-      const setPublishCheckpoint = (id: string, publish: Session["publish"]) =>
-        update(id, (s) => ({ ...s, publish }))
+      const setPublishCheckpoint = (id: string, publish: SessionCheckout["publish"]) =>
+        update(id, (s) => reduceCheckouts(s, { type: "update", checkoutId: activeCheckoutOf(s).id, patch: { publish } }))
 
     /**
      * Record a worktree that has MOVED — not one that was re-forked.

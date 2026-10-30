@@ -1028,7 +1028,7 @@ function AuthedApp({
         activeCheckoutOf(session).prNumber !== null ||
         workspaceModeOf(activeCheckoutOf(session)) !== "worktree" ||
         session.semanticBranchPending === true ||
-        session.publish?.step === "complete" ||
+        activeCheckoutOf(session).publish?.step === "complete" ||
         autoPublishCancels.current.has(session.id)
       )
         return;

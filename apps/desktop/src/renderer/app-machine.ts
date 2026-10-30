@@ -17,8 +17,12 @@ import type {
   Session,
   WorkspaceConfig,
 } from "@jingler/core";
+import { activeCheckoutOf, reduceCheckouts, type SessionCheckout } from "@jingler/core";
 import { assign, fromCallback, fromPromise, setup } from "xstate";
 import { rpc } from "./rpc-client.js";
+
+const editActiveCheckout = (session: Session, patch: Partial<Omit<SessionCheckout, "id">>): Session =>
+  reduceCheckouts(session, { type: "update", checkoutId: activeCheckoutOf(session).id, patch });
 
 export interface AppContext {
   readonly reposDir: string | null;
@@ -593,7 +597,7 @@ export const appMachine = setup({
         SESSION_PR_LINKED: {
           actions: assign(({ context, event }) => ({
             sessions: context.sessions.map((s) =>
-              s.id === event.sessionId ? { ...s, prNumber: event.prNumber } : s,
+              s.id === event.sessionId ? editActiveCheckout(s, { prNumber: event.prNumber, prs: [{ number: event.prNumber }] }) : s,
             ),
           })),
         },
@@ -603,14 +607,13 @@ export const appMachine = setup({
           actions: assign(({ context, event }) => ({
             sessions: context.sessions.map((session) =>
               session.id === event.sessionId
-                ? {
-                    ...session,
+                ? editActiveCheckout(session, {
                     publish: event.checkpoint,
                     ...(event.checkpoint.step === "complete" &&
                     event.checkpoint.prNumber !== undefined
-                      ? { prNumber: event.checkpoint.prNumber }
+                      ? { prNumber: event.checkpoint.prNumber, prs: [{ number: event.checkpoint.prNumber }] }
                       : {}),
-                  }
+                  })
                 : session,
             ),
           })),

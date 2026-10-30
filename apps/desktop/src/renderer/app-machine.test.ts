@@ -479,8 +479,9 @@ describe("appMachine first-run coordination", () => {
       },
     });
 
-    expect(actor.getSnapshot().context.sessions[0]).toMatchObject({
-      title: "Current title",
+    const merged = actor.getSnapshot().context.sessions[0]!;
+    expect(merged.title).toBe("Current title");
+    expect(activeCheckoutOf(merged)).toMatchObject({
       prNumber: 42,
       publish: { step: "complete", prNumber: 42 },
     });
