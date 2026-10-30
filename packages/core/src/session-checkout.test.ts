@@ -5,6 +5,7 @@ import {
   activeCheckoutOf,
   agentCwdOf,
   checkoutsOf,
+  currentPublishOf,
   hasNoRepo,
   migrateCheckoutPrs,
   migrateSessionCheckouts,
@@ -201,5 +202,14 @@ describe("reposLabelOf", () => {
     expect(reposLabelOf(legacy)).toBe("api");
     expect(reposLabelOf(reduceCheckouts(legacy, { type: "attach", checkout: { ...web, repo: "org/web" } }))).toBe("api + web");
     expect(reposLabelOf({ id: "s-auto", repo: "", branch: "", prNumber: null, checkouts: [] })).toBe("No repo");
+  });
+});
+
+describe("currentPublishOf", () => {
+  const done = { step: "complete" as const, completed: [], prNumber: 948, updatedAt: "2026-10-30T00:00:00.000Z" };
+  it("hides a result recorded on another branch, keeps a matching or untagged one", () => {
+    expect(currentPublishOf({ ...web, publish: { ...done, branch: "feat/other" } })).toBeUndefined();
+    expect(currentPublishOf({ ...web, publish: { ...done, branch: "feat/b" } })?.prNumber).toBe(948);
+    expect(currentPublishOf({ ...web, publish: done })?.prNumber).toBe(948);
   });
 });

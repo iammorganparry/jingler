@@ -1148,6 +1148,27 @@ describe("SessionStore", () => {
     expect(exit.value.githubFeedbackSemanticKeys).toBeUndefined()
   })
 
+  it("moving the active checkout to another branch drops its publish result", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Moved branch" }))
+        const branch = activeCheckoutOf(created).branch
+        yield* SessionStore.setPublishCheckpoint(created.id, {
+          step: "complete", completed: [], branch, prNumber: 948, updatedAt: "2026-10-30T00:00:00.000Z"
+        })
+        yield* SessionStore.setBranch(created.id, branch)
+        const same = yield* SessionStore.get(created.id)
+        yield* SessionStore.setBranch(created.id, "ci/other")
+        return [same, yield* SessionStore.get(created.id)] as const
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(activeCheckoutOf(exit.value[0]).publish?.prNumber).toBe(948)
+    expect(activeCheckoutOf(exit.value[1]).publish).toBeUndefined()
+  })
+
   it("persists publish checkpoints for restart-safe recovery", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
