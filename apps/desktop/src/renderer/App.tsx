@@ -41,6 +41,8 @@ import type {
 import type { SessionCreationPhase } from "@jingler/contracts";
 import {
   activeCheckoutOf,
+  checkoutPrsOf,
+  checkoutsOf,
   clampFontScale,
   countNodesAwaitingAttention,
   DEFAULT_THEME_ID,
@@ -1443,10 +1445,16 @@ function AuthedApp({
     () =>
       new Set(
         sessions.flatMap((s) => {
+          if (!visibleIds.has(s.id)) return [];
+          // Each checkout's PRs live in that checkout's repo; subagent PRs are opened from the active one.
+          const own = checkoutsOf(s).flatMap((c) =>
+            c.githubSlug ? checkoutPrsOf(c).map((pr) => `${c.githubSlug}#${pr.number}`.toLowerCase()) : [],
+          );
           const { githubSlug } = activeCheckoutOf(s);
-          return visibleIds.has(s.id) && githubSlug
-            ? sessionPrRows(prNumbersOf(s), subagentPrNodes[s.id] ?? []).map((row) => `${githubSlug}#${row.number}`.toLowerCase())
+          const fleet = githubSlug
+            ? sessionPrRows([], subagentPrNodes[s.id] ?? []).map((row) => `${githubSlug}#${row.number}`.toLowerCase())
             : [];
+          return [...own, ...fleet];
         }),
       ),
     [sessions, visibleIds, subagentPrNodes],
