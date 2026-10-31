@@ -1754,17 +1754,17 @@ export const githubIssueCommentBySlug = (input: {
         }),
       );
 
-/** A layer must belong to this checkout's stack; anything else is not ours to read. */
-const ownsPr = (checkout: SessionCheckout, number: number): boolean =>
-  checkoutPrsOf(checkout).some((pr) => pr.number === number);
+/** A PR is ours to read when it is in this checkout's stack or one the agent linked on the session. */
+const ownsPr = (session: Session, checkout: SessionCheckout, number: number): boolean =>
+  checkoutPrsOf(checkout).some((pr) => pr.number === number) || (session.linkedPrs ?? []).includes(number);
 
 export const githubPr = (sessionId: string, number?: number, checkoutId?: string) =>
   Effect.gen(function* () {
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return null;
-    const { checkout } = resolved;
+    const { session, checkout } = resolved;
     if (!checkout.worktreePath || checkout.prNumber === null) return null;
-    if (number !== undefined && !ownsPr(checkout, number)) return null;
+    if (number !== undefined && !ownsPr(session, checkout, number)) return null;
     return yield* GitHubApi.prView(checkout.worktreePath, number ?? checkout.prNumber);
   });
 
@@ -1778,9 +1778,9 @@ export const githubPrState = (sessionId: string, number?: number, checkoutId?: s
   Effect.gen(function* () {
     const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!resolved) return null;
-    const { checkout } = resolved;
+    const { session, checkout } = resolved;
     if (!checkout.worktreePath || checkout.prNumber === null) return null;
-    if (number !== undefined && !ownsPr(checkout, number)) return null;
+    if (number !== undefined && !ownsPr(session, checkout, number)) return null;
     return yield* GitHubApi.prState(checkout.worktreePath, number ?? checkout.prNumber);
   });
 
