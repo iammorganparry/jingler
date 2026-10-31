@@ -46,6 +46,8 @@ const flags = [
   ...(process.platform === "darwin" ? ["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"] : []),
   ...(process.platform === "win32" ? ["-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"] : [])
 ]
+// The restored cache may come from another runner; CMakeCache.txt pins absolute paths, so configure fresh.
+rmSync(join(src, "build"), { recursive: true, force: true })
 run("cmake", ["-B", "build", ...flags], src)
 run("cmake", ["--build", "build", "--config", "Release", "--target", "whisper-cli", "-j"], src)
 
