@@ -279,7 +279,10 @@ jobs:
       - name: Ensure cmake
         if: runner.os == 'macOS'
         shell: bash
-        run: command -v cmake >/dev/null || /opt/homebrew/bin/brew install cmake
+        # The minis' runner PATH has no Homebrew, so put it on PATH for later steps too.
+        run: |
+          [[ -d /opt/homebrew/bin ]] && echo /opt/homebrew/bin >> "$GITHUB_PATH"
+          PATH="/opt/homebrew/bin:$PATH" command -v cmake >/dev/null || /opt/homebrew/bin/brew install cmake
       - name: Build whisper-cli
         run: node scripts/distribution/build-whisper.mjs
 
