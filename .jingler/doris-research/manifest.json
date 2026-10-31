@@ -1,0 +1,272 @@
+[
+  {
+    "path": "versioned_docs/version-4.x/table-design/data-model/unique.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/data-model/unique.md",
+    "bytes": 4710
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/data-model/aggregate.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/data-model/aggregate.md",
+    "bytes": 9209
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/data-partitioning/data-bucketing.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/data-partitioning/data-bucketing.md",
+    "bytes": 13564
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/data-partitioning/manual-partitioning.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/data-partitioning/manual-partitioning.md",
+    "bytes": 8232
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/data-partitioning/dynamic-partitioning.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/data-partitioning/dynamic-partitioning.md",
+    "bytes": 16506
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/data-partitioning/auto-partitioning.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/data-partitioning/auto-partitioning.md",
+    "bytes": 19950
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/update/partial-column-update.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/update/partial-column-update.md",
+    "bytes": 18654
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/update/unique-update-concurrent-control.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/update/unique-update-concurrent-control.md",
+    "bytes": 13635
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/update/multi-stream-update-for-unique-model.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/update/multi-stream-update-for-unique-model.md",
+    "bytes": 13279
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/delete/batch-delete-manual.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/delete/batch-delete-manual.md",
+    "bytes": 9495
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/import/import-way/stream-load-manual.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/import/import-way/stream-load-manual.md",
+    "bytes": 56309
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/import/import-way/routine-load-manual.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/import/import-way/routine-load-manual.md",
+    "bytes": 85752
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/import/load-best-practices/group-commit-manual.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/import/load-best-practices/group-commit-manual.md",
+    "bytes": 34645
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/import/load-best-practices/load-best-practices.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/import/load-best-practices/load-best-practices.md",
+    "bytes": 27251
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/import/load-best-practices/routine-load-best-practices.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/import/load-best-practices/routine-load-best-practices.md",
+    "bytes": 13224
+  },
+  {
+    "path": "versioned_docs/version-4.x/data-operate/transaction.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/data-operate/transaction.md",
+    "bytes": 19598
+  },
+  {
+    "path": "versioned_docs/version-4.x/connection-integration/data-integration/flink-doris-connector.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/connection-integration/data-integration/flink-doris-connector.md",
+    "bytes": 70223
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/schema-change.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/schema-change.md",
+    "bytes": 16353
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/index/index-overview.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/index/index-overview.md",
+    "bytes": 12226
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/index/inverted-index/overview.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/index/inverted-index/overview.md",
+    "bytes": 9301
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/index/prefix-index.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/index/prefix-index.md",
+    "bytes": 7902
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/index/vector-index/overview.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/index/vector-index/overview.md",
+    "bytes": 28587
+  },
+  {
+    "path": "versioned_docs/version-4.x/query-acceleration/query-profile.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/query-acceleration/query-profile.md",
+    "bytes": 45623
+  },
+  {
+    "path": "versioned_docs/version-4.x/query-acceleration/optimization-technology-principle/statistics.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/query-acceleration/optimization-technology-principle/statistics.md",
+    "bytes": 24143
+  },
+  {
+    "path": "versioned_docs/version-4.x/query-acceleration/colocation-join.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/query-acceleration/colocation-join.md",
+    "bytes": 24929
+  },
+  {
+    "path": "versioned_docs/version-4.x/query-acceleration/materialized-view/async-materialized-view/overview.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/query-acceleration/materialized-view/async-materialized-view/overview.md",
+    "bytes": 15389
+  },
+  {
+    "path": "versioned_docs/version-4.x/query-acceleration/materialized-view/sync-materialized-view.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/query-acceleration/materialized-view/sync-materialized-view.md",
+    "bytes": 39116
+  },
+  {
+    "path": "versioned_docs/version-4.x/admin-manual/workload-management/workload-group.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/admin-manual/workload-management/workload-group.md",
+    "bytes": 33417
+  },
+  {
+    "path": "versioned_docs/version-4.x/admin-manual/workload-management/spill-disk.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/admin-manual/workload-management/spill-disk.md",
+    "bytes": 15153
+  },
+  {
+    "path": "versioned_docs/version-4.x/admin-manual/trouble-shooting/compaction.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/admin-manual/trouble-shooting/compaction.md",
+    "bytes": 6359
+  },
+  {
+    "path": "versioned_docs/version-4.x/admin-manual/data-admin/backup-restore/overview.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/admin-manual/data-admin/backup-restore/overview.md",
+    "bytes": 4158
+  },
+  {
+    "path": "versioned_docs/version-4.x/admin-manual/auth/security-overview.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/admin-manual/auth/security-overview.md",
+    "bytes": 9196
+  },
+  {
+    "path": "versioned_docs/version-4.x/admin-manual/cluster-management/upgrade.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/admin-manual/cluster-management/upgrade.md",
+    "bytes": 28237
+  },
+  {
+    "path": "versioned_docs/version-4.x/install/choosing-deployment-mode.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/install/choosing-deployment-mode.md",
+    "bytes": 5241
+  },
+  {
+    "path": "versioned_docs/version-4.x/install/preparation/cluster-planning.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/install/preparation/cluster-planning.md",
+    "bytes": 2800
+  },
+  {
+    "path": "versioned_docs/version-4.x/lakehouse/catalog-overview.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/lakehouse/catalog-overview.md",
+    "bytes": 18308
+  },
+  {
+    "path": "versioned_docs/version-4.x/lakehouse/best-practices/optimization.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/lakehouse/best-practices/optimization.md",
+    "bytes": 10261
+  },
+  {
+    "path": "versioned_docs/version-4.x/sql-manual/basic-element/sql-data-types/semi-structured/VARIANT.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/sql-manual/basic-element/sql-data-types/semi-structured/VARIANT.md",
+    "bytes": 27073
+  },
+  {
+    "path": "releasenotes/v4.1/release-4.1.4.1.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/releasenotes/v4.1/release-4.1.4.1.md",
+    "bytes": 978
+  },
+  {
+    "path": "releasenotes/v4.1/release-4.1.3.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/releasenotes/v4.1/release-4.1.3.md",
+    "bytes": 7706
+  },
+  {
+    "path": "releasenotes/v4.1/release-4.1.2.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/releasenotes/v4.1/release-4.1.2.md",
+    "bytes": 11178
+  },
+  {
+    "path": "releasenotes/v4.1/release-4.1.0.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/releasenotes/v4.1/release-4.1.0.md",
+    "bytes": 56822
+  },
+  {
+    "path": "releasenotes/v4.1/release-4.1.1.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/releasenotes/v4.1/release-4.1.1.md",
+    "bytes": 11681
+  },
+  {
+    "path": "releasenotes/v4.1/release-4.1.4.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/releasenotes/v4.1/release-4.1.4.md",
+    "bytes": 13285
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/index/ngram-bloomfilter-index.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/index/ngram-bloomfilter-index.md",
+    "bytes": 13813
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/index/bloomfilter.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/index/bloomfilter.md",
+    "bytes": 6926
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/index/inverted-index/search-function.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/index/inverted-index/search-function.md",
+    "bytes": 16304
+  },
+  {
+    "path": "versioned_docs/version-4.x/table-design/index/inverted-index/search-operators.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/table-design/index/inverted-index/search-operators.md",
+    "bytes": 6391
+  },
+  {
+    "path": "versioned_docs/version-4.x/sql-manual/sql-functions/scalar-functions/string-functions/levenshtein.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/sql-manual/sql-functions/scalar-functions/string-functions/levenshtein.md",
+    "bytes": 4195
+  },
+  {
+    "path": "versioned_docs/version-4.x/sql-manual/sql-functions/scalar-functions/string-functions/damerau_levenshtein_distance.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/sql-manual/sql-functions/scalar-functions/string-functions/damerau_levenshtein_distance.md",
+    "bytes": 6331
+  },
+  {
+    "path": "versioned_docs/version-4.x/sql-manual/sql-functions/scalar-functions/string-functions/ngram-search.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/sql-manual/sql-functions/scalar-functions/string-functions/ngram-search.md",
+    "bytes": 2560
+  },
+  {
+    "path": "versioned_docs/version-4.x/sql-manual/basic-element/sql-data-types/semi-structured/variant-workload-guide.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/sql-manual/basic-element/sql-data-types/semi-structured/variant-workload-guide.md",
+    "bytes": 16581
+  },
+  {
+    "path": "versioned_docs/version-4.x/query-acceleration/materialized-view/async-materialized-view/use-guide.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/query-acceleration/materialized-view/async-materialized-view/use-guide.md",
+    "bytes": 42270
+  },
+  {
+    "path": "versioned_docs/version-4.x/admin-manual/auth/authorization/data.md",
+    "url": "https://raw.githubusercontent.com/apache/doris-website/master/versioned_docs/version-4.x/admin-manual/auth/authorization/data.md",
+    "bytes": 5646
+  }
+]

@@ -1,0 +1,790 @@
+Webhooks API guide - HubSpot docs
+Documentation Index
+Fetch the complete documentation index at:
+/docs/llms.txt
+Use this file to discover all available pages before exploring further.
+Skip to main content
+HubSpot docs
+home page
+Search...
+⌘
+K
+Ask Assistant
+⌘
+I
+Changelog
+Sign up
+Sign up
+Search...
+Navigation
+Webhooks
+Webhooks API guide
+close
+On this page
+Scopes
+Webhook settings
+Manage settings in your developer account
+Manage settings via API
+Webhook subscriptions
+Manage subscriptions via API
+Get subscriptions
+Create a new subscription
+Update a subscription
+Delete a subscription
+Webhook payloads
+Privacy compliant contact deletions
+Security
+Retries
+Limits
+Webhooks
+Webhooks API guide
+Learn how to use the webhooks subscription management APIs.
+The API endpoints and functionality in this article can only be used with
+legacy public apps
+.
+If you want to use webhooks in a
+project-based app
+, check out
+the configuration reference article
+. You can also use the
+webhook journal and management APIs
+, which are powered by a client credentials token you can generate using OAuth.
+The webhooks API allows you to subscribe to events happening in a HubSpot account with your integration installed. Rather than making an API call when an event happens in a connected account, HubSpot can send an HTTP request to an endpoint you configure. You can configure subscribed events in your app’s settings or using the endpoints detailed below. Webhooks can be more scalable than regularly polling for changes, especially for apps with a large install base. You can subscribe to CRM object events, which includes contacts, companies, deals, tickets, products and line items, as well as conversations events.
+Using the webhooks API requires the following:
+You have an existing
+legacy public app
+to use webhooks by subscribing to the events you want to be notified about, and by specifying a URL to send those notifications.
+You must deploy a publicly available and secure (HTTPS) endpoint for that URL that can handle the webhook payloads specified in this documentation.
+The webhooks API is configured on the
+app level
+, not for individual accounts. Any account that installs your app by going through the
+OAuth flow
+will be subscribed to its webhook subscriptions.
+​
+Scopes
+In order to use webhooks to subscribe to CRM events, your app will need to be configured to authorize the
+Required scopes
+that corresponds to the CRM object type you want to subscribe to. For example, if you want to subscribe to contact events, you would need to request the
+crm.objects.contacts.read
+scope.
+If you’re creating subscriptions in the settings UI of your public app, you’ll be prompted to add the required scope in the
+Create new webhook subscriptions
+panel before you finish creating your subscription.
+If you’re creating a subscription by making a
+POST
+request to the
+/app-webhooks/2026-09/{appId}/subscriptions
+endpoint, the response will include an error that will provide the name of the scope you’ll need to configure in the settings UI of your public app.
+If your app is already using webhooks, you won’t be able to remove any scopes required by active webhook subscriptions without first pausing and removing the subscriptions.
+You can review the scopes required for each webhook subscription type in the
+table below.
+Review the documentation for
+more details about scopes
+and
+setting up the authorization URL
+for your app.
+​
+Webhook settings
+Before setting up your webhook subscriptions, you need to specify a URL to send those notifications to. Follow the instructions in the sections below to learn how to fully configure subscriptions for your app.
+Please note:
+Webhook settings can be cached for up to five minutes. When making changes to the webhook URL, concurrency limits, or subscription settings, it may take up to five minutes to see your changes go into effect.
+HubSpot sets a concurrency limit of 10 requests when sending subscription event data associated with an account that installed your app. This concurrency limit is the maximum number of in-flight requests that HubSpot will attempt at a time. Each request can contain up to 100 events.
+​
+Manage settings in your developer account
+You can manage your URL and event throttling limit in your app’s configuration page in your developer account:
+In your developer account, in the left sidebar, click
+Apps
+, then click the
+name
+of your app you want to manage.
+In the left sidebar menu, navigate to
+Webhooks
+.
+In the
+Target URL
+field, enter the
+URL
+that HubSpot will make a
+POST
+request to when events trigger.
+Use the
+Event throttling
+setting to adjust the maximum number of events HubSpot will attempt to send.
+Click
+Save
+.
+​
+Manage settings via API
+You can use the following endpoints to programmatically configure webhook settings for an app. The endpoints described below are authenticated using your
+Developer API key
+, which should be included via the
+?hapikey
+query parameter.
+To view any webhook settings currently configured for an app, make a
+GET
+request to
+/app-webhooks/2026-09/{appId}/settings
+.
+You’ll need to include the
+app ID
+in the request, which you can find below the name of the app in your
+Apps
+dashboard, or on the
+Auth
+tab in your app’s settings.
+The settings object contains the following fields:
+Field
+Description
+webhookUrl
+The URL that HubSpot will send webhook notifications to. This URL must be served over HTTPS.
+maxConcurrentRequests
+The concurrency limit for the webhook URL. This value must be a number greater than five.
+To update to these settings, make a
+PUT
+request to
+/app-webhooks/2026-09/{appId}/settings
+and include the following fields in the request body:
+Field
+Description
+targetUrl
+The publicly available URL for HubSpot to call where event payloads will be delivered.
+throttling
+An object with a single sub-property,
+maxConcurrentRequests
+, which allows you to set the maximum number of HTTP requests HubSpot will attempt to make to your app. This value must be specified as a number greater than five.
+For example, your request might look similar to the following:
+{
+"targetUrl"
+:
+"https://www.example.com/hubspot/target"
+,
+"throttling"
+: {
+"maxConcurrentRequests"
+:
+10
+}
+}
+​
+Webhook subscriptions
+Once you’ve set up your webhook URL and event throttling limit, you’ll need to create one or more subscriptions. Webhook subscriptions tell HubSpot which events your particular app would like to receive.
+Subscriptions apply to all customers who have installed your integration. This means that you only need to specify what subscriptions you need once. Once you’ve turned on a subscription for an application, it will automatically start getting webhooks for all customers that have installed your application, and your integration will start receiving webhook triggers from any new customers.
+For all
+associationChange
+webhook subscriptions, the webhook will fire two events for both sides of the association.
+When associating two contacts, a subscription to
+contact.associationChange
+will fire two events, representing
+contact 1 to contact 2
+and
+contact 2 to contact 1
+.
+When associating a company, if you have two webhook subscriptions
+contact.associationChange
+and
+company.associationChange
+, you will receive two events. These will represent
+contact 1 to company 1
+and
+company 1 to contact 1
+.
+The following subscription types are supported and can be used as the value for the
+eventType
+field when creating subscriptions via API:
+Subscription type
+Scope required
+Description
+contact.creation
+crm.objects.contacts.read
+Get notified if any contact is created in a customer’s account.
+contact.deletion
+crm.objects.contacts.read
+Get notified if any contact is deleted in a customer’s account.
+contact.merge
+crm.objects.contacts.read
+Get notified if a contact is merged with another.
+contact.associationChange
+crm.objects.contacts.read
+Get notified if a contact has an association added or removed between itself and another supported webhook object (contact, company, deal, ticket, line item, or product).
+contact.restore
+crm.objects.contacts.read
+Get notified if a contact is restored from deletion.
+contact.privacyDeletion
+crm.objects.contacts.read
+Get notified if a contact is deleted for privacy compliance reasons.
+contact.propertyChange
+crm.objects.contacts.read
+Get notified if a specified property is changed for any contact in an account.
+company.creation
+crm.objects.companies.read
+Get notified if any company is created in a customer’s account.
+company.deletion
+crm.objects.companies.read
+Get notified if any company is deleted in a customer’s account.
+company.propertyChange
+crm.objects.companies.read
+Get notified if a specified property is changed for any company in a customer’s account.
+company.associationChange
+crm.objects.companies.read
+Get notified if a company has an association added or removed between itself and another supported webhook object (contact, company, deal, ticket, line item, or product).
+company.restore
+crm.objects.companies.read
+Get notified if a company is restored from deletion.
+company.merge
+crm.objects.companies.read
+Get notified if a company is merged with another.
+deal.creation
+crm.objects.deals.read
+Get notified if any deal is created in a customer’s account.
+deal.deletion
+crm.objects.deals.read
+Get notified if any deal is deleted in a customer’s account.
+deal.associationChange
+crm.objects.deals.read
+Get notified if a deal has an association added or removed between itself and another supported webhook object (contact, company, deal, ticket, line item, or product).
+deal.restore
+crm.objects.deals.read
+Get notified if a deal is restored from deletion.
+deal.merge
+crm.objects.deals.read
+Get notified if a deal is merged with another.
+deal.propertyChange
+crm.objects.deals.read
+Get notified if a specified property is changed for any deal in a customer’s account.
+ticket.creation
+tickets
+Get notified if a ticket is created in a customer’s account.
+ticket.deletion
+tickets
+Get notified if any ticket is deleted in a customer’s account.
+ticket.propertyChange
+tickets
+Get notified if a specified property is changed for any ticket in a customer’s account.
+ticket.associationChange
+tickets
+Get notified if a ticket has an association added or removed between itself and another supported webhook object (contact, company, deal, ticket, line item, or product).
+ticket.restore
+tickets
+Get notified if a ticket is restored from deletion.
+ticket.merge
+tickets
+Get notified if a ticket is merged with another.
+product.creation
+e-commerce
+Get notified if any product is created in a customer’s account.
+product.deletion
+e-commerce
+Get notified if any product is deleted in a customer’s account.
+product.restore
+e-commerce
+Get notified if a product is restored from deletion.
+product.merge
+e-commerce
+Get notified if a product is merged with another.
+product.propertyChange
+e-commerce
+Get notified if a specified product is changed for any product in a customer’s account.
+line_item.creation
+crm.objects.line_items.read
+Get notified if any line item is created in a customer’s account.
+line_item.deletion
+crm.objects.line_items.read
+Get notified if any line item is deleted in a customer’s account.
+line_item.associationChange
+crm.objects.line_items.read
+Get notified if a line item has an association added or removed between itself and another supported webhook object (contact, company, deal, ticket, line item, or product).
+line_item.restore
+crm.objects.line_items.read
+Get notified if a line item is restored from deletion.
+line_item.merge
+crm.objects.line_items.read
+Get notified if a line item is merged with another.
+line_item.propertyChange
+crm.objects.line_items.read
+Get notified if a specified property is changed for any line item in a customer’s account.
+The following conversations subscription types are also available:
+Subscription type
+Scope
+Description
+conversation.creation
+conversations.read
+Get notified if a new thread is created in an account.
+conversation.deletion
+conversations.read
+Get notified if a thread is archived or soft-deleted in an account.
+conversation.privacyDeletion
+conversations.read
+Get notified if a thread is permanently deleted in an account.
+conversation.propertyChange
+conversations.read
+Get notified if a property on a thread has been changed.
+conversation.newMessage
+conversations.read
+Get notified if a new message on a thread has been received.
+For property change subscriptions, you will need to specify which property you want to be notified of. You can specify multiple property change subscriptions. If a customer’s account doesn’t have the property you specify in a subscription, you will not get any webhooks from that customer for that property.
+Certain properties are not available for CRM property change subscriptions. These properties are:
+num_unique_conversion_events
+hs_lastmodifieddate
+If you are using the
+conversations messages and inbox API
+, the following properties are available:
+assignedTo
+:
+the conversation thread has been reassigned or unassigned. If the thread was reassigned, the
+propertyValue
+will be an actor ID in the webhooks payload; if unassigned, it will be empty.
+status
+:
+the status of the conversation thread has changed. In the webhooks payload, the
+propertyValue
+will either be
+OPEN
+or
+CLOSED
+.
+isArchived
+:
+the conversation thread has been restored. The
+propertyValue
+in the webhooks payload will always be
+FALSE
+.
+​
+Manage subscriptions via API
+You can programmatically manage subscriptions for public apps using the endpoints listed in the sections below. You will need to use your
+Developer API key
+when making requests to these endpoints.
+A subscription object can include the following fields:
+Field
+Description
+id
+A number representing the unique ID of a subscription.
+createdAt
+The time in milliseconds when this subscription was created.
+createdBy
+The user ID associated with the user who created the subscription.
+active
+This indicates whether or not the subscription is turned on and actively triggering notifications. The value can be
+true
+or
+false
+.
+eventType
+The type of subscription. The
+table
+at the start of this section includes the available subscription types.
+propertyName
+The name of the property the subscription will listen for changes to. This is only needed for property change subscription types.
+​
+Get subscriptions
+To retrieve the list of subscriptions, make a
+GET
+request to
+/app-webhooks/2026-09/{appId}/subscriptions
+.
+The response will be an array of objects representing your subscriptions. Each object will include information on the subscription like the ID, create date, type, and whether or not it’s currently active. Here’s what an example response would look like:
+[
+{
+"id"
+:
+25
+,
+"createdAt"
+:
+1461704185000
+,
+"createdBy"
+:
+529872
+,
+"eventType"
+:
+"contact.propertyChange"
+,
+"propertyName"
+:
+"lifecyclestage"
+,
+"active"
+:
+false
+},
+{
+"id"
+:
+59
+,
+"createdAt"
+:
+1462388498000
+,
+"createdBy"
+:
+529872
+,
+"eventType"
+:
+"company.creation"
+,
+"active"
+:
+false
+},
+{
+"id"
+:
+108
+,
+"createdAt"
+:
+1463423132000
+,
+"createdBy"
+:
+529872
+,
+"eventType"
+:
+"deal.creation"
+,
+"active"
+:
+true
+}
+]
+​
+Create a new subscription
+To create a new subscription, make a
+POST
+request to
+/app-webhooks/2026-09/{appId}/subscriptions
+.
+In the request body, you can include the following fields:
+Field
+Description
+eventType
+The type of subscription.
+propertyName
+The name of the property the subscription will listen for changes to. This is only needed for property change subscription types.
+active
+This indicates whether or not the subscription is turned on and actively triggering notifications. The value can be
+true
+or
+false
+.
+You don’t need to include
+id
+,
+createdAt
+, or
+createdBy
+, as those fields are set automatically.
+For example, your request body may appear similar to the following:
+{
+"eventType"
+:
+"company.propertyChange"
+,
+"propertyName"
+:
+"companyname"
+,
+"active"
+:
+false
+}
+The
+eventType
+must be a valid subscription type as defined in the above section and the
+propertyName
+must be a valid property name. If a customer has no property defined that matches this value, then this subscription will not result in any notifications.
+​
+Update a subscription
+To activate or pause a subscription, make a
+PUT
+request to
+/app-webhooks/2026-09/{appId}/subscriptions/{subscriptionId}
+.
+In the request body, include the following:
+Field
+Description
+active
+This indicates whether or not the subscription is turned on and actively triggering notifications. The value can be
+true
+or
+false
+.
+​
+Delete a subscription
+To delete a subscription, make a
+DELETE
+request to
+/app-webhooks/2026-09/{appId}/subscriptions/{subscriptionId}
+.
+​
+Webhook payloads
+The endpoint at the target URL that you specify in your app’s webhooks settings will receive
+POST
+requests containing JSON formatted data from HubSpot.
+To ensure that the requests you’re getting at your webhook endpoint are actually coming from HubSpot, HubSpot populates a
+X-HubSpot-Signature
+header with a SHA-256 hash built using the client secret of your app combined with details of the request. Learn more about
+validating request signatures
+.
+Use the tables below to view details about fields that may be contained in the payload.
+Field
+Description
+objectId
+The ID of the object that was created, changed, or deleted. For contacts this is the contact ID; for companies, the company ID; for deals, the deal ID; and for conversations the
+thread ID
+.
+propertyName
+This is only sent for property change subscriptions and is the name of the property that was changed.
+propertyValue
+This is only sent for property change subscriptions and represents the new value set for the property that triggered the notification.
+changeSource
+The source of the change. This can be any of the change sources that appear in contact property histories.
+eventId
+The ID of the event that triggered this notification. This value is not guaranteed to be unique.
+subscriptionId
+The ID of the subscription that triggered a notification about the event.
+portalId
+The customer’s
+HubSpot account ID
+where the event occurred.
+appId
+The ID of your application. This is used in case you have multiple applications pointing to the same webhook URL.
+occurredAt
+When this event occurred as a millisecond timestamp.
+subscriptionType
+The type of subscription this notification is for. Review the list of supported subscription types in the
+webhooks subscription section above
+.
+attemptNumber
+Starting at 0, which number attempt this is to notify your service of this event. If your service times-out or throws an error as describe in the
+Retries
+section below, HubSpot will attempt to send the notification again.
+messageId
+This is only sent when a webhook is listening for new messages to a thread. It is the ID of the new message.
+messageType
+This is only sent when a webhook is listening for new messages to a thread. It represents the type of message you’re sending. This value can either be
+MESSAGE
+or
+COMMENT
+.
+Field
+Description
+primaryObjectId
+The ID of the merge winner, which is the record that remains after the merge. In the HubSpot merge UI, this is the record on the right.
+mergedObjectIds
+An array of IDs that represent the records that are merged into the merge winner. In the HubSpot merge UI, this is the record on the left.
+newObjectId
+The ID of the record after the merge.
+numberOfPropertiesMoved
+An integer representing how many properties were transferred during the merge.
+Field
+Description
+associationType
+The type of association, which will be one of the following:
+CONTACT_TO_COMPANY
+CONTACT_TO_DEAL
+CONTACT_TO_TICKET
+CONTACT_TO_CONTACT
+COMPANY_TO_CONTACT
+COMPANY_TO_DEAL
+COMPANY_TO_TICKET
+COMPANY_TO_COMPANY
+DEAL_TO_CONTACT
+DEAL_TO_COMPANY
+DEAL_TO_LINE_ITEM
+DEAL_TO_TICKET
+DEAL_TO_DEAL
+TICKET_TO_CONTACT
+TICKET_TO_COMPANY
+TICKET_TO_DEAL
+TICKET_TO_TICKET
+LINE_ITEM_TO_DEAL
+fromObjectId
+The ID of the record that the association change was made from.
+toObjectId
+The ID of the secondary record in the association event.
+associationRemoved
+A boolean that represents the following:
+true
+: the webhook was triggered by removing an association.
+false
+: the webhook was triggered by creating an association.
+isPrimaryAssociation
+A boolean that represents the following:
+true
+: the secondary record is the
+primary association
+of the record that the association change was made from.
+false
+: the record is
+not
+the primary association of the record that the association change was made from.
+Please note:
+creating a primary association instance between two object records will cause the corresponding non-primary association to also be created. This may result in two webhook messages.
+[
+{
+"objectId"
+:
+1246965
+,
+"propertyName"
+:
+"lifecyclestage"
+,
+"propertyValue"
+:
+"subscriber"
+,
+"changeSource"
+:
+"ACADEMY"
+,
+"eventId"
+:
+3816279340
+,
+"subscriptionId"
+:
+25
+,
+"portalId"
+:
+33
+,
+"appId"
+:
+1160452
+,
+"occurredAt"
+:
+1462216307945
+,
+"eventType"
+:
+"contact.propertyChange"
+,
+"attemptNumber"
+:
+0
+},
+{
+"objectId"
+:
+1246978
+,
+"changeSource"
+:
+"IMPORT"
+,
+"eventId"
+:
+3816279480
+,
+"subscriptionId"
+:
+22
+,
+"portalId"
+:
+33
+,
+"appId"
+:
+1160452
+,
+"occurredAt"
+:
+1462216307945
+,
+"eventType"
+:
+"contact.creation"
+,
+"attemptNumber"
+:
+0
+}
+]
+As shown above, you should expect to receive an array of objects in a single request. The batch size can vary, but will be under 100 notifications. HubSpot will send multiple notifications when a lot of events have occurred within a short period of time. For example, if you’ve subscribed to new contacts and a customer imports a large number of contacts, HubSpot will send you the notifications for these imported contacts in batches and not one per request.
+HubSpot does not guarantee that you’ll receive these notifications in the order they occurred. Use the
+occurredAt
+property for each notification to determine when the event that triggered the notification occurred.
+HubSpot also does not guarantee that you’ll only get a single notification for an event. Though this should be rare, it is possible that HubSpot will send you the same notification multiple times.
+​
+Privacy compliant contact deletions
+HubSpot users have the ability to permanently delete a contact record to comply with privacy laws. Learn more about performing a
+GDPR compliant delete
+.
+You can subscribe to the
+contact.privacyDeletion
+subscription type to receive webhook notifications when a user performs a privacy compliant contact deletion.
+Privacy deletion notifications have some special behavior:
+A privacy deletion event will also trigger the contact deletion event, so you will receive two notifications if you are subscribed to both events.
+These notifications will not necessarily be sent in any specific order or in the same batch of messages. You will need to use the object ID to match the separate messages.
+​
+Security
+To ensure that the requests you’re getting at your webhook endpoint are actually coming from HubSpot, HubSpot populates a
+X-HubSpot-Signature
+header with a SHA-256 hash of the concatenation of the app-secret for your application and the request body HubSpot is sending.
+To verify this signature, concatenate the app secret of your application and the un-parsed request body of the request you’re handling, and get a SHA-256 hash of the result. Compare the resulting hash with the value of the
+X-HubSpot-Signature
+. If these values match, then this verifies that this request came from HubSpot. Or, the request came from someone else who knows your application secret. It’s important to keep this value secret.
+If these values do not match, then this request may have been tampered with in-transit or someone may be spoofing webhook notifications to your endpoint.
+Learn more about
+validating signature requests
+.
+​
+Retries
+If your service has problems handling notifications at any time, HubSpot will attempt to re-send failed notifications up to 10 times.
+HubSpot will retry in the following cases:
+Connection failed:
+HubSpot cannot open an HTTP connection to the provided webhook URL.
+Timeout:
+your service takes longer than five seconds to send back a response to a batch of notifications.
+Error codes:
+your service responds with any HTTP status code (4xx or 5xx).
+Notifications will be retried up to 10 times. These retries will be spread out over the next 24 hours, with varying delays between requests. Individual notifications will have some randomization applied, to prevent a large number of concurrent failures from being retried at the exact same time.
+​
+Limits
+POST
+requests that HubSpot sends to your service via your webhook subscriptions will
+not
+count against your
+app’s API rate limits
+.
+You can create a maximum of 1000 subscriptions per application. If you attempt to create more you will receive a 400 bad request in return with the following body:
+{
+"status"
+:
+"error"
+,
+"message"
+:
+"Couldn't create another subscription. You've reached the maximum number allowed per application (1000)."
+,
+"correlationId"
+:
+"2c9beb86-387b-4ff6-96f7-dbb486c00a95"
+,
+"requestId"
+:
+"919c4c84f66769e53b2c5713d192fca7"
+}
+Last modified on
+September 9, 2026
+Was this page helpful?
+Yes
+No
+facebook
+instagram
+youtube
+x
+linkedin
+medium
+Assistant
+Responses are generated using AI and may contain mistakes.
