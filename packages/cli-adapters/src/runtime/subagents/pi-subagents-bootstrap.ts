@@ -86,18 +86,22 @@ export class PiSubagentsBootstrapError extends Data.TaggedError(
 const configPath = (agentDir: string): string =>
   join(agentDir, "extensions", "subagent", "config.json")
 
+// Excess keys must fail the match: a Struct decode strips them by default, so
+// a key pi-subagents later removed (modelExclusions, rejected by 0.84) read as
+// "same", was never rewritten, and every run failed to load the extension.
 const sameConfig = async (path: string): Promise<boolean> => {
   try {
-    const parsed = Schema.decodeUnknownSync(Schema.parseJson(PiSubagentConfig))(
-      await readFile(path, "utf8")
-    )
+    const parsed = Schema.decodeUnknownSync(Schema.parseJson(PiSubagentConfig), {
+      onExcessProperty: "error"
+    })(await readFile(path, "utf8"))
     return JSON.stringify(parsed) === JSON.stringify(CONFIG)
   } catch {
     return false
   }
 }
 
-const writeConfig = async (path: string): Promise<void> => {
+export const writePiSubagentsConfig = async (agentDir: string): Promise<void> => {
+  const path = configPath(agentDir)
   if (await sameConfig(path)) return
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   const temporary = `${path}.${process.pid}.${crypto.randomUUID()}.next`
@@ -233,7 +237,7 @@ export const preparePiSubagentsRuntime = (
         )
       }
       process.env.PI_CODING_AGENT_DIR = expected
-      await writeConfig(configPath(expected))
+      await writePiSubagentsConfig(expected)
       const launcher = defaultPiChildLauncherConfig(expected)
       await materializePiSubagentProfiles(
         expected,

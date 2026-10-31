@@ -5,7 +5,10 @@ import { resolveSubagentLaunchContract } from "pi-subagents/preflight"
 import { afterEach, describe, expect, it } from "vitest"
 import { JINGLER_SUBAGENT_NAMES, ProviderModelId } from "@jingler/core"
 import { PONYTAIL_EXTENSION_PATH } from "../resources/ponytail-resources.js"
-import { materializePiSubagentProfiles } from "./pi-subagents-bootstrap.js"
+import {
+  materializePiSubagentProfiles,
+  writePiSubagentsConfig
+} from "./pi-subagents-bootstrap.js"
 
 const roots: string[] = []
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR
@@ -204,5 +207,23 @@ describe("managed pi-subagent profiles", () => {
     const worker = await readFile(join(root, "agents", "worker.md"), "utf8")
     expect(worker).toMatch(/^thinking: medium$/m)
     expect(worker).not.toMatch(/^thinking: high$/m)
+  })
+})
+
+describe("managed pi-subagents config", () => {
+  it("rewrites a config carrying a key pi-subagents no longer accepts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-subagent-config-"))
+    roots.push(root)
+    await writePiSubagentsConfig(root)
+    const path = join(root, "extensions", "subagent", "config.json")
+    const current = await readFile(path, "utf8")
+    await writeFile(path, JSON.stringify({
+      ...JSON.parse(current),
+      modelExclusions: { defaultTtlMs: 300_000 }
+    }))
+
+    await writePiSubagentsConfig(root)
+
+    expect(await readFile(path, "utf8")).toBe(current)
   })
 })
