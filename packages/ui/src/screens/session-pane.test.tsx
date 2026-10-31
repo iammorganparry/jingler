@@ -307,10 +307,11 @@ describe("plugin tab contributions", () => {
     expect(screen.getByText("linear.issue body")).toBeTruthy()
   })
 
-  it("opens the PR view from the header PR chip without duplicating the tab", () => {
+  it("puts the PR chip first among the view buttons, not beside the title, and opens the PR view once", () => {
     render(
       <>
         <div id="session-header-identity-portal" />
+        <div id="session-header-views-portal" />
         <SessionPane
           session={session({ id: "chip-pr", prNumber: 482 })}
           renderConversation={() => <div>transcript</div>}
@@ -318,8 +319,11 @@ describe("plugin tab contributions", () => {
         />
       </>
     )
-    const chip = within(document.getElementById("session-header-identity-portal")!).getByTestId("header-link-pr")
+    expect(within(document.getElementById("session-header-identity-portal")!).queryByTestId("header-link-pr")).toBeNull()
+    const views = document.getElementById("session-header-views-portal")!
+    const chip = within(views).getByTestId("header-link-pr")
     expect(chip.textContent).toBe("PR #482")
+    expect(views.querySelector("button")).toBe(chip)
     fireEvent.click(chip)
     fireEvent.click(chip)
     expect(screen.getAllByText("pr body")).toHaveLength(1)

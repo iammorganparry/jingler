@@ -1001,6 +1001,13 @@ const writeExpanded = (ids: ReadonlySet<string>): void => {
   }
 }
 
+/** Publishes where the content column starts as `--chat-pane-left`; read by `TitleBar`. */
+const setChatPaneLeft = (px: number | null) => {
+  if (typeof document === "undefined") return
+  if (px === null) document.documentElement.style.removeProperty("--chat-pane-left")
+  else document.documentElement.style.setProperty("--chat-pane-left", `${px}px`)
+}
+
 /** The collapsed rail's width — one avatar plus breathing room. */
 const RAIL_WIDTH = 52
 
@@ -1263,6 +1270,7 @@ export function SessionSidebar(props: SessionSidebarProps) {
     applyLive: (value) => {
       const el = sidebarEl.current
       if (el) el.style.width = `${value}px`
+      setChatPaneLeft(value)
     }
   })
   const [pinned, setPinned] = React.useState<boolean | null>(readPinned)
@@ -1271,6 +1279,11 @@ export function SessionSidebar(props: SessionSidebarProps) {
   // sidebar doesn't flash a rail on every launch before the observer reports.
   const cramped = sidebarIsRail(shellWidth)
   const expanded = !props.forceCollapsed && (pinned ?? !cramped)
+  // The title bar lines the session title up with the chat pane's left edge.
+  React.useLayoutEffect(() => {
+    setChatPaneLeft(expanded ? width : RAIL_WIDTH)
+    return () => setChatPaneLeft(null)
+  }, [expanded, width])
 
   const setPin = React.useCallback((next: boolean) => {
     setPinned(next)
