@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.15.1
+
+### Patch Changes
+
+- b28a7a2: Picking any PR from the header PRs menu now opens it, not just the top one.
+  - @jingler/plannotator-ext@0.15.1
+
 ## 0.15.0
 
 ### Minor Changes
