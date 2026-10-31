@@ -1584,4 +1584,10 @@ describe("ToolCall.output — added without erasing history", () => {
     const part = msg.parts.find((p) => p._tag === "Tool")
     expect(part && part._tag === "Tool" && "output" in part.tool).toBe(false)
   })
+
+it("SubagentStarted stamps the tab's start time so its timer doesn't count from 1970", () => {
+  const before = Date.now()
+  const [started] = applySubagentEvent([], { _tag: "SubagentStarted", id: "t1", name: "Reviewer", description: "d", parentId: null })
+  expect(Date.parse(started!.message.createdAt)).toBeGreaterThanOrEqual(before)
+})
 })

@@ -1426,7 +1426,8 @@ export const applySubagentEvent = (
         description: event.description,
         parentId: event.parentId,
         status: "working",
-        message: assistantMessage(event.id, "")
+        // Stamped on arrival: the subagent timer counts from this, and "" parses to the 1970 epoch.
+        message: assistantMessage(event.id, new Date().toISOString())
       }
     ]
   }
