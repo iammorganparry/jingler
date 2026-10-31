@@ -23,6 +23,8 @@ export interface TerminalTab {
   status: TerminalTabStatus
   /** Set once the shell has exited. */
   exitCode?: number | null
+  /** A read-only mirror of an agent's command: no input, nothing to restart. */
+  readOnly?: boolean
 }
 
 export interface TerminalDockProps {
@@ -415,11 +417,13 @@ export function TerminalPanel({ tab, onRestart, cwdLabel, renderTerminal }: Term
             className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-hairline bg-panel px-3 py-1.5 text-[12px] text-muted-foreground"
           >
             <span className="min-w-0 flex-1 truncate">
-              Shell exited{tab.exitCode != null ? ` with code ${tab.exitCode}` : ""}
+              {tab.readOnly ? "Agent command finished" : `Shell exited${tab.exitCode != null ? ` with code ${tab.exitCode}` : ""}`}
             </span>
-            <Button variant="secondary" size="sm" onClick={() => onRestart(tab.id)}>
-              Restart
-            </Button>
+            {!tab.readOnly && (
+              <Button variant="secondary" size="sm" onClick={() => onRestart(tab.id)}>
+                Restart
+              </Button>
+            )}
           </div>
         )}
         <div className="absolute inset-0">{renderTerminal(tab.id)}</div>

@@ -149,7 +149,7 @@ describe("workspace mutation tools", () => {
 
     const result = await Effect.runPromise(registry.execute({
       id: "command_execute",
-      arguments: { command: "printf 'hello'" },
+      arguments: { command: "printf 'hel'; sleep 0.2; printf 'lo' >&2" },
       role: "conversation",
       mode: "ask",
       callId: "command-call",
@@ -158,9 +158,10 @@ describe("workspace mutation tools", () => {
 
     expect(result).toMatchObject({
       status: "success",
-      value: { exitCode: 0, stdout: "hello", stderr: "" }
+      value: { exitCode: 0, stdout: "hel", stderr: "lo" }
     })
-    expect(progress.join("")).toBe("hello")
+    // Each update is the interleaved output so far, not just the newest chunk.
+    expect(progress).toEqual(["hel", "hello"])
     expect(registry.capabilitiesFor("plan", "read-only")).toEqual([])
     expect(registry.capabilitiesFor("review", "read-only")).toEqual([])
   })

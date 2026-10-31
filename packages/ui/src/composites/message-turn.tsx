@@ -243,6 +243,12 @@ const useMcpSignIn = (tool: ToolCallModel) => {
 }
 
 export const ToolStopContext = createContext<(() => void) | null>(null)
+/** Opens a command card's live output in a read-only terminal tab; null where there is no terminal. */
+export const ToolWatchContext = createContext<((tool: ToolCallModel) => void) | null>(null)
+const useWatchTool = (tool: ToolCallModel): (() => void) | undefined => {
+  const watch = useContext(ToolWatchContext)
+  return watch && tool.target && isStoppableTool(toolDisplayName(tool.name)) ? () => watch(tool) : undefined
+}
 
 /**
  * Children of the active chat plus the callback the lane-header chip rows use
@@ -333,6 +339,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
       expanded={expanded}
       onToggle={openable ? () => setExpanded((v) => !v) : undefined}
       onStop={onStop}
+      onWatch={onWatch}
       signIn={signIn}
       className={WIDTH}
     >
@@ -396,6 +403,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
                             }
 
   const stopTool = useContext(ToolStopContext)
+  const onWatch = useWatchTool(tool)
   const subagentEntry = useContext(SubagentEntryContext)
   const signIn = useMcpSignIn(tool)
   const [expanded, setExpanded] = useState(tool.status === "running")
@@ -430,6 +438,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
         maxHeight={320}
         copyText={tool.output}
         onStop={onStop}
+        onWatch={onWatch}
         className={WIDTH}
       >
         <ToolResultOutput language="bash">{output}</ToolResultOutput>

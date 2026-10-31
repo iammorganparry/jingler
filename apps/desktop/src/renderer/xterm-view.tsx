@@ -21,6 +21,7 @@ import { WebglAddon } from "@xterm/addon-webgl"
 import { WebLinksAddon } from "@xterm/addon-web-links"
 import "@xterm/xterm/css/xterm.css"
 import { rpc } from "./rpc-client.js"
+import { mirrorWrite } from "./agent-command-tabs.js"
 
 /**
  * The terminal is themed like everything else, but through a different pipe:
@@ -42,9 +43,15 @@ export interface XtermViewProps {
   active?: boolean
   /** Called with the exit code when the shell process ends. */
   onExit?: (code: number) => void
+  /**
+   * Read-only mode: render an agent command's cumulative output snapshot
+   * instead of attaching to a PTY. No input, no resize RPC.
+   */
+  mirror?: { readonly output: string | undefined; readonly status: "running" | "success" | "error" | null }
 }
 
-export function XtermView({ terminalId, active = true, onExit }: XtermViewProps) {
+export function XtermView({ terminalId, active = true, onExit, mirror }: XtermViewProps) {
+  const isMirror = mirror !== undefined
   const containerRef = useRef<HTMLDivElement>(null)
   // Keep the latest onExit without re-running the (expensive) mount effect.
   const onExitRef = useRef(onExit)
@@ -65,6 +72,8 @@ export function XtermView({ terminalId, active = true, onExit }: XtermViewProps)
   // State, not a ref: the WebGL and theme effects below must re-run when the
   // mount effect rebuilds the Terminal, and a ref mutation cannot tell them.
   const [term, setTerm] = useState<Terminal | null>(null)
+  // What a mirror has already written to the current Terminal instance.
+  const shownRef = useRef("")
 
   useEffect(() => {
     const el = containerRef.current
@@ -79,11 +88,13 @@ export function XtermView({ terminalId, active = true, onExit }: XtermViewProps)
         '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
       fontSize: 12,
       lineHeight: 1.4,
-      cursorBlink: true,
+      cursorBlink: !isMirror,
+      disableStdin: isMirror,
       allowProposedApi: true,
       theme: { ...themeRef.current }
     })
 
+    shownRef.current = ""
     setTerm(term)
 
     const fit = new FitAddon()
@@ -93,11 +104,11 @@ export function XtermView({ terminalId, active = true, onExit }: XtermViewProps)
 
     fit.fit()
 
-    // Operator input → PTY.
-    const inputSub = term.onData((data) => void rpc.terminalWrite(terminalId, data))
+    // Operator input → PTY. A mirror has no PTY; its output arrives via the `mirror` effect.
+    const inputSub = isMirror ? null : term.onData((data) => void rpc.terminalWrite(terminalId, data))
 
     // PTY output → terminal. Replays scrollback first, then live coalesced frames.
-    const detach = rpc.terminalAttach(terminalId, (chunk) => {
+    const detach = isMirror ? () => {} : rpc.terminalAttach(terminalId, (chunk) => {
       if (chunk._tag === "data") {
         term.write(chunk.data)
       } else {
@@ -116,25 +127,43 @@ export function XtermView({ terminalId, active = true, onExit }: XtermViewProps)
         } catch {
           /* container detached mid-drag */
         }
-        void rpc.terminalResize(terminalId, term.cols, term.rows)
+        if (!isMirror) void rpc.terminalResize(terminalId, term.cols, term.rows)
       })
     }
     const resizeObserver = new ResizeObserver(scheduleFit)
     resizeObserver.observe(el)
 
     // Push the initial size to the PTY (create used a guessed 80×24).
-    void rpc.terminalResize(terminalId, term.cols, term.rows)
-    term.focus()
+    if (!isMirror) {
+      void rpc.terminalResize(terminalId, term.cols, term.rows)
+      term.focus()
+    }
 
     return () => {
       cancelAnimationFrame(raf)
       resizeObserver.disconnect()
-      inputSub.dispose()
+      inputSub?.dispose()
       detach()
       term.dispose()
       setTerm(null)
     }
-  }, [terminalId])
+  }, [terminalId, isMirror])
+
+  // Mirror output: append only what's new; redraw when the snapshot was trimmed or replaced.
+  const mirrorOutput = mirror?.output
+  const mirrorStatus = mirror?.status
+  useEffect(() => {
+    if (term === null || !isMirror) return
+    const update = mirrorWrite(shownRef.current, mirrorOutput?.replace(/\r?\n/g, "\r\n"), mirrorStatus === "running")
+    if (update === null) return
+    if (update.reset) term.reset()
+    if (update.data) term.write(update.data)
+    shownRef.current = update.reset ? update.data : shownRef.current + update.data
+  }, [isMirror, mirrorOutput, mirrorStatus, term])
+  useEffect(() => {
+    if (term === null || mirrorStatus == null || mirrorStatus === "running") return
+    term.write(`\r\n\x1b[2m[agent command ${mirrorStatus === "success" ? "finished" : "failed"}]\x1b[0m\r\n`)
+  }, [mirrorStatus, term])
 
   // GPU rendering only while visible; hidden cells drop back to the DOM
   // renderer (they are not painting anyway) so their context is released.

@@ -103,6 +103,8 @@ export interface ConversationPaneCtx {
   onOpenPlanReview: (stepId?: string) => void
   /** Open a repository path in its own editor tab. */
   onOpenFile: (path: string) => void
+  /** Open (focus) a terminal tab the host already lists for this session. */
+  onOpenTerminal?: (id: string) => void
 
   /** Reveal and focus the session browser for an operator-requested preview. */
   onSelectBrowser?: () => void
@@ -810,6 +812,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             props.onTrackFile?.(session.id, path)
             openSurface({ kind: "file", id: path })
           },
+          onOpenTerminal: (id) => openSurface({ kind: "terminal", id }),
 
           onSelectBrowser: () => ctx.onSelectTab(BUILTIN_TAB.browser),
           onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),

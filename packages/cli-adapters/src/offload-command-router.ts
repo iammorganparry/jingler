@@ -30,7 +30,8 @@ import {
 } from "./resource-pressure.js"
 import {
   ToolError,
-  type ToolExecutionContext
+  type ToolExecutionContext,
+  cumulativeProgress
 } from "./runtime/tools/tool-registry.js"
 
 export interface OffloadedCommandResult {
@@ -133,20 +134,17 @@ const terminal = (result: OffloadJobResult): OffloadedCommandResult => {
   }
 }
 
+/**
+ * Offload state changes ride the same cumulative output stream as dim marker
+ * lines, so a status update never replaces the command output already shown.
+ */
 const reportEvents = (
   events: ReadonlyArray<OffloadJobEvent>,
-  context: ToolExecutionContext
+  report: (chunk: string) => void
 ): void => {
   for (const event of events) {
-    if (event.kind === "output") {
-      context.progress({ message: event.text, completed: null, total: null })
-    } else if (event.kind === "state") {
-      context.progress({
-        message: `Offload Compute: ${event.state}`,
-        completed: null,
-        total: null
-      })
-    }
+    if (event.kind === "output") report(event.text)
+    else if (event.kind === "state") report(`[Offload Compute: ${event.state}]\n`)
   }
 }
 
@@ -199,6 +197,7 @@ export const pollResult = async (input: PollInput): Promise<OffloadedCommandResu
   let cursor = 0
   let consecutiveFailures = 0
   let consecutiveAuthorizationFailures = 0
+  const report = cumulativeProgress(input.context.progress)
   const cancel = () => cancelRemote(admission, async () => {
     admission = await input.refresh()
     input.onAdmission?.(admission)
@@ -240,7 +239,7 @@ export const pollResult = async (input: PollInput): Promise<OffloadedCommandResu
       "Remote job returned invalid status data"
     )
     cursor = page.cursor
-    reportEvents(page.events, input.context)
+    reportEvents(page.events, report)
     if (page.result !== null) return terminal(page.result)
     await interruptibleDelay(500, input.context.signal)
   }

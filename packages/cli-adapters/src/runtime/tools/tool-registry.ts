@@ -37,6 +37,23 @@ export interface ToolProgress {
   readonly total: number | null
 }
 
+/**
+ * A command's progress reporter that sends the whole output so far, not the new
+ * chunk: `ToolDelta` consumers (the card, the read-only terminal mirror) treat
+ * every delta as a cumulative snapshot, the same contract Codex follows.
+ */
+export const cumulativeProgress = (
+  progress: (progress: ToolProgress) => void,
+  max = 32_000
+): ((chunk: string) => void) => {
+  let combined = ""
+  return (chunk) => {
+    if (chunk.length === 0) return
+    combined = (combined + chunk).slice(-max)
+    progress({ message: combined, completed: null, total: null })
+  }
+}
+
 export interface ToolArtifactReference {
   readonly id: string
   readonly byteLength: number

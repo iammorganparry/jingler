@@ -18,6 +18,7 @@ import { AssetService } from "../../asset.js"
 import type { OffloadCommandRouterPort } from "../../offload-command-router.js"
 import {
   ToolError,
+  cumulativeProgress,
   cwdOf,
   type WorkspaceCwd,
   type ToolDefinition,
@@ -176,13 +177,13 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       return { from: source.relative, to: destination.relative }
     }).pipe(mapFailure("Could not rename workspace file"))
 
-  const maxCommandOutput = 32_000
   const execute: WorkspaceMutationPort["execute"] = (cwd, source, context, sessionId) => Effect.scoped(
     Effect.gen(function* () {
       if (process.platform === "win32") {
         // Windows keeps ordinary shell access; destructive lifecycle refuses its unprovable history.
         const child = yield* Command.make("cmd.exe", "/d", "/s", "/c", source).pipe(Command.workingDirectory(cwd), Command.env({ ...worktreeEnv(process.env, cwd), ...trustedWorkspaceEnvironment(context.workspaceEnvironment) }), Command.start, Effect.provideService(CommandExecutor.CommandExecutor, executor), mapFailure("Command launch failed"))
-        const collect = (stream: Stream.Stream<Uint8Array, unknown>) => stream.pipe(Stream.decodeText(), Stream.tap(chunk => Effect.sync(() => context.progress({ message: chunk.slice(-maxCommandOutput), completed: null, total: null }))), Stream.runFold("", (text, chunk) => (text + chunk).slice(-maxCommandOutput)))
+        const report = cumulativeProgress(context.progress, maxCommandOutput)
+        const collect = (stream: Stream.Stream<Uint8Array, unknown>) => stream.pipe(Stream.decodeText(), Stream.tap(chunk => Effect.sync(() => report(chunk))), Stream.runFold("", (text, chunk) => (text + chunk).slice(-maxCommandOutput)))
         const [stdout, stderr, exitCode] = yield* Effect.all([collect(child.stdout), collect(child.stderr), child.exitCode], { concurrency: 3 }).pipe(mapFailure("Command execution failed"))
         if (exitCode !== 0) return yield* Effect.fail(failure(stderr.trim() || stdout.trim() || `Command exited ${exitCode}`))
         return { command: source, exitCode: Number(exitCode), stdout, stderr }
@@ -205,11 +206,12 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       const result = yield* Effect.tryPromise({
         try: () => new Promise<{ command: string; exitCode: number; stdout: string; stderr: string }>((resolve, reject) => {
           let stdout = "", stderr = ""
+          const report = cumulativeProgress(context.progress, maxCommandOutput)
           const out = new StringDecoder("utf8"), err = new StringDecoder("utf8")
           const append = (chunk: string, isError: boolean) => {
             if (isError) stderr = (stderr + chunk).slice(-maxCommandOutput)
             else stdout = (stdout + chunk).slice(-maxCommandOutput)
-            context.progress({ message: chunk.slice(-maxCommandOutput), completed: null, total: null })
+            report(chunk)
           }
           child.stdout?.on("data", chunk => append(out.write(chunk), false))
           child.stderr?.on("data", chunk => append(err.write(chunk), true))
@@ -227,6 +229,8 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
 
   return { write, edit, remove, rename, execute } satisfies WorkspaceMutationPort
 })
+
+const maxCommandOutput = 32_000
 
 const fileTool = <Input, Encoded>(
   definition: Pick<

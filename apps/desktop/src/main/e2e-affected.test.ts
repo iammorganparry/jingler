@@ -17,7 +17,7 @@ describe("affected-map.json", () => {
 describe("selectSpecs", () => {
   it("selects only the mapped specs for a UI change", () => {
     const { specs } = selectSpecs(["packages/ui/src/app/terminal-panel.tsx"], map, allSpecs)
-    expect(specs).toEqual(["editor-groups.spec.ts", "terminal.spec.ts", "workspace-terminal-archive.spec.ts"])
+    expect(specs).toEqual(["agent-command-terminal.spec.ts", "editor-groups.spec.ts", "terminal.spec.ts", "workspace-terminal-archive.spec.ts"])
   })
 
   it("runs everything for an unmapped path", () => {
