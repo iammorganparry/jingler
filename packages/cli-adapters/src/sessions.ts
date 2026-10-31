@@ -415,13 +415,20 @@ export const migrateSessionIssue = (session: Session): Session => {
 }
 
 /** Set the scalar `branch` and keep the active checkout's own record in step (labels read the checkout). */
-const withActiveCheckoutBranch = <S extends Session>(session: S, branch: string): S => ({
+export const withActiveCheckoutBranch = <S extends Session>(session: S, branch: string): S => ({
   ...session,
   branch,
   ...(session.checkouts
-    ? { checkouts: session.checkouts.map((c) => (c.id === session.activeCheckoutId ? { ...c, branch } : c)) }
+    ? { checkouts: session.checkouts.map((c) => (c.id === session.activeCheckoutId ? onBranch(c, branch) : c)) }
     : {})
 })
+
+/** A publish result belongs to the branch it ran on; moving branches drops it. */
+const onBranch = (checkout: SessionCheckout, branch: string): SessionCheckout => {
+  if (checkout.branch === branch) return checkout
+  const { publish: _stale, ...rest } = checkout
+  return { ...rest, branch }
+}
 
 /** Apply `edit` to the active checkout's PR stack; `prNumber` follows its top. */
 const editActivePrs = (session: Session, edit: (prs: ReadonlyArray<SessionPr>) => ReadonlyArray<SessionPr>): Session => {

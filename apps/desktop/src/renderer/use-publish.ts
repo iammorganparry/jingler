@@ -1,4 +1,4 @@
-import { activeCheckoutOf, type Session, type SessionCheckout } from "@jingler/core"
+import { activeCheckoutOf, currentPublishOf, type Session, type SessionCheckout } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import { useMemo } from "react"
 import { createRendererPublishMachine } from "./publish-machine.js"
@@ -9,7 +9,8 @@ export const usePublish = (
   onPrLinked?: (sessionId: string, prNumber: number) => void,
   onCheckpoint?: (sessionId: string, checkpoint: NonNullable<SessionCheckout["publish"]>) => void
 ) => {
-  const machine = useMemo(() => createRendererPublishMachine(activeCheckoutOf(session).publish, {
+  const checkout = activeCheckoutOf(session)
+  const machine = useMemo(() => createRendererPublishMachine(currentPublishOf(checkout), {
     subscribe: (listener, base) => rpc.githubPublish(session.id, (checkpoint) => {
       onCheckpoint?.(session.id, checkpoint)
       listener(checkpoint)
@@ -17,7 +18,7 @@ export const usePublish = (
     onComplete: (checkpoint) => {
       if (checkpoint.prNumber !== undefined) onPrLinked?.(session.id, checkpoint.prNumber)
     }
-  }), [session.id, onCheckpoint, onPrLinked])
+  }), [session.id, checkout.id, checkout.branch, onCheckpoint, onPrLinked])
   const [snapshot, send] = useMachine(machine)
   return {
     checkpoint: snapshot.context.checkpoint,

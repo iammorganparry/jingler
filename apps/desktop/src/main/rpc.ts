@@ -148,6 +148,7 @@ import {
   workspaceModeOf,
   reduceCheckouts,
   activeCheckoutOf,
+  currentPublishOf,
   checkoutById,
   checkoutPrsOf,
   PRIMARY_CHECKOUT_ID,
@@ -3104,7 +3105,7 @@ export const githubPublish = (sessionId: string, base?: string) =>
             if (!checkout.worktreePath) {
               const failure = publishFailure(
                 "This session has no worktree to publish.",
-                checkout.publish,
+                currentPublishOf(checkout),
               );
               await run(SessionStore.setPublishCheckpoint(session.id, failure));
               offer(failure);
@@ -3126,7 +3127,7 @@ export const githubPublish = (sessionId: string, base?: string) =>
             try {
               await runPublishMachineExclusive(
                 session.id,
-                checkout.publish,
+                currentPublishOf(checkout),
                 {
                   // A stacked layer is a new PR on a new branch: never adopt the lower layer's PR.
                   knownPrNumber: base === undefined ? activeCheckoutOf(session).prNumber : null,

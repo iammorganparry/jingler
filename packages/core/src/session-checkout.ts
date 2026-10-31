@@ -215,3 +215,7 @@ export const ownedWorktreePaths = (session: CheckoutSession): ReadonlyArray<stri
 export const checkoutById = (session: CheckoutSession, checkoutId?: string): SessionCheckout =>
   (checkoutId === undefined ? undefined : checkoutsOf(session).find((c) => c.id === checkoutId)) ??
   activeCheckoutOf(session);
+
+/** The checkout's publish result, unless it was recorded on another branch (the checkout moved since). */
+export const currentPublishOf = (checkout: SessionCheckout): SessionCheckout["publish"] =>
+  checkout.publish?.branch === undefined || checkout.publish.branch === checkout.branch ? checkout.publish : undefined;
