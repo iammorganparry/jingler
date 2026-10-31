@@ -184,7 +184,8 @@ function renderLoadingIcon() {
 
   return (
     <motion.span
-      layout
+      // Size only: a badge whose row reflows (e.g. the title inset tracking the sidebar) must not spring across from its old spot.
+      layout="size"
       transition={{ type: "spring", stiffness: 420, damping: 30, mass: 0.7 }}
       className={cn(
         "relative inline-flex shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full border font-medium tabular-nums",
