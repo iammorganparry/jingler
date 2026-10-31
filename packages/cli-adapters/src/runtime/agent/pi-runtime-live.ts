@@ -307,6 +307,7 @@ export const makePiAgentRuntimeLive = (
         Effect.provideService(AppPaths, paths)
       ),
       terminalTracker: (spec) => new FileChangeTracker({
+        restricted: workspaceRestricted(spec.sessionId),
         artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
         sessionId: spec.continuation?.id ?? spec.runId
       }),

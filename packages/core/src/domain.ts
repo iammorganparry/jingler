@@ -644,6 +644,8 @@ export const SessionWire = Schema.Struct({
   routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
   /** Routine sessions: no setup, shell, build, test, terminals or delegated children. */
   restricted: Schema.optional(Schema.Boolean),
+  /** Pre-0.15 name for `restricted`; read on decode only, never written. */
+  checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Absent means legacy/unknown, never proven clean. Persist before any unowned launch. */
   checkpointExecutionHistory: Schema.optional(Schema.Literal("clean", "unprovable")),
   /** An interactive terminal may leave descendants after its leader or the app exits. */
@@ -857,6 +859,7 @@ const {
   prNumber: _prNumber,
   prs: _prs,
   publish: _publish,
+  checkpointSafeMode: _checkpointSafeMode,
   ...sessionFields
 } = SessionWire.fields;
 
@@ -877,6 +880,7 @@ export interface Session
     | "prNumber"
     | "prs"
     | "publish"
+    | "checkpointSafeMode"
   > {}
 
 /** A session whose repos live only in `checkouts`; see `SessionWire` for the persisted shape. */
@@ -895,9 +899,10 @@ export const Session: Schema.Schema<Session, SessionWireEncoded> = Schema.transf
       prNumber: _pn,
       prs: _prs,
       publish: _publish,
+      checkpointSafeMode,
       ...session
     } = migrateCheckoutPrs(migrateSessionCheckouts(wire));
-    return session;
+    return checkpointSafeMode === true ? { ...session, restricted: true } : session;
   },
   encode: (session) => {
     const { id: _id, prs: _prs, ...mirror } = activeCheckoutOf(session);

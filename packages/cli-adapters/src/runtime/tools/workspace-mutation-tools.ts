@@ -3,6 +3,7 @@ import { StringDecoder } from "node:string_decoder"
 import { acquireWorkspaceActivity } from "../../workspace-admission.js"
 import { trackChild, stopChildAndWait } from "../../child-registry.js"
 import { workspaceRestricted } from "../../workspace-admission.js"
+import { restrictedFiles } from "../../restricted-file-tools.js"
 import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { worktreeEnv } from "../../worktree-env.js"
 import { assertPlanCall } from "./plan-policy.js"
@@ -264,7 +265,7 @@ export const registerWorkspaceMutationTools = (
       execute: ({ path, content }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
         if (context.plan) assertPlanCall("workspace_write", { path }, resolved)
-        return Effect.runPromise(workspace.write(resolved, path, content))
+        return routing?.sessionId && workspaceRestricted(routing.sessionId) ? restrictedFiles.write(resolved, path, content) : Effect.runPromise(workspace.write(resolved, path, content))
       }
     })
   )
@@ -281,7 +282,7 @@ export const registerWorkspaceMutationTools = (
       execute: ({ path, oldText, newText, replaceAll }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
         if (context.plan) assertPlanCall("workspace_edit", { path }, resolved)
-        return Effect.runPromise(workspace.edit(resolved, path, oldText, newText, replaceAll))
+        return routing?.sessionId && workspaceRestricted(routing.sessionId) ? restrictedFiles.edit(resolved, path, oldText, newText, replaceAll) : Effect.runPromise(workspace.edit(resolved, path, oldText, newText, replaceAll))
       }
     })
   )
@@ -292,7 +293,7 @@ export const registerWorkspaceMutationTools = (
       input: Schema.Struct({ path: PathInput }),
       execute: ({ path }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
-        return Effect.runPromise(workspace.remove(resolved, path))
+        return routing?.sessionId && workspaceRestricted(routing.sessionId) ? restrictedFiles.remove(resolved, path) : Effect.runPromise(workspace.remove(resolved, path))
       }
     })
   )
@@ -303,7 +304,7 @@ export const registerWorkspaceMutationTools = (
       input: Schema.Struct({ from: PathInput, to: PathInput }),
       execute: ({ from, to }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
-        return Effect.runPromise(workspace.rename(resolved, from, to))
+        return routing?.sessionId && workspaceRestricted(routing.sessionId) ? restrictedFiles.rename(resolved, from, to) : Effect.runPromise(workspace.rename(resolved, from, to))
       }
     })
   )

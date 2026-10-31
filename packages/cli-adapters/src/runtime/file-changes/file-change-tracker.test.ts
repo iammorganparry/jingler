@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { randomBytes } from "node:crypto"
 import { mkdtemp, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -123,5 +124,16 @@ describe("FileChangeTracker", () => {
 
     await Effect.runPromise(tracker.dispose())
     expect(await readdir(shadowRoot)).toEqual([])
+  })
+
+  it("a restricted capture refuses a path with a Git clean filter and never runs it", async () => {
+    const root = await repository()
+    const sentinel = join(root, "..", `filter-ran-${randomBytes(4).toString("hex")}`)
+    git(root, ["config", "filter.evil.clean", `touch ${sentinel}; cat`])
+    await writeFile(join(root, ".gitattributes"), "*.txt filter=evil\n")
+    await writeFile(join(root, "note.txt"), "x\n")
+    const tracker = makeTracker({ artifactDir: join(root, "..", "artifacts"), sessionId: "restricted", restricted: true })
+    await expect(Effect.runPromise(tracker.capture(root))).rejects.toThrow()
+    expect(existsSync(sentinel)).toBe(false)
   })
 })
