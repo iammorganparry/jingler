@@ -25,7 +25,14 @@ export function TitleBar({
       style={drag}
       className="window-drag-region flex h-11 flex-none items-center gap-2 border-b border-hairline bg-panel px-3.5"
     >
-      {overlay ? null : <div aria-hidden data-testid="traffic-light-inset" className="w-16 flex-none" />}
+      {/* Ends where the chat pane starts (minus px-3.5 and gap-2) so the title sits over it;
+          never narrower than the macOS traffic lights. */}
+      <div
+        aria-hidden
+        data-testid="traffic-light-inset"
+        className={overlay ? "flex-none" : "min-w-16 flex-none"}
+        style={{ width: "calc(var(--chat-pane-left, 0px) - 22px)" }}
+      />
       <div id="session-header-identity-portal" style={noDrag} className="flex min-w-0 shrink items-center overflow-hidden" />
       <div
         id="session-tab-bar-portal"

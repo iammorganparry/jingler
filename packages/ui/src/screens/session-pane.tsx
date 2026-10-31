@@ -41,7 +41,7 @@ import { BuiltinStubScreen } from "./stub-screen.js"
 import { SessionPrsChip } from "../app/session-prs-chip.js"
 import { sessionPrRows } from "../lib/session-prs.js"
 import { SessionHeaderIdentity } from "../app/session-header-identity.js"
-import { HeaderViewButtons, type HeaderLinkChip, type HeaderViewItem } from "../app/header-view-buttons.js"
+import { HeaderLinkChips, HeaderViewButtons, type HeaderLinkChip, type HeaderViewItem } from "../app/header-view-buttons.js"
 import { ViewOverflowMenu } from "../app/view-overflow-menu.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
@@ -1099,9 +1099,24 @@ function SessionPaneBody(props: SessionPaneProps) {
         <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
       </>
     ) : null
+  // The PR sits first among the view buttons; the title side keeps title, branch and issue.
+  const prChip = linkChips.filter((chip) => chip.id === "pr")
+  const prControl =
+    prRows.length > 1 ? (
+      <SessionPrsChip
+        rows={prRows}
+        onSelect={(row) => {
+          props.onOpenSessionPr?.(active.id, row.number)
+          selectTab(BUILTIN_TAB.checks)
+        }}
+      />
+    ) : prChip.length > 0 ? (
+      <HeaderLinkChips chips={prChip} />
+    ) : null
   const headerViewControls =
-    issuePicker || viewButtons ? (
+    prControl || issuePicker || viewButtons ? (
       <div className="flex items-center gap-0.5">
+        {prControl}
         {issuePicker}
         {viewButtons}
       </div>
@@ -1110,18 +1125,8 @@ function SessionPaneBody(props: SessionPaneProps) {
     <SessionHeaderIdentity
       title={active.title || UNTITLED_SESSION}
       branch={activeCheckoutOf(active).branch}
-      chips={prRows.length > 1 ? linkChips.filter((chip) => chip.id !== "pr") : linkChips}
-    >
-      {prRows.length > 1 && (
-        <SessionPrsChip
-          rows={prRows}
-          onSelect={(row) => {
-            props.onOpenSessionPr?.(active.id, row.number)
-            selectTab(BUILTIN_TAB.checks)
-          }}
-        />
-      )}
-    </SessionHeaderIdentity>
+      chips={linkChips.filter((chip) => chip.id !== "pr")}
+    />
   )
 
   const renderGroups = (groupLayout: EditorLayout) => (
