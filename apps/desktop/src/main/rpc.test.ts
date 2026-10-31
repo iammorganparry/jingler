@@ -1487,6 +1487,26 @@ describe("RPC handlers", () => {
       expect(detected).toBeNull();
     });
 
+    it("reads a PR the agent linked on the session, and still refuses an unrelated one", async () => {
+      const now = "2026-08-11T06:00:00.000Z";
+      const worktreePath = join(dir, "linked-worktree");
+      mkdirSync(root, { recursive: true });
+      mkdirSync(worktreePath, { recursive: true });
+      writeFileSync(join(root, "sessions.json"), JSON.stringify([{
+        id: "linked", repo: "widget", branch: "fix/a", baseBranch: "main",
+        title: "Linked", status: "idle", cli: "claude", diff: { added: 0, removed: 0 },
+        prNumber: 948, linkedPrs: [954], costUsd: 0, tokens: 0, updatedAt: now, worktreePath,
+        workspaceMode: "worktree", semanticBranchPending: false,
+        chats: [{ id: "c", title: null, createdAt: now, updatedAt: now }], activeChatId: "c",
+      }]));
+      const prView = vi.fn((_cwd: string, number: number) => Effect.succeed({ number }));
+      const github = Layer.mergeAll(base, SessionStore.Default, fakeGithubApi({ prView }));
+      const read = (number: number) => Effect.runPromise(githubPr("linked", number).pipe(Effect.provide(github)));
+      await expect(read(954)).resolves.toEqual({ number: 954 });
+      await expect(read(999)).resolves.toBeNull();
+      expect(prView).toHaveBeenCalledTimes(1);
+    });
+
     it("links a CLI-detected PR without enabling realtime when the App is not installed", async () => {
       const now = "2026-08-11T06:00:00.000Z";
       const worktreePath = join(dir, "cli-only-worktree");
