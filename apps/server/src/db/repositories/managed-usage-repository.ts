@@ -8,17 +8,13 @@ export interface ManagedUsagePolicy {
   readonly maxActiveSeconds: number
   readonly dailyBudgetMicrousd: number
   readonly maxEgressBytes: number
-  readonly maxCheckpointBytes: number
-  readonly checkpointRetentionSeconds: number
 }
 
 export const DEFAULT_MANAGED_USAGE_POLICY: ManagedUsagePolicy = {
   maxConcurrentSessions: 1,
   maxActiveSeconds: 7_200,
   dailyBudgetMicrousd: 200_000,
-  maxEgressBytes: 100 * 1024 * 1024,
-  maxCheckpointBytes: 64 * 1024 * 1024,
-  checkpointRetentionSeconds: 7 * 24 * 60 * 60
+  maxEgressBytes: 100 * 1024 * 1024
 }
 
 /** Published basic-instance ceiling: memory + disk + 100% active CPU. */

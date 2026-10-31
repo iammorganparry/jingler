@@ -213,3 +213,13 @@ describe("currentPublishOf", () => {
     expect(currentPublishOf({ ...web, publish: done })?.prNumber).toBe(948);
   });
 });
+
+describe("legacy checkpointSafeMode", () => {
+  it("a pre-upgrade safe session decodes as restricted and re-encodes without the old flag", () => {
+    const decoded = Schema.decodeUnknownSync(Session)({ ...wire(), checkpointSafeMode: true });
+    expect(decoded.restricted).toBe(true);
+    expect("checkpointSafeMode" in decoded).toBe(false);
+    expect("checkpointSafeMode" in Schema.encodeSync(Session)(decoded)).toBe(false);
+    expect(Schema.decodeUnknownSync(Session)(wire()).restricted).toBeUndefined();
+  });
+});

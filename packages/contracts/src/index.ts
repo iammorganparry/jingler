@@ -80,8 +80,6 @@ import {
   ProjectDirectoryListing,
   ProjectRunCommand,
   WorkspaceRunState,
-  WorkspaceCheckpoint,
-  WorkspaceCheckpointPreview,
   PublishCheckpoint,
   RestackedLayer,
   PullRequest,
@@ -596,27 +594,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       copyFiles: Schema.Array(Schema.String),
       approve: Schema.Boolean
     }
-  }),
-
-  Rpc.make("WorkspaceCheckpoints.setMode", {
-    success: Session, error: GitError,
-    payload: { sessionId: Schema.String, enabled: Schema.Boolean }
-  }),
-  Rpc.make("WorkspaceCheckpoints.list", {
-    success: Schema.Array(WorkspaceCheckpoint), error: GitError,
-    payload: { sessionId: Schema.String }
-  }),
-  Rpc.make("WorkspaceCheckpoints.capture", {
-    success: WorkspaceCheckpoint, error: GitError,
-    payload: { sessionId: Schema.String }
-  }),
-  Rpc.make("WorkspaceCheckpoints.preview", {
-    success: WorkspaceCheckpointPreview, error: GitError,
-    payload: { sessionId: Schema.String, checkpointId: Schema.String }
-  }),
-  Rpc.make("WorkspaceCheckpoints.restore", {
-    success: WorkspaceCheckpoint, error: GitError,
-    payload: { sessionId: Schema.String, checkpointId: Schema.String, token: Schema.String }
   }),
 
   Rpc.make("WorkspaceWorkflow.retrySetup", {

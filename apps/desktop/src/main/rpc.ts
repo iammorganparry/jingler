@@ -88,7 +88,6 @@ import {
   sessionNeedsRuntimeIdentity,
   WorkspaceService,
   WorkspaceWorkflowService,
-  WorkspaceCheckpointService,
   workspaceHasUnprovenProcesses,
   closeWorkspaceAdmission,
   reopenWorkspaceAdmission,
@@ -837,9 +836,9 @@ export const createSession = (input: CreateSessionInput) =>
                 : { environmentId: project.environmentId }),
             })),
           );
-    if (resolvedInput.checkpointSafeMode && resolvedInput.projectId) {
+    if (resolvedInput.restricted && resolvedInput.projectId) {
       const project = yield* ProjectService.get(resolvedInput.projectId);
-      if (project.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot run this project's setup shell command. Use a project without setup commands or create an ordinary workspace; models and permissions are unchanged." }));
+      if (project.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Restricted sessions cannot run this project's setup shell command." }));
     }
     const runtimeInput = yield* resolvePiCreateInput(resolvedInput).pipe(
       Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
@@ -900,9 +899,7 @@ const sessionCreationStream = <E, R>(
 const prepareLocalWorkspace = (session: Session) =>
   Effect.gen(function* () {
     const workflow = yield* WorkspaceWorkflowService;
-    if (session.checkpointSafeMode) {
-      yield* WorkspaceCheckpointService.setMode(session.id, true)
-    } else yield* workflow.setup(session.id).pipe(Effect.either)
+    if (!session.restricted) yield* workflow.setup(session.id).pipe(Effect.either)
     return yield* SessionStore.get(session.id).pipe(
       Effect.mapError((cause) => new GitError({ message: "Created workspace could not be reloaded", cause })),
     )
@@ -1651,8 +1648,8 @@ export const assetWrite = (input: {
   expectedRevision: string;
   checkoutId?: string;
 }) =>
-  Effect.flatMap(resolveSession(input.sessionId), (session) => session?.checkpointSafeMode
-    ? Effect.fail(new AssetWriteIoError({ path: input.path, message: "Use managed Pi structured file tools in checkpoint-safe mode; direct editor mutations are unsupported." }))
+  Effect.flatMap(resolveSession(input.sessionId), (session) => session?.restricted
+    ? Effect.fail(new AssetWriteIoError({ path: input.path, message: "Restricted sessions use managed Pi structured file tools; direct editor mutations are unsupported." }))
     : Effect.flatMap(assetWorktree(input.sessionId, input.checkoutId), (worktree) =>
     AssetService.write(
       worktree,
@@ -1712,7 +1709,7 @@ export const workspaceRevertFile = (input: {
     if (!session) return;
     const checkout = checkoutById(session, input.checkoutId);
     if (!checkout.worktreePath) return;
-    if (session.checkpointSafeMode) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in checkpoint-safe mode. Use the checkpoint restore preview." }));
+    if (session.restricted) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in restricted sessions." }));
     if (workspaceModeOf(checkout) === "direct") {
       return yield* Effect.fail(
         new GitError({
@@ -2017,7 +2014,7 @@ export const restoreSession = (sessionId: string) =>
     lifecycleClosures.delete(sessionId);
     const session = yield* SessionStore.get(sessionId);
     const checkout = activeCheckoutOf(session);
-    if (checkout.worktreePath && !session.checkpointSafeMode) {
+    if (checkout.worktreePath && !session.restricted) {
       const offload = yield* makeOffloadCommandRouter
       yield* Effect.forkDaemon(
         offload.primeSession(checkout.worktreePath, session.id).pipe(Effect.ignore)
@@ -3100,7 +3097,7 @@ export const githubPublish = (sessionId: string, base?: string) =>
         Effect.tryPromise({
           try: async () => {
             let session = await run(SessionStore.get(sessionId));
-            if (session.checkpointSafeMode) throw new Error("Publishing invokes unsupported Git commands in checkpoint-safe mode. Disable safe mode before publishing.");
+            if (session.restricted) throw new Error("Publishing is unsupported in restricted sessions.");
             const checkout = activeCheckoutOf(session);
             if (!checkout.worktreePath) {
               const failure = publishFailure(
@@ -3844,7 +3841,7 @@ export const createTerminal = (input: {
     const session = yield* SessionStore.get(input.sessionId).pipe(Effect.catchTag("SessionNotFoundError", () => Effect.succeed(null)));
     const cwd = input.cwd ?? (session && activeCheckoutOf(session).worktreePath) ?? undefined;
     const terminals = yield* TerminalService;
-    if (session?.checkpointSafeMode) return yield* Effect.fail(new TerminalError({ message: "Interactive terminals are unsupported in checkpoint-safe mode." }));
+    if (session?.restricted) return yield* Effect.fail(new TerminalError({ message: "Interactive terminals are unsupported in restricted sessions." }));
     if (session) yield* SessionStore.markCheckpointTerminalExecutionUnprovable(session.id).pipe(Effect.mapError((cause) => new TerminalError({ message: "Could not persist terminal history; terminal creation blocked.", cause })));
     return yield* terminals.create({
       executionHistoryPersisted: session !== null && session !== undefined,
@@ -5218,11 +5215,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       },
       approve,
     ),
-  "WorkspaceCheckpoints.setMode": ({ sessionId, enabled }) => WorkspaceCheckpointService.setMode(sessionId, enabled),
-  "WorkspaceCheckpoints.list": ({ sessionId }) => WorkspaceCheckpointService.list(sessionId),
-  "WorkspaceCheckpoints.capture": ({ sessionId }) => WorkspaceCheckpointService.capture(sessionId),
-  "WorkspaceCheckpoints.preview": ({ sessionId, checkpointId }) => WorkspaceCheckpointService.preview(sessionId, checkpointId),
-  "WorkspaceCheckpoints.restore": ({ sessionId, checkpointId, token }) => WorkspaceCheckpointService.restore(sessionId, checkpointId, token),
   "WorkspaceWorkflow.retrySetup": ({ sessionId }) => WorkspaceWorkflowService.setup(sessionId),
   "WorkspaceWorkflow.skipSetup": ({ sessionId }) => WorkspaceWorkflowService.skipSetup(sessionId),
   "WorkspaceWorkflow.startRun": ({ sessionId, runId }) => WorkspaceWorkflowService.startRun(sessionId, runId),
@@ -6895,7 +6887,6 @@ export type RpcServerRequirements =
   | UsageService
   | WorkspaceService
   | WorkspaceWorkflowService
-  | WorkspaceCheckpointService
   | RuntimeDiagnostics
   | RuntimeRecoveryService
   | ProviderConnections;

@@ -170,7 +170,6 @@ import { useEnvironments } from "./use-environments.js";
 import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
 import { useImportSessions } from "./use-import-sessions.js";
-import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js";
 import { CheckoutHeader } from "./checkout-header.js";
 import { WorkspaceWorkflowBar } from "./workspace-workflow-bar.js";
 import { useAutoUpdate } from "./use-auto-update.js";
@@ -885,7 +884,6 @@ function AuthedApp({
   // Delete is destructive (removes the worktree) — confirm first. Holds the
   // session pending confirmation; the ConfirmDialog fires `deleteSession`.
   // Capture once: navigation must not retarget an open restore preview or operation.
-  const [checkpointOwner, setCheckpointOwner] = useState<{ session: Session; trigger: HTMLButtonElement | null } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null);
   const [sessionMutationError, setSessionMutationError] = useState<
     string | null
@@ -1700,11 +1698,9 @@ function AuthedApp({
         </div>
       )}
       <ObsidianSaveToast />
-      {checkpointOwner && <WorkspaceCheckpointsView key={checkpointOwner.session.id} session={checkpointOwner.session} returnFocus={checkpointOwner.trigger} onSession={publishSessionUpdate} onClosed={() => setCheckpointOwner(null)} />}
       <SubagentLaneViewProvider>
       <AgentEditsMarkerContext.Provider value={renderAgentEditsMarker}>
       <JinglerApp
-        onOpenCheckpoints={(id, trigger) => { const session = sessions.find((item) => item.id === id); if (session) setCheckpointOwner({ session, trigger }); }}
         tabContributions={pluginTabs}
         onSelectIssue={selectIssue}
         paneContributions={pluginPanes}

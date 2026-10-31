@@ -163,7 +163,6 @@ const cloudCreationTitle = (input: CloudCreationInput): string => {
 }
 
 export interface JinglerAppProps {
-  onOpenCheckpoints?: (sessionId: string, trigger: HTMLButtonElement | null) => void
 
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
@@ -558,7 +557,6 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
 
          function renderSessionWorkspace() {
            return (<SessionConversation
-        onOpenCheckpoints={props.onOpenCheckpoints}
         initialWorkspaceView={props.initialWorkspaceView}
         onWorkspaceViewChange={props.onWorkspaceViewChange}
         search={

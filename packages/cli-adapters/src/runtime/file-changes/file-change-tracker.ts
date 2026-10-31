@@ -1,4 +1,4 @@
-import { WorkspaceCheckpointStore } from "../../workspace-checkpoint-store.js"
+import { anchoredFs } from "../../anchored-fs.js"
 import { execFile, spawn } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises"
@@ -59,6 +59,16 @@ const git = async (
     env: env ? { ...process.env, ...env } : process.env
   })
   return result.stdout
+}
+
+/** `check-attr` only reads `.gitattributes`; any path with a filter attribute would run a driver on `git add`. */
+const assertNoFilters = async (cwd: string, env: Readonly<Record<string, string>>): Promise<void> => {
+  const paths = (await git(cwd, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], env)).split("\0").filter(Boolean)
+  if (paths.length === 0) return
+  const rows = (await anchoredFs.git(cwd, ["check-attr", "-z", "--stdin", "filter"], { ...env }, Buffer.from(paths.join("\0") + "\0"))).toString("utf8").split("\0")
+  for (let i = 2; i < rows.length; i += 3) {
+    if (!["unspecified", "unset"].includes(rows[i]!)) throw new Error(`Restricted sessions cannot track a path with a Git filter: ${rows[i - 2]}`)
+  }
 }
 
 const gitMaybe = async (cwd: string, args: ReadonlyArray<string>): Promise<string | null> => {
@@ -142,28 +152,29 @@ const treeSize = async (cwd: string, tree: string, path: string | null): Promise
 }
 
 export class FileChangeTracker {
-  readonly #checkpointSafeMode: boolean
   readonly #artifactDir: string
   readonly #sessionId: string
   readonly #maxArtifactBytes: number
   readonly #shadowIndexRoot: string
+  readonly #restricted: boolean
   // One shadow index per worktree: a session may switch checkout mid-run.
   readonly #shadowIndexes = new Map<string, ShadowIndex>()
   #operations: Promise<void> = Promise.resolve()
   #disposed = false
 
   constructor(input: {
-    readonly checkpointSafeMode?: boolean
     readonly artifactDir: string
     readonly sessionId: string
     readonly maxArtifactBytes?: number
     readonly shadowIndexRoot?: string
+    /** Restricted sessions refuse to snapshot paths with a Git filter: `git add` would run its command. */
+    readonly restricted?: boolean
   }) {
-    this.#checkpointSafeMode = input.checkpointSafeMode === true
     this.#artifactDir = input.artifactDir
     this.#sessionId = input.sessionId
     this.#maxArtifactBytes = input.maxArtifactBytes ?? 2 * 1024 * 1024
     this.#shadowIndexRoot = input.shadowIndexRoot ?? tmpdir()
+    this.#restricted = input.restricted === true
   }
 
   #serialized<A>(operation: () => Promise<A>): Promise<A> {
@@ -200,9 +211,9 @@ export class FileChangeTracker {
   }
 
   async #capture(cwd: string): Promise<WorktreeSnapshot> {
-    if (this.#checkpointSafeMode) return new WorkspaceCheckpointStore({ cwd, root: this.#shadowIndexRoot, sessionId: this.#sessionId }).worktreeSnapshot()
     const canonical = await realpath(cwd)
     const shadow = await this.#indexFor(canonical)
+    if (this.#restricted) await assertNoFilters(canonical, shadow.environment)
     await git(canonical, ["add", "-A", "--", "."], shadow.environment)
     return { cwd: canonical, tree: (await git(canonical, ["write-tree"], shadow.environment)).trim() }
   }

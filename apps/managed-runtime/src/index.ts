@@ -21,10 +21,6 @@ import { matchesGitRepositoryScope } from "./git-scope.js";
 import { issueManagedRuntimeGrant } from "./grant.js";
 import { hydrateWorkspace } from "./workspace-hydration.js";
 import {
-  createWorkspaceCheckpoint,
-  restoreWorkspaceCheckpoint,
-} from "./workspace-checkpoint.js";
-import {
   createControlPlaneProviderFetch,
   decodeManagedPathComponent,
   providerAuthorizationScope,
@@ -35,7 +31,6 @@ import {
   managedRuntimeSandboxOrigin,
   type ManagedRuntimeEnv,
 } from "./runtime-env.js";
-import { r2CheckpointStore } from "./r2-checkpoint-store.js";
 import { json } from "./worker-http.js";
 import { INTERNAL_ROUTES } from "./internal-routes.js";
 import {
@@ -756,87 +751,6 @@ const handleSandboxProbe = async (
   return json({ success: result.success, output: result.stdout });
 };
 
-const handleCheckpointProbe = async (
-  request: Request,
-  env: ManagedRuntimeEnv,
-  url: URL,
-): Promise<Response | null> => {
-  if (!(url.pathname === "/v1/checkpoint-probe" && request.method === "POST")) return null;
-
-  if (!hasServiceAuthorization(request, env)) {
-    return json({ error: "Unauthorized" }, 401);
-  }
-  const suffix = crypto.randomUUID().replaceAll("-", "");
-  const sessionId = `checkpoint_probe_${suffix}`;
-  const checkpointId = `checkpoint_${suffix}`;
-  const store = r2CheckpointStore(env.WORKSPACE_CHECKPOINTS);
-  const sandboxId = await sandboxIdForSession(sessionId);
-  let sandbox = getSandbox(env.Sandbox, sandboxId, {
-    transport: "rpc",
-    normalizeId: true,
-    enableDefaultSession: false,
-    sleepAfter: "2m",
-  });
-  let archiveKey: string | null = null;
-  const manifestKey = `manifests/checkpoint-probe/${encodeURIComponent(sessionId)}/${encodeURIComponent(checkpointId)}.json`;
-  try {
-    const initialized = await sandbox.exec(
-      "git init --initial-branch=main . && git config user.email probe@jingler.dev && git config user.name Jingler && printf checkpoint-ready > checkpoint.txt && git add checkpoint.txt && git commit -m base && printf dirty-state > dirty.txt",
-      { cwd: "/workspace", timeout: 30_000 },
-    );
-    if (!initialized.success) throw new Error("Checkpoint probe setup failed");
-    const created = await createWorkspaceCheckpoint(sandbox, store, {
-      checkpointId,
-      subject: "checkpoint-probe",
-      environmentId: "managed-probe",
-      sessionId,
-      previousCheckpoint: null,
-      eventCursor: 1,
-      nowSeconds: Math.floor(Date.now() / 1_000),
-      retentionSeconds: 300,
-      maxBytes: 1_048_576,
-    });
-    archiveKey = created.manifest.backup.key;
-    await sandbox.destroy();
-    sandbox = getSandbox(env.Sandbox, sandboxId, {
-      transport: "rpc",
-      normalizeId: true,
-      enableDefaultSession: false,
-      sleepAfter: "2m",
-    });
-    await restoreWorkspaceCheckpoint(sandbox, store, created.manifest);
-    const verified = await sandbox.exec(
-      'test "$(cat checkpoint.txt)" = checkpoint-ready && test "$(cat dirty.txt)" = dirty-state && printf restored',
-      { cwd: "/workspace", timeout: 30_000 },
-    );
-    return json(
-      {
-        success: verified.success,
-        output: verified.stdout,
-        checkpointId,
-      },
-      verified.success ? 200 : 500,
-    );
-  } catch (cause) {
-    return json(
-      {
-        success: false,
-        error: cause instanceof Error ? cause.message : "Checkpoint probe failed",
-      },
-      500,
-    );
-  } finally {
-    const cleanupCheckpointProbe = async (): Promise<void> => {
-      await sandbox.destroy().catch(() => undefined);
-      await env.WORKSPACE_CHECKPOINTS.delete(manifestKey).catch(() => undefined);
-      if (archiveKey !== null) {
-        await env.WORKSPACE_CHECKPOINTS.delete(archiveKey).catch(() => undefined);
-      }
-    };
-    await cleanupCheckpointProbe();
-  }
-};
-
 const handleEnvironmentsDestroy = async (
   request: Request,
   env: ManagedRuntimeEnv,
@@ -1515,7 +1429,6 @@ export default {
       () => handleOffloadBenchmark(request, env, url),
       () => handleOffloadProbe(request, env, url),
       () => handleSandboxProbe(request, env, url),
-      () => handleCheckpointProbe(request, env, url),
       () => handleEnvironmentsDestroy(request, env, url),
       () => handleSessionsDestroy(request, env, url),
       () => handleWorkspacesHydrate(request, env, url),

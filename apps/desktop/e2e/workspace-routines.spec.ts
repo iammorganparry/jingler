@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { addProject, appShell, expect, test } from "./fixtures.js"
 
-test("saves a routine through Settings and runs the real checkpoint-gated Pi into a linked fresh worktree", async ({ launchApp }) => {
+test("saves a routine through Settings and runs the real restricted Pi into a linked fresh worktree", async ({ launchApp }) => {
   test.setTimeout(180000)
   const launched = await launchApp({ configured: true, withRepo: true, piFixture: { scenarioId: "workspace-routines", authRoute: "api-key" } })
   const { window, repoPath, home } = launched
@@ -38,16 +37,13 @@ test("saves a routine through Settings and runs the real checkpoint-gated Pi int
   expect(session.modelId).toBe(document().routines[0].modelId)
   expect(session.connectionId).toBe(document().routines[0].connectionId)
   expect(session.endpointId).toBe(document().routines[0].endpointId)
-  expect(session.checkpointSafeMode).toBe(true); expect(session.checkpointExecutionHistory).toBe("clean")
+  expect(session.restricted).toBe(true); expect(session.checkpointExecutionHistory).toBe("clean")
   expect(session.workspaceLifecycle.status).toBe("setup-skipped")
   expect(session.worktreePath).not.toBe(repoPath)
   expect(readFileSync(join(session.worktreePath, "README.md"), "utf8")).toBe("# e2e repo\n")
   expect(session.chats.find((chat: { id: string }) => chat.id === session.activeChatId).mode).toBe("ask")
   expect(readFileSync(join(repoPath, "README.md"), "utf8")).toBe("# e2e repo\n")
   expect(existsSync(join(repoPath, "routine-proof.txt"))).toBe(false)
-  const checkpointRoot = join(home, "jingler/checkpoints", createHash("sha256").update(session.id).digest("hex"))
-  const snapshots = readdirSync(checkpointRoot).filter(id => !id.endsWith(".tmp")).map(id => JSON.parse(readFileSync(join(checkpointRoot, id, "snapshot.json"), "utf8")))
-  expect(snapshots.some(item => item.summary.label.startsWith("Before agent turn"))).toBe(true)
   const transcript = () => readFileSync(join(home, "jingler/transcripts", `${encodeURIComponent(session.activeChatId)}.json`), "utf8")
   await expect.poll(transcript).toContain("workspace_read_file")
   expect(transcript()).toContain("# e2e repo")
@@ -80,7 +76,6 @@ test("saves a routine through Settings and runs the real checkpoint-gated Pi int
   await expect.poll(() => document().runs.filter((item: { status: string }) => item.status === "cancelled").length).toBe(1)
 
   await routines.getByRole("button", { name: "Open workspace Routine proof" }).first().click()
-  await expect(window.getByRole("button", { name: "More conversation actions" })).toBeVisible()
   const ids = document().runs.map((item: { id: string }) => item.id)
   // Cross the actual persisted due time while disabled; checking only the flag
   // would miss a stale armed timer that still dispatches an occurrence.
@@ -160,7 +155,7 @@ test("Ask WRITE routine needs attention without approval or mutation", async ({ 
   expect(session.modelId).toBe(document().routines[0].modelId)
   expect(session.connectionId).toBe(document().routines[0].connectionId)
   expect(session.endpointId).toBe(document().routines[0].endpointId)
-  expect(session.checkpointSafeMode).toBe(true)
+  expect(session.restricted).toBe(true)
   expect(existsSync(join(session.worktreePath, "routine-proof.txt"))).toBe(false)
   expect(existsSync(join(repoPath, "routine-proof.txt"))).toBe(false)
   expect(readFileSync(join(repoPath, "README.md"), "utf8")).toBe("# e2e repo\n")

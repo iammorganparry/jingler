@@ -329,15 +329,6 @@ function NewWorkspaceContent({ props, context, send, submitting, failed, loading
           <div className="flex min-w-0 items-center gap-3"><div className="min-w-0"><h2 className="truncate text-[20px] font-semibold tracking-[-0.2px] text-text-bright">New workspace</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Describe the task. Jingler creates the branch and starts the agent.</p></div></div>
           <WorkspaceStartFrom props={props} context={context} send={send} icon={selectedSource?.icon} label={sourceLabel} loading={sourceLoading} />
           {source === "branch" && <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.</p>}
-          <label className="text-xs text-text-bright">
-            <Tooltip
-              label="Enable checkpoint-safe mode before the first turn. Local isolated managed Pi only; structured edits and read-only inspection. File rename is unsupported in safe mode; no files are changed. Shell/build/test, setup commands, terminals, delegation and offload are blocked."
-              className="max-w-sm whitespace-normal"
-            >
-              <input type="checkbox" aria-label="Checkpoint-safe mode" disabled={loading || submitting} checked={context.checkpointSafeMode} onChange={(event) => send({ type: "SET_CHECKPOINT_SAFE_MODE", enabled: event.currentTarget.checked })} />
-            </Tooltip>{" "}
-            Checkpoint-safe mode
-          </label>
           <WorkspaceComposer submitting={submitting} context={context} props={props} catalog={catalog} unavailableReason={unavailableReason} selectedProject={selectedProject} send={send} controls={<ProjectControls context={context} props={props} sourceOptions={sourceOptions} loading={loading} send={send} />} />
           {draft.trim().length === 0 && unavailableReason === undefined && <div className="flex justify-end"><Button variant="secondary" aria-label="Create workspace" onClick={() => send({ type: "SUBMIT" })}><MessageCircle size={14} /> Create without a first message</Button></div>}
           {error && <p role="alert" className="text-[11px] text-red">{error}</p>}

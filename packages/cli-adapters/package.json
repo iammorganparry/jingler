@@ -59,7 +59,6 @@
     "./project-workflow": "./src/project-workflow.ts",
     "./workspace-environment": "./src/workspace-environment.ts",
     "./routine-store": "./src/routine-store.ts",
-    "./workspace-checkpoints": "./src/workspace-checkpoints.ts",
     "./anchored-fs": "./src/anchored-fs.ts"
   },
   "scripts": {

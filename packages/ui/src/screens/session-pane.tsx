@@ -128,7 +128,6 @@ export interface ConversationPaneCtx {
 }
 
 export interface SessionPaneProps {
-  onOpenCheckpoints?: (sessionId: string, trigger: HTMLButtonElement | null) => void
   /** The session this pane shows. A pane only exists for a filled grid slot. */
   session: Session
   /** Restore the view this session last owned when its pane is mounted again. */
@@ -1131,7 +1130,6 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const renderGroups = (groupLayout: EditorLayout) => (
         <EditorGroups
-          onOpenCheckpoints={props.onOpenCheckpoints ? (trigger) => props.onOpenCheckpoints?.(sessionId, trigger) : undefined}
           sessionId={sessionId}
           layout={groupLayout}
           // Layout-only updates keep this token, while render dependencies replace it.

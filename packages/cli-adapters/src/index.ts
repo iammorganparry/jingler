@@ -122,7 +122,6 @@ export { probeOpenCodeEndpoint } from "./runtime/opencode/endpoint.js"
 
 export { BUILTIN_SKILLS } from "./runtime/resources/portable-skills.js"
 
-export { WorkspaceCheckpointService, acquireCheckpointedTurn } from "./workspace-checkpoints.js"
 export { configureAnchoredFsProcess, anchoredFs } from "./anchored-fs.js"
 export type { AnchoredProcess } from "./anchored-fs.js"
 

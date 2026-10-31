@@ -1,4 +1,4 @@
-import { workspaceCheckpointMode } from "../../workspace-admission.js"
+import { workspaceRestricted } from "../../workspace-admission.js"
 import { INTERACTIVE_TOOL_TIMEOUT_MS } from "../tools/tool-registry.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "../agent/native-runtime-tools.js"
 
@@ -115,7 +115,7 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
   const reservations = new Set<string>()
   return {
     run: (spec, context) => Stream.unwrapScoped(Effect.gen(function* () {
-      if (workspaceCheckpointMode(spec.sessionId)) return yield* Effect.fail(new AgentRuntimeError({ reason: "runtime", message: "Native execution is unsupported in checkpoint-safe mode." }))
+      if (workspaceRestricted(spec.sessionId)) return yield* Effect.fail(new AgentRuntimeError({ reason: "runtime", message: "Native execution is unsupported in restricted sessions." }))
       yield* Effect.try({ try: () => {
         assertOwner(spec)
         if (spec.reasoning) throw new Error("OpenCode reasoning overrides are unsupported")

@@ -1,5 +1,5 @@
 import { concreteClaudeModels } from "../providers/claude-cli-models.js"
-import { workspaceCheckpointMode } from "../../workspace-admission.js"
+import { workspaceRestricted } from "../../workspace-admission.js"
 import {
   createAgentSession,
   createEventBus,
@@ -402,7 +402,7 @@ const createEmbeddedSession = (
       })
       await options.configureModelRuntime?.(modelRuntime)
       if (connection.providerId === "openai-codex") await registerJinglerModels(modelRuntime)
-      if (workspaceCheckpointMode(spec.sessionId) && usesClaudeCli(connection)) throw new PiSessionFactoryError({ message: "Checkpoint-safe mode requires managed Pi provider access; the Claude CLI subscription route has unsupported process ownership." })
+      if (workspaceRestricted(spec.sessionId) && usesClaudeCli(connection)) throw new PiSessionFactoryError({ message: "Restricted sessions requires managed Pi provider access; the Claude CLI subscription route has unsupported process ownership." })
       if (usesClaudeCli(connection)) {
         registerClaudeCliProvider(modelRuntime, { cwd: spec.cwd })
       }

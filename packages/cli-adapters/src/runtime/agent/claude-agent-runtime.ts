@@ -1,4 +1,4 @@
-import { workspaceCheckpointMode } from "../../workspace-admission.js"
+import { workspaceRestricted } from "../../workspace-admission.js"
 import { worktreeEnv } from "../../worktree-env.js"
 import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process"
@@ -426,7 +426,7 @@ export const makeClaudeAgentRuntime = (
   const active = new Map<string, ChildProcessWithoutNullStreams>()
   const reserved = new Set<string>()
   return {
-    run: (spec, context) => workspaceCheckpointMode(spec.sessionId) ? Stream.fail(new AgentRuntimeError({ reason: "runtime", message: "Native execution is unsupported in checkpoint-safe mode." })) : claudeStream(spec, context, options, active, reserved),
+    run: (spec, context) => workspaceRestricted(spec.sessionId) ? Stream.fail(new AgentRuntimeError({ reason: "runtime", message: "Native execution is unsupported in restricted sessions." })) : claudeStream(spec, context, options, active, reserved),
     steer: () => unsupported("steering"),
     interrupt: (continuation) => {
       const child = active.get(continuation.id)

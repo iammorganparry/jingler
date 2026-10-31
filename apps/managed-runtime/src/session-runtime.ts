@@ -33,11 +33,6 @@ import {
   type ManagedRuntimeEnv,
 } from "./runtime-env.js";
 import { redactedUsageTelemetry, shouldSampleUsage } from "./usage-policy.js";
-import {
-  createWorkspaceCheckpoint,
-  type WorkspaceCheckpointManifest,
-} from "./workspace-checkpoint.js";
-import { r2CheckpointStore } from "./r2-checkpoint-store.js";
 import { fields, json } from "./worker-http.js";
 import { managedProviderEnvironment } from "./provider-session-config.js";
 import { ManagedExecutionScheduler } from "./execution-scheduler.js";
@@ -65,7 +60,6 @@ interface RuntimeMetadata {
   readonly gitTokenHash: string | null;
   readonly usageReservationId: string | null;
   readonly usageStartedAt: number | null;
-  readonly checkpoint: WorkspaceCheckpointManifest | null;
 }
 
 const METADATA_KEY = "runtime-metadata";
@@ -222,11 +216,9 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     commandId: string,
     status: "complete" | "failed" | "cancelled",
     payload: unknown,
-    checkpoint: boolean,
   ): Promise<void> {
     const terminal = await this.#settleJournal(commandId, status, payload);
     this.#broadcast(commandId, terminal);
-    if (checkpoint) await this.#checkpoint(terminal.eventSequence);
     const metadata = await this.#metadata();
     if (metadata !== null) {
       await this.ctx.storage.put(METADATA_KEY, {
@@ -245,41 +237,6 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     payload: unknown,
   ): Promise<RemoteSessionEvent> {
     return this.#mutateJournal((journal) => journal.settle(commandId, status, payload));
-  }
-
-  async #checkpoint(eventCursor: number): Promise<void> {
-    const metadata = await this.#metadata();
-    if (metadata === null) return;
-    const sandbox = getSandbox(this.env.Sandbox, await sandboxIdForSession(metadata.sessionId), {
-      transport: "rpc",
-      normalizeId: true,
-      enableDefaultSession: false,
-      sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-    });
-    try {
-      const result = await createWorkspaceCheckpoint(
-        sandbox,
-        r2CheckpointStore(this.env.WORKSPACE_CHECKPOINTS),
-        {
-          checkpointId: `checkpoint_${crypto.randomUUID().replaceAll("-", "")}`,
-          subject: metadata.subject,
-          environmentId: metadata.environmentId,
-          sessionId: metadata.sessionId,
-          previousCheckpoint: metadata.checkpoint,
-          eventCursor,
-          nowSeconds: Math.floor(Date.now() / 1_000),
-          retentionSeconds: Number(this.env.MANAGED_RUNTIME_CHECKPOINT_RETENTION_SECONDS),
-          maxBytes: Number(this.env.MANAGED_RUNTIME_MAX_CHECKPOINT_BYTES),
-        },
-      );
-      await this.ctx.storage.put(METADATA_KEY, {
-        ...metadata,
-        checkpoint: result.manifest,
-      });
-    } catch {
-      // The turn is already durable in the event journal. A later settled turn
-      // retries the content-aware checkpoint without delaying client delivery.
-    }
   }
 
   async #settleUsage(): Promise<void> {
@@ -353,7 +310,6 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     const inputDirectory = "/tmp/jingler-commands";
     const inputFile = `${inputDirectory}/${await sha256Hex(command.commandId)}.json`;
     let phase = "preparing command input";
-    const checkpoint = managedRuntimeActionForOperation(command.operation) !== "session.observe";
     let disposeProcess: (() => void) | null = null;
     try {
       await sandbox.mkdir(inputDirectory, { recursive: true });
@@ -428,10 +384,10 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         if (frame?.type === "managed-event") {
           await this.#append(command.commandId, frame.event);
         } else if (frame?.type === "managed-complete") {
-          await this.#settle(command.commandId, "complete", frame.payload, checkpoint);
+          await this.#settle(command.commandId, "complete", frame.payload);
           settled = true;
         } else if (frame?.type === "managed-failed") {
-          await this.#settle(command.commandId, "failed", frame.payload, checkpoint);
+          await this.#settle(command.commandId, "failed", frame.payload);
           settled = true;
         }
       };
@@ -467,7 +423,6 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
               code: "runtime-protocol-ended",
               message: `Managed command runner exited without a terminal frame (${result.exitCode}).`,
             },
-            checkpoint,
           );
         }
         return;
@@ -510,7 +465,6 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
             code: "runtime-protocol-ended",
             message: `Managed command runner exited without a terminal frame (${exited.exitCode ?? "unknown"}).`,
           },
-          checkpoint,
         );
       }
     } catch (cause) {
@@ -524,7 +478,6 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
               ? `Managed runtime failed while ${phase}: ${cause.message}`
               : `Managed runtime failed while ${phase}`,
         },
-        checkpoint,
       ).catch(() => undefined);
     } finally {
       disposeProcess?.();
@@ -560,7 +513,6 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         reason,
       });
       this.#broadcast(metadata.processId, terminal);
-      await this.#checkpoint(terminal.eventSequence);
     } catch {
       // A concurrently completing process may already have durably settled.
     }
@@ -638,7 +590,6 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           providerTokenHash: previous?.providerTokenHash ?? null,
           gitTokenHash: previous?.gitTokenHash ?? null,
           ...configuredUsage(),
-          checkpoint: previous?.checkpoint ?? null,
         };
         return metadata;
       };

@@ -321,8 +321,6 @@ const defaultDependencies = (): EnvironmentRoutesDependencies => ({
           maxActiveSeconds: env.managedMaxActiveSeconds,
           dailyBudgetMicrousd: env.managedDailyBudgetMicrousd,
           maxEgressBytes: env.managedMaxEgressBytes,
-          maxCheckpointBytes: env.managedMaxCheckpointBytes,
-          checkpointRetentionSeconds: env.managedCheckpointRetentionSeconds,
         },
         now: new Date(),
       }),
@@ -511,7 +509,7 @@ const matchesProviderSelection = (
 
 /**
  * Cloud is an account-scoped execution target, not a user-managed machine.
- * The stable opaque id keeps sessions and checkpoints addressable without
+ * The stable opaque id keeps sessions addressable without
  * exposing the account id or requiring an inventory row before first use.
  */
 export const managedCloudIdForUser = (userId: string): string =>

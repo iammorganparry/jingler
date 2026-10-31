@@ -893,15 +893,6 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
       })
     case "workspace-routines":
       return Array.from({ length: 64 }, () => routineProofResponse)
-    case "workspace-checkpoints":
-      return Array.from({ length: 12 }, () => async (context: PiContext) => {
-        if (!latestOperatorText(context).includes("checkpoint")) return defaultResponse(context)
-        if (recentToolResultCount(context, WRITE_TOOL) === 0) {
-          return callTool(WRITE_TOOL, { path: "checkpoint-proof.txt", content: "changed" }, "checkpoint-write")
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10000))
-        return fauxAssistantMessage("Checkpoint edit complete.")
-      })
     case "plan-mode":
       return Array.from({ length: 12 }, () => planModeResponse)
     case "plan-scratchpad":

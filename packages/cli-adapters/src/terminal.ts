@@ -28,7 +28,7 @@ import type { TerminalChunk, TerminalInfo } from "@jingler/core"
 import { Effect, Exit, Mailbox, Stream } from "effect"
 import { neutralCwd } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
-import { acquireWorkspaceActivity, workspaceCheckpointMode, type WorkspaceActivity } from "./workspace-admission.js"
+import { acquireWorkspaceActivity, workspaceRestricted, type WorkspaceActivity } from "./workspace-admission.js"
 
 /** Last-N-bytes of output kept for re-attach replay (per terminal). */
 const RING_CAP = 256 * 1024
@@ -198,7 +198,7 @@ export interface CreateTerminalInput {
 }
 
 const validateTerminalHistory = (input: CreateTerminalInput): void => {
-  if (workspaceCheckpointMode(input.sessionId)) throw new Error("Interactive terminals are unsupported in checkpoint-safe mode.")
+  if (workspaceRestricted(input.sessionId)) throw new Error("Interactive terminals are unsupported in restricted sessions.")
   if (input.sessionId && !input.unscoped && !input.executionHistoryPersisted) throw new Error("Terminal history must be persisted before spawning.")
 }
 

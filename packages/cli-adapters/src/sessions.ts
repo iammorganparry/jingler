@@ -1,4 +1,4 @@
-import { workspaceAdmissionClosed, workspaceHasUnprovenProcesses, setWorkspaceCheckpointMode } from "./workspace-admission.js"
+import { workspaceAdmissionClosed, workspaceHasUnprovenProcesses, setWorkspaceRestricted } from "./workspace-admission.js"
 import { setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
 import { ProjectService } from "./projects.js"
 import { createHash } from "node:crypto"
@@ -56,7 +56,7 @@ import { runGit } from "./command.js"
 import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime-identity.js"
 
 const updateWorkspaceReadiness = (session: Session): void => {
-  setWorkspaceCheckpointMode(session.id, session.checkpointSafeMode === true)
+  setWorkspaceRestricted(session.id, session.restricted === true)
   const status = session.workspaceLifecycle?.status
   const reason = session.archived ? "the workspace is archived" :
     status && status !== "ready" && status !== "setup-skipped" ? `workspace ${status}` : undefined
@@ -533,10 +533,9 @@ const nextOpId = (): number => ++opSeq
  * Reads are best-effort: a missing or malformed file yields an empty list so
  * the app still boots.
  */
-const checkpointCreationFields = (input: CreateSessionInput) => ({ ...(input.checkpointSafeMode ? { checkpointSafeMode: true } : {}), ...(input.routineOccurrence ? { routineOccurrence: input.routineOccurrence } : {}) })
-const checkpointCreationSupported = (input: CreateSessionInput): boolean => !input.checkpointSafeMode || (!input.environmentId && input.useWorktree !== false && (input.runtimeId ?? "pi") === "pi" && process.platform !== "win32")
+const restrictedCreationFields = (input: CreateSessionInput) => ({ ...(input.restricted ? { restricted: true } : {}), ...(input.routineOccurrence ? { routineOccurrence: input.routineOccurrence } : {}) })
 
-const validateCheckpointCreation = (input: CreateSessionInput) => checkpointCreationSupported(input) ? Effect.void : Effect.fail(new GitError({ message: "Checkpoint-safe mode requires a fresh isolated local managed Pi workspace." }))
+const validateRestrictedCreation = (input: CreateSessionInput) => !input.restricted || (input.runtimeId ?? "pi") === "pi" ? Effect.void : Effect.fail(new GitError({ message: "Restricted sessions require the managed Pi runtime." }))
 
 // Called inside update's SessionStore lock: wall clocks can tie or move backwards.
 const nextLifecycleTimestamp = (session: Session, requested = new Date().toISOString()) => {
@@ -549,7 +548,7 @@ const advanceLifecycle = (session: Session) => ({
   updatedAt: nextLifecycleTimestamp(session)
 })
 
-const initialWorkspaceLifecycle = (input: CreateSessionInput, updatedAt: string) => ({ status: input.checkpointSafeMode ? "setup-skipped" as const : "setup-running" as const, updatedAt })
+const initialWorkspaceLifecycle = (input: CreateSessionInput, updatedAt: string) => ({ status: input.restricted ? "setup-skipped" as const : "setup-running" as const, updatedAt })
 
 export class SessionStore extends Effect.Service<SessionStore>()(
   "@jingler/SessionStore",
@@ -586,10 +585,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
       const checkWorkspaceSetup = (session: Session) => Effect.gen(function* () {
         const checkout = activeCheckoutOf(session)
-        if (!session.checkpointSafeMode || session.environmentId || checkout.workspaceMode === "direct" || !checkout.worktreePath) return session
+        if (!session.restricted || session.environmentId || checkout.workspaceMode === "direct" || !checkout.worktreePath) return session
         const projectService = yield* Effect.serviceOption(ProjectService)
         const project = checkout.projectId && projectService._tag === "Some" ? yield* projectService.value.get(checkout.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project workflow", cause }))) : undefined
-        if (project?.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot execute project setup shell commands." }))
+        if (project?.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Restricted sessions cannot execute project setup shell commands." }))
         return session
       })
       const repositoryLocks = new Map<string, Effect.Semaphore>()
@@ -735,7 +734,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         | AppPaths
       > =>
         Effect.gen(function* () {
-          yield* validateCheckpointCreation(input)
+          yield* validateRestrictedCreation(input)
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
           // Title is optional now: blank → the agent auto-names it (provisional
@@ -800,7 +799,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             const autoSession: Session = {
               id,
               checkpointExecutionHistory: "clean",
-              ...checkpointCreationFields(input),
+              ...restrictedCreationFields(input),
               ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
               checkouts: [{ id: PRIMARY_CHECKOUT_ID, repo: "", branch: "", worktreePath: scratchDir, prNumber: null }],
               activeCheckoutId: PRIMARY_CHECKOUT_ID,
@@ -834,7 +833,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           ): Session => ({
             id,
             checkpointExecutionHistory: "clean",
-            ...checkpointCreationFields(input),
+            ...restrictedCreationFields(input),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             // Non-Auto creation always supplies `repoName` and `baseBranch`; Auto
             // (no `repoPath`) returns above before this closure is ever called.
@@ -1988,8 +1987,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
-      const setCheckpointSafeMode = (id: string, enabled: boolean) =>
-        update(id, (session) => ({ ...session, checkpointSafeMode: enabled })).pipe(Effect.tap(() => Effect.sync(() => setWorkspaceCheckpointMode(id, enabled))))
       const markCheckpointTerminalExecutionUnprovable = (id: string) => update(id, (session) => ({ ...session, checkpointExecutionHistory: "unprovable", checkpointPtyHistory: true }))
       const markCheckpointExecutionUnprovable = (id: string) => update(id, (session) => ({ ...session, checkpointExecutionHistory: "unprovable" }))
 
@@ -2317,7 +2314,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         recoverGitHubFeedbackOutbox,
         setPublishCheckpoint,
         setWorkspaceLifecycle,
-        setCheckpointSafeMode,
         markCheckpointExecutionUnprovable,
         markCheckpointTerminalExecutionUnprovable,
         reconcileInterruptedWorkspaceLifecycles,

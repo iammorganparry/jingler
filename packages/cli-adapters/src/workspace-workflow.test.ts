@@ -46,7 +46,7 @@ const harness = async (setup: string, body: (workflow: WorkspaceWorkflowService,
     const workflow = yield* WorkspaceWorkflowService
     yield* Effect.promise(() => body(workflow, session.id, activeCheckoutOf(session).worktreePath!, {
       read: () => Effect.runPromise(SessionStore.get(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer))),
-      safe: () => Effect.runPromise(SessionStore.setCheckpointSafeMode(session.id, true).pipe(Effect.provide(services), Effect.provide(temp.layer))),
+      safe: () => Promise.resolve().then(() => { const file = join(temp.root, "sessions.json"); writeFileSync(file, JSON.stringify(JSON.parse(readFileSync(file, "utf8")).map((item: { id: string }) => item.id === session.id ? { ...item, restricted: true } : item))) }),
       reconcile: () => Effect.runPromise(SessionStore.reconcileInterruptedWorkspaceLifecycles().pipe(Effect.provide(services), Effect.provide(temp.layer)))
     }))
   }).pipe(

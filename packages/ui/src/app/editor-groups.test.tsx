@@ -293,20 +293,6 @@ describe("EditorGroups rendering", () => {
   })
 })
 
-it("offers checkpoints only on conversation surfaces and hands off the surviving trigger", async () => {
-  const onOpenCheckpoints = vi.fn()
-  const rendered = render(<EditorGroups {...props(() => null)} layout={layout} onOpenCheckpoints={onOpenCheckpoints} />)
-  const trigger = screen.getByRole("button", { name: "More conversation actions" })
-  expect(screen.queryByRole("button", { name: "Checkpoints" })).toBeNull()
-  fireEvent.keyDown(trigger, { key: "ArrowDown" })
-  const item = await screen.findByRole("menuitem", { name: "Checkpoints" })
-  fireEvent.click(item)
-  expect(onOpenCheckpoints).toHaveBeenCalledWith(trigger)
-  await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Checkpoints" })).toBeNull())
-  rendered.rerender(<EditorGroups {...props(() => null)} layout={{ focusedGroupId: "right", root: { type: "group", id: "right", tabs: [source], active: sessionSurfaceKey(source) } }} onOpenCheckpoints={onOpenCheckpoints} />)
-  expect(screen.queryByRole("button", { name: "More conversation actions" })).toBeNull()
-})
-
 describe("EditorGroups breadcrumbs", () => {
   it("shows path crumbs for file tabs and none for chat tabs", () => {
     const describeWithCrumbs = (surface: SessionSurface) => ({

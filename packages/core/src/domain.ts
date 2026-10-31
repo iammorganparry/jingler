@@ -642,7 +642,9 @@ export type SessionCheckout = Schema.Schema.Type<typeof SessionCheckout>;
  */
 export const SessionWire = Schema.Struct({
   routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
-  /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
+  /** Routine sessions: no setup, shell, build, test, terminals or delegated children. */
+  restricted: Schema.optional(Schema.Boolean),
+  /** Pre-0.15 name for `restricted`; read on decode only, never written. */
   checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Absent means legacy/unknown, never proven clean. Persist before any unowned launch. */
   checkpointExecutionHistory: Schema.optional(Schema.Literal("clean", "unprovable")),
@@ -857,6 +859,7 @@ const {
   prNumber: _prNumber,
   prs: _prs,
   publish: _publish,
+  checkpointSafeMode: _checkpointSafeMode,
   ...sessionFields
 } = SessionWire.fields;
 
@@ -877,6 +880,7 @@ export interface Session
     | "prNumber"
     | "prs"
     | "publish"
+    | "checkpointSafeMode"
   > {}
 
 /** A session whose repos live only in `checkouts`; see `SessionWire` for the persisted shape. */
@@ -895,9 +899,10 @@ export const Session: Schema.Schema<Session, SessionWireEncoded> = Schema.transf
       prNumber: _pn,
       prs: _prs,
       publish: _publish,
+      checkpointSafeMode,
       ...session
     } = migrateCheckoutPrs(migrateSessionCheckouts(wire));
-    return session;
+    return checkpointSafeMode === true ? { ...session, restricted: true } : session;
   },
   encode: (session) => {
     const { id: _id, prs: _prs, ...mirror } = activeCheckoutOf(session);
@@ -2251,8 +2256,8 @@ export const adversarialReviewModelLabel = (
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
   routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
-  /** Explicit consent to edit/inspect-only managed Pi checkpoint execution. */
-  checkpointSafeMode: Schema.optional(Schema.Boolean),
+  /** Set only by routines. */
+  restricted: Schema.optional(Schema.Boolean),
   /** Internal remote provision fence; omitted by renderer-originated requests. */
   requestedSessionId: Schema.optional(
     Schema.String.pipe(Schema.pattern(/^s_[A-Za-z0-9_-]{8,120}$/u)),

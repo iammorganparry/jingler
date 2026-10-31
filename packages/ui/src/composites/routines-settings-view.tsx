@@ -107,7 +107,7 @@ function SafetyNotes() {
       <details className={mutedText}>
         <summary className="cursor-pointer">Full routine safety details</summary>
         <p className="mt-2">
-          Every run uses a fresh checkpoint-safe worktree. Edit and inspect files only. File rename is
+          Every run uses a fresh restricted worktree. Edit and inspect files only. File rename is
           unsupported in safe mode; no files are changed. Arbitrary shell, tests, builds, terminals,
           delegation, offload and external tools are unsupported. Saved model, reasoning and Ask permissions
           are used without escalation or fallback.

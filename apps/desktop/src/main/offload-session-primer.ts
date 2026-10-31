@@ -2,7 +2,7 @@ import { activeCheckoutOf } from "@jingler/core"
 import { Effect } from "effect"
 
 export type PrimeableOffloadSession = Parameters<typeof activeCheckoutOf>[0] & {
-  readonly checkpointSafeMode?: boolean
+  readonly restricted?: boolean
   readonly archived?: boolean
 }
 
@@ -15,7 +15,7 @@ export const primeOffloadSessions = <E>(
     sessions,
     (session) => {
       const { worktreePath } = activeCheckoutOf(session)
-      return worktreePath && !session.checkpointSafeMode && !session.archived
+      return worktreePath && !session.restricted && !session.archived
         ? prime(worktreePath, session.id).pipe(Effect.ignore)
         : Effect.void
     },
