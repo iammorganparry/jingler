@@ -1357,7 +1357,7 @@ describe("RPC handlers", () => {
 
     it.each([
       { name: "ordinary", safe: false, persistFails: false, lookupFails: false, error: "reached PTY boundary", order: ["persist", "spawn"], spawns: 1 },
-      { name: "safe", safe: true, persistFails: false, lookupFails: false, error: "safe mode", order: [], spawns: 0 },
+      { name: "safe", safe: true, persistFails: false, lookupFails: false, error: "restricted sessions", order: [], spawns: 0 },
       { name: "persist-failure", safe: false, persistFails: true, lookupFails: false, error: "persist terminal history", order: ["persist"], spawns: 0 },
       { name: "lookup-failure", safe: false, persistFails: false, lookupFails: true, error: "lookup unavailable", order: [], spawns: 0 }
     ])("keeps the authoritative bound terminal guard: $name", async scenario => {
@@ -1370,7 +1370,7 @@ describe("RPC handlers", () => {
       }))
       const services = Layer.mergeAll(
         Layer.succeed(SessionStore, {
-          get: () => scenario.lookupFails ? Effect.die(new Error("lookup unavailable")) : Effect.succeed({ id: "bound", worktreePath: dir, checkpointSafeMode: scenario.safe }),
+          get: () => scenario.lookupFails ? Effect.die(new Error("lookup unavailable")) : Effect.succeed({ id: "bound", worktreePath: dir, restricted: scenario.safe }),
           markCheckpointTerminalExecutionUnprovable: () => Effect.suspend(() => {
             order.push("persist")
             return scenario.persistFails ? Effect.fail(new GitError({ message: "disk unavailable" })) : Effect.void

@@ -517,11 +517,6 @@ export const rpc = {
     copyFiles: ReadonlyArray<string>
     approve: boolean
   }): Promise<Project> => run((c) => c.Projects.setWorkflow({ ...input, runs: [...input.runs], copyFiles: [...input.copyFiles] })),
-  workspaceCheckpointsSetMode: (sessionId: string, enabled: boolean): Promise<Session> => run((c) => c.WorkspaceCheckpoints.setMode({ sessionId, enabled })),
-  workspaceCheckpointsList: (sessionId: string): Promise<ReadonlyArray<import("@jingler/core").WorkspaceCheckpoint>> => run((c) => c.WorkspaceCheckpoints.list({ sessionId })),
-  workspaceCheckpointsCapture: (sessionId: string): Promise<import("@jingler/core").WorkspaceCheckpoint> => run((c) => c.WorkspaceCheckpoints.capture({ sessionId })),
-  workspaceCheckpointsPreview: (sessionId: string, checkpointId: string): Promise<import("@jingler/core").WorkspaceCheckpointPreview> => run((c) => c.WorkspaceCheckpoints.preview({ sessionId, checkpointId })),
-  workspaceCheckpointsRestore: (sessionId: string, checkpointId: string, token: string): Promise<import("@jingler/core").WorkspaceCheckpoint> => run((c) => c.WorkspaceCheckpoints.restore({ sessionId, checkpointId, token })),
   workspaceWorkflowRetrySetup: (sessionId: string): Promise<Session> =>
     run((c) => c.WorkspaceWorkflow.retrySetup({ sessionId })),
   workspaceWorkflowSkipSetup: (sessionId: string): Promise<Session> =>

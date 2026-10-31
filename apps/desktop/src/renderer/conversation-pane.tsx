@@ -61,8 +61,6 @@ import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.
 import { rpc } from "./rpc-client.js"
 import { useConnectivity } from "./connectivity.js"
 import { DeviceOfflineBanner } from "@jingler/ui"
-import { useTurnCheckpointIds } from "./use-turn-checkpoints.js"
-import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js"
 import { clearInterruptedChat, useInterruptedChats } from "./interrupted-chats.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import {
@@ -422,26 +420,6 @@ function InterruptedRunCard({ session, chatId, busy }: { session: Session; chatI
   )
 }
 
-/** Rail "Revert to here": maps a turn number to its checkpoint and owns the direct-revert dialog. */
-function useTurnRevert(session: Session, busy: boolean) {
-  const ids = useTurnCheckpointIds(session, busy)
-  const [checkpointId, setCheckpointId] = useState<string | null>(null)
-  return {
-    checkpointCount: ids.length,
-    onRevertToTurn: (turn: number) => setCheckpointId(ids[turn - 1] ?? null),
-    dialog: checkpointId === null ? null : (
-      <WorkspaceCheckpointsView
-        key={checkpointId}
-        session={session}
-        revertTo={checkpointId}
-        returnFocus={null}
-        onSession={() => {}}
-        onClosed={() => setCheckpointId(null)}
-      />
-    )
-  }
-}
-
 type PromptImages = ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }> | undefined
 type WaitingSend = { readonly id: string; readonly text: string; readonly images: PromptImages; readonly agentContext: string }
 
@@ -565,7 +543,6 @@ export function ConversationPane({
     onAuthorizeMcp
   )
   const convo = useConversation(session, activeChat.id)
-  const turnRevert = useTurnRevert(session, convo.busy)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
   const offlineDevice = offlineDeviceOf(environments, session.environmentId, () => continueEnvironmentMutation.mutate(undefined))
   const checkout = activeCheckoutOf(session)
@@ -1281,13 +1258,10 @@ export function ConversationPane({
                 toggleFollowAgent,
                 onRestore,
                 onDelete,
-                checkpointCount: turnRevert.checkpointCount,
-                onRevertToTurn: turnRevert.onRevertToTurn,
                 onFilterChanges: onSelectChanges
               })}
         </SubagentEntryContext.Provider>
       )}
-      {turnRevert.dialog}
       {/*
         Background tasks dock — runtime work that OUTLIVES this turn. Sits below
         the conversation (not in the sub-agent tab bar, which is per-run and
@@ -1463,8 +1437,6 @@ function renderMainConversation({
   toggleFollowAgent,
   onRestore,
   onDelete,
-  checkpointCount,
-  onRevertToTurn,
   onFilterChanges
 }: {
   convo: Conversation;
@@ -1509,8 +1481,6 @@ function renderMainConversation({
   toggleFollowAgent: (enabled: boolean) => void;
   onRestore: ((sessionId: string) => void) | undefined;
   onDelete: ((sessionId: string) => void) | undefined;
-  checkpointCount: number;
-  onRevertToTurn: (turn: number) => void;
   onFilterChanges: (() => void) | undefined;
 }) {
   const checkout = activeCheckoutOf(session);
@@ -1626,8 +1596,6 @@ function renderMainConversation({
     focusKey={activeChat.id}
     followAgent={fileBrowser.followEnabled}
     onToggleFollowAgent={toggleFollowAgent}
-    checkpointCount={checkpointCount}
-    onRevertToTurn={onRevertToTurn}
     onFilterChanges={onFilterChanges}
     archived={session.archived
       ? {

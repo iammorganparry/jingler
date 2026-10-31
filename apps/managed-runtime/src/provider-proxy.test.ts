@@ -270,7 +270,7 @@ describe("managed provider credential proxy", () => {
     expect(response.status).toBe(200)
   })
 
-  it("never exposes provider secrets in sandbox commands, files, URLs, events, logs, or checkpoints", async () => {
+  it("never exposes provider secrets in sandbox commands, files, URLs, events, or logs", async () => {
     const providerToken = "ghp_provider_secret_value"
     const visible: string[] = []
     const response = await proxyProviderRequest(

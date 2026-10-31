@@ -160,29 +160,17 @@ describe("ConversationView timeline rail ticks", () => {
     }
   ]
 
-  it("marks a blocked question amber and shows turn stats, Jump, Filter Changes and Revert to here on hover", () => {
-    const onRevertToTurn = vi.fn()
+  it("marks a blocked question amber and shows turn stats, Jump and Filter Changes on hover", () => {
     const onFilterChanges = vi.fn()
-    render(
-      <ConversationView mode="auto" messages={blockedTurns()} checkpointCount={2} onRevertToTurn={onRevertToTurn} onFilterChanges={onFilterChanges} />
-    )
+    render(<ConversationView mode="auto" messages={blockedTurns()} onFilterChanges={onFilterChanges} />)
     const ticks = screen.getAllByRole("button", { name: /^Go to user message/ })
     expect(ticks[1]!.querySelector("[data-slot=preview-rail-tick]")!.getAttribute("data-kind")).toBe("needs-you")
-    expect(ticks[0]!.querySelector("[data-slot=preview-rail-tick]")!.getAttribute("data-kind")).toBe("checkpoint")
 
     fireEvent.pointerEnter(ticks[0]!)
     expect(document.querySelector("[data-slot=preview-rail-meta]")!.textContent).toBe("Turn 1")
     fireEvent.click(screen.getByRole("button", { name: "Filter Changes" }))
     expect(onFilterChanges).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByRole("button", { name: "Revert to here" }))
-    expect(onRevertToTurn).toHaveBeenCalledWith(1)
     expect(screen.getByRole("button", { name: "Jump" })).toBeTruthy()
-  })
-
-  it("offers no Revert to here for turns without a checkpoint", () => {
-    render(<ConversationView mode="auto" messages={blockedTurns()} checkpointCount={0} onRevertToTurn={vi.fn()} />)
-    fireEvent.pointerEnter(screen.getAllByRole("button", { name: /^Go to user message/ })[0]!)
-    expect(screen.queryByRole("button", { name: "Revert to here" })).toBeNull()
   })
 
   it("moves between turns with alt+up / alt+down", async () => {

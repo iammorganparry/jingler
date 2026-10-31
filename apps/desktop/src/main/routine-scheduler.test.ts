@@ -171,14 +171,14 @@ describe("desktop routine clock and dispatch fence", () => {
     await scheduler.cancel(second.id)
     expect((await store.read()).runs.map(run => run.status)).toEqual(["cancelled", "cancelled"])
   })
-  it.each(["validate", "create", "setMode"].flatMap(stage => ["stop", "cancel"].map(action => ({ stage, action }))))("$action during unresolved $stage is bounded but retains activity and blocks admission", async ({ stage, action }) => {
+  it.each(["validate", "create"].flatMap(stage => ["stop", "cancel"].map(action => ({ stage, action }))))("$action during unresolved $stage is bounded but retains activity and blocks admission", async ({ stage, action }) => {
     const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
     const entered = deferred<void>(); const release = deferred<void>(); const prompt = vi.fn()
     const wait = async () => { entered.resolve(); await release.promise }
     const execution = routineExecution({
       validate: async () => { if (stage === "validate") await wait() },
-      create: async (_, run) => { if (stage === "create") await wait(); return { id: run.requestedSessionId, routineOccurrence: { routineId: run.routineId, runId: run.id }, checkpointSafeMode: true, checkpointExecutionHistory: "clean", workspaceLifecycle: { status: "setup-skipped" } } as import("@jingler/core").Session },
-      setMode: async () => { if (stage === "setMode") await wait() }, prompt
+      create: async (_, run) => { if (stage === "create") await wait(); return { id: run.requestedSessionId, routineOccurrence: { routineId: run.routineId, runId: run.id }, restricted: true, checkpointExecutionHistory: "clean", workspaceLifecycle: { status: "setup-skipped" } } as import("@jingler/core").Session },
+      prompt
     })
     scheduler = new RoutineScheduler(store, { execute: execution, sessionExists: async () => false }, clock)
     await scheduler.start(); const run = await scheduler.runNow(id); await entered.promise

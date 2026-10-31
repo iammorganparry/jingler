@@ -137,7 +137,6 @@
       "claude-mcp-inheritance.spec.ts",
       "session-history.spec.ts",
       "background-tasks.spec.ts",
-      "workspace-checkpoints.spec.ts",
       "context-compaction.spec.ts"
     ]
   },
@@ -470,8 +469,6 @@
       "apps/desktop/src/renderer/use-environments.ts",
       "apps/desktop/src/renderer/environment-machine.ts",
       "apps/desktop/src/renderer/connectivity.ts",
-      "apps/desktop/src/renderer/workspace-checkpoints-machine.ts",
-      "apps/desktop/src/renderer/use-turn-checkpoints.ts",
       "apps/desktop/src/main/remote-",
       "apps/desktop/src/main/workspace",
       "apps/desktop/src/main/worktree-env.ts",
@@ -490,7 +487,6 @@
       "real-remote-environment.spec.ts",
       "managed-environments.spec.ts",
       "managed-environments.real.spec.ts",
-      "workspace-checkpoints.spec.ts",
       "workspace-workflow.spec.ts",
       "offload-compute.spec.ts",
       "projects-and-workspaces.spec.ts",

@@ -136,7 +136,7 @@ const activeRailIdFor = (
   return userIndex === undefined ? undefined : itemKeys[userIndex]
 }
 
-/** The rail tick for one user turn: its preview text plus attention/checkpoint colour and file stats. */
+/** The rail tick for one user turn: its preview text plus attention colour and file stats. */
 const buildRailItem = (
   messages: ReadonlyArray<Message>,
   messageIndex: number,
@@ -144,7 +144,6 @@ const buildRailItem = (
   userIndex: number,
   turnCount: number,
   id: string,
-  checkpointed: boolean,
   subagentNeedsAttention: boolean
 ): PreviewRailItem => {
   const responseTurn = messages.slice(messageIndex + 1).find(candidate => candidate.role === "assistant")
@@ -153,7 +152,7 @@ const buildRailItem = (
     id,
     ...createMessageRailPreview(railText(messages[messageIndex]!), responseTurn ? railText(responseTurn) : ""),
     ariaLabel: `Go to user message ${userIndex + 1} of ${turnCount}`,
-    kind: summary.attention ?? (checkpointed ? "checkpoint" : undefined),
+    kind: summary.attention,
     meta: turnRailMeta(userIndex + 1, summary)
   }
 }
@@ -161,13 +160,10 @@ const buildRailItem = (
 const sameRailItem = (a: PreviewRailItem, b: PreviewRailItem): boolean =>
   a.id === b.id && a.label === b.label && a.description === b.description && a.ariaLabel === b.ariaLabel && a.kind === b.kind && a.meta === b.meta
 
-/** Hover-card controls for a rail tick: Jump, Filter Changes, and Revert to here where a checkpoint exists. */
-const useRailActions = ({ items, checkpointCount, hasMoreHistory, onSelect, onRevertToTurn, onFilterChanges }: {
+/** Hover-card controls for a rail tick: Jump and Filter Changes. */
+const useRailActions = ({ items, onSelect, onFilterChanges }: {
   items: ReadonlyArray<PreviewRailItem>
-  checkpointCount: number
-  hasMoreHistory: boolean
   onSelect: (item: PreviewRailItem) => void
-  onRevertToTurn?: (turn: number) => void
   onFilterChanges?: () => void
 }) => useCallback((item: PreviewRailItem) => {
   const turn = items.findIndex(candidate => candidate.id === item.id) + 1
@@ -175,12 +171,9 @@ const useRailActions = ({ items, checkpointCount, hasMoreHistory, onSelect, onRe
     <>
       <Button size="sm" variant="secondary" onClick={() => onSelect(item)}>Jump</Button>
       {onFilterChanges && <Button size="sm" variant="secondary" onClick={onFilterChanges}>Filter Changes</Button>}
-      {onRevertToTurn && !hasMoreHistory && turn <= checkpointCount && (
-        <Button size="sm" variant="danger" onClick={() => onRevertToTurn(turn)}>Revert to here</Button>
-      )}
     </>
   )
-}, [checkpointCount, hasMoreHistory, items, onFilterChanges, onRevertToTurn, onSelect])
+}, [items, onFilterChanges, onSelect])
 
 /** ⌥↑ / ⌥↓ step between turns. Scoped like Shift+Tab: only fires while focus is inside this pane. */
 const useTurnHotkeys = (items: ReadonlyArray<PreviewRailItem>, activeId: string | undefined, onSelect: (item: PreviewRailItem) => void) =>
@@ -322,13 +315,6 @@ export interface ConversationViewProps {
    * run the same prompt twice.
    */
   steeringId?: string | null
-  /**
-   * How many of the oldest turns have a restorable workspace checkpoint (their rail ticks turn blue
-   * and the hover card offers "Revert to here"). Turn N maps to the N-th oldest checkpoint.
-   */
-  checkpointCount?: number
-  /** Revert the workspace to the checkpoint taken at the start of this 1-based turn. */
-  onRevertToTurn?: (turn: number) => void
   /** Show the session's Changes — the hover card's "Filter Changes". */
   onFilterChanges?: () => void
   onDecideGate?: (gateId: string, decision: GateDecision) => void
@@ -405,9 +391,8 @@ const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: Con
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, waitingIds, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, workMode, autoSwitch, onSetWorkMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, waitingIds, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, workMode, autoSwitch, onSetWorkMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
-    checkpointCount: 0,
     loadingHistory: false,
     skills: [],
     files: [],
@@ -711,8 +696,6 @@ function renderSessionAnalytics() {
         userIndex,
         userMessageIndexes.length,
         itemKeys[messageIndex]!,
-        // Turn numbers only line up with checkpoints once the whole history is loaded.
-        !hasMoreHistory && userIndex < checkpointCount,
         // Only the latest turn's fleet is live — a prior turn's subagents are long done.
         userIndex === userMessageIndexes.length - 1 && subagentNeedsAttention === true
       )
@@ -724,7 +707,7 @@ function renderSessionAnalytics() {
     const result = reusedAll ? previous : next
     previousRailItems.current = result
     return result
-  }, [checkpointCount, hasMoreHistory, itemKeys, messages, userMessageIndexes])
+  }, [itemKeys, messages, userMessageIndexes])
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
@@ -775,7 +758,7 @@ function renderSessionAnalytics() {
     virtualizer.scrollToIndex(index, { align: "center" })
   }, [messages.length, virtualizer])
   useJumpToTurn(focusKey, messages, jumpToIndex)
-  const renderRailActions = useRailActions({ items: messageRailItems, checkpointCount, hasMoreHistory, onSelect: handleRailSelect, onRevertToTurn: props.onRevertToTurn, onFilterChanges: props.onFilterChanges })
+  const renderRailActions = useRailActions({ items: messageRailItems, onSelect: handleRailSelect, onFilterChanges: props.onFilterChanges })
   const turnHotkeyRef = useTurnHotkeys(messageRailItems, activeRailId, handleRailSelect)
 
   // Preserve the viewport across a "Load earlier" prepend: capture the scroll

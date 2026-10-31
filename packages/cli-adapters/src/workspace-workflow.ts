@@ -31,7 +31,7 @@ const safeOutput = (value: string): string =>
     .slice(-OUTPUT_LIMIT)
 
 const assertShellSupported = (session: Session): void => {
-  if (session.checkpointSafeMode) throw new Error("Shell/build/test commands are unsupported in checkpoint-safe mode.")
+  if (session.restricted) throw new Error("Shell/build/test commands are unsupported in restricted sessions.")
   if (process.platform === "win32") throw new Error("Workspace commands are not supported on Windows until owned process-tree termination is available.")
 }
 

@@ -1,6 +1,6 @@
 import { Effect, Layer, Schema, Stream } from "effect"
 import { afterEach, expect, it, vi } from "vitest"
-import { AgentRunner, AuthService, ProjectService, ProviderConnections, SessionStore, WorkspaceCheckpointService } from "@jingler/cli-adapters"
+import { AgentRunner, AuthService, ProjectService, ProviderConnections, SessionStore } from "@jingler/cli-adapters"
 import { RoutineInput, type AuthSession } from "@jingler/core"
 import { withTempRoot } from "../../../../packages/cli-adapters/src/test-support.js"
 import { RoutinesService } from "./routines.js"
@@ -14,7 +14,7 @@ async function fixture(stop: () => Effect.Effect<void, Error> = () => Effect.voi
   const temp = withTempRoot(); cleanup.push(temp.cleanup)
   let session: AuthSession | null = { user: { id: "u", name: "", email: "", image: null }, expiresAt: new Date(Date.now() + 3600_000).toISOString() }
   let unreachable = false
-  const create = vi.fn((options: { requestedSessionId: string; routineOccurrence: unknown }) => Effect.succeed({ id: options.requestedSessionId, routineOccurrence: options.routineOccurrence, activeChatId: "chat", checkpointSafeMode: true, checkpointExecutionHistory: "clean", workspaceLifecycle: { status: "setup-skipped" } }))
+  const create = vi.fn((options: { requestedSessionId: string; routineOccurrence: unknown }) => Effect.succeed({ id: options.requestedSessionId, routineOccurrence: options.routineOccurrence, activeChatId: "chat", restricted: true, checkpointExecutionHistory: "clean", workspaceLifecycle: { status: "setup-skipped" } }))
   let entered!: () => void
   const prompted = new Promise<void>(resolve => { entered = resolve })
   const prompt = vi.fn(() => Stream.fromEffect(Effect.sync(entered).pipe(Effect.zipRight(Effect.never))))
@@ -23,7 +23,6 @@ async function fixture(stop: () => Effect.Effect<void, Error> = () => Effect.voi
     Layer.succeed(SessionStore, { create, get: () => Effect.succeed(null) } as unknown as SessionStore),
     Layer.succeed(ProjectService, { routineStore: new RoutineStore(join(temp.root, "routines.json")), get: () => Effect.succeed({ path: temp.root, name: "repo", availability: "available" }) } as unknown as ProjectService),
     Layer.succeed(ProviderConnections, { list: Effect.succeed({ connections: [{ connection: { status: "authenticated", targetId: "desktop", id: "test" }, models: [{ providerId: "test", id: "model", selectable: true }] }] }) } as unknown as typeof ProviderConnections.Service),
-    Layer.succeed(WorkspaceCheckpointService, { setMode: () => Effect.void } as unknown as WorkspaceCheckpointService),
     Layer.succeed(AgentRunner, { prompt, stop } as unknown as AgentRunner)
   )
   // Mock methods require no turn-driver dependencies captured by the production runtime.

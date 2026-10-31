@@ -50,35 +50,6 @@ it("follows a project-rail selection while the form is open", async () => {
   await waitFor(() => expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("Beta"))
 })
 
-it("describes the concise checkpoint-safe checkbox on keyboard focus without changing its default", async () => {
-  render(view("alpha"))
-  const checkbox = await screen.findByRole("checkbox", { name: "Checkpoint-safe mode" })
-  expect(checkbox).toHaveProperty("checked", false)
-  expect(checkbox.closest("label")?.textContent?.trim()).toBe("Checkpoint-safe mode")
-  await waitFor(() => expect(checkbox).toHaveProperty("disabled", false))
-  checkbox.focus()
-  const tooltip = await screen.findByRole("tooltip", { hidden: true })
-  expect(checkbox.getAttribute("aria-describedby")).toBe(tooltip.id)
-  expect(tooltip.textContent).toBe("Enable checkpoint-safe mode before the first turn. Local isolated managed Pi only; structured edits and read-only inspection. File rename is unsupported in safe mode; no files are changed. Shell/build/test, setup commands, terminals, delegation and offload are blocked.")
-  checkbox.click()
-  expect(checkbox).toHaveProperty("checked", true)
-})
-it("accepts checkpoint-safe selection only after branch loading finishes", async () => {
-  let resolve!: (branches: ReadonlyArray<string>) => void
-  render(<NewWorkspaceView open projects={projects} defaultProjectId="alpha"
-    prepareProject={async () => projects[0]!}
-    loadBranches={() => new Promise((done) => { resolve = done })}
-    onCreate={vi.fn(async () => undefined)} onClose={() => {}} />)
-  const checkbox = screen.getByRole("checkbox", { name: "Checkpoint-safe mode" })
-  expect(checkbox).toHaveProperty("disabled", true)
-  checkbox.click()
-  expect(checkbox).toHaveProperty("checked", false)
-  await waitFor(() => expect(resolve).toBeDefined())
-  await act(async () => resolve(["main"]))
-  expect(checkbox).toHaveProperty("disabled", false)
-  checkbox.click()
-  expect(checkbox).toHaveProperty("checked", true)
-})
 it("shows send-button submission, ignores duplicate mouse/Enter and retains the draft after deferred creation fails", async () => {
   let reject!: (error: Error) => void
   let resolve!: () => void

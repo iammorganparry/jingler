@@ -642,8 +642,8 @@ export type SessionCheckout = Schema.Schema.Type<typeof SessionCheckout>;
  */
 export const SessionWire = Schema.Struct({
   routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
-  /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
-  checkpointSafeMode: Schema.optional(Schema.Boolean),
+  /** Routine sessions: no setup, shell, build, test, terminals or delegated children. */
+  restricted: Schema.optional(Schema.Boolean),
   /** Absent means legacy/unknown, never proven clean. Persist before any unowned launch. */
   checkpointExecutionHistory: Schema.optional(Schema.Literal("clean", "unprovable")),
   /** An interactive terminal may leave descendants after its leader or the app exits. */
@@ -2251,8 +2251,8 @@ export const adversarialReviewModelLabel = (
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
   routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
-  /** Explicit consent to edit/inspect-only managed Pi checkpoint execution. */
-  checkpointSafeMode: Schema.optional(Schema.Boolean),
+  /** Set only by routines. */
+  restricted: Schema.optional(Schema.Boolean),
   /** Internal remote provision fence; omitted by renderer-originated requests. */
   requestedSessionId: Schema.optional(
     Schema.String.pipe(Schema.pattern(/^s_[A-Za-z0-9_-]{8,120}$/u)),

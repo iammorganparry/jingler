@@ -1,6 +1,6 @@
 import { routineExecution, runOwnedRoutineEffect, routineTeardown } from "./routine-execution.js"
 import { validateRoutineProject, validateRoutineModel } from "./routine-validation.js"
-import { AgentRunner, AuthService, ProjectService, ProviderConnections, SessionStore, WorkspaceCheckpointService } from "@jingler/cli-adapters"
+import { AgentRunner, AuthService, ProjectService, ProviderConnections, SessionStore } from "@jingler/cli-adapters"
 import { GitError, type RoutineInput, type RoutineRun } from "@jingler/core"
 import { Effect, Runtime, Stream } from "effect"
 import { revalidateRoutineAuth, routineStartup } from "./routine-auth.js"
@@ -16,7 +16,6 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
     const sessions = yield* SessionStore
     const projects = yield* ProjectService
     const runner = yield* AgentRunner
-    const checkpoints = yield* WorkspaceCheckpointService
     const providers = yield* ProviderConnections
     const validate = (input: RoutineInput, expectedDigest?: string | null) => Effect.gen(function* () {
       const project = yield* projects.get(input.projectId)
@@ -31,9 +30,9 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
     const create = (input: RoutineInput, run: RoutineRun) => Effect.gen(function* () {
       yield* requireAuth()
       const { project } = yield* validate(input)
-      return yield* sessions.create({ ...input, repoPath: project.path, repoName: project.name, title: input.name, requestedSessionId: run.requestedSessionId, routineOccurrence: { routineId: run.routineId, runId: run.id }, checkpointSafeMode: true, useWorktree: true }, { defaultMode: input.mode, defaultReasoning: input.reasoning ?? undefined })
+      return yield* sessions.create({ ...input, repoPath: project.path, repoName: project.name, title: input.name, requestedSessionId: run.requestedSessionId, routineOccurrence: { routineId: run.routineId, runId: run.id }, restricted: true, useWorktree: true }, { defaultMode: input.mode, defaultReasoning: input.reasoning ?? undefined })
     })
-    type Environment = Effect.Effect.Context<ReturnType<typeof create>> | Stream.Stream.Context<ReturnType<typeof runner.prompt>> | Effect.Effect.Context<ReturnType<typeof validate>> | Effect.Effect.Context<ReturnType<typeof checkpoints.setMode>>
+    type Environment = Effect.Effect.Context<ReturnType<typeof create>> | Stream.Stream.Context<ReturnType<typeof runner.prompt>> | Effect.Effect.Context<ReturnType<typeof validate>>
     const effectRuntime = yield* Effect.runtime<Environment>()
     const runEffect = Runtime.runPromise(effectRuntime)
     const store = projects.routineStore
@@ -47,7 +46,6 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
       execute: routineExecution({
         validate: (routine, signal) => runEffect(requireAuth().pipe(Effect.zipRight(validate(routine, routine.workflowDigest))), { signal }),
         create: (routine, run, signal, committed) => runOwnedRoutineEffect(effectRuntime, create(routine, run), signal, committed),
-        setMode: (id, signal) => runOwnedRoutineEffect(effectRuntime, checkpoints.setMode(id, true), signal),
         prompt: async (session, routine, signal) => {
         await runEffect(requireAuth(), { signal })
         const chatId = session.activeChatId

@@ -2,8 +2,7 @@ import { spawn } from "node:child_process"
 import { StringDecoder } from "node:string_decoder"
 import { acquireWorkspaceActivity } from "../../workspace-admission.js"
 import { trackChild, stopChildAndWait } from "../../child-registry.js"
-import { checkpointFiles } from "../../checkpoint-file-tools.js"
-import { workspaceCheckpointMode } from "../../workspace-admission.js"
+import { workspaceRestricted } from "../../workspace-admission.js"
 import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { worktreeEnv } from "../../worktree-env.js"
 import { assertPlanCall } from "./plan-policy.js"
@@ -265,7 +264,7 @@ export const registerWorkspaceMutationTools = (
       execute: ({ path, content }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
         if (context.plan) assertPlanCall("workspace_write", { path }, resolved)
-        return routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.write(resolved, path, content) : Effect.runPromise(workspace.write(resolved, path, content))
+        return Effect.runPromise(workspace.write(resolved, path, content))
       }
     })
   )
@@ -282,7 +281,7 @@ export const registerWorkspaceMutationTools = (
       execute: ({ path, oldText, newText, replaceAll }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
         if (context.plan) assertPlanCall("workspace_edit", { path }, resolved)
-        return routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.edit(resolved, path, oldText, newText, replaceAll) : Effect.runPromise(workspace.edit(resolved, path, oldText, newText, replaceAll))
+        return Effect.runPromise(workspace.edit(resolved, path, oldText, newText, replaceAll))
       }
     })
   )
@@ -293,7 +292,7 @@ export const registerWorkspaceMutationTools = (
       input: Schema.Struct({ path: PathInput }),
       execute: ({ path }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
-        return routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.remove(resolved, path) : Effect.runPromise(workspace.remove(resolved, path))
+        return Effect.runPromise(workspace.remove(resolved, path))
       }
     })
   )
@@ -304,7 +303,7 @@ export const registerWorkspaceMutationTools = (
       input: Schema.Struct({ from: PathInput, to: PathInput }),
       execute: ({ from, to }, context) => {
         const resolved = context.cwd ?? cwdOf(cwd)
-        return routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.rename(resolved, from, to) : Effect.runPromise(workspace.rename(resolved, from, to))
+        return Effect.runPromise(workspace.rename(resolved, from, to))
       }
     })
   )
@@ -328,7 +327,7 @@ export const registerWorkspaceMutationTools = (
       const resolved = context.cwd ?? cwdOf(cwd)
       if (context.plan) assertPlanCall("command_execute", { command }, resolved)
       return Effect.runPromise(
-        (routing && !workspaceCheckpointMode(routing.sessionId)
+        (routing && !workspaceRestricted(routing.sessionId)
           ? routing.offload.executeIfEligible(
               resolved,
               routing.sessionId,

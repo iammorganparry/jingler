@@ -232,16 +232,6 @@ export const loadEnv = (environment: Environment = process.env) => {
     "MANAGED_MAX_EGRESS_BYTES",
     100 * 1024 * 1024
   )
-  const managedMaxCheckpointBytes = positiveNumber(
-    environment,
-    "MANAGED_MAX_CHECKPOINT_BYTES",
-    64 * 1024 * 1024
-  )
-  const managedCheckpointRetentionSeconds = positiveNumber(
-    environment,
-    "MANAGED_CHECKPOINT_RETENTION_SECONDS",
-    7 * 24 * 60 * 60
-  )
   if (
     managedEnvironmentsEnabled &&
     nodeEnv === "production" &&
@@ -326,8 +316,6 @@ export const loadEnv = (environment: Environment = process.env) => {
     managedMaxActiveSeconds,
     managedDailyBudgetMicrousd,
     managedMaxEgressBytes,
-    managedMaxCheckpointBytes,
-    managedCheckpointRetentionSeconds,
     googleClientId: optional(environment, "GOOGLE_CLIENT_ID"),
     googleClientSecret: optional(environment, "GOOGLE_CLIENT_SECRET"),
     resendApiKey: optional(environment, "RESEND_API_KEY"),

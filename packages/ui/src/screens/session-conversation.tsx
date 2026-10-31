@@ -34,7 +34,6 @@ import type { PaneContribution } from "../app/pane-contributions.js"
 export type { ConversationPaneCtx } from "./session-pane.js"
 
 export interface SessionConversationProps {
-  onOpenCheckpoints?: (sessionId: string, trigger: HTMLButtonElement | null) => void
 
   /** Global command search shown at the top of the sidebar. */
   search?: ReactNode
@@ -362,7 +361,6 @@ export function SessionConversation(props: SessionConversationProps) {
             onOpenSession={props.onSelectSession}
           />)
            return (<SessionSplit
-            onOpenCheckpoints={props.onOpenCheckpoints}
             group={group}
             sessions={props.sessions}
             emptyState={

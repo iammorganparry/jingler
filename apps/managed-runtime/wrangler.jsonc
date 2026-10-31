@@ -16,9 +16,7 @@
     "MANAGED_CONTROL_PLANE_URL": "https://api.jingler.dev",
     "MANAGED_RUNTIME_IDLE_SECONDS": "120",
     "MANAGED_RUNTIME_MAX_ACTIVE_SECONDS": "7200",
-    "MANAGED_RUNTIME_MAX_EGRESS_BYTES": "104857600",
-    "MANAGED_RUNTIME_MAX_CHECKPOINT_BYTES": "67108864",
-    "MANAGED_RUNTIME_CHECKPOINT_RETENTION_SECONDS": "604800"
+    "MANAGED_RUNTIME_MAX_EGRESS_BYTES": "104857600"
   },
   "containers": [
     {
@@ -54,10 +52,6 @@
     ]
   },
   "r2_buckets": [
-    {
-      "binding": "WORKSPACE_CHECKPOINTS",
-      "bucket_name": "jingler-managed-workspace-checkpoints"
-    },
     {
       "binding": "OFFLOAD_JOBS",
       "bucket_name": "jingler-offload-jobs"

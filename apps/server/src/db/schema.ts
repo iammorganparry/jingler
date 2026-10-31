@@ -250,46 +250,6 @@ export const managedSessionRuntime = pgTable(
   ]
 )
 
-export const workspaceCheckpoint = pgTable(
-  "workspace_checkpoint",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    environmentId: text("environment_id")
-      .notNull()
-      .references(() => managedEnvironment.id, { onDelete: "cascade" }),
-    runtimeId: text("runtime_id")
-      .notNull()
-      .references(() => managedSessionRuntime.id, { onDelete: "cascade" }),
-    objectKey: text("object_key").notNull(),
-    workspaceDigest: text("workspace_digest").notNull(),
-    headSha: text("head_sha").notNull(),
-    branch: text("branch").notNull(),
-    eventCursor: bigint("event_cursor", { mode: "number" }).default(0).notNull(),
-    manifest: text("manifest_json").notNull(),
-    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
-    createdAt: timestamp("created_at").notNull(),
-    expiresAt: timestamp("expires_at").notNull()
-  },
-  (table) => [
-    uniqueIndex("workspace_checkpoint_runtime_digest_unique").on(
-      table.runtimeId,
-      table.workspaceDigest
-    ),
-    index("workspace_checkpoint_user_runtime_created_idx").on(
-      table.userId,
-      table.runtimeId,
-      table.createdAt,
-      table.id
-    ),
-    index("workspace_checkpoint_expiry_idx").on(table.expiresAt, table.id),
-    check("workspace_checkpoint_size_check", sql`${table.sizeBytes} >= 0`),
-    check("workspace_checkpoint_cursor_check", sql`${table.eventCursor} >= 0`)
-  ]
-)
-
 export const managedUsageReservation = pgTable(
   "managed_usage_reservation",
   {

@@ -86,7 +86,7 @@ import { BrowserControlMcpService,
 } from "./browser-control-mcp-service.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
-import { acquireCheckpointedTurnScoped } from "./workspace-checkpoints.js"
+import { acquireWorkspaceActivity, setWorkspaceRestricted } from "./workspace-admission.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { UsageFactStore } from "./usage-facts.js"
@@ -1437,12 +1437,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                       : "Workspace setup or cleanup is still in progress."
                 }])
               }
-              const checkpointPaths = yield* AppPaths
               let runOwnsLease = false
               const workspaceLease = yield* (gatedSession
-                ? acquireCheckpointedTurnScoped(gatedSession, join(checkpointPaths.root, "checkpoints"), chatId, (lease) => {
-                  if (!runOwnsLease) lease.release()
-                })
+                ? Effect.acquireRelease(
+                  Effect.try({
+                    try: () => {
+                      setWorkspaceRestricted(gatedSession.id, gatedSession.restricted === true)
+                      return acquireWorkspaceActivity(gatedSession.id, "agent-turn")
+                    },
+                    catch: (cause) => cause
+                  }),
+                  (lease) => Effect.sync(() => { if (!runOwnsLease) lease.release() })
+                )
                 : Effect.fail(new Error("Workspace session not found."))
               ).pipe(Effect.either)
               if (workspaceLease._tag === "Left") {
@@ -1451,7 +1457,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   message: workspaceLease.left instanceof Error ? workspaceLease.left.message : "Workspace is unavailable."
                 }])
               }
-              if (gatedSession?.checkpointSafeMode !== true) yield* SessionStore.markCheckpointExecutionUnprovable(sessionId)
+              if (gatedSession?.restricted !== true) yield* SessionStore.markCheckpointExecutionUnprovable(sessionId)
 
               // Concurrent chats in one session are allowed, but a single chat is
               // single-flight: two runs on ONE chatId would race the `fibers`

@@ -1,4 +1,4 @@
-import { workspaceCheckpointMode } from "../../workspace-admission.js"
+import { workspaceRestricted } from "../../workspace-admission.js"
 import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { INTERACTIVE_TOOL_TIMEOUT_MS } from "../tools/tool-registry.js"
 import { CodexInbox } from "./inbox.js"
@@ -374,7 +374,7 @@ export const makeCodexAgentRuntime = (options: CodexRuntimeOptions = {}): AgentR
     run: (spec, context) =>
       Stream.unwrapScoped(
         Effect.gen(function* () {
-      if (workspaceCheckpointMode(spec.sessionId)) return yield* Effect.fail(new AgentRuntimeError({ reason: "runtime", message: "Native execution is unsupported in checkpoint-safe mode." }))
+      if (workspaceRestricted(spec.sessionId)) return yield* Effect.fail(new AgentRuntimeError({ reason: "runtime", message: "Native execution is unsupported in restricted sessions." }))
           // No supported policy guarantees approval for every edit and command.
           // In particular, workspace-write + untrusted can auto-approve edits.
           if (spec.mode === "ask" || spec.mode === "accept-edits")

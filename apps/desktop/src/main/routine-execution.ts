@@ -39,7 +39,6 @@ export const preparation = <A>(operation: Promise<A>, signal: AbortSignal): Prom
 export interface RoutineExecutionPorts {
   validate(routine: Routine, signal: AbortSignal): Promise<unknown>
   create(routine: Routine, run: RoutineRun, signal: AbortSignal, committed: (session: Session) => Promise<void>): Promise<Session>
-  setMode(id: string, signal: AbortSignal): Promise<unknown>
   prompt(session: Session, routine: Routine, signal: AbortSignal): ReturnType<RoutineExecution["execute"]>
 }
 /** All durable claims enter the same production creation, mode and turn gates. */
@@ -59,8 +58,7 @@ export const routineExecution = (ports: RoutineExecutionPorts): RoutineExecution
   // Associate on actual creation, including completion after the bounded cancel wait.
   const session = await preparation(ports.create(routine, run, signal, associate).then(async session => { await associate(session); return session }), signal)
   await check()
-  if (!session.checkpointSafeMode || session.checkpointExecutionHistory !== "clean" || session.workspaceLifecycle?.status !== "setup-skipped") throw new Error("Safe creation did not persist clean history and skipped setup")
-  await preparation(ports.setMode(session.id, signal), signal)
+  if (!session.restricted || session.workspaceLifecycle?.status !== "setup-skipped") throw new Error("Restricted creation did not persist the restriction and skipped setup")
   await check()
   return ports.prompt(session, routine, signal)
 }

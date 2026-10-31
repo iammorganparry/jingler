@@ -1,26 +1,5 @@
 import { addProject, appShell, expect, test } from "./fixtures.js"
 
-test("checkpoint-safe label exposes all restrictions on keyboard focus", async ({ launchApp }) => {
-  const { window, repoPath } = await launchApp({ configured: true, withRepo: true })
-  await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("new-session").click()
-  await addProject(window, repoPath)
-  const checkbox = window.getByRole("checkbox", { name: "Checkpoint-safe mode", exact: true })
-  await expect(checkbox).not.toBeChecked()
-  await expect(checkbox.locator("xpath=ancestor::label")).toHaveText("Checkpoint-safe mode")
-  await expect(checkbox).toBeEnabled()
-  await checkbox.focus()
-  await window.keyboard.press("Tab")
-  await window.keyboard.press("Shift+Tab")
-  await expect(checkbox).toBeFocused()
-  await expect(window.getByRole("tooltip", { includeHidden: true })).toHaveText(
-    "Enable checkpoint-safe mode before the first turn. Local isolated managed Pi only; structured edits and read-only inspection. File rename is unsupported in safe mode; no files are changed. Shell/build/test, setup commands, terminals, delegation and offload are blocked.",
-  )
-  await expect(checkbox).toHaveAccessibleDescription(/Shell\/build\/test, setup commands, terminals, delegation and offload are blocked/)
-  await window.keyboard.press("Space")
-  await expect(checkbox).toBeChecked()
-})
-
 test("empty and saved routine drafts stay editable across live polling", async ({ launchApp }) => {
   const { window, repoPath } = await launchApp({
     configured: true, withRepo: true,

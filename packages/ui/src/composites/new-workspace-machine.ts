@@ -51,7 +51,6 @@ export interface NewWorkspaceContext {
   environmentId: string
   resolvedProject: Project | null
   isolation: "worktree" | "direct"
-  checkpointSafeMode: boolean
   baseBranch: string
   branches: ReadonlyArray<string>
   source: NewSessionSource
@@ -79,7 +78,6 @@ export interface NewWorkspaceContext {
 }
 
 export type NewWorkspaceEvent =
-  | { type: "SET_CHECKPOINT_SAFE_MODE"; enabled: boolean }
   | { type: "OPEN"; projectId?: string; pr?: PrSummary; issue?: IssueSummary; draft?: string; source?: "pr" | "github"; baseBranch?: string; isolation?: "worktree" | "direct" }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
@@ -129,12 +127,6 @@ const canonicalWorkspaceModel = (context: NewWorkspaceContext) => (
                 }
                 : null
 )
-
-const checkpointSourceSupported = (context: NewWorkspaceContext): boolean => !context.checkpointSafeMode || context.source === "blank" || context.source === "branch"
-const assertCheckpointSource = (context: NewWorkspaceContext): void => {
-  if (!checkpointSourceSupported(context)) throw new Error("Safe checkpoints require a fresh local managed Pi workspace.")
-}
-const checkpointCreationFields = (context: NewWorkspaceContext) => context.checkpointSafeMode ? { checkpointSafeMode: true } : {}
 
 /** The project-picker value for Auto: no repo chosen, no checkout until `switch_checkout`. */
 export const AUTO_PROJECT_ID = "auto"
@@ -186,7 +178,6 @@ const submitWorkspace = (
   context: NewWorkspaceContext,
   onProgress: (phase: SessionCreationPhase) => void
 ): Promise<void> => {
-            assertCheckpointSource(context)
             const canonical = canonicalWorkspaceModel(context)
             if (canonical === null) {
               return Promise.reject(new Error("Select a certified provider model."))
@@ -204,7 +195,6 @@ const submitWorkspace = (
               ...initialPrompt,
               baseBranch: context.baseBranch,
               useWorktree: context.isolation === "worktree",
-              ...checkpointCreationFields(context),
               ...(context.source === "branch" ? { continueBranch: true } : {})
             }, context.attachments, onProgress)
 }
@@ -417,7 +407,6 @@ export const newWorkspaceMachine = setup({
         environmentId: "local",
         resolvedProject: null,
         isolation: open.isolation,
-        checkpointSafeMode: false,
         baseBranch: open.baseBranch,
         branches: [] as ReadonlyArray<string>,
         ...resetSource,
@@ -511,7 +500,6 @@ export const newWorkspaceMachine = setup({
     environmentId: "local",
     resolvedProject: null,
     isolation: "worktree",
-    checkpointSafeMode: false,
     baseBranch: "",
     branches: [],
     ...resetSource,
@@ -588,7 +576,6 @@ export const newWorkspaceMachine = setup({
         SET_SEARCH: { target: "sourceLoading", actions: assign(({ event }) => ({ search: event.search })) },
         SET_MINE: { target: "sourceLoading", actions: assign(({ event }) => ({ mine: event.mine })) },
         RETRY_SOURCE: { target: "sourceLoading" },
-        SET_CHECKPOINT_SAFE_MODE: { actions: assign(({ event }) => ({ checkpointSafeMode: event.enabled })) },
         SET_ISOLATION: { actions: assign(({ event }) => ({ isolation: event.isolation })) },
         SET_BASE: { actions: assign(({ event }) => ({ baseBranch: event.baseBranch })) },
         SELECT_PR: { actions: assign(({ event }) => ({ selectedPr: event.pr, baseBranch: event.pr.baseRefName })) },

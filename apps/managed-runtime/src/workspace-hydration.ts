@@ -44,7 +44,7 @@ const run = async (
   return result.stdout.trim()
 }
 
-/** Recreates a clean exact Git base. Checkpoint changes are restored only afterwards. */
+/** Recreates a clean exact Git base. */
 export const hydrateWorkspace = async (
   executor: WorkspaceCommandExecutor,
   plan: WorkspaceProvisioningPlan,

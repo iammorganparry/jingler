@@ -1,4 +1,4 @@
-import { setWorkspaceCheckpointMode } from "./workspace-admission.js"
+import { setWorkspaceRestricted } from "./workspace-admission.js"
 import type { TerminalChunk, TerminalError } from "@jingler/core"
 import { Effect, Fiber, Stream } from "effect"
 import { describe, expect, it } from "vitest"
@@ -95,14 +95,14 @@ describe("TerminalService", () => {
     }))
   })
   it("blocks safe-mode PTYs even with persisted history, while ordinary mode remains available", async () => {
-    setWorkspaceCheckpointMode("safe-terminal", true)
+    setWorkspaceRestricted("safe-terminal", true)
     try {
       await withService(t => Effect.gen(function* () {
         const exit = yield* t.create({ sessionId: "safe-terminal", executionHistoryPersisted: true, cols: 80, rows: 24 }).pipe(Effect.exit)
         expect(exit._tag).toBe("Failure")
         expect(yield* t.list("safe-terminal")).toEqual([])
       }))
-    } finally { setWorkspaceCheckpointMode("safe-terminal", false) }
+    } finally { setWorkspaceRestricted("safe-terminal", false) }
   })
 
   it("spawns a running terminal and lists it only for its own session", () =>

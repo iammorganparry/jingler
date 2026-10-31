@@ -15,8 +15,7 @@ const verification = readFileSync(
 const requiredTables = [
   "managed_environment",
   "managed_session_runtime",
-  "managed_usage_reservation",
-  "workspace_checkpoint"
+  "managed_usage_reservation"
 ] as const
 
 describe("managed environment migration", () => {
@@ -30,7 +29,6 @@ describe("managed environment migration", () => {
   it("verifies production managed environment indexes and constraints", () => {
     expect(migration).toContain("managed_environment_user_state_updated_idx")
     expect(migration).toContain("managed_usage_user_window_state_idx")
-    expect(migration).toContain("workspace_checkpoint_runtime_digest_unique")
     expect(migration).toContain("managed_environment_state_check")
     expect(verification).toContain("to_regclass")
   })
@@ -51,7 +49,6 @@ describe("managed environment migration", () => {
               ('managed_environment'),
               ('managed_session_runtime'),
               ('managed_usage_reservation'),
-              ('workspace_checkpoint'),
               ('managed_environment_user_state_updated_idx'),
               ('managed_usage_user_window_state_idx')
           ) as required(name)

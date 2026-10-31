@@ -1,4 +1,3 @@
-import { WorkspaceCheckpointStore } from "../../workspace-checkpoint-store.js"
 import { execFile, spawn } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises"
@@ -142,7 +141,6 @@ const treeSize = async (cwd: string, tree: string, path: string | null): Promise
 }
 
 export class FileChangeTracker {
-  readonly #checkpointSafeMode: boolean
   readonly #artifactDir: string
   readonly #sessionId: string
   readonly #maxArtifactBytes: number
@@ -153,13 +151,11 @@ export class FileChangeTracker {
   #disposed = false
 
   constructor(input: {
-    readonly checkpointSafeMode?: boolean
     readonly artifactDir: string
     readonly sessionId: string
     readonly maxArtifactBytes?: number
     readonly shadowIndexRoot?: string
   }) {
-    this.#checkpointSafeMode = input.checkpointSafeMode === true
     this.#artifactDir = input.artifactDir
     this.#sessionId = input.sessionId
     this.#maxArtifactBytes = input.maxArtifactBytes ?? 2 * 1024 * 1024
@@ -200,7 +196,6 @@ export class FileChangeTracker {
   }
 
   async #capture(cwd: string): Promise<WorktreeSnapshot> {
-    if (this.#checkpointSafeMode) return new WorkspaceCheckpointStore({ cwd, root: this.#shadowIndexRoot, sessionId: this.#sessionId }).worktreeSnapshot()
     const canonical = await realpath(cwd)
     const shadow = await this.#indexFor(canonical)
     await git(canonical, ["add", "-A", "--", "."], shadow.environment)
