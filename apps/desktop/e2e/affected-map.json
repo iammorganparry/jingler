@@ -11,7 +11,16 @@
       "apps/desktop/src/main/terminal",
       "packages/cli-adapters/src/terminal"
     ],
-    "specs": ["terminal.spec.ts", "editor-groups.spec.ts", "workspace-terminal-archive.spec.ts"]
+    "specs": ["terminal.spec.ts", "editor-groups.spec.ts", "workspace-terminal-archive.spec.ts", "agent-command-terminal.spec.ts"]
+  },
+  {
+    "paths": [
+      "apps/desktop/src/renderer/agent-command-",
+      "apps/desktop/src/renderer/xterm-view.tsx",
+      "packages/ui/src/components/beui/tool-result.tsx",
+      "packages/ui/src/composites/message-turn.tsx"
+    ],
+    "specs": ["agent-command-terminal.spec.ts"]
   },
   {
     "paths": [

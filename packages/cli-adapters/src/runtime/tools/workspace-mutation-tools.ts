@@ -176,13 +176,13 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       return { from: source.relative, to: destination.relative }
     }).pipe(mapFailure("Could not rename workspace file"))
 
-  const maxCommandOutput = 32_000
   const execute: WorkspaceMutationPort["execute"] = (cwd, source, context, sessionId) => Effect.scoped(
     Effect.gen(function* () {
       if (process.platform === "win32") {
         // Windows keeps ordinary shell access; destructive lifecycle refuses its unprovable history.
         const child = yield* Command.make("cmd.exe", "/d", "/s", "/c", source).pipe(Command.workingDirectory(cwd), Command.env({ ...worktreeEnv(process.env, cwd), ...trustedWorkspaceEnvironment(context.workspaceEnvironment) }), Command.start, Effect.provideService(CommandExecutor.CommandExecutor, executor), mapFailure("Command launch failed"))
-        const collect = (stream: Stream.Stream<Uint8Array, unknown>) => stream.pipe(Stream.decodeText(), Stream.tap(chunk => Effect.sync(() => context.progress({ message: chunk.slice(-maxCommandOutput), completed: null, total: null }))), Stream.runFold("", (text, chunk) => (text + chunk).slice(-maxCommandOutput)))
+        let combined = ""
+        const collect = (stream: Stream.Stream<Uint8Array, unknown>) => stream.pipe(Stream.decodeText(), Stream.tap(chunk => Effect.sync(() => { combined = reportOutput(context, combined, chunk) })), Stream.runFold("", (text, chunk) => (text + chunk).slice(-maxCommandOutput)))
         const [stdout, stderr, exitCode] = yield* Effect.all([collect(child.stdout), collect(child.stderr), child.exitCode], { concurrency: 3 }).pipe(mapFailure("Command execution failed"))
         if (exitCode !== 0) return yield* Effect.fail(failure(stderr.trim() || stdout.trim() || `Command exited ${exitCode}`))
         return { command: source, exitCode: Number(exitCode), stdout, stderr }
@@ -204,12 +204,12 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       )
       const result = yield* Effect.tryPromise({
         try: () => new Promise<{ command: string; exitCode: number; stdout: string; stderr: string }>((resolve, reject) => {
-          let stdout = "", stderr = ""
+          let stdout = "", stderr = "", combined = ""
           const out = new StringDecoder("utf8"), err = new StringDecoder("utf8")
           const append = (chunk: string, isError: boolean) => {
             if (isError) stderr = (stderr + chunk).slice(-maxCommandOutput)
             else stdout = (stdout + chunk).slice(-maxCommandOutput)
-            context.progress({ message: chunk.slice(-maxCommandOutput), completed: null, total: null })
+            combined = reportOutput(context, combined, chunk)
           }
           child.stdout?.on("data", chunk => append(out.write(chunk), false))
           child.stderr?.on("data", chunk => append(err.write(chunk), true))
@@ -227,6 +227,20 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
 
   return { write, edit, remove, rename, execute } satisfies WorkspaceMutationPort
 })
+
+const maxCommandOutput = 32_000
+
+/**
+ * Report the command's whole interleaved output so far, not the new chunk:
+ * `ToolDelta` consumers (the card, the read-only terminal mirror) treat each
+ * delta as a cumulative snapshot, the same contract Codex's deltas follow.
+ */
+const reportOutput = (context: ToolExecutionContext, combined: string, chunk: string): string => {
+  if (chunk.length === 0) return combined
+  const next = (combined + chunk).slice(-maxCommandOutput)
+  context.progress({ message: next, completed: null, total: null })
+  return next
+}
 
 const fileTool = <Input, Encoded>(
   definition: Pick<

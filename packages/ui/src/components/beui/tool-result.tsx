@@ -55,6 +55,8 @@ export interface ToolResultProps {
   onCopy?: () => void | Promise<void>;
   onRetry?: () => void;
   onStop?: () => void;
+  /** Open this command's live output in a read-only terminal tab. */
+  onWatch?: () => void;
   className?: string;
   contentClassName?: string;
 }
@@ -175,6 +177,7 @@ export function ToolResult({
   onCopy,
   onRetry,
   onStop,
+  onWatch,
   className,
   contentClassName,
 }: ToolResultProps) {
@@ -195,6 +198,11 @@ export function ToolResult({
               {onRetry ? (
                 <ToolResultAction label="Run again" onClick={onRetry}>
                   <RotateCcw className="size-3.5" />
+                </ToolResultAction>
+              ) : null}
+              {onWatch ? (
+                <ToolResultAction label="Watch in terminal" onClick={onWatch}>
+                  <SquareTerminal className="size-3.5" />
                 </ToolResultAction>
               ) : null}
               {running && onStop ? (
@@ -358,7 +366,7 @@ export function ToolResult({
             <div className={cn("p-3", contentClassName)}>{children}</div>
           </div>
 
-            {canCopy || onRetry || (running && onStop) ? (
+            {canCopy || onRetry || onWatch || (running && onStop) ? (
               renderResultActions()
             ) : null}
           </div>

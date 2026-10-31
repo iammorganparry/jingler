@@ -19,7 +19,8 @@ import type {
   Session,
   SubagentFleetControlAction,
   SubagentFleetControlOutcome,
-  SubagentFleetNode
+  SubagentFleetNode,
+  ToolCall
 } from "@jingler/core"
 import type { ToastInput } from "@jingler/ui"
 import {
@@ -39,6 +40,7 @@ import {
   type ComposerVoiceInput,
   ConversationView,
   SubagentEntryContext,
+  ToolWatchContext,
   SubagentReadOnlyBar,
   FleetAgentView,
   McpApiKeyDialog,
@@ -83,6 +85,7 @@ import {
   serializeCodeReferences
 } from "./code-reference.js"
 import { useConversation, type Conversation } from "./use-conversation.js"
+import { watchAgentCommand } from "./agent-command-tabs.js"
 import { useSessionSubagentEntry } from "./session-chat-tabs.js"
 import { MAIN_FLEET_AGENT, useSubagentFleet, type SubagentFleetController } from "./use-subagent-fleet.js"
 import {
@@ -460,6 +463,7 @@ export function ConversationPane({
   providerCatalog,
   agentEndpointCatalog,
   onSelectChanges,
+  onOpenTerminal,
   onOpenPullRequest,
   onSelectBrowser,
   onOpenProviderSettings,
@@ -505,6 +509,8 @@ export function ConversationPane({
   onOpenFile?: (sessionId: string, path: string) => void
 /** Open the canonical Changes view from uncertain-mutation recovery. */
   onSelectChanges?: () => void
+  /** Focus a terminal tab by id (a read-only mirror of an agent command). */
+  onOpenTerminal?: (id: string) => void
   /** Open the session's PR view from a subagent's PR chip. */
   onOpenPullRequest?: () => void
   /** Open the Browser view; the `Preview ready · Open browser` chip's path. */
@@ -525,6 +531,12 @@ export function ConversationPane({
   paneFocused?: boolean
 }) {
   const activeChat = activeChatFor(session)
+  const watchTool = useMemo(
+    () => onOpenTerminal
+      ? (tool: ToolCall) => onOpenTerminal(watchAgentCommand(session.id, activeChat.id, tool.id, tool.target ?? tool.name))
+      : null,
+    [onOpenTerminal, session.id, activeChat.id]
+  )
   // An agent drove the embedded browser for THIS chat: offer the transcript link.
   const [previewRevealed, setPreviewRevealed] = useState(false)
   useEffect(
@@ -1216,6 +1228,7 @@ export function ConversationPane({
         </>
       ) : (
         <SubagentEntryContext.Provider value={subagentEntry}>
+        <ToolWatchContext.Provider value={watchTool}>
         {renderMainConversation({
                 convo,
                 subagentNeedsAttention: countNodesAwaitingAttention(fleet.nodes) > 0,
@@ -1260,6 +1273,7 @@ export function ConversationPane({
                 onDelete,
                 onFilterChanges: onSelectChanges
               })}
+        </ToolWatchContext.Provider>
         </SubagentEntryContext.Provider>
       )}
       {/*
