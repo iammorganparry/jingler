@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.14.1
+
+### Patch Changes
+
+- 09033d6: Fix every agent turn failing with "Ambient pi resources escaped containment: extension" after the pi-subagents 0.84 upgrade. A subagent config written by an older Jingler is now rewritten instead of being kept with a key pi-subagents no longer accepts.
+  - @jingler/plannotator-ext@0.14.1
+
 ## 0.14.0
 
 ### Minor Changes
