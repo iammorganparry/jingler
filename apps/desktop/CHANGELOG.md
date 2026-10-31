@@ -1,5 +1,18 @@
 # @jingler/desktop
 
+## 0.15.0
+
+### Minor Changes
+
+- 6a3f43f: Workspace checkpoints are gone: the Checkpoints menu, "Revert to here" and the "Checkpoint-safe mode" option in New workspace have been removed. Routines still run without a shell or project setup.
+
+### Patch Changes
+
+- 6a1f949: The Checks tab no longer shows an old "Pull request #N linked" card after a workspace switches to a different branch.
+- a9af470: A subagent's elapsed timer no longer shows hundreds of thousands of hours.
+- ca93652: The session title now lines up with the chat pane, and the PR chip sits first among the header buttons on the right.
+  - @jingler/plannotator-ext@0.15.0
+
 ## 0.14.1
 
 ### Patch Changes
