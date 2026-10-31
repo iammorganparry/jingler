@@ -13,5 +13,5 @@ export function AgentCommandView({ session, tab, active }: { session: Session; t
   useEffect(() => {
     if (status !== null && status !== "running") markDone(session.id, tab.id)
   }, [session.id, status, tab.id])
-  return <XtermView terminalId={tab.id} active={active} mirror={{ output: tool?.output ?? "", status }} />
+  return <XtermView terminalId={tab.id} active={active} mirror={{ output: tool?.output, status }} />
 }

@@ -205,6 +205,44 @@ describe("automatic Offload Compute routing", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/cancel")
   })
 
+  it("reports offloaded output cumulatively, with state changes as marker lines", async () => {
+    const event = (sequence: number, rest: object) => ({ version: OFFLOAD_COMPUTE_PROTOCOL_VERSION, jobId: admission.jobId, sequence, ...rest })
+    fetchMock.mockResolvedValueOnce(Response.json({
+      version: OFFLOAD_COMPUTE_PROTOCOL_VERSION,
+      jobId: admission.jobId,
+      state: "succeeded",
+      cursor: 3,
+      events: [
+        event(1, { kind: "output", stream: "stdout", text: "first\n" }),
+        event(2, { kind: "state", state: "running" }),
+        event(3, { kind: "output", stream: "stdout", text: "second\n" })
+      ],
+      result: {
+        version: OFFLOAD_COMPUTE_PROTOCOL_VERSION,
+        jobId: admission.jobId,
+        state: "succeeded",
+        exitCode: 0,
+        failureReason: null,
+        stdout: "first\nsecond\n",
+        stderr: "",
+        outputTruncated: false,
+        timings: { queuedMs: 0, snapshotMs: 0, hydrationMs: 0, dependencyMs: 0, commandMs: 0 }
+      }
+    }))
+    const progress: string[] = []
+    await pollResult({
+      admission,
+      refresh: async () => admission,
+      context: { ...context(), progress: (update) => progress.push(update.message) },
+      deadlineAt: Date.now() + 60_000
+    })
+    expect(progress).toEqual([
+      "first\n",
+      "first\n[Offload Compute: running]\n",
+      "first\n[Offload Compute: running]\nsecond\n"
+    ])
+  })
+
   it("cancels with the latest refreshed grant", async () => {
     vi.useFakeTimers()
     const controller = new AbortController()

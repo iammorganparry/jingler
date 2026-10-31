@@ -25,6 +25,7 @@
  *  - **Publishing is coalesced** (`coalesce.ts`). The subscription fires per
  *    streamed token, and what it publishes is read at human speed.
  */
+import { clearAgentCommands } from "./agent-command-tabs.js"
 import type { ActorRefFrom, SnapshotFrom } from "xstate"
 import { createActor } from "xstate"
 import { useSyncExternalStore } from "react"
@@ -770,6 +771,7 @@ export const getConversationActor = (
 /** Stop + forget a session's actor (call when the session is deleted). */
 export const disposeConversationActor = (sessionId: string): void => {
   clearSubagentTabs(sessionId)
+  clearAgentCommands(sessionId)
   for (const key of [...registry.keys()]) {
     if (!key.startsWith(`${sessionId}:`)) continue
     setPlanPresent(key.slice(sessionId.length + 1), false)
@@ -787,6 +789,7 @@ export const disposeChatActor = (sessionId: string, chatId: string): void => {
   setPlanPresent(chatId, false)
   setPlanDisconnected(chatId, false)
   forget(key)
+  clearAgentCommands(sessionId, chatId)
   clearAgentFileActivityChat(sessionId, chatId)
   publishChatActivity(sessionId, chatId, null)
   recomputeSession(sessionId)

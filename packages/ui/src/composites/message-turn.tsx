@@ -247,7 +247,7 @@ export const ToolStopContext = createContext<(() => void) | null>(null)
 export const ToolWatchContext = createContext<((tool: ToolCallModel) => void) | null>(null)
 const useWatchTool = (tool: ToolCallModel): (() => void) | undefined => {
   const watch = useContext(ToolWatchContext)
-  return watch && tool.target ? () => watch(tool) : undefined
+  return watch && tool.target && isStoppableTool(toolDisplayName(tool.name)) ? () => watch(tool) : undefined
 }
 
 /**
@@ -339,6 +339,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
       expanded={expanded}
       onToggle={openable ? () => setExpanded((v) => !v) : undefined}
       onStop={onStop}
+      onWatch={onWatch}
       signIn={signIn}
       className={WIDTH}
     >

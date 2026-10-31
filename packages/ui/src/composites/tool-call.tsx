@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Check, ChevronDown, ChevronRight, CircleStop, LoaderCircle, X } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, CircleStop, LoaderCircle, SquareTerminal, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Spin } from "../components/spin.js"
 import { FileIcon } from "../components/file-icon.js"
@@ -107,6 +107,8 @@ export interface ToolCallProps {
    * as a stop button on the header only while `status` is "running".
    */
   onStop?: () => void
+  /** Open this command's live output in a read-only terminal tab. */
+  onWatch?: () => void
   /**
    * Second line under the header — the raw command/path once `target` is an
    * agent-written intent. Mono, dim, truncated; the full text still lives in
@@ -202,6 +204,7 @@ export function ToolCall({
   expanded = false,
   onToggle,
   onStop,
+  onWatch,
   detail,
   signIn,
   className
@@ -273,6 +276,17 @@ export function ToolCall({
         {signIn && status === "error" && (
           <Button variant="ghost" size="sm" onClick={signIn.onClick} className="my-auto mr-2 flex-none">
             {signIn.label}
+          </Button>
+        )}
+        {onWatch && (
+          <Button
+            variant="ghost"
+            onClick={onWatch}
+            aria-label="Watch in terminal"
+            title="Watch in terminal"
+            className="h-auto flex-none rounded-none px-2.5 text-muted-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            <SquareTerminal className="size-3.5" />
           </Button>
         )}
         {onStop && status === "running" && (

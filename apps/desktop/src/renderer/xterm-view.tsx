@@ -47,7 +47,7 @@ export interface XtermViewProps {
    * Read-only mode: render an agent command's cumulative output snapshot
    * instead of attaching to a PTY. No input, no resize RPC.
    */
-  mirror?: { readonly output: string; readonly status: "running" | "success" | "error" | null }
+  mirror?: { readonly output: string | undefined; readonly status: "running" | "success" | "error" | null }
 }
 
 export function XtermView({ terminalId, active = true, onExit, mirror }: XtermViewProps) {
@@ -153,13 +153,13 @@ export function XtermView({ terminalId, active = true, onExit, mirror }: XtermVi
   const mirrorOutput = mirror?.output
   const mirrorStatus = mirror?.status
   useEffect(() => {
-    if (term === null || mirrorOutput === undefined) return
-    const next = mirrorOutput.replace(/\r?\n/g, "\r\n")
-    const { reset, data } = mirrorWrite(shownRef.current, next)
-    if (reset) term.reset()
-    if (data) term.write(data)
-    shownRef.current = next
-  }, [mirrorOutput, term])
+    if (term === null || !isMirror) return
+    const update = mirrorWrite(shownRef.current, mirrorOutput?.replace(/\r?\n/g, "\r\n"), mirrorStatus === "running")
+    if (update === null) return
+    if (update.reset) term.reset()
+    if (update.data) term.write(update.data)
+    shownRef.current = update.reset ? update.data : shownRef.current + update.data
+  }, [isMirror, mirrorOutput, mirrorStatus, term])
   useEffect(() => {
     if (term === null || mirrorStatus == null || mirrorStatus === "running") return
     term.write(`\r\n\x1b[2m[agent command ${mirrorStatus === "success" ? "finished" : "failed"}]\x1b[0m\r\n`)

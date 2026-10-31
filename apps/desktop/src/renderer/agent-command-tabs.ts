@@ -22,7 +22,9 @@ let tabsBySession: Readonly<Record<string, ReadonlyArray<AgentCommandTab>>> = {}
 const listeners = new Set<() => void>()
 
 const setTabs = (sessionId: string, update: (tabs: ReadonlyArray<AgentCommandTab>) => ReadonlyArray<AgentCommandTab>): void => {
-  tabsBySession = { ...tabsBySession, [sessionId]: update(tabsBySession[sessionId] ?? NO_TABS) }
+  const { [sessionId]: current = NO_TABS, ...rest } = tabsBySession
+  const next = update(current)
+  tabsBySession = next.length > 0 ? { ...rest, [sessionId]: next } : rest
   for (const listener of listeners) listener()
 }
 
@@ -40,6 +42,12 @@ export const watchAgentCommand = (sessionId: string, chatId: string, toolId: str
 
 export const closeAgentCommand = (sessionId: string, id: string): void =>
   setTabs(sessionId, (tabs) => tabs.filter((tab) => tab.id !== id))
+
+/** Drop a session's mirrors, or only one chat's, when its conversation is disposed. */
+export const clearAgentCommands = (sessionId: string, chatId?: string): void => {
+  if (agentCommandTabs(sessionId).length === 0) return
+  setTabs(sessionId, (tabs) => (chatId === undefined ? NO_TABS : tabs.filter((tab) => tab.chatId !== chatId)))
+}
 
 export const markDone = (sessionId: string, id: string): void => {
   if (!agentCommandTabs(sessionId).some((tab) => tab.id === id && !tab.done)) return
@@ -71,6 +79,20 @@ export const findToolCall = (
   return undefined
 }
 
-/** What to write to move a terminal from `shown` to `next`: the appended tail, or a full redraw. */
-export const mirrorWrite = (shown: string, next: string): { readonly reset: boolean; readonly data: string } =>
-  next.startsWith(shown) ? { reset: false, data: next.slice(shown.length) } : { reset: true, data: next }
+/**
+ * What to write to move a mirror from `shown` to `next`: the appended tail, a
+ * full redraw, or nothing.
+ *
+ * Only LIVE snapshots drive it. A settled card's output is the formatted tool
+ * result (stdout then stderr, or just the error message) — not the stream the
+ * operator watched — so once anything has been shown, settling must not
+ * replace it. Missing output (compacted, trimmed history) never clears either.
+ */
+export const mirrorWrite = (
+  shown: string,
+  next: string | undefined,
+  running: boolean
+): { readonly reset: boolean; readonly data: string } | null => {
+  if (next === undefined || (!running && shown !== "")) return null
+  return next.startsWith(shown) ? { reset: false, data: next.slice(shown.length) } : { reset: true, data: next }
+}
