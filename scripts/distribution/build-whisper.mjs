@@ -10,7 +10,7 @@
  * Usage: node build-whisper.mjs
  */
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 export const WHISPER_TAG = "v1.9.5"
@@ -46,6 +46,11 @@ const flags = [
   ...(process.platform === "darwin" ? ["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"] : []),
   ...(process.platform === "win32" ? ["-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"] : [])
 ]
+// The cached build/ is shared across runners at different paths; cmake refuses a cache generated elsewhere.
+const cache = join(src, "build", "CMakeCache.txt")
+if (existsSync(cache) && !readFileSync(cache, "utf8").split(/\r?\n/).includes(`CMAKE_HOME_DIRECTORY:INTERNAL=${src.replaceAll("\\", "/")}`)) {
+  rmSync(join(src, "build"), { recursive: true, force: true })
+}
 run("cmake", ["-B", "build", ...flags], src)
 run("cmake", ["--build", "build", "--config", "Release", "--target", "whisper-cli", "-j"], src)
 
