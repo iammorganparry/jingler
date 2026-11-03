@@ -492,4 +492,17 @@ describe("shared harness planning", () => {
     await expect(turn(stranger)).rejects.toThrow("Plan belongs to a different workspace")
   })
 
+  it("accepts a follow-up turn after an Auto session switches from its scratch folder into a cloned repo", async () => {
+    const f = await setup()
+    const cloned = await mkdtemp(join(tmpdir(), "jingler-shared-planning-clone-")); roots.push(cloned)
+    // Before switch_checkout the session is the scratch placeholder; attaching drops it.
+    let session: object = { id: "s", repo: "", branch: "", worktreePath: f.root }
+    const checkouts = { session: () => session } as never
+    const runtime = f.wrap(async function* () { yield done })
+    const turn = (cwd: string) => Effect.runPromise(Stream.runCollect(runtime.run(specFor(cwd), { ...f.context, checkouts })))
+    await turn(f.root)
+    session = { id: "s", checkouts: [{ id: "co_clone", repo: "clone", repoPath: cloned, branch: "main", worktreePath: cloned }], activeCheckoutId: "co_clone" }
+    await turn(cloned)
+  })
+
 })
