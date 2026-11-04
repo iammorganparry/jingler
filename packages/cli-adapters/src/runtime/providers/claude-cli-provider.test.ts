@@ -231,6 +231,39 @@ setInterval(() => {}, 1000)
     expect(events.some((event) => event.type === "text_delta")).toBe(false)
   })
 
+  it("runs a tool call the model wrote as text instead of printing it to the chat", async () => {
+    // Regression: Claude copied the history's <jingler-tool-call> notes into its
+    // reply, so the question JSON showed as chat text instead of a question card.
+    const leak = '<jingler-tool-call id="t1" name="workspace_read_file">\n{"path":"package.json"}\n</jingler-tool-call>'
+    const binary = await executable(`
+process.stdin.resume()
+for (const text of ["Reading it.\\n", ${JSON.stringify(leak.slice(0, 10))}, ${JSON.stringify(leak.slice(10))}]) {
+  console.log(JSON.stringify({type:"stream_event",event:{type:"content_block_delta",index:0,delta:{type:"text_delta",text}}}))
+}
+console.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"",usage:{}}))
+`)
+    const stream = createClaudeCliStreamSimple({
+      binary,
+      checkAuth: async () => {},
+      startToolRelay: async () => ({ mcpConfigPath: "/tmp/mcp.json", toolCall: new Promise(() => {}), close: async () => {} })
+    })(model, context)
+    const events = await collect(stream)
+    const shown = events.flatMap((event) => event.type === "text_delta" ? [event.delta] : []).join("")
+    expect(shown).toBe("Reading it.\n")
+    const end = events.find((event) => event.type === "toolcall_end")
+    expect(end?.type === "toolcall_end" ? end.toolCall : null).toMatchObject({
+      name: "workspace_read_file",
+      arguments: { path: "package.json" }
+    })
+    const done = events.at(-1)
+    expect(done?.type === "done" ? done.reason : null).toBe("toolUse")
+  })
+
+  it("tells Claude the history's tool-call notes are a record, not a format to write", () => {
+    const prompt = claudeCliArguments(model, context, {}, "/tmp/mcp.json")
+    expect(prompt[prompt.indexOf("--system-prompt") + 1]).toMatch(/^Use only the supplied tools\.\n\n.*Never write a <jingler-tool-call> block/su)
+  })
+
   it("echoes a published artifact URL into the reply so it survives the CLI being stopped", async () => {
     const binary = await executable(`
 process.stdin.resume()

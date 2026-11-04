@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import type { RelayedToolCall } from "./claude-cli-sampling-relay.js"
 
 /** Claude CLI names every relayed tool `mcp__<server>__<tool>`. */
@@ -110,5 +111,68 @@ export const makeClaudeCliToolRescue = (
       return { call: rescue(record) }
     }
     return { call: null }
+  }
+}
+
+/** How older transcripts replayed tool calls; models copy it into reply text. */
+const TEXT_CALL_MARKER = "<jingler-tool-call"
+const TEXT_CALL = /^<jingler-tool-call\b[^>]*?\bname="([^"]+)"[^>]*>([\s\S]*?)<\/jingler-tool-call>/u
+
+/** Length of the longest tail of `text` that could still grow into the marker. */
+const markerTail = (text: string): number => {
+  for (let n = Math.min(TEXT_CALL_MARKER.length - 1, text.length); n > 0; n--) {
+    if (TEXT_CALL_MARKER.startsWith(text.slice(-n))) return n
+  }
+  return 0
+}
+
+const parseTextToolCall = (text: string, offered: ReadonlySet<string>): RelayedToolCall | null => {
+  const match = TEXT_CALL.exec(text)
+  if (match === null) return null
+  const name = bareName(match[1]!)
+  if (!offered.has(name)) return null
+  let input: unknown
+  try {
+    input = JSON.parse(match[2]!)
+  } catch {
+    return null
+  }
+  const args = recordOf(input)
+  return args === null ? null : { id: `text-${randomUUID()}`, name, arguments: args }
+}
+
+/**
+ * Recover a tool call the model wrote as reply text (`<jingler-tool-call
+ * name="…">{json}</jingler-tool-call>`) instead of calling the tool. Text from
+ * the marker on is held back so the leak never reaches the chat; at the end it
+ * becomes a real call for an offered tool, or is released unchanged.
+ */
+export const makeTextToolCallGuard = (
+  offered: ReadonlySet<string>,
+  warn: (message: string) => void = (message) => console.warn(message)
+) => {
+  let held = ""
+  let leaked = false
+  return {
+    /** Feed a text delta; returns the part that is safe to show now. */
+    push: (delta: string): string => {
+      held += delta
+      if (leaked) return ""
+      const at = held.indexOf(TEXT_CALL_MARKER)
+      const cut = at >= 0 ? at : held.length - markerTail(held)
+      leaked = at >= 0
+      const safe = held.slice(0, cut)
+      held = held.slice(cut)
+      return safe
+    },
+    /** Held text to release, or the call it spelled out. */
+    finish: (): { readonly text: string; readonly call: RelayedToolCall | null } => {
+      const text = held
+      held = ""
+      const call = leaked ? parseTextToolCall(text, offered) : null
+      if (call === null) return { text, call }
+      warn(`[claude-cli] rescued ${call.name}: the model wrote the tool call as text`)
+      return { text: "", call }
+    }
   }
 }

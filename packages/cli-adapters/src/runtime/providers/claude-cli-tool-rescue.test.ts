@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { makeClaudeCliToolRescue } from "./claude-cli-tool-rescue.js"
+import { makeClaudeCliToolRescue, makeTextToolCallGuard } from "./claude-cli-tool-rescue.js"
 
 const init = (tools: ReadonlyArray<string>) => ({ type: "system", subtype: "init", tools })
 const toolUse = (id: string, name: string, input: unknown) => ({
@@ -51,5 +51,36 @@ describe("makeClaudeCliToolRescue", () => {
     observe(toolUse("toolu_4", "mcp__jingler__command_execute", { command: "false" }))
     const failed = { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "toolu_4", is_error: true, content: "exit 1" }] } }
     expect(observe(failed).call).toBeNull()
+  })
+})
+
+describe("makeTextToolCallGuard", () => {
+  const leak = '<jingler-tool-call id="x" name="jingler_ask_question">\n{"questions":[{"question":"Which?"}]}\n</jingler-tool-call>'
+  const feed = (guard: ReturnType<typeof makeTextToolCallGuard>, text: string, size: number): string => {
+    let shown = ""
+    for (let i = 0; i < text.length; i += size) shown += guard.push(text.slice(i, i + size))
+    return shown
+  }
+
+  it("turns a tool call written as text into a real call, hiding it even when the marker is split across deltas", () => {
+    const guard = makeTextToolCallGuard(new Set(["jingler_ask_question"]), vi.fn())
+    expect(feed(guard, `Pick one.\n${leak}`, 3)).toBe("Pick one.\n")
+    const { text, call } = guard.finish()
+    expect(text).toBe("")
+    expect(call).toMatchObject({ name: "jingler_ask_question", arguments: { questions: [{ question: "Which?" }] } })
+  })
+
+  it("releases the text unchanged when the tool was not offered or the JSON is broken", () => {
+    for (const [offered, body] of [[[], leak], [["jingler_ask_question"], leak.replace("{\"questions", "{questions")]] as const) {
+      const guard = makeTextToolCallGuard(new Set(offered), vi.fn())
+      const shown = guard.push(`Hi ${body}`)
+      expect(shown + guard.finish().text).toBe(`Hi ${body}`)
+    }
+  })
+
+  it("holds back only a possible marker prefix and releases it at the end", () => {
+    const guard = makeTextToolCallGuard(new Set(["jingler_ask_question"]), vi.fn())
+    expect(guard.push("a < b <jingler")).toBe("a < b ")
+    expect(guard.finish()).toEqual({ text: "<jingler", call: null })
   })
 })
