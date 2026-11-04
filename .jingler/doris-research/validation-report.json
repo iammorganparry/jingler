@@ -1,0 +1,309 @@
+{
+  "markdown_files": 11,
+  "local_links": 10,
+  "unique_external_links": 105,
+  "live_urls_checked": 50,
+  "errors": [],
+  "urls": [
+    {
+      "url": "https://doris.apache.org/docs/4.x/admin-manual/auth/authorization/data/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/admin-manual/auth/authorization/data/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/admin-manual/auth/security-overview/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/admin-manual/auth/security-overview/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/admin-manual/cluster-management/upgrade/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/admin-manual/cluster-management/upgrade/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/admin-manual/data-admin/backup-restore/overview/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/admin-manual/data-admin/backup-restore/overview/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/admin-manual/workload-management/spill-disk/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/admin-manual/workload-management/spill-disk/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/admin-manual/workload-management/workload-group/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/admin-manual/workload-management/workload-group/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/connection-integration/data-integration/flink-doris-connector/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/connection-integration/data-integration/flink-doris-connector/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/delete/batch-delete-manual/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/delete/batch-delete-manual/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/import/import-way/routine-load-manual/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/import/import-way/routine-load-manual/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/import/import-way/stream-load-manual/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/import/import-way/stream-load-manual/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/routine-load-best-practices/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/routine-load-best-practices/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/transaction/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/transaction/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/update/multi-stream-update-for-unique-model/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/update/multi-stream-update-for-unique-model/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/data-operate/update/unique-update-concurrent-control/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/data-operate/update/unique-update-concurrent-control/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/install/choosing-deployment-mode/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/install/choosing-deployment-mode/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/install/preparation/cluster-planning/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/install/preparation/cluster-planning/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/lakehouse/best-practices/optimization/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/lakehouse/best-practices/optimization/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/lakehouse/catalog-overview/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/lakehouse/catalog-overview/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/query-acceleration/colocation-join/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/query-acceleration/colocation-join/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/overview/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/overview/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/use-guide/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/use-guide/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/sync-materialized-view/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/sync-materialized-view/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/query-acceleration/optimization-technology-principle/statistics/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/query-acceleration/optimization-technology-principle/statistics/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/query-acceleration/query-profile/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/query-acceleration/query-profile/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/semi-structured/VARIANT/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/semi-structured/VARIANT/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/semi-structured/variant-workload-guide/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/semi-structured/variant-workload-guide/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/string-functions/damerau_levenshtein_distance/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/string-functions/damerau_levenshtein_distance/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/string-functions/levenshtein/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/string-functions/levenshtein/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/string-functions/ngram-search/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/string-functions/ngram-search/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/data-model/aggregate/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/data-model/aggregate/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/data-model/unique/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/data-model/unique/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/data-partitioning/auto-partitioning/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/data-partitioning/auto-partitioning/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/data-partitioning/data-bucketing/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/data-partitioning/data-bucketing/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/data-partitioning/dynamic-partitioning/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/data-partitioning/dynamic-partitioning/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/data-partitioning/manual-partitioning/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/data-partitioning/manual-partitioning/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/index/bloomfilter/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/index/bloomfilter/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/index/index-overview/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/index/index-overview/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/index/inverted-index/overview/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/index/inverted-index/overview/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/index/inverted-index/search-function/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/index/inverted-index/search-function/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/index/inverted-index/search-operators/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/index/inverted-index/search-operators/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/index/ngram-bloomfilter-index/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/index/ngram-bloomfilter-index/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/index/prefix-index/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/index/prefix-index/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/index/vector-index/overview/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/index/vector-index/overview/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/docs/4.x/table-design/schema-change/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/docs/4.x/table-design/schema-change/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/releases/v4.1/release-4.1.0/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/releases/v4.1/release-4.1.0/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://doris.apache.org/releases/v4.1/release-4.1.4.1/",
+      "status": 200,
+      "final_url": "https://doris.apache.org/releases/v4.1/release-4.1.4.1/",
+      "title": "Mail"
+    },
+    {
+      "url": "https://github.com/apache/doris/releases/latest",
+      "status": 200,
+      "final_url": "https://github.com/apache/doris/releases/tag/4.1.4.1",
+      "title": "Release Apache Doris 4.1.4.1 Release \u00b7 apache/doris \u00b7 GitHub"
+    }
+  ]
+}
