@@ -42,6 +42,7 @@ import {
   ContextConfig,
   ContextSnapshot,
   Message,
+  ConversationSearchPage,
   AuthSessionInfo,
   AuthSessionRequest,
   LoadedPlugin,
@@ -955,6 +956,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       source: Schema.Literal("claude-code", "codex", "conductor", "t3code"),
       nativeSessionId: Schema.String
+    }
+  }),
+
+  /** Search saved conversation text on this device, with bounded snippet results. */
+  Rpc.make("Sessions.searchConversations", {
+    success: ConversationSearchPage,
+    error: GitError,
+    payload: {
+      query: Schema.String.pipe(Schema.maxLength(160)),
+      sessionId: Schema.optional(Schema.String),
+      chatId: Schema.optional(Schema.String)
     }
   }),
 

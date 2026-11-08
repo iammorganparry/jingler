@@ -19,6 +19,7 @@ import { FileChangeList } from "../components/file-change-list.js"
 import { Markdown } from "../components/markdown.js"
 import { ToolResult as BeUIToolResult, ToolResultOutput } from "../components/beui/tool-result.js"
 import { Button } from "../components/button.js"
+import { CollapsibleSection } from "../components/collapsible-section.js"
 import type { SubagentChipItem } from "../app/subagent-chip.js"
 import { providerColor, providerLabel, ProviderIcon } from "../components/provider-icon.js"
 import { ApprovalGate } from "./approval-gate.js"
@@ -85,6 +86,7 @@ const PATH_TOOLS: ReadonlySet<string> = new Set([
   "Delete",
   "Rename"
 ])
+const HISTORY_TOOLS: ReadonlySet<string> = new Set(["conversation_search", "conversation_read"])
 
 const pathOf = (tool: ToolCallModel, displayName: string): string | null => {
   const changes = tool.fileChanges?.changes
@@ -408,7 +410,9 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
   const onWatch = useWatchTool(tool)
   const subagentEntry = useContext(SubagentEntryContext)
   const signIn = useMcpSignIn(tool)
-  const [expanded, setExpanded] = useState(tool.status === "running")
+  // History results can contain many snippets. Keep their details behind the
+  // existing disclosure rather than opening a large JSON body during recall.
+  const [expanded, setExpanded] = useState(tool.status === "running" && !HISTORY_TOOLS.has(tool.name))
   const canonicalChanges = tool.fileChanges?.changes ?? []
   const legacyPreview = canonicalChanges.length === 0 ? tool.preview : null
   const lines = legacyPreview ? legacyPreview.replace(/\n+$/, "").split("\n") : []
@@ -488,6 +492,52 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ReadonlyArray<Tool
     </div>
   )
 }, (prev, next) => sameMembers(prev.tools, next.tools))
+
+/** A history lookup is one activity; its internal calls stay available on demand. */
+const ConversationRecall = memo(function ConversationRecall({ tools }: { tools: ReadonlyArray<ToolCallModel> }) {
+  const [open, setOpen] = useState(false)
+  const running = tools.some((tool) => tool.status === "running")
+  const failed = tools.some((tool) => tool.status === "error")
+  const title = running ? "Checking earlier chats…" : failed ? "Chat lookup had an error" : "Checked earlier chats"
+  return (
+    <CollapsibleSection
+      data-testid="conversation-recall"
+      title={title}
+      open={open}
+      onOpenChange={setOpen}
+      trailing={running
+        ? <Spin><LoaderCircle className="size-3" /></Spin>
+        : failed ? <XCircle className="size-3 text-red" /> : undefined}
+      className={WIDTH}
+    >
+      <div className="flex flex-col gap-2 py-2">
+        {tools.map((tool) => <ToolCardView key={tool.id} tool={tool} />)}
+      </div>
+    </CollapsibleSection>
+  )
+}, (prev, next) => sameMembers(prev.tools, next.tools))
+
+/** Preserve program order when history lookup and ordinary workspace tools interleave. */
+function renderToolRuns(parts: ReadonlyArray<ToolPart>, start: number): ReactNode[] {
+  const out: ReactNode[] = []
+  let index = 0
+  while (index < parts.length) {
+    const history = HISTORY_TOOLS.has(parts[index]!.tool.name)
+    let end = index + 1
+    while (end < parts.length && HISTORY_TOOLS.has(parts[end]!.tool.name) === history) end += 1
+    const tools = parts.slice(index, end).map((part) => part.tool)
+    const key = start + index
+    if (history) {
+      out.push(<ConversationRecall key={`h${key}`} tools={tools} />)
+    } else if (tools.length >= COLLAPSE_MIN) {
+      out.push(<ToolGroup key={`g${key}`} tools={tools} />)
+    } else {
+      tools.forEach((tool, offset) => { out.push(<ToolCardView key={`${key}-${offset}`} tool={tool} />) })
+    }
+    index = end
+  }
+  return out
+}
 
 /**
  * One or more consecutive reasoning parts compiled into a single thought pill.
@@ -593,9 +643,8 @@ const PartView = memo(function PartView({
 })
 
 /**
- * Render a turn's parts, collapsing runs of ≥ `COLLAPSE_MIN` consecutive tool
- * calls (with no text between) into a single `ToolGroup`. Anything else renders
- * in program order.
+ * Render parts in program order, folding history lookups and long runs of
+ * ordinary tools into their respective disclosures.
  */
 function renderParts(
   parts: ReadonlyArray<ContentPart>,
@@ -623,13 +672,7 @@ function renderParts(
   let runStart = 0
   const flush = () => {
     if (run.length === 0) return
-    if (run.length >= COLLAPSE_MIN) {
-      out.push(<ToolGroup key={`g${runStart}`} tools={run.map((p) => p.tool)} />)
-    } else {
-      run.forEach((p, k) => {
-        out.push(<ToolCardView key={`${runStart}-${k}`} tool={p.tool} />)
-      })
-    }
+    out.push(...renderToolRuns(run, runStart))
     run = []
   }
   // Consecutive attached images render as a single wrapping thumbnail row.

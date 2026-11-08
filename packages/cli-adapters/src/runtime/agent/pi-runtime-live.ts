@@ -28,6 +28,8 @@ import { SecretStore } from "../../secret-store.js"
 import { PluginHost, type PluginHostRuntime } from "../../plugin-host.js"
 import { PluginRegistry } from "../../plugins.js"
 import { SessionStore } from "../../sessions.js"
+import { TranscriptStore } from "../../transcripts.js"
+import { makeConversationHistory } from "../tools/conversation-tools.js"
 import { makeOffloadCommandRouterWithOwnedDevice } from "../../offload-command-router.js"
 import { makeOwnedDeviceOffloadPort } from "../../owned-device-offload.js"
 import { RemoteSessionService } from "../../remote-session.js"
@@ -230,6 +232,7 @@ export const makePiAgentRuntimeLive = (
     const pluginRegistry = yield* PluginRegistry
     const pluginHost = yield* PluginHost
     const sessionStore = yield* SessionStore
+    const conversationHistory = yield* makeConversationHistory
     const workspace = yield* makeWorkspaceInspectionPort
     const webSearch = yield* Effect.serviceOption(WebSearchService)
     const browserControl = yield* Effect.serviceOption(BrowserControlPort)
@@ -475,6 +478,7 @@ export const makePiAgentRuntimeLive = (
             context,
             cwd: spec.cwd,
             workspace,
+            conversations: conversationHistory(spec.sessionId),
             ...(runWebSearch === undefined ? {} : { webSearch: runWebSearch }),
             mcp: {
               ...context.mcp,
@@ -832,7 +836,7 @@ export const makePiAgentRuntimeLive = (
     makeCodexRuntimeRegistration(nativeTools),
     makeOpenCodeRuntimeRegistration(nativeTools)].map((registration) => ({ ...registration, runtime: portable(planning(registration.runtime)) })))
   })
-)
+).pipe(Layer.provide(TranscriptStore.Default))
 
 /** Production composition: no alternate provider transport is installed. */
 export const PiAgentRuntimeLive = makePiAgentRuntimeLive()

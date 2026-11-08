@@ -1,4 +1,5 @@
 import { updateTranscriptRowKeys } from "./transcript-row-keys.js"
+import { useConversationSearchHighlight } from "./use-conversation-search-highlight.js"
 import { useJumpToTurn } from "./jump-to-turn.js"
 import { defaultProps } from "../lib/default-props.js"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -201,6 +202,10 @@ export const planTranscriptAnchorIndex = (messages: ReadonlyArray<Message>): num
 
 export interface ConversationViewProps {
   messages: ReadonlyArray<Message>
+  /** Focus a saved search hit instead of following the live edge. */
+  focusMessageIndex?: number
+  /** Highlight the found phrase within the focused message's rendered text. */
+  searchQuery?: string
   /** Older turns remain before `messages[0]` — show the "Load earlier" control. */
   hasMoreHistory?: boolean
   /** An older page is being fetched — spinner + disabled control. */
@@ -629,10 +634,12 @@ function renderSessionAnalytics() {
   const gutter = atLeast(useWidthTier(), "mid") ? "px-[30px]" : "px-3"
   const [viewport, setViewport] = useState<HTMLElement | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
+  useConversationSearchHighlight(transcriptRef, props.searchQuery)
   // MessageScroller owns live-edge following. Keeping the current decision in
   // state lets history paging pause it without racing the scroller's observer.
   const [following, setFollowing] = useState(true)
   const anchoredAssistantKey = useRef<string | undefined>(undefined)
+  const wasShowingSearch = useRef(false)
   const [queueExpanded, setQueueExpanded] = useState(false)
   const queueLimit = queueExpanded ? queued.length : QUEUE_PREVIEW
   const planAnchorIndex = planTranscriptAnchorIndex(messages)
@@ -727,7 +734,7 @@ function renderSessionAnalytics() {
     getScrollElement: () => viewport,
     enabled: viewport !== null && messages.length > 0,
     // Start at the live edge instead of rendering the oldest rich rows just to discard them.
-    initialOffset: () => following
+    initialOffset: () => following && props.focusMessageIndex === undefined
       ? Math.max(0, messages.length * ESTIMATED_TURN_HEIGHT - (viewport?.clientHeight ?? 0))
       : 0,
     estimateSize: () => ESTIMATED_TURN_HEIGHT,
@@ -739,16 +746,30 @@ function renderSessionAnalytics() {
   const activeRailId = activeRailIdFor(activeVirtualItem?.index, itemKeys, messages, userMessageIndexes)
 
   useLayoutEffect(() => {
+    if (props.focusMessageIndex !== undefined) {
+      wasShowingSearch.current = true
+      return
+    }
     const index = latestAssistantMessageIndex(messages)
     const key = itemKeys[index]
-    if (key === undefined || key === anchoredAssistantKey.current) return
+    if (key === undefined || (key === anchoredAssistantKey.current && !wasShowingSearch.current)) return
+    wasShowingSearch.current = false
     const frame = requestAnimationFrame(() => {
       anchoredAssistantKey.current = key
       setFollowing(index === messages.length - 1)
       virtualizer.scrollToIndex(index, { align: "end" })
     })
     return () => cancelAnimationFrame(frame)
-  }, [itemKeys, messages, virtualizer])
+  }, [itemKeys, messages, virtualizer, props.focusMessageIndex])
+
+  useLayoutEffect(() => {
+    if (props.focusMessageIndex === undefined || !viewport) return
+    const index = props.focusMessageIndex
+    if (index < 0 || index >= messages.length) return
+    setFollowing(false)
+    const frame = requestAnimationFrame(() => virtualizer.scrollToIndex(index, { align: "center" }))
+    return () => cancelAnimationFrame(frame)
+  }, [props.focusMessageIndex, messages, viewport, virtualizer])
 
   // Referentially stable so the memoised PreviewRail isn't defeated by a fresh
   // closure per render. `virtualizer` is a stable instance across renders.
@@ -810,7 +831,7 @@ function renderSessionAnalytics() {
           navigationActiveId={activeRailId}
           onNavigationSelect={handleRailSelect}
           renderNavigationActions={renderRailActions}
-          followOutput={following && messages.length > 0}
+          followOutput={props.focusMessageIndex === undefined && following && messages.length > 0}
           onFollowChange={setFollowing}
           busy={busy}
           viewportRef={setViewport}
@@ -858,6 +879,7 @@ function renderSessionAnalytics() {
                 <div
                   key={item.key}
                   data-index={item.index}
+                  data-search-match={item.index === props.focusMessageIndex ? "true" : undefined}
                   ref={virtualizer.measureElement}
                   className="absolute left-0 top-0 w-full"
                   style={{ transform: `translateY(${item.start}px)`, contain: "layout" }}

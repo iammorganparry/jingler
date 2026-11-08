@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Message, PlanDocument } from "@jingler/core"
+import type { ContentPart, Message, PlanDocument } from "@jingler/core"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { isSubagentSpawnMessage, MessageTurn, PlanProgressContext, SubagentEntryContext } from "./message-turn.js"
@@ -128,6 +128,52 @@ describe("MessageTurn streaming text", () => {
       ]
     })} />)
     expect(withProgress.container.querySelector(".jingler-streaming-text")).toBeNull()
+  })
+})
+
+describe("MessageTurn conversation recall", () => {
+  const tool = (name: string, status: "success" | "running" | "error" = "success", id = name): ContentPart => ({
+    _tag: "Tool", tool: { id, name, target: name === "workspace_read_file" ? "README.md" : null, status, meta: null, diff: null, preview: null, output: "Saved result details" }
+  })
+  const recallMessage = (parts: ReadonlyArray<ContentPart>) => assistant({ streaming: false, parts })
+
+  it("shows one quiet disclosure for a search/read pair and keeps both calls inspectable", async () => {
+    render(<MessageTurn message={recallMessage([tool("conversation_search"), tool("conversation_read"), { _tag: "Text", text: "The earlier decision was to reset the pool." }])} />)
+    const details = screen.getByTestId<HTMLDetailsElement>("conversation-recall")
+    expect(details.open).toBe(false)
+    expect(screen.getAllByText("Checked earlier chats")).toHaveLength(1)
+    expect(screen.getByText("The earlier decision was to reset the pool.")).toBeTruthy()
+    details.open = true
+    fireEvent(details, new Event("toggle"))
+    await waitFor(() => expect(details.open).toBe(true))
+    expect(screen.getByRole("button", { name: "Search chats" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Read chat" })).toBeTruthy()
+  })
+
+  it("updates a running lookup in place without opening its details", () => {
+    const view = render(<MessageTurn message={recallMessage([tool("conversation_search", "running")])} />)
+    const details = screen.getByTestId<HTMLDetailsElement>("conversation-recall")
+    expect(screen.getByText("Checking earlier chats…")).toBeTruthy()
+    view.rerender(<MessageTurn message={recallMessage([tool("conversation_search"), tool("conversation_read")])} />)
+    expect(screen.getByTestId("conversation-recall")).toBe(details)
+    expect(details.open).toBe(false)
+    expect(screen.getByText("Checked earlier chats")).toBeTruthy()
+  })
+
+  it("keeps intervening workspace tools outside history disclosures and in order", () => {
+    const view = render(<MessageTurn message={recallMessage([tool("conversation_search"), tool("workspace_read_file"), tool("conversation_read")])} />)
+    expect(screen.getAllByTestId("conversation-recall")).toHaveLength(2)
+    const read = screen.getByRole("button", { name: "ReadREADME.md" })
+    expect(read.closest("details")).toBeNull()
+    const text = view.container.textContent ?? ""
+    expect(text.indexOf("Checked earlier chats")).toBeLessThan(text.indexOf("README.md"))
+    expect(text.lastIndexOf("Checked earlier chats")).toBeGreaterThan(text.indexOf("README.md"))
+  })
+
+  it("keeps a lookup error visible while its internal calls are collapsed", () => {
+    render(<MessageTurn message={recallMessage([tool("conversation_search", "error")])} />)
+    expect(screen.getByText("Chat lookup had an error")).toBeTruthy()
+    expect(screen.getByTestId<HTMLDetailsElement>("conversation-recall").open).toBe(false)
   })
 })
 

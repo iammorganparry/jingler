@@ -236,8 +236,8 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | ChatLaneHeader | `app/chat-lane-header.tsx` | Thread switcher dropdown, new chat, and follow-agent toggle replacing the chat tab strip in redesign 4.3. (`actionsSlot` / `ChatLaneActionsContext` after New chat) | chats, activeChatId, onSelectChat, onCreateChat, followAgent, onToggleFollowAgent | yes | #398 (4.3) |
 | ArchivedList, ArchivedEntry | `app/archived-list.tsx` | Sidebar "Archived (N)" entry opening a searchable Dialog of archived workspaces, each with Restore and a destructive Delete (caller confirms with ConfirmDialog). | open, onOpenChange, sessions, onRestore, onDelete | yes | #513 (13.3) |
 | ChatDrawer | `app/chat-drawer.tsx` | Narrow-window (<1100px) chat lane: 400px overlay on the content area only (never the sidebar or rail), scrim, Esc/scrim close, focus returns to opener. Built on Drawer. | open, onOpenChange, container | yes | #400 (4.5) |
-| PALETTE, CommandPalette | `app/command-palette.tsx` | Global ⌘K palette. | — | yes | — |
-| ConversationView | `app/conversation-view.tsx` | Chat transcript, composer and queue. | messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills | no | — |
+| PALETTE, CommandPalette | `app/command-palette.tsx` | Global ⌘K palette with debounced saved-conversation search, snippets, and Workspace / Chat scopes. | items, searchConversations, onOpenConversation | yes | — |
+| ConversationView | `app/conversation-view.tsx` | Chat transcript, composer and queue; saved search results highlight the found phrase without altering Markdown or selection. | messages, hasMoreHistory, loadingHistory, onLoadEarlier, focusMessageIndex, searchQuery, mode, skills | yes | — |
 | DiffPanel | `app/diff-panel.tsx` | Right-hand worktree diff rail. | — | no | — |
 | EditorGroups | `app/editor-groups.tsx` | Split tree of editor groups. | onOpenCheckpoints, sessionId, layout, revision, describe, renderBody | no | — |
 | JinglerApp | `app/jingler-app.tsx` | Top-level app composition. | onOpenCheckpoints, sessions, user, update, releaseNotes, onSignOut | yes | — |

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { Option, Schema } from "effect"
 import { Check, ChevronDown, ChevronRight, CircleStop, LoaderCircle, SquareTerminal, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Spin } from "../components/spin.js"
@@ -53,6 +54,15 @@ const workModeTitle = (args: Record<string, unknown> | null | undefined): string
   return typeof args?.reason === "string" && args.reason ? `Switched to ${mode}, ${args.reason}` : `Switched to ${mode}`
 }
 
+const decodeConversationQuery = Schema.decodeUnknownOption(Schema.Struct({ query: Schema.String }))
+const conversationLabel = (toolName: string, args: ToolCallLabelInput["args"]): ToolCallLabelResult => {
+  const parsed = decodeConversationQuery(args)
+  return {
+    title: toolName === "conversation_search" ? "Search saved chats" : "Read saved chat",
+    detail: Option.isSome(parsed) ? parsed.value.query : null
+  }
+}
+
 /**
  * A tool call's title and secondary line. `intent` (agent-written, present
  * tense) always wins the title when present; otherwise derive a label from
@@ -78,6 +88,9 @@ export function toolCallLabel({ toolName, args, intent, cwd }: ToolCallLabelInpu
     }
     case "jingler_set_work_mode":
       return { title: workModeTitle(args), detail: null }
+    case "conversation_search":
+    case "conversation_read":
+      return conversationLabel(toolName, args)
     default:
       return { title: toolName, detail }
   }

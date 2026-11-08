@@ -7,6 +7,8 @@
  */
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import type { ConversationSearchTarget } from "./conversation-search-preview-machine.js"
+import { useConversationSearchPreview } from "./use-conversation-search-preview.js"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   AgentEndpointCatalog,
@@ -41,7 +43,8 @@ import {
   OpenAssetProvider,
   BackgroundTaskDock,
   BackgroundTaskOutput,
-  Composer,
+  BannerShell,
+  Button,
   type ComposerVoiceInput,
   ConversationView,
   SubagentEntryContext,
@@ -482,6 +485,8 @@ function offlineDeviceOf(
 
 export function ConversationPane({
   session,
+  conversationSearchTarget,
+  onCloseConversationSearch,
   view = "conversation",
   onOpenPlanReview,
   onPlanDraftAvailable,
@@ -508,6 +513,8 @@ export function ConversationPane({
   paneFocused = true
 }: {
   session: Session
+  conversationSearchTarget?: ConversationSearchTarget | null
+  onCloseConversationSearch?: () => void
   /** Live paired-device catalogue owned by the app-level environment controller. */
   environments: ReadonlyArray<Environment>
   /** PI provider settings and recovery state. */
@@ -590,6 +597,7 @@ export function ConversationPane({
     onAuthorizeMcp
   )
   const convo = useConversation(session, activeChat.id)
+  const searchPreview = useConversationSearchPreview(session, conversationSearchTarget, convo)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
   const offlineDevice = offlineDeviceOf(environments, session.environmentId, () => continueEnvironmentMutation.mutate(undefined))
   const checkout = activeCheckoutOf(session)
@@ -883,10 +891,6 @@ export function ConversationPane({
     return (offline ? hold : convo.sendPrompt)(text, images, agentContext)
   }
 
-  const createChat = () => {
-    queueSessionChatMutation(session.id, () => rpc.sessionsCreateChat(session.id))
-  }
-
   /**
    * Hand a queued message to a FRESH chat instead of this one.
    *
@@ -1085,6 +1089,8 @@ export function ConversationPane({
   const mainColumnRef = useRef<HTMLDivElement>(null)
   const selectFleetRef = useRef(fleet.select)
   selectFleetRef.current = fleet.select
+  const searchRequestNonce = searchPreview.requestNonce
+  useEffect(() => { if (searchRequestNonce !== undefined) selectFleetRef.current(MAIN_FLEET_AGENT) }, [searchRequestNonce])
   const fleetSelectedIdRef = useRef(fleet.selectedId)
   fleetSelectedIdRef.current = fleet.selectedId
   useEffect(() => registerMainViewReader(activeChat.id, () => ({
@@ -1193,6 +1199,7 @@ export function ConversationPane({
         it; this outer row did not, so the constraint stopped one level short. */}
     <div ref={planSplitRowRef} className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
       <div ref={mainColumnRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {renderConversationSearchNotice(searchPreview, onCloseConversationSearch)}
       {offlineDevice && <DeviceOfflineBanner device={offlineDevice.name} onContinueLocally={offlineDevice.continueLocally} />}
       {renderEnvironmentNotices({
               convo,
@@ -1279,7 +1286,11 @@ export function ConversationPane({
         <SubagentEntryContext.Provider value={subagentEntry}>
         <ToolWatchContext.Provider value={watchTool}>
         {renderMainConversation({
-                convo,
+                convo: searchPreview.conversation,
+                conversationViewKey: searchPreview.viewKey,
+                searchMessageIndex: searchPreview.focusIndex,
+                searchQuery: searchPreview.query,
+                searchPreviewActive: searchPreview.active,
                 subagentNeedsAttention: countNodesAwaitingAttention(fleet.nodes) > 0,
                 addLocalMcp: localMcpConfig.add,
                 mcpServers: localMcpConfig.servers,
@@ -1306,7 +1317,6 @@ export function ConversationPane({
                 sendPrompt,
                 waiting,
                 setWaiting,
-                offlineDevice,
                 onOpenPlanReview,
                 previewReady: previewRevealed && onSelectBrowser ? { onOpen: onSelectBrowser } : null,
                 onForkOntoBranchStable,
@@ -1461,6 +1471,10 @@ const availableRetryPrompt = (
 
 function renderMainConversation({
   convo,
+  conversationViewKey,
+  searchMessageIndex,
+  searchQuery,
+  searchPreviewActive,
   subagentNeedsAttention,
   addLocalMcp,
   mcpServers,
@@ -1487,7 +1501,6 @@ function renderMainConversation({
   sendPrompt,
   waiting,
   setWaiting,
-  offlineDevice,
   onOpenPlanReview,
   previewReady,
   onForkOntoBranchStable,
@@ -1504,6 +1517,10 @@ function renderMainConversation({
   onFilterChanges
 }: {
   convo: Conversation;
+  conversationViewKey: string;
+  searchMessageIndex?: number;
+  searchQuery?: string;
+  searchPreviewActive: boolean;
   /** The active chat's subagent fleet has a pending attention request — lights the latest turn's rail tick amber. */
   subagentNeedsAttention: boolean;
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
@@ -1530,7 +1547,6 @@ function renderMainConversation({
   composerDisabledReason: string | undefined;
   waiting: ReadonlyArray<WaitingSend>;
   setWaiting: (value: ReadonlyArray<WaitingSend>) => void;
-  offlineDevice: { name: string; continueLocally: () => void } | null;
   sendPrompt: (text: string, images?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }>, agentContext?: string) => void;
   onOpenPlanReview: ((stepId?: string) => void) | undefined;
   previewReady: { readonly onOpen: () => void } | null;
@@ -1549,7 +1565,10 @@ function renderMainConversation({
 }) {
   const checkout = activeCheckoutOf(session);
   return <ConversationView
+    key={conversationViewKey}
     messages={convo.messages}
+    focusMessageIndex={searchMessageIndex}
+    searchQuery={searchQuery}
     hasMoreHistory={convo.hasMoreHistory}
     loadingHistory={convo.loadingHistory}
     onLoadEarlier={convo.loadOlder}
@@ -1618,11 +1637,11 @@ function renderMainConversation({
     connectionId={convo.connectionId}
     providerId={convo.providerId}
     modelId={convo.modelId}
-    composerDisabledReason={composerDisabledReason}
+    composerDisabledReason={searchPreviewActive ? "Return to the latest messages to continue this chat." : composerDisabledReason}
     onSetModel={({ runtimeId, endpointId, connectionId, providerId, modelId }) =>
       convo.setModel(runtimeId, endpointId, connectionId, providerId, modelId)}
     onSend={sendPrompt}
-    onRetryPrompt={availableRetryPrompt(session.archived, composerDisabledReason, convo.retryPrompt)}
+    onRetryPrompt={availableRetryPrompt(session.archived || searchPreviewActive, composerDisabledReason, convo.retryPrompt)}
     onStop={convo.stop}
     onDecideGate={convo.decideGate}
     onSetMode={convo.setMode}
@@ -1927,4 +1946,13 @@ function renderPlanSurface(
       )}
     </>
   )
+}
+
+
+function renderConversationSearchNotice(preview: ReturnType<typeof useConversationSearchPreview>, onClose: (() => void) | undefined) {
+  if (!preview.active) return null
+  return <BannerShell placement="top" failed={preview.failed}
+    actions={[<Button key="latest" size="sm" variant="secondary" onClick={onClose}>Back to latest</Button>]}>
+    {preview.label}
+  </BannerShell>
 }

@@ -1,4 +1,4 @@
-import type { ProjectConfig, RoutineInput, RoutineDocument, RoutineRun } from "@jingler/core"
+import type { ConversationSearchPage, ProjectConfig, RoutineInput, RoutineDocument, RoutineRun } from "@jingler/core"
 /**
  * Renderer-side RPC client. Mirror image of `src/main/rpc.ts`: a custom
  * `RpcClient.Protocol` that shuttles encoded frames over the preload bridge
@@ -684,6 +684,13 @@ export const rpc = {
     run((c) => c.Sessions.closeChat({ sessionId, chatId, discard })),
   sessionsReopenChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.reopenChat({ sessionId, chatId })),
+  sessionsSearchConversations: (
+    query: string,
+    sessionId?: string,
+    chatId?: string,
+    signal?: AbortSignal
+  ): Promise<ConversationSearchPage> =>
+    run((c) => c.Sessions.searchConversations({ query, sessionId, chatId }), signal),
   /**
    * A newest-anchored window of the transcript. Omit `before` for the newest
    * page; pass the previous page's opaque cursor to page further back. `hasMore`
@@ -694,13 +701,14 @@ export const rpc = {
     sessionId: string,
     chatId: string,
     before: string | undefined,
-    limit: number
+    limit: number,
+    signal?: AbortSignal
   ): Promise<{
     messages: ReadonlyArray<Message>
     hasMore: boolean
     cursor?: string
   }> =>
-    run((c) => c.Sessions.transcriptPage({ sessionId, chatId, before, limit })),
+    run((c) => c.Sessions.transcriptPage({ sessionId, chatId, before, limit }), signal),
   /** One image attachment's base64, or null when the id is unknown. */
   sessionsAttachment: (
     chatId: string,

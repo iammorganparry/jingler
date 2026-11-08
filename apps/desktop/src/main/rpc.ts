@@ -77,6 +77,7 @@ import {
   ThemeService,
   BackgroundTaskStore,
   TranscriptStore,
+  searchConversations,
   makeAgentRuntimePublishMetadataGenerator,
   isCommitSubjectSafe,
   isSessionPublishBranchReady,
@@ -5488,6 +5489,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Sessions.scanImportable": () => scanImportableSessions(),
   "Sessions.import": ({ source, nativeSessionId }) =>
     importSession(source, nativeSessionId),
+  "Sessions.searchConversations": (input) => searchConversations(input),
   // The windowed read the renderer opens sessions with — only the tail loads,
   // older turns page in on demand. Same attachment-stripping as the whole read.
   "Sessions.transcriptPage": ({ sessionId, chatId, before, limit }) =>

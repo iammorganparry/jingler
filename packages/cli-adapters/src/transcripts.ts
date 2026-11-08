@@ -1,5 +1,5 @@
-import type { ExternalInstructionIdentity, Message } from "@jingler/core"
-import { Message as MessageSchema } from "@jingler/core"
+import type { ConversationSearchHit, ExternalInstructionIdentity, Message } from "@jingler/core"
+import { CONVERSATION_SEARCH_PAGE_SIZE, conversationSearchSnippet, Message as MessageSchema, normalizeConversationQuery } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema } from "effect"
 import { open, stat } from "node:fs/promises"
@@ -46,6 +46,21 @@ const structurallySound = (index: TranscriptIndex): boolean => {
 }
 
 type TranscriptEnv = FileSystem.FileSystem | Path.Path | AppPaths
+
+type TranscriptSearchHit = Pick<ConversationSearchHit, "messageId" | "messageIndex" | "before" | "role" | "snippet">
+
+const searchPage = (messages: ReadonlyArray<Message>, query: string, before: string, limit: number): TranscriptSearchHit[] => {
+  const hits: TranscriptSearchHit[] = []
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!
+    if (message.role !== "user" && message.role !== "assistant") continue
+    const snippet = conversationSearchSnippet(message, query)
+    if (snippet === null) continue
+    hits.push({ messageId: message.id, messageIndex: i, before, role: message.role, snippet })
+    if (hits.length >= limit) break
+  }
+  return hits
+}
 
 /**
  * Per-chat conversation transcript, persisted to
@@ -680,9 +695,28 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           })
         )
 
+      /** Read bounded pages, yielding between them so cancelling a query stops disk work. */
+      const search = (chatId: string, input: string, limit: number) => Effect.gen(function* () {
+        const query = normalizeConversationQuery(input)
+        const hits: TranscriptSearchHit[] = []
+        if (query.length < 3 || query.length > 160 || limit <= 0) return hits
+        const index = yield* lock.withPermits(1)(ensureIndex(chatId))
+        let before: string | undefined = `v1:${index.offsets.length}`
+        while (before !== undefined) {
+          const pageBefore: string = before
+          const page = yield* listPage(chatId, { before: pageBefore, limit: CONVERSATION_SEARCH_PAGE_SIZE })
+          hits.push(...searchPage(page.messages, query, pageBefore, limit - hits.length))
+          if (hits.length >= limit) return hits
+          before = page.hasMore ? page.cursor : undefined
+          yield* Effect.yieldNow()
+        }
+        return hits
+      })
+
       return {
         list,
         listPage,
+        search,
         adoptLegacy,
         remove,
         append,

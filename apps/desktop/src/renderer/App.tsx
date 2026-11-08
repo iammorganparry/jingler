@@ -12,6 +12,7 @@ import type {
   AgentEndpointCatalog,
   Attachment,
   ContextConfig,
+  ConversationSearchHit,
   PlanTemplateConfig,
   VsCodeTheme,
   CreateSessionFromIssueInput,
@@ -88,6 +89,7 @@ import { appMachine } from "./app-machine.js";
 import { useConnectivity } from "./connectivity.js";
 import { authMachine } from "./auth-machine.js";
 import { ConversationPane } from "./conversation-pane.js";
+import type { ConversationSearchTarget } from "./conversation-search-preview-machine.js";
 import {
   useExplanationDocument,
   useExplanationSessions,
@@ -146,7 +148,6 @@ import { completedSessionIds } from "./pr-refresh.js";
 import {
   issuesToCloseOnMerge,
   prNotifyKey,
-  prNumbersOf,
   prTargetsOf,
   prsToNotify,
   stackLifecycle,
@@ -424,6 +425,28 @@ function AuthedApp({
     tabId?: string;
     nonce: number;
   } | null>(null);
+  const [conversationSearchTarget, setConversationSearchTarget] = useState<ConversationSearchTarget | null>(null);
+  const openConversationSearchHit = useCallback((hit: ConversationSearchHit, query: string) => {
+    const failed = () => sendToast({ type: "PUSH", toast: { key: "conversation-search-open", variant: "error", title: "Could not open this search result", description: "The conversation may have changed or been removed. Search again to find it." } });
+    const session = sessionsRef.current.find((candidate) => candidate.id === hit.sessionId);
+    if (!session) { failed(); return; }
+    queueSessionChatMutation(hit.sessionId, async () => {
+      try {
+        if (!session.chats.some((chat) => chat.id === hit.chatId)) {
+          await rpc.sessionsReopenChat(hit.sessionId, hit.chatId);
+        }
+        return await rpc.sessionsSelectChat(hit.sessionId, hit.chatId);
+      } catch (error) {
+        failed();
+        throw error;
+      }
+    }, (updated) => {
+      publishSessionUpdate(updated);
+      updateEditorLayout(hit.sessionId, (layout) => openTab(layout, { kind: "chat", id: hit.chatId }));
+      setSelectRequest((previous) => ({ sessionId: hit.sessionId, nonce: (previous?.nonce ?? 0) + 1 }));
+      setConversationSearchTarget((previous) => ({ ...hit, query, nonce: (previous?.nonce ?? 0) + 1 }));
+    });
+  }, [sendToast]);
   const [newSessionRequest, setNewSessionRequest] = useState<{
     projectId: string;
     pr?: PrSummary;
@@ -1713,6 +1736,8 @@ function AuthedApp({
         pluginCommands={pluginCommands}
         onRunPluginCommand={runPluginCommand}
         selectSessionRequest={selectRequest}
+        searchConversations={rpc.sessionsSearchConversations}
+        onOpenConversationSearchHit={openConversationSearchHit}
         newSessionRequest={newSessionRequest}
         onVisibleSessionsChange={onVisibleSessionsChange}
         platform={window.jingler.platform}
@@ -2048,6 +2073,8 @@ function AuthedApp({
           <ConversationPane
             key={`${session.id}:${session.activeChatId}`}
             session={session}
+            conversationSearchTarget={conversationSearchTarget}
+            onCloseConversationSearch={() => setConversationSearchTarget(null)}
             environments={environmentController.environments}
             providerCatalog={providerCatalog.catalog}
             agentEndpointCatalog={agentEndpointCatalog}

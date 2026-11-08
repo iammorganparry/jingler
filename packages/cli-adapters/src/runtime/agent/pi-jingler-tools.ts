@@ -32,6 +32,7 @@ import { registerStructuralCodeTools } from "../tools/structural-code-tools.js"
 import { registerCheckoutTool, toolCwd } from "../tools/checkout-tools.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { registerWorkModeTool } from "./work-mode-tool.js"
+import { registerConversationTools, type ConversationHistoryPort } from "../tools/conversation-tools.js"
 
 const roles = ["conversation", "plan", "plan-execution", "background"] as const
 const modes = codeReadModes
@@ -209,6 +210,7 @@ export interface JinglerToolRegistryInput {
   readonly context: AgentRuntimeContext
   readonly cwd: WorkspaceCwd
   readonly workspace?: WorkspaceInspectionPort
+  readonly conversations?: ConversationHistoryPort
   readonly webSearch?: WebSearchServiceShape
   readonly mcp?: JinglerMcpAttachments
   /**
@@ -260,6 +262,7 @@ export const createJinglerTools = (
       new ToolRegistry(input.registryOptions)
     )
     const cwd = toolCwd(input.cwd, input.context.checkouts)
+    if (input.conversations) registerConversationTools(registry, input.conversations)
     if (input.workspace) {
       registerWorkspaceInspectionTools(registry, cwd, input.workspace)
     }

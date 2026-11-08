@@ -1,6 +1,25 @@
 [
   {
     "paths": [
+      "packages/cli-adapters/src/conversation-search.ts",
+      "packages/cli-adapters/src/transcripts.ts",
+      "packages/cli-adapters/src/runtime/tools/conversation-tools",
+      "packages/cli-adapters/src/runtime/agent/pi-jingler-tools.ts",
+      "packages/cli-adapters/src/runtime/agent/pi-runtime-live.ts",
+      "packages/cli-adapters/src/runtime/agent/fixtures/claude-conversation-search.mjs",
+      "packages/core/src/conversation-search.ts",
+      "packages/ui/src/app/conversation-search",
+      "packages/ui/src/app/use-conversation-search",
+      "apps/desktop/src/renderer/conversation-search",
+      "apps/desktop/src/renderer/use-conversation-search"
+    ],
+    "specs": [
+      "conversation-search.spec.ts",
+      "agent-conversation-search.spec.ts"
+    ]
+  },
+  {
+    "paths": [
       "apps/server/",
       ".github/"
     ],

@@ -40,6 +40,13 @@ describe("ToolCall sign-in", () => {
 })
 
 describe("toolCallLabel", () => {
+  it("labels history lookups and ignores malformed saved queries", () => {
+    expect(toolCallLabel({ toolName: "conversation_search", args: { query: "connection pool" } })).toEqual({ title: "Search saved chats", detail: "connection pool" })
+    expect(toolCallLabel({ toolName: "conversation_read", args: { query: "connection pool" } })).toEqual({ title: "Read saved chat", detail: "connection pool" })
+    expect(toolCallLabel({ toolName: "conversation_search", args: { query: 42 } })).toEqual({ title: "Search saved chats", detail: null })
+    expect(toolCallLabel({ toolName: "conversation_read", args: null })).toEqual({ title: "Read saved chat", detail: null })
+  })
+
   it("intent wins the title, with detail as the stripped command", () => {
     const result = toolCallLabel({
       toolName: "command_execute",

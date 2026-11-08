@@ -563,6 +563,9 @@
   ::selection {
     background: var(--sb-selection);
   }
+  ::highlight(jingler-conversation-search) {
+    background-color: color-mix(in srgb, var(--sb-yellow) 22%, transparent);
+  }
 
   /*
    * Tailwind v4's Preflight resets <button> to `cursor: default`, so every

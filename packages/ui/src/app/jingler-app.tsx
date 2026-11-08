@@ -14,6 +14,8 @@ import {
 import type {
   AgentEndpointCatalog,
   ContextConfig,
+  ConversationSearchHit,
+  ConversationSearchPage,
   PlanTemplateConfig,
   ContextSnapshot,
   CreateSessionFromIssueInput,
@@ -399,6 +401,8 @@ export interface JinglerAppProps {
   /** Whether the named session's Browser tab is currently open. */
   isBrowserActive?: (sessionId: string, chatId: string) => boolean
   activeSessionId?: string | null
+  searchConversations?: (query: string, sessionId?: string, chatId?: string, signal?: AbortSignal) => Promise<ConversationSearchPage>
+  onOpenConversationSearchHit?: (hit: ConversationSearchHit, query: string) => void
   /**
    * Select a session from OUTSIDE the shell — a notification click, a deep link.
    * Bump this to a new value to jump there; the shell owns the selection
@@ -895,7 +899,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bugReport, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, subagentCounts, subagentAttentionCounts, subagentEntries, onOpenSubagent, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, notificationPermission, onOpenNotificationSystemSettings, offloadCompute, onSaveOffloadCompute, offloadStatus, onRetryOffload, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, planTemplate, onSavePlanTemplate, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, voice, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, useSessionTerminals, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, subagentPrNodes, onOpenSessionPr, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView, obsidianExplanations, onSaveObsidianExplanations, obsidianVaultConfigured } = defaultProps(props, {
+const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bugReport, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, subagentCounts, subagentAttentionCounts, subagentEntries, onOpenSubagent, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, notificationPermission, onOpenNotificationSystemSettings, offloadCompute, onSaveOffloadCompute, offloadStatus, onRetryOffload, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, planTemplate, onSavePlanTemplate, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, voice, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, useSessionTerminals, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, searchConversations, onOpenConversationSearchHit, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, subagentPrNodes, onOpenSessionPr, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView, obsidianExplanations, onSaveObsidianExplanations, obsidianVaultConfigured } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -1415,6 +1419,13 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
     [sessions, liveActivity]
   )
 
+  const searchSessionId = active?.id
+  const searchChatId = active?.activeChatId
+  const searchSavedConversations = useCallback((query: string, scope: "workspace" | "chat", signal: AbortSignal) => {
+    if (!searchConversations || (scope === "chat" && !searchSessionId)) return Promise.resolve({ hits: [], hasMore: false })
+    return searchConversations(query, scope === "chat" ? searchSessionId : undefined, scope === "chat" ? searchChatId : undefined, signal)
+  }, [searchConversations, searchSessionId, searchChatId])
+
   const paletteItems = useMemo<ReadonlyArray<PaletteItem>>(() => {
     const items: PaletteItem[] = []
 
@@ -1634,6 +1645,8 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         items={paletteItems}
+        searchConversations={searchConversations ? searchSavedConversations : undefined}
+        onOpenConversation={onOpenConversationSearchHit}
       />
       {fileQuickOpenSession && renderFileQuickOpen
         ? renderFileQuickOpen(fileQuickOpenSession, {

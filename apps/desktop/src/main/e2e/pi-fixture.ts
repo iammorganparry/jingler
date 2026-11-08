@@ -15,6 +15,7 @@ import {
   CLAUDE_CLI_API_ROUTE,
   CLAUDE_CLI_SUBSCRIPTION_ROUTE,
   CURRENT_RUNTIME_CONTRACTS,
+  ConversationSearchPage,
   ProviderConnection,
   ProviderId,
   ProviderModelId,
@@ -896,8 +897,30 @@ const routineProofResponse = async (context: PiContext): Promise<ReturnType<type
   return fauxAssistantMessage("Routine proof inspection complete.")
 }
 
+const conversationSearchResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  const query = "quartz capybara"
+  if (recentToolResultCount(context, "conversation_search") === 0) {
+    return callTool("conversation_search", { query }, "history-search")
+  }
+  const search = context.messages.findLast((message) => message.role === "toolResult" && message.toolName === "conversation_search")
+  const result = Schema.decodeUnknownSync(Schema.parseJson(ConversationSearchPage))(toolResultText(search!))
+  const hit = result.hits.find((entry) => entry.chatId === "closed-chat")
+  if (!hit || result.hits.some((entry) => entry.sessionId !== "current" && entry.sessionId !== "archive")) throw new Error("Expected scoped project history results")
+  if (recentToolResultCount(context, "conversation_read") === 0) {
+    const { sessionId, chatId, messageId, messageIndex, before } = hit
+    return callTool("conversation_read", { query, sessionId, chatId, messageId, messageIndex, before }, "history-read")
+  }
+  const read = context.messages.findLast((message) => message.role === "toolResult" && message.toolName === "conversation_read")
+  const excerpt = Schema.decodeUnknownSync(Schema.parseJson(Schema.Struct({ messages: Schema.Array(Schema.Struct({ text: Schema.String })) })))(toolResultText(read!))
+  const answer = excerpt.messages.find((message) => message.text.includes("Reset the shared pool before reconnecting."))
+  if (!answer) throw new Error("Expected neighboring context from the real history tool")
+  return fauxAssistantMessage(`From saved chat ${hit.chatId}: ${answer.text}`)
+}
+
 const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> => {
   switch (fixture.scenarioId) {
+    case "conversation-search":
+      return Array.from({ length: 8 }, () => conversationSearchResponse)
     case "send-progress":
       // The real title role waits on the scripted transport, so creation stays
       // pending after the workspace exists. No provider/network request occurs.

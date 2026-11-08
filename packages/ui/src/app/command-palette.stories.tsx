@@ -1,4 +1,4 @@
-import * as React from "react"
+import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import {
   Archive,
@@ -176,12 +176,37 @@ export const PrefixScope: Story = {
 export const Interactive: Story = {
   args: { open: false, onOpenChange: noop, items: ITEMS },
   render: (args) => {
-    const [open, setOpen] = React.useState(false)
+    const [open, setOpen] = useState(false)
     return (
       <div className="flex h-[520px] items-start justify-center pt-8">
         <Button onClick={() => setOpen(true)}>Open the palette</Button>
         <CommandPalette {...args} open={open} onOpenChange={setOpen} />
       </div>
     )
+  }
+}
+
+/** Type a phrase to exercise the same asynchronous result states as the desktop. */
+export const SavedConversations: Story = {
+  args: {
+    open: true,
+    onOpenChange: noop,
+    items: ITEMS,
+    onOpenConversation: noop,
+    searchConversations: async (query) => ({
+      hits: [{
+        sessionId: "s1", chatId: "chat1", messageId: "message1", messageIndex: 0,
+        before: "v1:1", sessionTitle: "Connection recovery", chatTitle: "Retry investigation",
+        repo: "jingler", role: "assistant", snippet: `We resolved ${query} by resetting the connection pool before retrying.`
+      }],
+      hasMore: false
+    })
+  }
+}
+
+export const ConversationSearchUnavailable: Story = {
+  args: {
+    ...SavedConversations.args,
+    searchConversations: async () => { throw new Error("Offline fixture") }
   }
 }

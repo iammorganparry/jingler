@@ -15,6 +15,13 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - Inspect and control delegated Pi agents from the composer-integrated [Fleet](docs/subagent-fleet.md).
 - Start work from a project checkout or a new isolated worktree.
 - Use built-in terminals, browser previews, themes, MCP servers, and agent skills.
+- Find saved conversation text from the command palette, including archived workspaces and closed chats.
+- Agents can use `conversation_search` and `conversation_read` to retrieve saved text from the current local project on demand, including archived workspaces and closed chats. Search returns up to 20 snippets; reading returns up to five messages with at most 2,000 characters each. Results exclude private thinking, tool output and attachments.
+
+Press **⌘K** (**Ctrl+K** on Windows/Linux) and enter a phrase of at least three characters to search
+saved messages on this device. **Workspace** searches across workspaces; **Chat** searches the current
+chat. Select a snippet to open the matching message. **Back to latest** restores the live conversation
+and your draft.
 
 ## Install
 

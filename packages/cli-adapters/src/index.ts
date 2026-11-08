@@ -127,6 +127,8 @@ export type { AnchoredProcess } from "./anchored-fs.js"
 
 export * from "./project-config.js"
 
+export { searchConversations } from "./conversation-search.js";
+
 // Session import scanners
 export {
   scanClaudeCodeSessions,
