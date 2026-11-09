@@ -6155,7 +6155,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setPlanAutoRun": ({ planAutoRun }) =>
     ConfigService.setPlanAutoRun(planAutoRun),
   "Config.setVoice": (voice) => ConfigService.setVoice(voice),
-  "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
+  "Config.setResponseStyle": ({ responseStyle }) => ConfigService.setResponseStyle(responseStyle),
   "Config.setFontScale": ({ fontScale }) =>
     ConfigService.setFontScale(fontScale),
   "Config.setDefaultProviderModel": ({ connectionId, providerId, modelId }) =>

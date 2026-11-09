@@ -34,6 +34,7 @@ import type {
   OffloadComputeSettings,
   PublishCheckpoint,
   PrSummary,
+  ResponseStyle,
   Session,
   SessionActivity,
   User,
@@ -48,6 +49,7 @@ import {
   DEFAULT_THEME_ID,
   normalizeHeaderViews,
   pendingQuestion,
+  responseStyleOf,
   workspaceModeOf,
 } from "@jingler/core";
 import {
@@ -645,7 +647,7 @@ function AuthedApp({
   }, [persistedOffloadCompute, sendOffloadSettings]);
   const offloadCompute = offloadSettingsState.context.settings;
   // Absent means Auto for configs written before this preference existed.
-  const { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, planTemplate, adhdMode, fontScale, contextConfig } = appDisplayPreferences(configQuery);
+  const { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, planTemplate, responseStyle, fontScale, contextConfig } = appDisplayPreferences(configQuery);
   const usage = usageQuery.data ?? null;
 
   const contextTargets = sessions.flatMap((session) => {
@@ -730,8 +732,8 @@ function AuthedApp({
     rpc.configSetPlanTemplate(template).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
-  const saveAdhdMode = (value: boolean) =>
-    rpc.configSetAdhdMode(value).then((saved) => {
+  const saveResponseStyle = (value: ResponseStyle) =>
+    rpc.configSetResponseStyle(value).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
   const saveFontScale = (value: number) =>
@@ -1829,8 +1831,8 @@ function AuthedApp({
         onSavePlanAutoRun={savePlanAutoRun}
         planTemplate={planTemplate}
         onSavePlanTemplate={savePlanTemplate}
-        adhdMode={adhdMode}
-        onSaveAdhdMode={saveAdhdMode}
+        responseStyle={responseStyle}
+        onSaveResponseStyle={saveResponseStyle}
         fontScale={fontScale}
         onSaveFontScale={saveFontScale}
         themes={themeSettings}
@@ -2343,9 +2345,7 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
   // Absent means on — plan mode's commands are read-only.
   const planAutoRun = configQuery.data?.planAutoRun ?? true;
   const planTemplate = configQuery.data?.planTemplate ?? null;
-  // Absent means off — ADHD mode shapes completion summaries, so it remains an
-  // opt-in preference rather than a default the operator has to undo.
-  const adhdMode = configQuery.data?.adhdMode ?? false;
+  const responseStyle = responseStyleOf(configQuery.data);
   // Absent or malformed collapses to 1× (FONT_SCALE_DEFAULT). This value only
   // feeds the Settings control's active preset — the transcript reads the var
   // set in conversation-pane.tsx, so scaling stays scoped there.
@@ -2355,7 +2355,7 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
   const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
   const headerViews = normalizeHeaderViews(configQuery.data?.headerViews);
   const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
-  return { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, planTemplate, adhdMode, fontScale, contextConfig };
+  return { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, planTemplate, responseStyle, fontScale, contextConfig };
 }
 
 function renderIssueInbox(

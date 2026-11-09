@@ -376,15 +376,15 @@ describe("ConfigService", () => {
     if (exit._tag === "Success") expect(exit.value?.defaultMode).toBe("ask")
   })
 
-  it("persists ADHD mode and reads it back", async () => {
+  it("persists the response style and reads it back", async () => {
     const exit = await provided(
       Effect.gen(function* () {
-        yield* ConfigService.setAdhdMode(true)
+        yield* ConfigService.setResponseStyle("elaborate")
         return yield* ConfigService.get()
       })
     )
     expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") expect(exit.value?.adhdMode).toBe(true)
+    if (exit._tag === "Success") expect(exit.value?.responseStyle).toBe("elaborate")
   })
 
   /**
@@ -392,10 +392,10 @@ describe("ConfigService", () => {
    * preservation spread drops a saved `false` on every unrelated write, which
    * reads as "the setting keeps turning itself back on".
    */
-  it("keeps ADHD mode and planAutoRun (including false) across an unrelated save", async () => {
+  it("keeps the response style and planAutoRun (including false) across an unrelated save", async () => {
     const exit = await provided(
       Effect.gen(function* () {
-        yield* ConfigService.setAdhdMode(true)
+        yield* ConfigService.setResponseStyle("balanced")
         yield* ConfigService.setPlanAutoRun(false)
         yield* ConfigService.setLastRepoPath("/repos/widget")
         return yield* ConfigService.get()
@@ -403,7 +403,7 @@ describe("ConfigService", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") {
-      expect(exit.value?.adhdMode).toBe(true)
+      expect(exit.value?.responseStyle).toBe("balanced")
       expect(exit.value?.planAutoRun).toBe(false)
     }
   })
