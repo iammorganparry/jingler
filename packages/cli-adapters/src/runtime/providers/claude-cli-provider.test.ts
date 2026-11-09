@@ -456,6 +456,33 @@ setInterval(() => {}, 1000)
     expect(text).not.toContain("jingler-tool-")
   })
 
+  it("only ever grows the replay at the end, so the prompt-cache prefix survives every call", () => {
+    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
+    const call = (id: string, timestamp: number) => ({
+      role: "assistant" as const,
+      content: [{ type: "toolCall" as const, id, name: "workspace_read_file", arguments: { path: `${id}.ts` } }],
+      api: model.api, provider: model.provider, model: model.id, usage, stopReason: "toolUse" as const, timestamp
+    })
+    const result = (id: string, timestamp: number) => ({
+      role: "toolResult" as const, toolCallId: id, toolName: "workspace_read_file",
+      content: [{ type: "text" as const, text: `${id} contents` }], isError: false, timestamp
+    })
+    const steps = [
+      [call("c1", 2), result("c1", 3)],
+      [call("c2", 4), result("c2", 5)],
+      [{ ...call("c3", 6), content: [{ type: "text" as const, text: "done" }], stopReason: "stop" as const }],
+      [{ role: "user" as const, content: "next", timestamp: 7 }]
+    ]
+    let messages = [...rawContext.messages]
+    let previous = transcriptContent(normalizeContext({ ...rawContext, messages }))
+    for (const step of steps) {
+      messages = [...messages, ...step]
+      const next = transcriptContent(normalizeContext({ ...rawContext, messages }))
+      expect(next.slice(0, previous.length)).toEqual(previous)
+      previous = next
+    }
+  })
+
   it("records the request's usage on a turn that ends in a tool call", async () => {
     const binary = await executable(`process.stdin.resume(); console.log(${JSON.stringify(JSON.stringify(JSON.parse('{"type":"stream_event","event":{"type":"message_delta","usage":{"input_tokens":9,"output_tokens":236,"cache_read_input_tokens":26773,"cache_creation_input_tokens":2968}}}')))}); setInterval(() => {}, 1000)`)
     const stream = createClaudeCliStreamSimple({

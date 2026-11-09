@@ -242,7 +242,8 @@ export function transcriptContent(context: TranscriptContext): ReadonlyArray<Cla
     numbers.set(id, number)
     return number
   }
-  for (const message of context.messages) {
+  const replayed = context.messages.filter(({ role }) => role !== "system")
+  for (const [index, message] of replayed.entries()) {
     if (message.role === "system") continue
     if (message.role === "user") {
       content.push({ type: "text", text: "<jingler-message role=\"user\">" })
@@ -268,6 +269,9 @@ export function transcriptContent(context: TranscriptContext): ReadonlyArray<Cla
         type: "text",
         text: `<jingler-message role="tool">\nCall #${callNumber(message.toolCallId)}: ${message.toolName} finished${message.isError ? " with an error" : ""}. Its output:\n${output}\n</jingler-message>`
       })
+      // After EVERY tool-result run, not just a trailing one: a note that only closes the
+      // replay vanishes on the next call, so the prompt-cache breakpoint on it never matches again.
+      if (replayed[index + 1]?.role !== "toolResult") content.push({ type: "text", text: TOOLS_FINISHED_NOTE })
       continue
     }
     content.push({ type: "text", text: "<jingler-message role=\"assistant\">" })
@@ -280,9 +284,6 @@ export function transcriptContent(context: TranscriptContext): ReadonlyArray<Cla
       })
     }
     content.push({ type: "text", text: "</jingler-message>" })
-  }
-  if (context.messages.findLast(({ role }) => role !== "system")?.role === "toolResult") {
-    content.push({ type: "text", text: TOOLS_FINISHED_NOTE })
   }
   return content
 }
