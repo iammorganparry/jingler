@@ -8,15 +8,17 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSelector } from "@xstate/react"
 import type { Session, SubagentFleetNode } from "@jingler/core"
 import { activeCheckoutOf, checkoutById, checkoutsOf, hasNoRepo, workspaceModeOf, sessionPrsOf } from "@jingler/core"
-import type { AgentTreeChanges } from "@jingler/ui"
-import { ChangedFilesExplorer, CollapsibleSection, EmptyState, SubagentScopeBar, ReviewSidebar, checkoutLabel, cn, reviewTurnsOf } from "@jingler/ui"
+import type { AgentTreeChanges, ChatScope } from "@jingler/ui"
+import { ChangedFilesExplorer, CollapsibleSection, EmptyState, SubagentScopeBar, ReviewSidebar, chatPathsOf, checkoutLabel, cn, narrowToPaths, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
 import {
   setReviewFilter,
   setReviewFocused,
   setReviewPrLayer,
   setReviewTrayHidden,
+  setChatChangesScope,
   setReviewTurn,
+  useChatChangesScope,
   useReviewFocused,
   useReviewTrayHidden,
   useSessionReviewState
@@ -103,6 +105,38 @@ export function useReviewTurns(session: Session) {
   return { turns, turn, setTurn }
 }
 
+/**
+ * Chats share one worktree, so "This chat" narrows the tree's diff to the paths
+ * the active chat's own tools changed. A file two chats edited shows its whole diff.
+ */
+export function useChatScopedFiles<
+  F extends { readonly path: string },
+  D extends { readonly path: string },
+  O extends { readonly path: string }
+>(
+  session: Session,
+  review: { readonly files: ReadonlyArray<F>; readonly fileDiffs: ReadonlyArray<D>; readonly omittedFiles: ReadonlyArray<O> },
+  turns: ReturnType<typeof reviewTurnsOf>,
+  checkoutId: string | undefined
+) {
+  const chatScope = useChatChangesScope(session.activeChatId)
+  // A multi-repo session names every checkout, the active one included; the
+  // agent's tools run in the active checkout, so that's where chat paths apply.
+  const active = checkoutId === undefined || checkoutId === activeCheckoutOf(session).id
+  const multiChat = active && session.chats.length > 1
+  const paths = useMemo(
+    () => (multiChat && chatScope === "chat" ? chatPathsOf(turns) : null),
+    [multiChat, chatScope, turns]
+  )
+  return {
+    files: useMemo(() => narrowToPaths(review.files, paths), [review.files, paths]),
+    fileDiffs: useMemo(() => narrowToPaths(review.fileDiffs, paths), [review.fileDiffs, paths]),
+    omittedFiles: useMemo(() => narrowToPaths(review.omittedFiles, paths), [review.omittedFiles, paths]),
+    chatScope,
+    setChatScope: multiChat ? (scope: ChatScope) => setChatChangesScope(session.activeChatId, scope) : undefined
+  }
+}
+
 function ViewedChildScopeBar({
   viewed,
   agentTrees,
@@ -150,7 +184,8 @@ function CheckoutChangesList({
   )
   // The turn filter belongs to the active checkout only.
   const active = checkoutId === undefined
-  const agentTrees = useAgentTrees(session, review.files, active && review.source === "local")
+  const { files, fileDiffs, omittedFiles, chatScope, setChatScope } = useChatScopedFiles(session, review, turns, checkoutId)
+  const agentTrees = useAgentTrees(session, files, active && review.source === "local")
   const { changesScope, setChangesScope } = useSubagentView(session.activeChatId)
   const viewed = useViewedChild(session.id, session.activeChatId)
   const scoped = active && viewed !== null && changesScope === viewed.subagentId
@@ -164,12 +199,14 @@ function CheckoutChangesList({
       prLayers={active ? sessionPrsOf(session) : []}
       prNumber={prLayer ?? activeCheckoutOf(session).prNumber}
       onPrNumberChange={selectLayer}
-      files={review.files}
+      files={files}
+      chatScope={chatScope}
+      onChatScopeChange={setChatScope}
       agentTrees={agentTrees}
       agentScope={changesScope}
       onAgentScopeChange={setChangesScope}
-      fileDiffs={review.fileDiffs}
-      omittedFiles={review.omittedFiles}
+      fileDiffs={fileDiffs}
+      omittedFiles={omittedFiles}
       diffLineLimit={review.diffLineLimit}
       drafts={review.drafts}
       reviewThreads={review.reviewThreads}

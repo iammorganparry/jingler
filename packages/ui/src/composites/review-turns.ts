@@ -22,15 +22,24 @@ export const reviewTurnsOf = (messages: readonly Message[]): readonly ReviewTurn
   })
 }
 
+/** Which chats' changes the Changes list shows: the active chat's own, or the whole shared tree. */
+export type ChatScope = "chat" | "all"
+
+/** Every path any of these turns changed: what one chat touched in the shared tree. */
+export const chatPathsOf = (turns: readonly ReviewTurn[]): ReadonlySet<string> =>
+  new Set(turns.flatMap((turn) => turn.paths))
+
+/** Keep only the items whose path is in `paths`; null keeps everything. */
+export const narrowToPaths = <T extends { readonly path: string }>(
+  items: readonly T[],
+  paths: ReadonlySet<string> | null
+): readonly T[] => (paths === null ? items : items.filter((item) => paths.has(item.path)))
+
 /** Keep only the items a turn touched; no turn keeps everything. */
 export const narrowToTurn = <T extends { readonly path: string }>(
   items: readonly T[],
   turn: ReviewTurn | null
-): readonly T[] => {
-  if (turn === null) return items
-  const paths = new Set(turn.paths)
-  return items.filter((item) => paths.has(item.path))
-}
+): readonly T[] => narrowToPaths(items, turn === null ? null : new Set(turn.paths))
 
 /** One file change an agent tool made to a single path, labelled with the turn it came from. */
 export interface AgentEdit {

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { PropsWithChildren, ReactElement } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { useChangesReview } from "./changes-review.js"
+import { useChangesReview, useChatScopedFiles } from "./changes-review.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { resetReviewStore, setReviewFilter } from "./review-store.js"
 import { rpc } from "./rpc-client.js"
@@ -180,5 +180,38 @@ describe("sending review comments to the agent", () => {
     expect(rpc.githubSubmitReview).toHaveBeenCalledWith("s1", [
       { path, line: 34, startLine: 33, body: "Nit." }
     ])
+  })
+})
+
+describe("chat-scoped changes", () => {
+  const multi = {
+    ...session,
+    chats: [{ id: "c1" }, { id: "c2" }],
+    activeChatId: "c1",
+    checkouts: [...(session.checkouts ?? []), { id: "other", repo: "o", branch: "b", prNumber: null, worktreePath: "/o", workspaceMode: "worktree" }]
+  } as unknown as Session
+  const review = {
+    files: [{ path: "mine.ts" }, { path: "theirs.ts" }],
+    fileDiffs: [{ path: "mine.ts" }, { path: "theirs.ts" }],
+    omittedFiles: [{ path: "theirs.ts" }]
+  }
+  const turns = [{ id: "a1", label: "Turn 1", paths: ["mine.ts"] }]
+
+  it("narrows files, diffs and omitted files in the active checkout, named or not", () => {
+    for (const checkoutId of [undefined, "primary"]) {
+      const { result } = renderHook(() => useChatScopedFiles(multi, review, turns, checkoutId))
+      expect(result.current.files.map((f) => f.path)).toEqual(["mine.ts"])
+      expect(result.current.fileDiffs.map((f) => f.path)).toEqual(["mine.ts"])
+      expect(result.current.omittedFiles).toEqual([])
+      expect(result.current.setChatScope).toBeDefined()
+    }
+  })
+
+  it("leaves other checkouts and single-chat sessions whole, with no toggle", () => {
+    const other = renderHook(() => useChatScopedFiles(multi, review, turns, "other")).result.current
+    expect(other.files).toBe(review.files)
+    expect(other.setChatScope).toBeUndefined()
+    const single = renderHook(() => useChatScopedFiles({ ...multi, chats: [{ id: "c1" }] } as unknown as Session, review, turns, undefined)).result.current
+    expect(single.files).toBe(review.files)
   })
 })

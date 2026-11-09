@@ -40,7 +40,8 @@ import {
 import { ReviewFileRail } from "./review-file-rail.js"
 import { FindingsList, rankFindings } from "./review-findings.js"
 import { createReviewCodeFiles, ReviewCodeView } from "./review-code-view.js"
-import { narrowToTurn, type ReviewTurn } from "./review-turns.js"
+import { narrowToTurn, type ChatScope, type ReviewTurn } from "./review-turns.js"
+import { SegmentedControl } from "../components/segmented-control.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
 import { TurnFilter } from "./turn-filter.js"
 import { PrFilter, type PrFilterLayer } from "./pr-filter.js"
@@ -208,6 +209,9 @@ export interface ChangedFilesExplorerProps {
   readonly prLayers?: readonly PrFilterLayer[]
   readonly prNumber?: number | null
   readonly onPrNumberChange?: (number: number) => void
+  /** Chats sharing the tree: the caller narrows `files`; the toggle shows when `onChatScopeChange` is set. */
+  readonly chatScope?: ChatScope
+  readonly onChatScopeChange?: (scope: ChatScope) => void
   /** The change list is still loading: show placeholder rows at real height. */
   readonly loading?: boolean
   /** The change list failed to load; `onRetry` adds the Retry button. */
@@ -255,6 +259,27 @@ function PrFilterBar({
   )
 }
 
+const CHAT_SCOPES = [
+  { value: "chat", label: "This chat" },
+  { value: "all", label: "All chats" }
+] as const
+
+/** "This chat / All chats": renders nothing without a change handler. */
+function ChatScopeBar({
+  value,
+  onChange
+}: {
+  readonly value: ChatScope
+  readonly onChange: ((scope: ChatScope) => void) | undefined
+}) {
+  if (!onChange) return null
+  return (
+    <div className="flex-none border-b border-hairline p-2">
+      <SegmentedControl items={CHAT_SCOPES} value={value} onChange={onChange} size="sm" fullWidth aria-label="Changes scope" />
+    </div>
+  )
+}
+
 /** The changed-files list once two or more agent trees exist: scope filter plus per-agent rows. */
 function AgentScopedFileList({
   trees,
@@ -286,8 +311,24 @@ function AgentScopedFileList({
   )
 }
 
-/** The empty state for a zero-file layer: a PR-stack-specific message once there's a layer to blame. */
-function ChangedFilesEmptyState({ hasPrLayers }: { readonly hasPrLayers: boolean }) {
+/** The empty state for a zero-file list: blames the chat filter first, then the PR layer. */
+function ChangedFilesEmptyState({
+  hasPrLayers,
+  onShowAllChats
+}: {
+  readonly hasPrLayers: boolean
+  /** Set when "This chat" is what emptied the list. */
+  readonly onShowAllChats?: () => void
+}) {
+  if (onShowAllChats) {
+    return (
+      <EmptyState
+        title="No changes from this chat"
+        description="Other chats in this session may have changed files."
+        action={<Button variant="secondary" size="sm" onClick={onShowAllChats}>Show all chats</Button>}
+      />
+    )
+  }
   return hasPrLayers ? (
     <EmptyState title="No commits in this layer" description="Pick another PR layer to see its changes." />
   ) : (
@@ -357,6 +398,8 @@ function ChangedFilesBody({
   prLayers,
   prNumber,
   onPrNumberChange,
+  chatScope,
+  onChatScopeChange,
   multiAgent,
   agentTrees,
   agentScope,
@@ -375,6 +418,8 @@ function ChangedFilesBody({
   readonly prLayers: readonly PrFilterLayer[]
   readonly prNumber: number | null
   readonly onPrNumberChange: ((number: number) => void) | undefined
+  readonly chatScope: ChatScope
+  readonly onChatScopeChange: ((scope: ChatScope) => void) | undefined
   readonly multiAgent: boolean
   readonly agentTrees: readonly AgentTreeChanges[]
   readonly agentScope: string
@@ -390,12 +435,16 @@ function ChangedFilesBody({
     <ReviewPierre>
       <div data-testid="changed-files-explorer" className="flex h-full min-h-0 flex-col">
         <OmittedFilesNotice files={omittedFiles} diffLineLimit={diffLineLimit} />
+        <ChatScopeBar value={chatScope} onChange={onChatScopeChange} />
         <TurnFilterBar turns={turns} value={turnId} onChange={onTurnChange} />
         <PrFilterBar layers={prLayers} value={prNumber} onChange={onPrNumberChange} />
         {multiAgent ? (
           <AgentScopedFileList trees={agentTrees} scope={agentScope} onScopeChange={onAgentScopeChange} activePath={activePath} onSelectFile={onSelectFile} />
         ) : allFiles.length === 0 ? (
-          <ChangedFilesEmptyState hasPrLayers={prLayers.length >= 2} />
+          <ChangedFilesEmptyState
+            hasPrLayers={prLayers.length >= 2}
+            onShowAllChats={chatScope === "chat" && onChatScopeChange ? () => onChatScopeChange("all") : undefined}
+          />
         ) : (
           <ReviewFileRail
             files={files}
@@ -442,6 +491,8 @@ export function ChangedFilesExplorer({
   prLayers = [],
   prNumber = null,
   onPrNumberChange,
+  chatScope = "chat",
+  onChatScopeChange,
   loading = false,
   error = null,
   onRetry,
@@ -482,6 +533,8 @@ export function ChangedFilesExplorer({
       prLayers={prLayers}
       prNumber={prNumber}
       onPrNumberChange={onPrNumberChange}
+      chatScope={chatScope}
+      onChatScopeChange={onChatScopeChange}
       multiAgent={multiAgent}
       agentTrees={agentTrees}
       agentScope={agentScope ?? localScope}

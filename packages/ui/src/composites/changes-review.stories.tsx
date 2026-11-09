@@ -142,6 +142,29 @@ function TurnFiltered() {
 /** "All turns ▾" narrows the file list to what one agent turn changed. */
 export const ExplorerTurnFilter: Story = { render: () => <TurnFiltered /> }
 
+function ChatScoped() {
+  const [scope, setScope] = useState<"chat" | "all">("chat")
+  const [active, setActive] = useState<string | null>(null)
+  const mine = new Set(turns.flatMap((turn) => turn.paths))
+  const shown = scope === "chat" ? localChanges.filter((change) => mine.has(change.file.path)) : localChanges
+  return (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={files(shown)}
+        fileDiffs={diffs(shown)}
+        drafts={[]}
+        activePath={active}
+        onSelectFile={setActive}
+        chatScope={scope}
+        onChatScopeChange={setScope}
+      />
+    </Frame>
+  )
+}
+
+/** Chats sharing a worktree: "This chat" lists only the files this chat's tools changed. */
+export const ExplorerChatScope: Story = { render: () => <ChatScoped /> }
+
 function AgentScoped({ scope }: { readonly scope?: string }) {
   const [active, setActive] = useState<string | null>(null)
   const [picked, setPicked] = useState(scope ?? "all")

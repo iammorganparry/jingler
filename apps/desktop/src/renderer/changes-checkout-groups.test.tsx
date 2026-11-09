@@ -32,6 +32,8 @@ const session = {
   prNumber: null,
   worktreePath: "/wt/api",
   workspaceMode: "worktree",
+  chats: [{ id: "chat-1" }],
+  activeChatId: "chat-1",
   activeCheckoutId: "primary",
   checkouts: [
     { id: "primary", repo: "org/api", branch: "feat/x", prNumber: null, worktreePath: "/wt/api" },
