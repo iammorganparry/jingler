@@ -1,5 +1,16 @@
 # @jingler/desktop
 
+## 0.24.0
+
+### Minor Changes
+
+- e17876e: Each chat in a session now opens its Changes list scoped to the files that chat edited, with a "This chat / All chats" toggle to see the whole worktree.
+
+### Patch Changes
+
+- 4f699fc: Use far fewer GitHub CLI calls. The pull request tab no longer polls every 30 seconds. It loads when you open it or return to the window, and you can refresh it yourself with the new Refresh button. Background PR checks now run every 5 minutes, and auto-review only runs when the PR changes.
+  - @jingler/plannotator-ext@0.24.0
+
 ## 0.23.1
 
 ### Patch Changes
