@@ -1526,11 +1526,12 @@ function AuthedApp({
   );
   const autoReviews = useQueries({
     queries: reviewTargets.map((s) => {
-      const { prNumber } = activeCheckoutOf(s);
+      const { id: checkoutId, prNumber } = activeCheckoutOf(s);
       // The sweep's `updatedAt` moves on a push, so a review runs when the PR changes, not on a timer.
-      const updatedAt = prStacks[s.id]?.find((layer) => layer.number === prNumber)?.status.updatedAt ?? null;
+      // Match the checkout too: two repos in one session can both have a PR #42.
+      const updatedAt = prStacks[s.id]?.find((layer) => layer.checkoutId === checkoutId && layer.number === prNumber)?.status.updatedAt ?? null;
       return {
-      queryKey: ["auto-review", s.id, prNumber, updatedAt] as const,
+      queryKey: ["auto-review", s.id, checkoutId, prNumber, updatedAt] as const,
       queryFn: () => rpc.reviewRun(s.id, false),
       enabled: updatedAt !== null,
       staleTime: Infinity,

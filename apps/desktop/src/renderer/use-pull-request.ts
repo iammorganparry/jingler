@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrMergeMethod, PullRequest, ReviewSubmitKind, Session, SessionPrStatus } from "@jingler/core"
-import { activeCheckoutOf, checkoutPrsOf, checkoutsOf } from "@jingler/core"
+import { activeCheckoutOf, checkoutFor } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import { retryUnlessRateLimited } from "./github-poll.js"
 import { getConversationActor } from "./conversation-registry.js"
@@ -130,9 +130,8 @@ export function usePullRequest(
 ): PullRequestState {
   const qc = useQueryClient()
   const prNumber = opts.prNumber ?? activeCheckoutOf(session).prNumber
-  // Same checkout the main process resolves, so the state key matches the sweep's.
-  const checkoutId = (checkoutsOf(session).find((c) => checkoutPrsOf(c).some((pr) => pr.number === prNumber))
-    ?? activeCheckoutOf(session)).id
+  // Same rule the main process uses (active first), so the state key matches the PR on screen.
+  const checkoutId = checkoutFor(session, undefined, prNumber).id
 
   // The full view costs ~12 GitHub requests, so it is never polled: the shared cheap
   // state read reloads it only when something changed (new push, checks, comment).
@@ -144,8 +143,14 @@ export function usePullRequest(
   })
   useReloadOnPrChange(prKey(session.id, prNumber), session.id, prNumber, checkoutId)
   const refresh = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: prStateKey(session.id, checkoutId, prNumber) })
-    void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
+    const stateKey = prStateKey(session.id, checkoutId, prNumber)
+    const before = prStateSignature(qc.getQueryData(stateKey))
+    void qc.refetchQueries({ queryKey: stateKey, exact: true }).then(() => {
+      const after = prStateSignature(qc.getQueryData(stateKey))
+      // A changed signature already reloads the full view (useReloadOnPrChange); don't read it twice.
+      if (before !== null && after !== null && before !== after) return
+      void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
+    })
   }, [qc, session.id, checkoutId, prNumber])
 
   // Route an instruction to the session's agent as a NORMAL conversation turn

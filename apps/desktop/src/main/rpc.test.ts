@@ -1981,6 +1981,17 @@ describe("RPC handlers", () => {
       expect(review.modelId).toBe("anthropic/claude-sonnet-4-5");
     });
 
+    it("runs one review when two auto-review calls for the same head overlap", async () => {
+      withSession();
+      const { layer, spawns } = countingAdapter();
+      const [first, second] = await Effect.runPromise(
+        Effect.all([reviewRun("s1", false), reviewRun("s1", false)], { concurrency: "unbounded" })
+          .pipe(Effect.provide(envFor("sha-one", layer))),
+      );
+      expect(spawns).toHaveLength(1);
+      expect(second.headSha).toBe(first.headSha);
+    });
+
     it("does not expose or stamp a stored review after the active PR changes", async () => {
       withSession({ prNumber: 42 });
       const { layer } = countingAdapter();

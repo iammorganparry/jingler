@@ -83,6 +83,28 @@ it("never polls the PR state on a timer; Refresh and state changes reload the fu
   client.clear()
 })
 
+it("Refresh with a changed PR state reads the full view once, not twice", async () => {
+  vi.mocked(rpc.githubPr).mockResolvedValue(null)
+  vi.mocked(rpc.githubPrState)
+    .mockResolvedValueOnce({ state: "open", checks: "running", updatedAt: "t1" })
+    .mockResolvedValue({ state: "open", checks: "pass", updatedAt: "t2" })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  )
+  const session = { id: "session-1", prNumber: 320 } as never
+  const { result } = renderHook(() => usePullRequest(session, { connected: true }), { wrapper })
+  await waitFor(() => expect(rpc.githubPrState).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(rpc.githubPr).toHaveBeenCalledTimes(1))
+
+  await act(async () => { result.current.refresh() })
+  await waitFor(() => expect(rpc.githubPrState).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(rpc.githubPr).toHaveBeenCalledTimes(2))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(rpc.githubPr).toHaveBeenCalledTimes(2)
+  client.clear()
+})
+
 it("flips a draft PR to open in the cache once markReady succeeds", async () => {
   vi.mocked(rpc.githubPr).mockResolvedValue({ number: 320, state: "draft", isDraft: true, mergeBlockers: [], timeline: [], reviewThreads: [] } as never)
   vi.mocked(rpc.githubMarkReady).mockResolvedValue(undefined)

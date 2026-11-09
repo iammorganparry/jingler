@@ -52,6 +52,39 @@ test("PR chip opens the PR view with header fields and arrow-key sub-tabs", asyn
   await expect(conversation).toHaveAttribute("aria-selected", "true")
 })
 
+test("PR view does not poll; the Refresh button re-reads the PR", async ({ launchApp }) => {
+  const { window, githubServer } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{
+      id: "s_pr_refresh", repo: "widget", branch: "chore/refactor", title: "PR refresh test", status: "idle",
+      diff: { added: 0, removed: 0 }, prNumber: 482, costUsd: 0, tokens: 0, updatedAt: "2026-10-12T10:00:00.000Z",
+      githubInstallationId: "101", githubRepositoryId: "301", worktreePath: context.repoPath
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [{
+        number: 482, title: "Refactor auth flow", headRefName: "chore/refactor", baseRefName: "main",
+        author: { login: "e2e-user" }, additions: 5, deletions: 2
+      }]
+    }
+  })
+  await window.getByTestId("session-row-s_pr_refresh").click()
+  await window.getByTestId("header-link-pr").click()
+  await expect(window.getByRole("heading", { name: /Refactor auth flow/ })).toBeVisible()
+
+  // A change on GitHub stays off screen until the operator asks: nothing polls it in.
+  githubServer.updatePr(482, { title: "Refactor auth flow v2" })
+  await window.waitForTimeout(1_500)
+  await expect(window.getByRole("heading", { name: /Refactor auth flow v2/ })).toHaveCount(0)
+
+  const refresh = window.getByRole("button", { name: "Refresh pull request" })
+  await refresh.click()
+  await expect(window.getByRole("heading", { name: /Refactor auth flow v2/ })).toBeVisible()
+  await expect(refresh).toBeEnabled()
+})
+
 test("PR right rail shows its sections and collapses to a sheet when narrow", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,

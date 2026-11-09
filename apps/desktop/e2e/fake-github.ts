@@ -97,6 +97,8 @@ export interface FakeGitHubServer {
   readonly connect: () => void;
   readonly setInstallation: (patch: Partial<GitHubAppInstallation>) => void;
   readonly addPr: (pr: FakeGitHubPr) => void;
+  /** Patch a served PR in place, e.g. to simulate a push the app hasn't seen yet. */
+  readonly updatePr: (number: number, patch: Partial<FakeGitHubPr>) => void;
   readonly sessionRoute: (sessionId: string) => {
     readonly relaySessionId: string;
     readonly pullRequestNumber: number;
@@ -1008,6 +1010,10 @@ export const startFakeGitHubServer = async (
     },
     addPr: (pr) => {
       prs.push(pr);
+    },
+    updatePr: (number, patch) => {
+      const index = prs.findIndex((pr) => pr.number === number);
+      if (index >= 0) prs[index] = { ...prs[index]!, ...patch };
     },
     sessionRoute: (sessionId) => {
       const route = sessionRoutes.get(sessionId);

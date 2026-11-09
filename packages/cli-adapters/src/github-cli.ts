@@ -135,10 +135,14 @@ const ghBucket = (args: ReadonlyArray<string>): string | null =>
 const GH_AUTH_FAILURE = /gh auth login|not logged in|authentication|bad credentials|HTTP 401/i
 /** `gh auth status` is a network round trip, and every GitHub read asked it first. */
 const AUTH_TTL_MS = 5 * 60_000
-let authCache: { readonly ok: boolean; readonly expires: number } | null = null
+// The entry is set before the probe runs, so concurrent callers share one `gh auth status`.
+let authProbe: {
+  readonly expires: number
+  readonly ok: Effect.Effect<boolean, never, CommandExecutor.CommandExecutor>
+} | null = null
 /** Map a failed gh run to an error; a rate-limit message also cools its bucket down. */
 const ghFailure = (message: string, bucket: string | null): GitHubApiError => {
-  if (GH_AUTH_FAILURE.test(message)) authCache = null
+  if (GH_AUTH_FAILURE.test(message)) authProbe = null
   if (GH_RATE_LIMIT.test(message)) {
     if (bucket !== null) ghGate.trip(bucket)
     return new GitHubApiError({ reason: "rate-limited", message })
@@ -161,6 +165,14 @@ const openPrCache = new Map<string, {
   readonly prs: Effect.Effect<ReadonlyMap<string, number>, GitHubApiError, CommandExecutor.CommandExecutor>
 }>()
 const ghCalls = new Map<string, number>()
+/** A fixed set of labels: `api` calls collapse to graphql/search/rest so endpoints never become keys. */
+export const ghCallLabel = (args: ReadonlyArray<string>): string => {
+  if (args[0] === "api") {
+    return args.includes("graphql") ? "api graphql" : args.some((arg) => arg.startsWith("search/")) ? "api search" : "api rest"
+  }
+  const sub = args[1]
+  return sub === undefined || sub.startsWith("-") ? String(args[0]) : `${args[0]} ${sub}`
+}
 /** gh processes the app spawned since launch, by `gh <command> <subcommand>` (dev perf monitor reads it). */
 export const ghCallCounts = (): Readonly<Record<string, number>> => Object.fromEntries(ghCalls)
 /** Test isolation only: the gate and PR cache are module state shared by every gh call. */
@@ -168,7 +180,7 @@ export const resetGhRateGate = (): void => {
   ghGate.clear("core")
   ghGate.clear("graphql")
   openPrCache.clear()
-  authCache = null
+  authProbe = null
   ghCalls.clear()
 }
 const PR_LIST_FIELDS = "number,title,headRefName,baseRefName,author,state,isDraft,additions,deletions,updatedAt"
@@ -200,7 +212,7 @@ const execute = (
     Effect.gen(function* () {
       const bucket = ghBucket(args)
       if (bucket !== null) yield* Effect.try({ try: () => ghGate.check(bucket), catch: (error) => error as GitHubApiError })
-      const label = args.filter((arg) => !arg.startsWith("-")).slice(0, 2).join(" ")
+      const label = ghCallLabel(args)
       ghCalls.set(label, (ghCalls.get(label) ?? 0) + 1)
       const base = Command.make("gh", ...args)
       const located = cwd === null ? base : base.pipe(Command.workingDirectory(cwd))
@@ -839,13 +851,20 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
         yield* execute(null, ["pr", "merge", String(input.number), "--repo", `github.com/${input.repository}`, mergeFlag(input.method)])
       })),
     available: () =>
-      Effect.suspend(() => authCache !== null && authCache.expires > Date.now()
-        ? Effect.succeed(authCache.ok)
-        : execute(null, ["auth", "status", "--active", "--hostname", "github.com"]).pipe(
+      Effect.gen(function* () {
+        const hit = authProbe
+        if (hit !== null && hit.expires > Date.now()) return yield* hit.ok
+        const ok = yield* Effect.cached(execute(null, ["auth", "status", "--active", "--hostname", "github.com"]).pipe(
           Effect.as(true),
-          Effect.orElseSucceed(() => false),
-          Effect.tap((ok) => Effect.sync(() => { authCache = { ok, expires: Date.now() + AUTH_TTL_MS } }))
-        )),
+          Effect.orElseSucceed(() => false)
+        ))
+        const entry = { expires: Date.now() + AUTH_TTL_MS, ok }
+        authProbe = entry
+        const result = yield* ok
+        // Only a success is kept: a signed-out or transient failure must not outlive the next `gh auth login`.
+        if (!result && authProbe === entry) authProbe = null
+        return result
+      }),
     cloneRepository: (repository: string, destination: string) =>
       execute(null, ["repo", "clone", repository, destination], undefined, {
         GIT_TERMINAL_PROMPT: "0",
