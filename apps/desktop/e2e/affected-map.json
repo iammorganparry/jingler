@@ -335,6 +335,7 @@
       "diffs-file-tree.spec.ts",
       "enormous-review-diff.spec.ts",
       "canonical-file-changes.spec.ts",
+      "changes-per-chat.spec.ts",
       "changes-committed-branch-work.spec.ts",
       "review-findings-dismiss.spec.ts",
       "deslop.spec.ts",

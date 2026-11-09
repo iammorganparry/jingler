@@ -227,6 +227,17 @@ describe("ReviewFileDiff selection", () => {
     expect(screen.queryByText("No files match these filters.")).toBeNull()
   })
 
+  it("shows the chat scope toggle only with a handler, and reports the picked scope", () => {
+    const onChatScopeChange = vi.fn()
+    const props = { files: [file(path)], fileDiffs: [{ path, diff: patch }], drafts: [], activePath: null, onSelectFile: () => {} }
+    const { rerender } = render(<WidthTierValue width={1_240}><ChangedFilesExplorer {...props} /></WidthTierValue>)
+    expect(screen.queryByRole("tablist", { name: "Changes scope" })).toBeNull()
+    rerender(<WidthTierValue width={1_240}><ChangedFilesExplorer {...props} chatScope="chat" onChatScopeChange={onChatScopeChange} /></WidthTierValue>)
+    expect(screen.getByRole("tab", { name: "This chat" }).getAttribute("aria-selected")).toBe("true")
+    fireEvent.click(screen.getByRole("tab", { name: "All chats" }))
+    expect(onChatScopeChange).toHaveBeenCalledWith("all")
+  })
+
   it("with a single agent tree, renders exactly the plain file rail (no agent chip or scope filter)", () => {
     const trees: readonly AgentTreeChanges[] = [{ agentId: null, label: "Main", files: [file(path)] }]
     render(

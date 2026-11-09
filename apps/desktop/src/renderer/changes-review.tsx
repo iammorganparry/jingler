@@ -8,15 +8,17 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSelector } from "@xstate/react"
 import type { Session, SubagentFleetNode } from "@jingler/core"
 import { activeCheckoutOf, checkoutById, checkoutsOf, hasNoRepo, workspaceModeOf, sessionPrsOf } from "@jingler/core"
-import type { AgentTreeChanges } from "@jingler/ui"
-import { ChangedFilesExplorer, CollapsibleSection, EmptyState, SubagentScopeBar, ReviewSidebar, checkoutLabel, cn, reviewTurnsOf } from "@jingler/ui"
+import type { AgentTreeChanges, ChatScope } from "@jingler/ui"
+import { ChangedFilesExplorer, CollapsibleSection, EmptyState, SubagentScopeBar, ReviewSidebar, chatPathsOf, checkoutLabel, cn, narrowToPaths, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
 import {
   setReviewFilter,
   setReviewFocused,
   setReviewPrLayer,
   setReviewTrayHidden,
+  setChatChangesScope,
   setReviewTurn,
+  useChatChangesScope,
   useReviewFocused,
   useReviewTrayHidden,
   useSessionReviewState
@@ -103,6 +105,31 @@ export function useReviewTurns(session: Session) {
   return { turns, turn, setTurn }
 }
 
+/**
+ * Chats share one worktree, so "This chat" narrows the tree's diff to the paths
+ * the active chat's own tools changed. A file two chats edited shows its whole diff.
+ */
+function useChatScopedFiles<F extends { readonly path: string }, D extends { readonly path: string }>(
+  session: Session,
+  files: ReadonlyArray<F>,
+  fileDiffs: ReadonlyArray<D>,
+  turns: ReturnType<typeof reviewTurnsOf>,
+  active: boolean
+) {
+  const chatScope = useChatChangesScope(session.activeChatId)
+  const multiChat = active && session.chats.length > 1
+  const paths = useMemo(
+    () => (multiChat && chatScope === "chat" ? chatPathsOf(turns) : null),
+    [multiChat, chatScope, turns]
+  )
+  return {
+    files: useMemo(() => narrowToPaths(files, paths), [files, paths]),
+    fileDiffs: useMemo(() => narrowToPaths(fileDiffs, paths), [fileDiffs, paths]),
+    chatScope,
+    setChatScope: multiChat ? (scope: ChatScope) => setChatChangesScope(session.activeChatId, scope) : undefined
+  }
+}
+
 function ViewedChildScopeBar({
   viewed,
   agentTrees,
@@ -150,7 +177,8 @@ function CheckoutChangesList({
   )
   // The turn filter belongs to the active checkout only.
   const active = checkoutId === undefined
-  const agentTrees = useAgentTrees(session, review.files, active && review.source === "local")
+  const { files, fileDiffs, chatScope, setChatScope } = useChatScopedFiles(session, review.files, review.fileDiffs, turns, active)
+  const agentTrees = useAgentTrees(session, files, active && review.source === "local")
   const { changesScope, setChangesScope } = useSubagentView(session.activeChatId)
   const viewed = useViewedChild(session.id, session.activeChatId)
   const scoped = active && viewed !== null && changesScope === viewed.subagentId
@@ -164,11 +192,13 @@ function CheckoutChangesList({
       prLayers={active ? sessionPrsOf(session) : []}
       prNumber={prLayer ?? activeCheckoutOf(session).prNumber}
       onPrNumberChange={selectLayer}
-      files={review.files}
+      files={files}
+      chatScope={chatScope}
+      onChatScopeChange={setChatScope}
       agentTrees={agentTrees}
       agentScope={changesScope}
       onAgentScopeChange={setChangesScope}
-      fileDiffs={review.fileDiffs}
+      fileDiffs={fileDiffs}
       omittedFiles={review.omittedFiles}
       diffLineLimit={review.diffLineLimit}
       drafts={review.drafts}

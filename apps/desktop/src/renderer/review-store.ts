@@ -8,6 +8,7 @@
  * Explorer decides which diff the Files view shows.
  */
 import { useSyncExternalStore } from "react"
+import type { ChatScope } from "@jingler/ui"
 import { readDismissedFindings, writeDismissedFindings } from "./dismissed-findings-store.js"
 import { readViewedPaths, viewedStorageKey } from "./viewed-store.js"
 
@@ -214,9 +215,22 @@ export const setFindingDismissed = (
     return { ...state, dismissedFindings: next }
   })
 
+/** Chats sharing a worktree each open on their own files; "all" shows the whole tree. */
+const chatScopes = new Map<string, ChatScope>()
+
+export const useChatChangesScope = (chatId: string): ChatScope =>
+  useSyncExternalStore(subscribe, () => chatScopes.get(chatId) ?? "chat")
+
+export const setChatChangesScope = (chatId: string, scope: ChatScope): void => {
+  if ((chatScopes.get(chatId) ?? "chat") === scope) return
+  chatScopes.set(chatId, scope)
+  for (const listener of listeners) listener()
+}
+
 /** Test seam: forget every session's review state. */
 export const resetReviewStore = (): void => {
   states.clear()
+  chatScopes.clear()
   draftSeq = 0
   focused = false
   for (const listener of listeners) listener()
