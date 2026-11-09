@@ -13,6 +13,13 @@ describe("responseStyleNote", () => {
   it("lets the operator override the level on request", () => {
     expect(responseStyleNote("concise")).toContain("unless the operator explicitly asks")
   })
+
+  it("limits the adhd format to the final completion summary", () => {
+    const note = responseStyleNote("adhd")
+    expect(note).toContain("final completion summary")
+    expect(note).toContain("permission requests, or errors while work remains")
+    expect(note).not.toContain("every reply")
+  })
 })
 
 describe("responseStyleOf", () => {

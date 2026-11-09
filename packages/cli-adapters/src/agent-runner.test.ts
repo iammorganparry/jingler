@@ -301,6 +301,41 @@ describe("AgentRunner remote MCP attachments", () => {
   })
 })
 
+describe("AgentRunner response style", () => {
+  it("applies a style saved mid-chat to the very next turn", async () => {
+    const captured: AgentTurnSpec[] = []
+    const recordingAdapter = Layer.succeed(
+      AgentTurnDriver,
+      AgentTurnDriver.of({
+        run: (_sessionId, spec, ctx) =>
+          Effect.sync(() => captured.push(spec)).pipe(
+            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
+          ),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default, BrowserControlMcpServiceTest, InMemorySecretStoreLive,
+      ConfigService.Default, SessionStore.Default, TranscriptStore.Default,
+      BackgroundTaskStore.Default, recordingAdapter, ContextManager.Default, temp.layer
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.prompt(SESSION, SESSION, "first").pipe(Stream.runDrain)
+        yield* ConfigService.setResponseStyle("elaborate")
+        yield* runner.prompt(SESSION, SESSION, "second").pipe(Stream.runDrain)
+      }).pipe(Effect.provide(base))
+    )
+
+    expect(captured).toHaveLength(2)
+    expect(captured[0]!.prompt).toContain("RESPONSE STYLE — CONCISE")
+    expect(captured[1]!.prompt).toContain("RESPONSE STYLE — ELABORATE")
+    expect(captured[1]!.prompt).not.toContain("RESPONSE STYLE — CONCISE")
+  })
+})
+
 describe("AgentRunner HITL gating", () => {
   it("accept-edits: applies edits without a gate, but pauses for a command", async () => {
     const { events } = await runPrompt("accept-edits", "allow")

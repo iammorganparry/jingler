@@ -9,7 +9,6 @@ const ADHD_RULES = [
   "5. End with ONE next action doable in under two minutes.",
   "",
   'Cap lists at 5 items. State errors matter-of-factly — cause, then fix. Banned: "Great question", "Let me…", "Sure!", "Hope this helps", and recaps of what you just did.',
-  "Working updates, planning, and questions stay natural and brief.",
   'Override this only when the user asks you to "explain" or "walk me through" (then go long, still no preamble).'
 ].join("\n")
 
@@ -29,9 +28,24 @@ const BODY = {
   adhd: ADHD_RULES
 } satisfies Record<ResponseStyle, string>
 
+const EVERY_REPLY = "Applies to every reply in this turn unless the operator explicitly asks for more or less detail."
+
+// ADHD formatting (action first line, one next action) only makes sense once the work is done.
+const COMPLETION_ONLY = [
+  "Apply the format below only when the requested task is finished and you are delivering the final completion summary.",
+  "Do not apply it to exploration, tool narration, working updates, planning, questions, permission requests, or errors while work remains; communicate naturally and briefly there."
+].join("\n")
+
+const SCOPE = {
+  concise: EVERY_REPLY,
+  balanced: EVERY_REPLY,
+  elaborate: EVERY_REPLY,
+  adhd: COMPLETION_ONLY
+} satisfies Record<ResponseStyle, string>
+
 /**
  * The response-style instruction, carried per turn so a Settings change applies
  * on the next message. Defined inline so it reads the same on every provider.
  */
 export const responseStyleNote = (style: ResponseStyle): string =>
-  `RESPONSE STYLE — ${style.toUpperCase()}:\nApplies to every reply in this turn unless the operator explicitly asks for more or less detail.\n${BODY[style]}`
+  `RESPONSE STYLE — ${style.toUpperCase()}:\n${SCOPE[style]}\n${BODY[style]}`
