@@ -110,6 +110,7 @@ import {
   Usage,
   UsageReport,
   VsCodeTheme,
+  ResponseStyle,
   WorkspaceConfig,
   WebSearchConfig,
   WebSearchError,
@@ -1444,14 +1445,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Persist ADHD mode — whether every agent turn is asked to shape its reply
-   * for an ADHD reader. Returns the whole config so the renderer can patch its
-   * cache without a refetch.
+   * Persist the response style applied to every agent reply. Returns the whole
+   * config so the renderer can patch its cache without a refetch.
    */
-  Rpc.make("Config.setAdhdMode", {
+  Rpc.make("Config.setResponseStyle", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: Schema.Struct({ adhdMode: Schema.Boolean })
+    payload: Schema.Struct({ responseStyle: ResponseStyle })
   }),
 
   /**

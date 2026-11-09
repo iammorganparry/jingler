@@ -127,7 +127,7 @@
       "transcript-paging.spec.ts",
       "session-history.spec.ts",
       "settled-sessions.spec.ts",
-      "adhd-mode.spec.ts",
+      "response-style.spec.ts",
       "direct-sessions.spec.ts",
       "actor-residency.spec.ts",
       "explanation.spec.ts"

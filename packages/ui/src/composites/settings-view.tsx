@@ -13,13 +13,15 @@ import type {
   Environment,
   ExecutionMode,
   Session,
-  PlanTemplateConfig
+  PlanTemplateConfig,
+  ResponseStyle
 } from "@jingler/core"
 import {
   BUDGET_RANGE,
   DEFAULT_CONTEXT_CONFIG,
   NOTIFICATIONS_DEFAULT,
   OBSIDIAN_EXPLANATIONS_DEFAULT,
+  RESPONSE_STYLE_DEFAULT,
   clampFontScale
 } from "@jingler/core"
 import { ContextMeter } from "./context-meter.js"
@@ -277,9 +279,9 @@ export interface SettingsViewProps {
   /** Custom starting plan structure; absent or empty means the built-in draft. */
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => void | Promise<void>
-  /** Whether final completion summaries are shaped for an ADHD reader. */
-  adhdMode?: boolean | null
-  onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
+  /** How long and structured agent replies are. */
+  responseStyle?: ResponseStyle | null
+  onSaveResponseStyle?: (responseStyle: ResponseStyle) => void | Promise<void>
   /** Multiplier for conversation + code text size; absent means 1×. */
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
@@ -348,8 +350,8 @@ export function SettingsView({
   onSavePlanAutoRun,
   planTemplate,
   onSavePlanTemplate,
-  adhdMode,
-  onSaveAdhdMode,
+  responseStyle,
+  onSaveResponseStyle,
   fontScale,
   onSaveFontScale,
   onClose,
@@ -420,8 +422,8 @@ return (<GeneralSection
           onRefreshOffloadEnvironments={devices?.onRefresh}
           defaultMode={defaultMode}
           onSaveDefaultMode={onSaveDefaultMode}
-          adhdMode={adhdMode}
-          onSaveAdhdMode={onSaveAdhdMode}
+          responseStyle={responseStyle}
+          onSaveResponseStyle={onSaveResponseStyle}
           fontScale={fontScale}
           onSaveFontScale={onSaveFontScale}
           webSearch={webSearch}
@@ -1250,8 +1252,8 @@ function GeneralSection({
   onRefreshOffloadEnvironments,
   defaultMode,
   onSaveDefaultMode,
-  adhdMode,
-  onSaveAdhdMode,
+  responseStyle,
+  onSaveResponseStyle,
   fontScale,
   onSaveFontScale,
   webSearch
@@ -1268,8 +1270,8 @@ function GeneralSection({
   onRefreshOffloadEnvironments?: () => void | Promise<void>
   defaultMode?: ExecutionMode | null
   onSaveDefaultMode?: (defaultMode: ExecutionMode) => void | Promise<void>
-  adhdMode?: boolean | null
-  onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
+  responseStyle?: ResponseStyle | null
+  onSaveResponseStyle?: (responseStyle: ResponseStyle) => void | Promise<void>
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
   webSearch?: WebSearchSettingsProps
@@ -1297,9 +1299,8 @@ function GeneralSection({
     () => setDefaultModeDraft(defaultMode ?? "auto"),
     [defaultMode]
   )
-  // Absent means OFF, matching `ADHD_MODE_DEFAULT` in the domain.
-  const [adhdDraft, setAdhdDraft] = React.useState<boolean>(adhdMode ?? false)
-  React.useEffect(() => setAdhdDraft(adhdMode ?? false), [adhdMode])
+  const [styleDraft, setStyleDraft] = React.useState<ResponseStyle>(responseStyle ?? RESPONSE_STYLE_DEFAULT)
+  React.useEffect(() => setStyleDraft(responseStyle ?? RESPONSE_STYLE_DEFAULT), [responseStyle])
   // Absent or malformed collapses to 1×, matching `FONT_SCALE_DEFAULT`.
   const [fontScaleDraft, setFontScaleDraft] = React.useState<number>(
     clampFontScale(fontScale)
@@ -1412,15 +1413,26 @@ function GeneralSection({
         </SettingsCard>
 
         <SettingsCard title="Responses">
-          {toggle(
-            "ADHD mode",
-            "Only final completion summaries lead with the action, number multi-step work, state progress, and end with one next step. Working updates, planning, and questions stay natural.",
-            adhdDraft,
-            (next) => {
-              setAdhdDraft(next)
-              void onSaveAdhdMode?.(next)
+          <SettingsRow
+            label="Response style"
+            help="Concise: a couple of sentences. Balanced: a summary plus key bullets. Elaborate: full detail. ADHD: action first, numbered steps, one next action."
+            control={
+              <SegmentedControl
+                aria-label="Response style"
+                value={styleDraft}
+                items={[
+                  { value: "concise", label: "Concise" },
+                  { value: "balanced", label: "Balanced" },
+                  { value: "elaborate", label: "Elaborate" },
+                  { value: "adhd", label: "ADHD" }
+                ]}
+                onChange={(next) => {
+                  setStyleDraft(next)
+                  void onSaveResponseStyle?.(next)
+                }}
+              />
             }
-          )}
+          />
           <FontSizeRow
             value={fontScaleDraft}
             onChange={(next) => {

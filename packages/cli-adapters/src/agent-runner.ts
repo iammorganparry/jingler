@@ -28,7 +28,7 @@ import type {
   RuntimeContinuation
 } from "@jingler/core"
 import {
-  ADHD_MODE_DEFAULT,
+  responseStyleOf,
   applyStreamEvent,
   assistantMessage,
   activeCheckoutOf,
@@ -52,7 +52,7 @@ import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "ef
 import { checkoutForCreatedPr, createdPrFromToolOutput, isGhPrCreate } from "./created-pr.js"
 import { gitLine, runString } from "./command.js"
 import { parseGitHubRemote } from "./github-remote.js"
-import { adhdNote } from "./adhd-prompt.js"
+import { responseStyleNote } from "./response-style-prompt.js"
 import { isTerminal, routeOf } from "./turn-events.js"
 import {
   composeTurnPrompt,
@@ -601,9 +601,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ...(chat.allowlist ?? [])
           ])
           const workspaceConfig = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-          // Read per turn, not per session: flipping ADHD mode in Settings takes
-          // effect on the very next message of an already-running session.
-          const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
+          // Read per turn, not per session: changing the response style in
+          // Settings takes effect on the very next message of a running session.
+          const responseStyle = responseStyleOf(workspaceConfig)
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
           // The agent always runs in the session's recorded working checkout.
@@ -640,17 +640,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             session,
             chatId
           )
-          // ADHD mode rides in the same per-turn prefix as the primer and plan
-          // pointer so a Settings change applies immediately. Its own scope makes
-          // the format dormant during work and active only for the final summary.
-          const adhd = adhdMode ? adhdNote() : null
+          // Rides the same per-turn prefix as the primer and plan pointer so a
+          // Settings change applies immediately.
+          const style = responseStyleNote(responseStyle)
           // Not optional, and not a setting: an agent that asks in prose is an
           // agent whose question never reaches the operator. Claude has the
           // `AskUserQuestion` tool the adapter intercepts, Codex has the fenced
           // block the adapter parses — but nothing tells either of them to
           // prefer it, so both default to asking in chat text that renders as
-          // an unanswerable paragraph. Rides the same per-turn prefix as ADHD
-          // mode, for the same reason: no system-prompt hook is shared by every
+          // an unanswerable paragraph. Rides the same per-turn prefix as the
+          // response style, for the same reason: no system-prompt hook is shared by every
           // harness, and this has to survive a mid-session harness switch.
           const ask = questionNote()
           // How this harness submits a plan. Null for Claude — the adapter passes
@@ -685,7 +684,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             promptText,
             primer,
             planPointer,
-            adhd,
+            style,
             ask,
             planProtocol,
             images,
@@ -1675,7 +1674,7 @@ function prepareTurnSpec(
   promptText: string,
   primer: string | null,
   planPointer: null,
-  adhd: string | null,
+  style: string,
   ask: string,
   planProtocol: null,
   images: readonly {
@@ -1736,7 +1735,7 @@ function prepareTurnSpec(
             {
               primer,
               planPointer,
-              adhd,
+              style,
               tools: managedToolsNote(),
               research: researchFirstNote(),
               ask,

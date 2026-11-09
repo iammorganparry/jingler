@@ -11,6 +11,7 @@ import type {
   ProviderConnectionId,
   ProviderModelId,
   JinglerSubagentName,
+  ResponseStyle,
   WebSearchConfig,
 } from "@jingler/core"
 import {
@@ -39,7 +40,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
     "context", "github", "git", "obsidianExplanations", "starredRepos", "headerViews", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
     "subagentModelsByProvider", "planTemplate", "notifications", "voice", "theme", "webSearch", "offloadCompute",
-    "disabledPlugins"
+    "disabledPlugins", "responseStyle"
   ] as const
   // A saved false (or zero) is a real value, not an absent section.
   const definedKeys = [
@@ -218,12 +219,12 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Whether plan mode runs its (read-only) commands without asking. */
       const setPlanAutoRun = (planAutoRun: boolean) => patch({ planAutoRun })
 
-      /** Whether final completion summaries are shaped for an ADHD reader. */
       const setMcpImportDismissed = (mcpImportDismissed: boolean) => patch({ mcpImportDismissed })
 
       const setVoice = (voice: VoiceConfig) => patch({ voice })
 
-      const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
+      /** How long and structured every agent reply is; supersedes legacy `adhdMode`. */
+      const setResponseStyle = (responseStyle: ResponseStyle) => patch({ responseStyle })
 
       /**
        * Conversation + code text-size multiplier, clamped via the shared
@@ -348,7 +349,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setSubagentModel,
         setPlanAutoRun,
         setVoice,
-        setAdhdMode,
+        setResponseStyle,
         setMcpImportDismissed,
         setFontScale,
         setStarredRepos,

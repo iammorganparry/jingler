@@ -1185,6 +1185,10 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
  * Persisted app configuration, stored at `~/jingler/config.json`. `reposDir` is
  * null until the user completes first-run setup by choosing a repos directory.
  */
+/** How long and how structured agent replies are. */
+export const ResponseStyle = Schema.Literal("concise", "balanced", "elaborate", "adhd");
+export type ResponseStyle = Schema.Schema.Type<typeof ResponseStyle>;
+
 export const WorkspaceConfig = Schema.Struct({
   /** Absolute path to the directory that contains the user's git repos. */
   reposDir: Schema.NullOr(Schema.String),
@@ -1250,16 +1254,14 @@ export const WorkspaceConfig = Schema.Struct({
   planTemplate: Schema.optional(PlanTemplateConfig),
   /** @deprecated Retained only so older config files continue to decode. Plan mode now runs like Auto. */
   planAutoRun: Schema.optional(Schema.Boolean),
-  /**
-   * Whether a finished task's final summary is shaped for an ADHD reader —
-   * lead with the action, number the steps, state final progress, end with one
-   * next action. Absent means OFF (see `ADHD_MODE_DEFAULT`).
-   *
-   * Off by default because output shaping is a preference and not a safety
-   * property. It is injected per turn as a prompt prefix (the same channel as
-   * the compaction primer), but explicitly applies only when the task is done.
-   */
+  /** @deprecated Read through `responseStyleOf`; `true` maps to the `adhd` style. */
   adhdMode: Schema.optional(Schema.Boolean),
+  /**
+   * How long and how structured every agent reply is. Absent falls back to the
+   * legacy `adhdMode`, then `RESPONSE_STYLE_DEFAULT`. Injected per turn, so a
+   * change applies on the next message.
+   */
+  responseStyle: Schema.optional(ResponseStyle),
   /** Voice input prefs (language, model, hold-to-talk key). */
   voice: Schema.optional(VoiceConfig),
   /** The operator dismissed the Home MCP-import card; it never shows again. */
@@ -1311,8 +1313,14 @@ export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>;
 /** @deprecated Plan mode always uses Auto permissions. */
 export const PLAN_AUTO_RUN_DEFAULT = true;
 
-/** ADHD response shaping is opt-in — it rewrites the voice of every session. */
-export const ADHD_MODE_DEFAULT = false;
+/** Short replies by default; the operator digs in when they want more. */
+export const RESPONSE_STYLE_DEFAULT: ResponseStyle = "concise";
+
+/** The effective style, honouring configs saved before `responseStyle` existed. */
+export const responseStyleOf = (
+  config: Pick<WorkspaceConfig, "responseStyle" | "adhdMode"> | null | undefined
+): ResponseStyle =>
+  config?.responseStyle ?? (config?.adhdMode === true ? "adhd" : RESPONSE_STYLE_DEFAULT);
 
 /** Conversation + code text is unscaled (1×) unless the operator picks a size. */
 export const FONT_SCALE_DEFAULT = 1;

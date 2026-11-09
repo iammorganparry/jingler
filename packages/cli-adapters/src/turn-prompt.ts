@@ -43,8 +43,8 @@ export interface TurnNotes {
   readonly primer?: string | null
   /** Where the worktree's saved plan lives. */
   readonly planPointer?: string | null
-  /** ADHD final-summary shaping, when the operator has it on. */
-  readonly adhd?: string | null
+  /** The operator's chosen response style. */
+  readonly style?: string | null
   /** Managed-tool precedence, including the visible in-app browser. */
   readonly tools?: string | null
   /** Research-first: verify current vendor docs before implementing against them. */
@@ -57,7 +57,7 @@ export interface TurnNotes {
 
 /** The notes, in order, each followed by a blank line. Empty when there are none. */
 const prefixOf = (notes: TurnNotes): string =>
-  [notes.primer, notes.planPointer, notes.adhd, notes.tools, notes.research, notes.ask, notes.planProtocol]
+  [notes.primer, notes.planPointer, notes.style, notes.tools, notes.research, notes.ask, notes.planProtocol]
     .filter((note): note is string => note !== null && note !== undefined && note !== "")
     .map((note) => `${note}\n\n`)
     .join("")

@@ -48,18 +48,18 @@ describe("leadsWithCommand", () => {
 })
 
 describe("composeTurnPrompt", () => {
-  const notes = { primer: "PRIMER", planPointer: "PLAN", adhd: "ADHD", ask: "ASK" }
+  const notes = { primer: "PRIMER", planPointer: "PLAN", style: "STYLE", ask: "ASK" }
 
   it("puts the notes in front of an ordinary message, in a fixed order", () => {
     expect(composeTurnPrompt("do the thing", notes, { leadWithText: false })).toBe(
-      "PRIMER\n\nPLAN\n\nADHD\n\nASK\n\ndo the thing"
+      "PRIMER\n\nPLAN\n\nSTYLE\n\nASK\n\ndo the thing"
     )
   })
 
   it("puts a command FIRST, with the notes after it", () => {
     // The bug this exists for: anything before `/babysit-pr` demotes it to prose.
     expect(composeTurnPrompt("/babysit-pr", notes, { leadWithText: true })).toBe(
-      "/babysit-pr\n\nPRIMER\n\nPLAN\n\nADHD\n\nASK"
+      "/babysit-pr\n\nPRIMER\n\nPLAN\n\nSTYLE\n\nASK"
     )
   })
 
@@ -72,7 +72,7 @@ describe("composeTurnPrompt", () => {
 
   it("skips notes that do not apply, without leaving gaps", () => {
     expect(
-      composeTurnPrompt("hello", { primer: null, planPointer: "PLAN", adhd: undefined, ask: "" }, {
+      composeTurnPrompt("hello", { primer: null, planPointer: "PLAN", style: undefined, ask: "" }, {
         leadWithText: false
       })
     ).toBe("PLAN\n\nhello")
