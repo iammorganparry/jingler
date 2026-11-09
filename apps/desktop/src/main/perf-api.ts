@@ -56,6 +56,8 @@ export interface PerfSample {
     readonly nodes: number
     readonly jsEventListeners: number
   }
+  /** gh processes spawned since launch, by `gh <command> <subcommand>`. */
+  readonly gh?: Readonly<Record<string, number>>
   readonly app?: {
     readonly actors: number
     readonly queryCache: number

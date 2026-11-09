@@ -30,6 +30,7 @@
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs"
 import { join } from "node:path"
 import { app, webContents, type WebContents } from "electron"
+import { ghCallCounts } from "@jingler/cli-adapters/github-cli"
 import { jinglerRoot } from "./app-paths.js"
 import { startPerfApi, type PerfApiDeps, type PerfSample } from "./perf-api.js"
 import { captureMemoryDump } from "./perf-memory-dump.js"
@@ -190,6 +191,7 @@ const takeSample = async (cdp: RendererCdp): Promise<PerfSample> => {
             jsEventListeners: dom.jsEventListeners
           }
         : undefined,
+    gh: ghCallCounts(),
     app: appMetrics
   }
 }

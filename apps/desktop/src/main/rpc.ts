@@ -151,6 +151,7 @@ import {
   activeCheckoutOf,
   currentPublishOf,
   checkoutById,
+  checkoutFor,
   checkoutPrsOf,
   PRIMARY_CHECKOUT_ID,
   checkoutsOf,
@@ -690,15 +691,6 @@ const activeCheckoutOrNull = (session: Session | null) => (session === null ? nu
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
 const resolveSession = (sessionId: string) =>
   SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null));
-
-/** The session seen through one checkout (the active one when `checkoutId` is absent). */
-/** The named checkout; without one, the checkout whose stack holds `prNumber` (active first), so another repo's PR reads from its own worktree. */
-const checkoutFor = (session: Session, checkoutId?: string, prNumber?: number): SessionCheckout => {
-  const named = checkoutById(session, checkoutId);
-  const holds = (c: SessionCheckout) => checkoutPrsOf(c).some((pr) => pr.number === prNumber);
-  if (checkoutId !== undefined || prNumber === undefined || holds(named)) return named;
-  return checkoutsOf(session).find(holds) ?? named;
-};
 
 const resolveCheckoutSession = (sessionId: string, checkoutId?: string, prNumber?: number) =>
   resolveSession(sessionId).pipe(
@@ -2351,6 +2343,20 @@ const reviewLocations = (
  * Exported for tests.
  */
 export const reviewRun = (sessionId: string, force: boolean) =>
+  reviewLock(sessionId).withPermits(1)(runReview(sessionId, force));
+
+// One review per session at a time: the head-SHA de-dupe below only holds if a
+// second run can't pass it while the first is still reviewing the same head.
+const reviewLocks = new Map<string, Effect.Semaphore>();
+const reviewLock = (sessionId: string): Effect.Semaphore => {
+  const existing = reviewLocks.get(sessionId);
+  if (existing) return existing;
+  const lock = Effect.unsafeMakeSemaphore(1);
+  reviewLocks.set(sessionId, lock);
+  return lock;
+};
+
+const runReview = (sessionId: string, force: boolean) =>
   Effect.gen(function* () {
     const session = yield* sessionWithPr(sessionId);
     const checkout = activeCheckoutOrNull(session);

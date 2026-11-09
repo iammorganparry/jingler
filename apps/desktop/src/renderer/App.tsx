@@ -194,8 +194,12 @@ import { VoiceHomeProvider } from "./voice-home-provider.js";
 import { GitHubFeedbackRouter } from "./github-feedback.js";
 import { applyRelayHealthUpdate } from "./github-relay-health.js";
 
-/** How often the archive sweep re-checks each linked PR's merged/closed state. */
-const ARCHIVE_POLL_MS = 60_000;
+/**
+ * How often the PR sweep and the worktree PR detect loop re-check GitHub. Each tick
+ * costs a gh call per PR, so this stays slow; finished agent runs, window focus and
+ * the PR tab's Refresh button cover the moments that need to be fresh.
+ */
+const ARCHIVE_POLL_MS = 5 * 60_000;
 
 /** How long a fetched PR state stays fresh before the sweep will re-fetch it. */
 const PR_STATE_STALE_MS = 5 * 60_000;
@@ -1521,17 +1525,22 @@ function AuthedApp({
     [autoReview, sweepTargets],
   );
   const autoReviews = useQueries({
-    queries: reviewTargets.map((s) => ({
-      queryKey: ["auto-review", s.id, activeCheckoutOf(s).prNumber] as const,
+    queries: reviewTargets.map((s) => {
+      const { id: checkoutId, prNumber } = activeCheckoutOf(s);
+      // The sweep's `updatedAt` moves on a push, so a review runs when the PR changes, not on a timer.
+      // Match the checkout too: two repos in one session can both have a PR #42.
+      const updatedAt = prStacks[s.id]?.find((layer) => layer.checkoutId === checkoutId && layer.number === prNumber)?.status.updatedAt ?? null;
+      return {
+      queryKey: ["auto-review", s.id, checkoutId, prNumber, updatedAt] as const,
       queryFn: () => rpc.reviewRun(s.id, false),
-      staleTime: PR_STATE_STALE_MS,
-      refetchInterval: ARCHIVE_POLL_MS,
-      refetchIntervalInBackground: true,
-      refetchOnWindowFocus: true,
+      enabled: updatedAt !== null,
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
       // A reviewer that can't run (API failure, harness missing) must never retry
       // in a loop or surface anywhere — the manual button remains the recourse.
       retry: false,
-    })),
+      };
+    }),
     /**
      * Keyed off the review's OWN `sessionId`, never the query's position.
      *

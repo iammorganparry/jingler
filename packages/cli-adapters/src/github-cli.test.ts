@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect"
 import { describe, expect, it } from "vitest"
-import { GitHubCli, resetGhRateGate } from "./github-cli.js"
+import { GitHubCli, ghCallLabel, resetGhRateGate } from "./github-cli.js"
 import { fakeCommandExecutor } from "./test-support.js"
 
 const run = <A>(effect: Effect.Effect<A, unknown, unknown>, handler: Parameters<typeof fakeCommandExecutor>[0]): Promise<A> =>
@@ -41,7 +41,52 @@ describe("GitHubCli", () => {
     expect(commands).toEqual(["gh"])
   })
 
+  it("caches gh auth status instead of asking before every call", async () => {
+    resetGhRateGate()
+    let probes = 0
+    const handler: Parameters<typeof fakeCommandExecutor>[0] = (command, args) => {
+      if (command === "gh" && args[0] === "auth") { probes++; return { stdout: "github.com\n" } }
+      return
+    }
+    await expect(run(GitHubCli.available(), handler)).resolves.toBe(true)
+    await expect(run(GitHubCli.available(), handler)).resolves.toBe(true)
+    expect(probes).toBe(1)
+    resetGhRateGate()
+  })
+
+  it("shares one in-flight gh auth status across concurrent callers", async () => {
+    resetGhRateGate()
+    let probes = 0
+    const results = await run(Effect.all(Array.from({ length: 5 }, () => GitHubCli.available()), { concurrency: "unbounded" }), (command, args) => {
+      if (command === "gh" && args[0] === "auth") { probes++; return { stdout: "github.com\n" } }
+      return
+    })
+    expect(results).toEqual([true, true, true, true, true])
+    expect(probes).toBe(1)
+    resetGhRateGate()
+  })
+
+  it("does not cache a signed-out result past the next gh auth login", async () => {
+    resetGhRateGate()
+    let signedIn = false
+    const handler: Parameters<typeof fakeCommandExecutor>[0] = (command, args) =>
+      command === "gh" && args[0] === "auth" ? (signedIn ? { stdout: "github.com\n" } : { exitCode: 1, stderr: "not logged in" }) : undefined
+    await expect(run(GitHubCli.available(), handler)).resolves.toBe(false)
+    signedIn = true
+    await expect(run(GitHubCli.available(), handler)).resolves.toBe(true)
+    resetGhRateGate()
+  })
+
+  it("labels gh calls from a fixed set so endpoints never become counter keys", () => {
+    expect(ghCallLabel(["api", "repos/acme/widget"])).toBe("api rest")
+    expect(ghCallLabel(["api", "-X", "POST", "repos/acme/widget/pulls"])).toBe("api rest")
+    expect(ghCallLabel(["api", "graphql", "-f", "query=x"])).toBe("api graphql")
+    expect(ghCallLabel(["api", "search/issues"])).toBe("api search")
+    expect(ghCallLabel(["pr", "view", "42", "--json", "state"])).toBe("pr view")
+  })
+
   it("reports an unavailable or signed-out CLI", async () => {
+    resetGhRateGate()
     await expect(run(GitHubCli.available(), (command) =>
       command === "gh" ? { exitCode: 1, stderr: "not logged in" } : undefined
     )).resolves.toBe(false)

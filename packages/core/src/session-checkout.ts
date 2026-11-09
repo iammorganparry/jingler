@@ -216,6 +216,14 @@ export const checkoutById = (session: CheckoutSession, checkoutId?: string): Ses
   (checkoutId === undefined ? undefined : checkoutsOf(session).find((c) => c.id === checkoutId)) ??
   activeCheckoutOf(session);
 
+/** The named checkout; without one, the checkout whose stack holds `prNumber` (active first), so another repo's PR reads from its own worktree. */
+export const checkoutFor = (session: CheckoutSession, checkoutId?: string, prNumber?: number | null): SessionCheckout => {
+  const named = checkoutById(session, checkoutId);
+  const holds = (c: SessionCheckout) => checkoutPrsOf(c).some((pr) => pr.number === prNumber);
+  if (checkoutId !== undefined || prNumber == null || holds(named)) return named;
+  return checkoutsOf(session).find(holds) ?? named;
+};
+
 /** The checkout's publish result, unless it was recorded on another branch (the checkout moved since). */
 export const currentPublishOf = (checkout: SessionCheckout): SessionCheckout["publish"] =>
   checkout.publish?.branch === undefined || checkout.publish.branch === checkout.branch ? checkout.publish : undefined;
