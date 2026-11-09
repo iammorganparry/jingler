@@ -59,6 +59,8 @@ export function PullRequestPane({
     busy,
     loadError,
     retryLoad,
+    refresh,
+    refreshing,
     mergePr,
     merging,
     mergeError,
@@ -141,6 +143,8 @@ export function PullRequestPane({
       onResolveThread={resolveThread}
       onReplyToThread={replyToThread}
       onOpenOnGithub={openOnGithub}
+      onRefresh={refresh}
+      refreshing={refreshing}
       onOpenFiles={() => {
         // Changes reads the layer from the review store; point it at the PR on screen.
         const own = activeCheckoutOf(session).prNumber

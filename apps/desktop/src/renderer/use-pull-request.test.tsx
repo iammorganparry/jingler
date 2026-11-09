@@ -22,7 +22,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-it("polls the cheap PR state and reloads the full view only when it changes", async () => {
+it("never polls the PR state on a timer; Refresh and state changes reload the full view", async () => {
   vi.useFakeTimers()
   vi.mocked(rpc.githubPr).mockResolvedValue(null)
   vi.mocked(rpc.githubPrState)
@@ -57,23 +57,29 @@ it("polls the cheap PR state and reloads the full view only when it changes", as
     baseBranch: "main",
     mode: "auto"
   })
-  renderHook(() => usePullRequest(session, { connected: true }), { wrapper })
+  const { result } = renderHook(() => usePullRequest(session, { connected: true }), { wrapper })
   await act(async () => {})
   expect(rpc.githubPr).toHaveBeenCalledTimes(1)
   expect(rpc.githubPrState).toHaveBeenCalledTimes(1)
 
-  // Unchanged state: the expensive full read is not repeated.
-  await act(async () => vi.advanceTimersByTimeAsync(PR_REFRESH_MS))
-  expect(rpc.githubPrState).toHaveBeenCalledTimes(2)
-  expect(rpc.githubPr).toHaveBeenCalledTimes(1)
+  // No timer: an open PR view spends no gh calls while it sits there.
+  await act(async () => vi.advanceTimersByTimeAsync(PR_REFRESH_MS * 10))
+  expect(rpc.githubPrState).toHaveBeenCalledTimes(1)
 
-  // Checks moved: one full reload.
-  await act(async () => vi.advanceTimersByTimeAsync(PR_REFRESH_MS))
+  // Refresh with unchanged state: the expensive full read is re-read once (the button asks for it)…
+  await act(async () => { result.current.refresh() })
+  await act(async () => vi.advanceTimersByTimeAsync(10))
+  expect(rpc.githubPrState).toHaveBeenCalledTimes(2)
+  expect(rpc.githubPr).toHaveBeenCalledTimes(2)
+
+  // …and a state change (checks moved) triggers the reload on its own.
+  await act(async () => { client.invalidateQueries({ queryKey: ["pr-state"] }) })
+  await act(async () => vi.advanceTimersByTimeAsync(10))
   expect(rpc.githubPrState).toHaveBeenCalledTimes(3)
   // The reload is triggered from an effect after the new state lands; react-query
   // delivers that state on a setTimeout(0), which fake timers must advance.
   await act(async () => vi.advanceTimersByTimeAsync(10))
-  expect(rpc.githubPr).toHaveBeenCalledTimes(2)
+  expect(rpc.githubPr).toHaveBeenCalledTimes(3)
   client.clear()
 })
 

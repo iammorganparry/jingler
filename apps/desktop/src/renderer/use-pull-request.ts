@@ -11,9 +11,9 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrMergeMethod, PullRequest, ReviewSubmitKind, Session, SessionPrStatus } from "@jingler/core"
-import { activeCheckoutOf } from "@jingler/core"
+import { activeCheckoutOf, checkoutPrsOf, checkoutsOf } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
-import { githubPollInterval, retryUnlessRateLimited } from "./github-poll.js"
+import { retryUnlessRateLimited } from "./github-poll.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { markRouted, useRoutedEntries } from "./routed-store.js"
 
@@ -41,6 +41,10 @@ export interface PullRequestState {
   readonly loadError: string | null
   /** Re-run the PR read after a failure. */
   readonly retryLoad: () => void
+  /** Re-read the PR state now (the view no longer polls on a timer). */
+  readonly refresh: () => void
+  /** A PR read is in flight. */
+  readonly refreshing: boolean
   /** Merge the PR. Defaults to a merge commit; the side panel offers the choice. */
   readonly mergePr: (method?: PrMergeMethod) => Promise<void>
   /** A merge is in flight. */
@@ -79,23 +83,28 @@ export interface PullRequestState {
   readonly resolveConflicts: (prompt: string) => void
 }
 
+/** The sweep's key for one PR's cheap state; sharing it means an open PR view costs no extra reads. */
+export const prStateKey = (sessionId: string, checkoutId: string, prNumber: number | null) =>
+  ["pr-state", sessionId, checkoutId, prNumber] as const
+
 /**
- * Poll the cheap PR state (2–3 GitHub requests) and invalidate `fullKey` only when
- * it changes. The full read behind `fullKey` is never polled itself.
+ * Read the cheap PR state (shared with the App sweep) and invalidate `fullKey` only
+ * when it changes. Nothing here polls on a timer: the sweep, window focus and the
+ * Refresh button drive it, so an open PR tab no longer burns gh calls every 30s.
  */
 export function useReloadOnPrChange(
   fullKey: ReadonlyArray<unknown>,
   sessionId: string,
   prNumber: number | null,
-  checkoutId?: string
+  checkoutId: string
 ): void {
   const qc = useQueryClient()
   const stateQuery = useQuery({
-    queryKey: ["github", "pr-state-poll", sessionId, checkoutId ?? null, prNumber] as const,
+    queryKey: prStateKey(sessionId, checkoutId, prNumber),
     queryFn: () => rpc.githubPrState(sessionId, prNumber ?? undefined, checkoutId),
     enabled: prNumber != null,
-    refetchInterval: githubPollInterval(PR_REFRESH_MS),
-    refetchIntervalInBackground: false,
+    staleTime: PR_REFRESH_MS,
+    refetchOnWindowFocus: true,
     retry: retryUnlessRateLimited
   })
   const signature = prStateSignature(stateQuery.data)
@@ -121,16 +130,23 @@ export function usePullRequest(
 ): PullRequestState {
   const qc = useQueryClient()
   const prNumber = opts.prNumber ?? activeCheckoutOf(session).prNumber
+  // Same checkout the main process resolves, so the state key matches the sweep's.
+  const checkoutId = (checkoutsOf(session).find((c) => checkoutPrsOf(c).some((pr) => pr.number === prNumber))
+    ?? activeCheckoutOf(session)).id
 
-  // The full view costs ~12 GitHub requests, so it is never polled: a cheap state
-  // read polls instead, and only a change in it (new push, checks, comment) reloads.
+  // The full view costs ~12 GitHub requests, so it is never polled: the shared cheap
+  // state read reloads it only when something changed (new push, checks, comment).
   const query = useQuery({
     queryKey: prKey(session.id, prNumber),
     queryFn: () => rpc.githubPr(session.id, prNumber ?? undefined),
     staleTime: PR_REFRESH_MS,
     retry: retryUnlessRateLimited
   })
-  useReloadOnPrChange(prKey(session.id, prNumber), session.id, prNumber)
+  useReloadOnPrChange(prKey(session.id, prNumber), session.id, prNumber, checkoutId)
+  const refresh = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: prStateKey(session.id, checkoutId, prNumber) })
+    void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
+  }, [qc, session.id, checkoutId, prNumber])
 
   // Route an instruction to the session's agent as a NORMAL conversation turn
   // (via the persistent actor), so its work + any approval gates / questions are
@@ -271,6 +287,8 @@ export function usePullRequest(
     busy: query.isPending,
     loadError: query.error ? ((query.error as { message?: string }).message ?? "Failed to load pull request") : null,
     retryLoad: () => void query.refetch(),
+    refresh,
+    refreshing: query.isFetching,
     mergePr,
     merging: mergeMutation.isPending,
     mergeError: mergeMutation.error

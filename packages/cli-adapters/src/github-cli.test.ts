@@ -41,7 +41,21 @@ describe("GitHubCli", () => {
     expect(commands).toEqual(["gh"])
   })
 
+  it("caches gh auth status instead of asking before every call", async () => {
+    resetGhRateGate()
+    let probes = 0
+    const handler: Parameters<typeof fakeCommandExecutor>[0] = (command, args) => {
+      if (command === "gh" && args[0] === "auth") { probes++; return { stdout: "github.com\n" } }
+      return
+    }
+    await expect(run(GitHubCli.available(), handler)).resolves.toBe(true)
+    await expect(run(GitHubCli.available(), handler)).resolves.toBe(true)
+    expect(probes).toBe(1)
+    resetGhRateGate()
+  })
+
   it("reports an unavailable or signed-out CLI", async () => {
+    resetGhRateGate()
     await expect(run(GitHubCli.available(), (command) =>
       command === "gh" ? { exitCode: 1, stderr: "not logged in" } : undefined
     )).resolves.toBe(false)

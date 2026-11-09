@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react"
 import type { PrState, PullRequest } from "@jingler/core"
-import { Check, Copy, Download, ExternalLink } from "lucide-react"
+import { Check, Copy, Download, ExternalLink, RefreshCw } from "lucide-react"
+import { Spin } from "../components/spin.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge, type BadgeTone } from "../components/badge.js"
@@ -100,6 +101,9 @@ export interface PrViewHeaderProps {
   sessionActionLabel: string
   sessionActionDisabledReason?: string
   onOpenOnGithub?: () => void
+  /** Re-read the PR now; the view does not poll on a timer. */
+  onRefresh?: () => void
+  refreshing?: boolean
   onMarkReady?: () => void
   markingReady?: boolean
   /** Ask to close the PR; the parent owns the ConfirmDialog. */
@@ -117,6 +121,8 @@ export function PrViewHeader({
   sessionActionLabel,
   sessionActionDisabledReason,
   onOpenOnGithub,
+  onRefresh,
+  refreshing = false,
   onMarkReady,
   markingReady,
   onRequestClose,
@@ -138,6 +144,13 @@ export function PrViewHeader({
       actions={
         <>
           {switcher}
+          {onRefresh && (
+            <Tooltip label="Refresh" side="bottom">
+              <Button variant="ghost" size="icon" aria-label="Refresh pull request" className="size-7" disabled={refreshing} onClick={onRefresh}>
+                <Spin active={refreshing}><RefreshCw size={15} aria-hidden /></Spin>
+              </Button>
+            </Tooltip>
+          )}
           {onOpenOnGithub && (
             <Tooltip label="Open on GitHub" side="bottom">
               <Button variant="ghost" size="icon" aria-label="Open on GitHub" className="size-7" onClick={onOpenOnGithub}>

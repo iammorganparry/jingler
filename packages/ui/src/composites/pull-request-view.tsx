@@ -176,6 +176,9 @@ export interface PullRequestViewProps {
   /** Reply into an inline review thread (`commentId` = the REST databaseId). */
   onReplyToThread?: (commentId: number, body: string) => Promise<void> | void
   onOpenOnGithub?: () => void
+  /** Re-read the PR now; the view does not poll on a timer. */
+  onRefresh?: () => void
+  refreshing?: boolean
   /** Open an existing session for this PR or start the prefilled creation flow. */
   onOpenSession?: () => void
   sessionActionLabel?: string
@@ -291,6 +294,8 @@ function PullRequestViewBody({
   onResolveThread,
   onReplyToThread,
   onOpenOnGithub,
+  onRefresh,
+  refreshing,
   onOpenSession,
   sessionActionLabel = "Create session",
   sessionActionDisabledReason,
@@ -373,6 +378,8 @@ function PullRequestViewBody({
               sessionActionLabel={sessionActionLabel}
               sessionActionDisabledReason={sessionActionDisabledReason}
               onOpenOnGithub={onOpenOnGithub}
+              onRefresh={onRefresh}
+              refreshing={refreshing}
               onMarkReady={readOnly && !onMerge ? undefined : onMarkReady}
               markingReady={markingReady}
               onRequestClose={onClosePr && !(readOnly && !onMerge) ? () => setCloseConfirmOpen(true) : undefined}
