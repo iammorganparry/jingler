@@ -109,22 +109,29 @@ export function useReviewTurns(session: Session) {
  * Chats share one worktree, so "This chat" narrows the tree's diff to the paths
  * the active chat's own tools changed. A file two chats edited shows its whole diff.
  */
-function useChatScopedFiles<F extends { readonly path: string }, D extends { readonly path: string }>(
+export function useChatScopedFiles<
+  F extends { readonly path: string },
+  D extends { readonly path: string },
+  O extends { readonly path: string }
+>(
   session: Session,
-  files: ReadonlyArray<F>,
-  fileDiffs: ReadonlyArray<D>,
+  review: { readonly files: ReadonlyArray<F>; readonly fileDiffs: ReadonlyArray<D>; readonly omittedFiles: ReadonlyArray<O> },
   turns: ReturnType<typeof reviewTurnsOf>,
-  active: boolean
+  checkoutId: string | undefined
 ) {
   const chatScope = useChatChangesScope(session.activeChatId)
+  // A multi-repo session names every checkout, the active one included; the
+  // agent's tools run in the active checkout, so that's where chat paths apply.
+  const active = checkoutId === undefined || checkoutId === activeCheckoutOf(session).id
   const multiChat = active && session.chats.length > 1
   const paths = useMemo(
     () => (multiChat && chatScope === "chat" ? chatPathsOf(turns) : null),
     [multiChat, chatScope, turns]
   )
   return {
-    files: useMemo(() => narrowToPaths(files, paths), [files, paths]),
-    fileDiffs: useMemo(() => narrowToPaths(fileDiffs, paths), [fileDiffs, paths]),
+    files: useMemo(() => narrowToPaths(review.files, paths), [review.files, paths]),
+    fileDiffs: useMemo(() => narrowToPaths(review.fileDiffs, paths), [review.fileDiffs, paths]),
+    omittedFiles: useMemo(() => narrowToPaths(review.omittedFiles, paths), [review.omittedFiles, paths]),
     chatScope,
     setChatScope: multiChat ? (scope: ChatScope) => setChatChangesScope(session.activeChatId, scope) : undefined
   }
@@ -177,7 +184,7 @@ function CheckoutChangesList({
   )
   // The turn filter belongs to the active checkout only.
   const active = checkoutId === undefined
-  const { files, fileDiffs, chatScope, setChatScope } = useChatScopedFiles(session, review.files, review.fileDiffs, turns, active)
+  const { files, fileDiffs, omittedFiles, chatScope, setChatScope } = useChatScopedFiles(session, review, turns, checkoutId)
   const agentTrees = useAgentTrees(session, files, active && review.source === "local")
   const { changesScope, setChangesScope } = useSubagentView(session.activeChatId)
   const viewed = useViewedChild(session.id, session.activeChatId)
@@ -199,7 +206,7 @@ function CheckoutChangesList({
       agentScope={changesScope}
       onAgentScopeChange={setChangesScope}
       fileDiffs={fileDiffs}
-      omittedFiles={review.omittedFiles}
+      omittedFiles={omittedFiles}
       diffLineLimit={review.diffLineLimit}
       drafts={review.drafts}
       reviewThreads={review.reviewThreads}

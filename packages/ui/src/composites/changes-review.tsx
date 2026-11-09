@@ -311,8 +311,24 @@ function AgentScopedFileList({
   )
 }
 
-/** The empty state for a zero-file layer: a PR-stack-specific message once there's a layer to blame. */
-function ChangedFilesEmptyState({ hasPrLayers }: { readonly hasPrLayers: boolean }) {
+/** The empty state for a zero-file list: blames the chat filter first, then the PR layer. */
+function ChangedFilesEmptyState({
+  hasPrLayers,
+  onShowAllChats
+}: {
+  readonly hasPrLayers: boolean
+  /** Set when "This chat" is what emptied the list. */
+  readonly onShowAllChats?: () => void
+}) {
+  if (onShowAllChats) {
+    return (
+      <EmptyState
+        title="No changes from this chat"
+        description="Other chats in this session may have changed files."
+        action={<Button variant="secondary" size="sm" onClick={onShowAllChats}>Show all chats</Button>}
+      />
+    )
+  }
   return hasPrLayers ? (
     <EmptyState title="No commits in this layer" description="Pick another PR layer to see its changes." />
   ) : (
@@ -425,7 +441,10 @@ function ChangedFilesBody({
         {multiAgent ? (
           <AgentScopedFileList trees={agentTrees} scope={agentScope} onScopeChange={onAgentScopeChange} activePath={activePath} onSelectFile={onSelectFile} />
         ) : allFiles.length === 0 ? (
-          <ChangedFilesEmptyState hasPrLayers={prLayers.length >= 2} />
+          <ChangedFilesEmptyState
+            hasPrLayers={prLayers.length >= 2}
+            onShowAllChats={chatScope === "chat" && onChatScopeChange ? () => onChatScopeChange("all") : undefined}
+          />
         ) : (
           <ReviewFileRail
             files={files}
