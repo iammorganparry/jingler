@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.23.1
+
+### Patch Changes
+
+- c644ecf: Fix Claude subscription sessions re-billing the whole conversation on every call. Prompt caching works again, so long sessions use far fewer tokens.
+  - @jingler/plannotator-ext@0.23.1
+
 ## 0.23.0
 
 ### Minor Changes

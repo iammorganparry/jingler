@@ -1,5 +1,11 @@
 # @jingler/server
 
+## 0.23.1
+
+### Patch Changes
+
+- @jingler/core@0.23.1
+
 ## 0.23.0
 
 ### Patch Changes
