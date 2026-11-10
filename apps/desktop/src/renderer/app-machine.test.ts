@@ -2,17 +2,15 @@ import { activeCheckoutOf } from "@jingler/core"
 import {
   ProviderCatalog as ProviderCatalogSchema,
   type ProviderCatalog,
-  type ProviderConnection,
   type Session,
 } from "@jingler/core";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { createActor, fromCallback, fromPromise, waitFor } from "xstate";
+import { createActor, fromPromise, waitFor } from "xstate";
 import {
   appMachine,
   type ChosenRepositoryDirectory,
   type InitialData,
-  type ProviderAuthInput,
 } from "./app-machine.js";
 
 vi.mock("./rpc-client.js", () => ({ rpc: {} }));
@@ -103,10 +101,6 @@ const unconfigured = () =>
       loadSessions: fromPromise<ReadonlyArray<Session>>(async () => []),
       loadProviderCatalog: fromPromise<ProviderCatalog>(
         async () => providerCatalog,
-      ),
-      watchProviderLoginEvents: fromCallback(() => () => undefined),
-      connectProvider: fromPromise<ProviderConnection, ProviderAuthInput>(
-        async () => providerCatalog.connections[0]!.connection,
       ),
       completeProviderSetup: fromPromise<void>(async () => undefined),
     },
@@ -338,40 +332,23 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
-  it("retries authentication without retaining the submitted secret", async () => {
+  it("reloads the catalog when the connect sheet reports a new connection", async () => {
+    let loads = 0;
     const machine = unconfigured().provide({
       actors: {
-        connectProvider: fromPromise<ProviderConnection, ProviderAuthInput>(
-          async () => {
-            throw new Error("Token rejected");
-          },
-        ),
+        loadProviderCatalog: fromPromise<ProviderCatalog>(async () => {
+          loads += 1;
+          return providerCatalog;
+        }),
       },
     });
     const actor = createActor(machine).start();
     await reachProvider(actor);
-    actor.send({
-      type: "CONNECT_CLAUDE",
-      kind: "claude-setup-token",
-      id: "connection-1",
-      token: "short-lived-secret",
-      targetId: "local",
-    });
-    expect(actor.getSnapshot().context.providerPendingAuthKind).toBe(
-      "claude-setup-token",
-    );
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { provider: "authFailed" } }),
-    );
-
-    expect(JSON.stringify(actor.getSnapshot().context)).not.toContain(
-      "short-lived-secret",
-    );
-    expect(actor.getSnapshot().context.providerPendingAuthKind).toBeNull();
-    actor.send({ type: "RETRY_AUTH" });
-    expect(actor.getSnapshot().matches({ setup: { provider: "idle" } })).toBe(
-      true,
-    );
+    await waitFor(actor, (s) => s.matches({ setup: { provider: "idle" } }));
+    const before = loads;
+    actor.send({ type: "PROVIDER_CONNECTED" });
+    await waitFor(actor, (s) => s.matches({ setup: { provider: "idle" } }) && loads === before + 1);
+    expect(actor.getSnapshot().context.providerCatalog).toBe(providerCatalog);
     actor.stop();
   });
 

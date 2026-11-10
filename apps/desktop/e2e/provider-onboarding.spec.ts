@@ -8,6 +8,7 @@ const DETERMINISTIC_MODEL = /^Deterministic pi model 1/u;
 const PROVIDERS_NAV = /Providers/u;
 const STALE_MODEL_TITLE = / · stale$/u;
 const GPT_6_1_SOL = /^GPT-6\.1 Sol/u;
+const ACCOUNT_ACTIONS = / actions$/u;
 const CODEX_BINARY = resolve(
   import.meta.dirname,
   "../../../packages/cli-adapters/src/runtime/codex/fixtures/app-server.mjs",
@@ -44,10 +45,10 @@ const finishProviderSetup = async (
   ).toHaveCount(0);
   await expect(launched.window.getByText("Add another account")).toBeVisible();
   await expect(
-    launched.window.getByRole("button", { name: "Connect Claude through PI" }),
+    launched.window.getByRole("button", { name: "Connect Claude Code", exact: true }),
   ).toBeHidden();
   await expect(
-    launched.window.getByRole("button", { name: "Open browser" }),
+    launched.window.getByRole("button", { name: "Connect Codex", exact: true }),
   ).toBeHidden();
   await launched.window.getByRole("button", { name: "Continue" }).click();
   // #487 removed the standalone resources onboarding step; onboarding now
@@ -66,22 +67,36 @@ const finishProviderSetup = async (
   await expect(launched.window.getByText(SUBSCRIPTION_BILLING)).toBeVisible();
 };
 
-const PROVIDER_ICON_KIND: Record<string, string> = {
-  "Claude CLI subscription": "claude",
-  "ChatGPT Codex subscription": "codex",
+const connectClaudeCli = async (launched: LaunchedApp): Promise<void> => {
+  await launched.window.getByRole("button", { name: "Connect Claude Code", exact: true }).click();
+  await launched.window
+    .getByRole("dialog")
+    .getByRole("button", { name: "Connect with Claude Code" })
+    .click();
+};
+
+const connectCodex = async (
+  launched: LaunchedApp,
+  method: "Open browser" | "Use device code",
+): Promise<void> => {
+  await launched.window.getByRole("button", { name: "Connect Codex", exact: true }).click();
+  await launched.window.getByRole("dialog").getByRole("button", { name: method }).click();
+};
+
+const PROVIDER_CARD: Record<string, { name: string; kind: string }> = {
+  "Claude CLI subscription": { name: "Claude Code", kind: "claude" },
+  "ChatGPT Codex subscription": { name: "Codex", kind: "codex" },
 };
 
 const expectAccountRowLogo = async (
   launched: LaunchedApp,
   routeLabel: string,
 ): Promise<void> => {
-  const kind = PROVIDER_ICON_KIND[routeLabel];
-  if (!kind) throw new Error(`no expected provider-icon kind for ${routeLabel}`);
-  const row = launched.window
-    .getByRole("button", { name: new RegExp(routeLabel) })
-    .first();
-  await expect(row.locator(`[data-provider-icon="${kind}"]`)).toBeVisible();
-  await expect(row.locator("[data-provider-fallback]")).toHaveCount(0);
+  const card = PROVIDER_CARD[routeLabel];
+  if (!card) throw new Error(`no expected provider card for ${routeLabel}`);
+  const region = launched.window.getByRole("region", { name: card.name, exact: true });
+  await expect(region.locator(`[data-provider-icon="${card.kind}"]`)).toBeVisible();
+  await expect(region.locator("[data-provider-fallback]")).toHaveCount(0);
 };
 
 test("connects the local Claude CLI subscription without collecting credentials", async ({
@@ -97,7 +112,7 @@ test("connects the local Claude CLI subscription without collecting credentials"
   });
   await chooseFixtureRepo(launched);
 
-  await launched.window.getByRole("button", { name: "Connect Claude through PI" }).click();
+  await connectClaudeCli(launched);
   await expect(launched.window.getByPlaceholder("Claude setup-token")).toHaveCount(0);
   await finishProviderSetup(launched, "Claude CLI subscription");
   await expectAccountRowLogo(launched, "Claude CLI subscription");
@@ -122,7 +137,7 @@ test("connects ChatGPT Codex with a pinned OAuth subscription route", async ({
   });
   await chooseFixtureRepo(launched);
 
-  await launched.window.getByRole("button", { name: "Open browser" }).click();
+  await connectCodex(launched, "Open browser");
   await finishProviderSetup(launched, "ChatGPT Codex subscription");
 });
 
@@ -139,9 +154,7 @@ test("connects ChatGPT Codex with device-code OAuth through the main process", a
   });
   await chooseFixtureRepo(launched);
 
-  await launched.window
-    .getByRole("button", { name: "Use device code" })
-    .click();
+  await connectCodex(launched, "Use device code");
   await expect(launched.window.getByText("JING-LER1")).toBeVisible();
   await expect(
     launched.window.getByText("https://login.example.test/device"),
@@ -165,7 +178,7 @@ test("recovers a configured workspace that has no selectable provider", async ({
   await expect(
     launched.window.getByRole("heading", { name: "Connect a model provider" }),
   ).toBeVisible();
-  await launched.window.getByRole("button", { name: "Connect Claude through PI" }).click();
+  await connectClaudeCli(launched);
   await finishProviderSetup(launched, "Claude CLI subscription");
 });
 
@@ -284,7 +297,7 @@ test("cancels a hung Codex OAuth login from the reconnect sheet", async ({
   await sheet.getByRole("button", { name: "Open browser" }).click();
 
   await expect(
-    sheet.getByText("Waiting for browser sign-in…"),
+    sheet.getByText("Waiting for browser…"),
   ).toBeVisible();
   await sheet.getByRole("button", { name: "Cancel" }).click();
 
@@ -292,7 +305,7 @@ test("cancels a hung Codex OAuth login from the reconnect sheet", async ({
     sheet.getByRole("button", { name: "Open browser" }),
   ).toBeVisible();
   await expect(
-    sheet.getByText("Waiting for browser sign-in…"),
+    sheet.getByText("Waiting for browser…"),
   ).toBeHidden();
 });
 
@@ -346,7 +359,7 @@ test("keeps the typed API key and shows an error when verification rejects it", 
   const sheet = launched.window.getByRole("dialog");
   await sheet.getByRole("tab", { name: "API key" }).click();
   await sheet.getByPlaceholder("Provider API key").fill("sk-bad");
-  await sheet.getByRole("button", { name: "Save API key" }).click();
+  await sheet.getByRole("button", { name: "Test & save" }).click();
 
   await expect(
     sheet.getByText("The provider rejected this API key."),
@@ -375,7 +388,7 @@ test("adds a provider from settings after provider onboarding was skipped", asyn
     launched.window.getByText("Add an agent runtime"),
   ).toBeVisible();
 
-  await launched.window.getByRole("button", { name: "Open browser" }).click();
+  await connectCodex(launched, "Open browser");
 
   await expect(
     launched.window.getByText("ChatGPT Codex subscription", { exact: true }).last(),
@@ -423,17 +436,18 @@ test("rejects a duplicate provider connection from settings", async ({ launchApp
   await launched.window.getByRole("menuitem", { name: "Settings" }).click();
   await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
   await launched.window.getByRole("button", { name: "Add runtime" }).click();
-  await launched.window.getByRole("button", { name: "Open browser" }).click();
+  await connectCodex(launched, "Open browser");
 
+  const sheet = launched.window.getByRole("dialog");
   await expect(
-    launched.window.getByText("This provider connection already exists on this target", {
-      exact: true,
-    }),
+    sheet.getByText("This provider connection already exists on this target"),
   ).toBeVisible();
+  await launched.window.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
   await expect(
-    launched.window.getByRole("button", {
-      name: "Sign out ChatGPT Codex subscription connection",
-    }),
+    launched.window
+      .getByRole("region", { name: "Codex", exact: true })
+      .getByRole("button", { name: ACCOUNT_ACTIONS }),
   ).toHaveCount(1);
 });
 
@@ -480,7 +494,7 @@ test("provider onboarding remains reachable at the minimum window height", async
   });
   await chooseFixtureRepo(launched);
 
-  await launched.window.getByRole("button", { name: "Connect Claude through PI" }).click();
+  await connectClaudeCli(launched);
   const heading = launched.window.getByRole("heading", {
     name: "Connect a model provider",
   });

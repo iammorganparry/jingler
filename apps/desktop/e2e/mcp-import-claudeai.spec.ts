@@ -49,39 +49,44 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
     await window.getByRole("menuitem", { name: "Settings" }).click()
     await window.getByRole("button", { name: "MCP servers" }).click()
 
-    // Import sheet lists user, claude.ai, plugin entries with origin labels and problems.
-    const openImport = async () => {
-      await window.getByRole("button", { name: "Claude", exact: true }).click()
-      await window.getByRole("button", { name: "Include claude.ai connectors & plugins" }).click()
-      await expect(window.getByText("claude-ai-linear", { exact: true })).toBeVisible({ timeout: 30_000 })
+    await window.getByRole("tab", { name: "Discover" }).click()
+
+    // claude.ai connectors run natively: real auth state from `claude mcp list`, never importable.
+    const native = window.getByRole("region", { name: "claude.ai servers" })
+    await expect(native.getByText("Linear", { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(native.getByRole("button", { name: "Connect" })).toBeVisible()
+    await expect(native.getByText("Native", { exact: true })).toBeVisible()
+
+    // Claude Code section lists user and plugin servers; not-configured plugins are hidden.
+    const claudeCode = window.getByRole("region", { name: "Claude Code servers" })
+    await expect(claudeCode.getByText("user-docs", { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(claudeCode.getByText("plugin-eng-notion", { exact: true })).toBeVisible()
+    await expect(claudeCode.getByText(/google-calendar/)).toHaveCount(0)
+    await expect(claudeCode.getByText("claude-ai-linear", { exact: true })).toHaveCount(0)
+    await claudeCode.getByRole("button", { name: "Import plugin-eng-notion" }).click()
+
+    const mcpJson = () => {
+      try {
+        return JSON.parse(readFileSync(join(home, "jingler", "mcp.json"), "utf8")).mcp as Record<string, { url?: string }>
+      } catch {
+        return {} as Record<string, { url?: string }>
+      }
     }
-    await openImport()
-    for (const name of ["user-docs", "claude-ai-linear", "claude-ai-supabase-gtm-grid", "plugin-eng-notion"]) {
-      await expect(window.getByText(name, { exact: true })).toBeVisible()
-    }
-    await expect(window.getByText("claude.ai", { exact: true }).first()).toBeVisible()
-    await expect(window.getByText("Plugin", { exact: true }).first()).toBeVisible()
-    await expect(window.getByText("User", { exact: true }).first()).toBeVisible()
-    await expect(window.getByText(/Not configured/)).toBeVisible()
-    await window.getByRole("button", { name: /^Import \d+ servers?$/ }).click()
-    await expect(window.getByText(/^Imported /)).toBeVisible()
+    await expect.poll(() => mcpJson()["plugin-eng-notion"]?.url).toBe(mcp.url)
+    expect(mcpJson()["claude-ai-linear"]).toBeUndefined()
+    // Once imported, the card flips to its state instead of offering Import again.
+    await expect(claudeCode.getByRole("button", { name: "Import plugin-eng-notion" })).toHaveCount(0, { timeout: 15_000 })
+    expect(Object.keys(mcpJson()).filter((name) => name === "plugin-eng-notion")).toHaveLength(1)
 
-    const mcpJson = () => JSON.parse(readFileSync(join(home, "jingler", "mcp.json"), "utf8")).mcp as Record<string, { url?: string }>
-    expect(mcpJson()["claude-ai-linear"]?.url).toBe(mcp.url)
-
-    // Re-import is idempotent: the existing entry is flagged, nothing is overwritten.
-    await openImport()
-    await expect(window.getByText(/already exists/).first()).toBeVisible()
-    expect(Object.keys(mcpJson()).filter((name) => name === "claude-ai-linear")).toHaveLength(1)
-
-    // Jingler-managed OAuth against the fake server.
+    // Yours: the plugin row reconnects through Jingler-managed OAuth.
+    await window.getByRole("tab", { name: "Yours" }).click()
     await app.evaluate(({ shell }) => {
       ;(globalThis as unknown as { __opened: string[] }).__opened = []
       shell.openExternal = async (url: string) => {
         ;(globalThis as unknown as { __opened: string[] }).__opened.push(url)
       }
     })
-    await window.getByRole("button", { name: "Connect", exact: true }).first().click()
+    await window.getByRole("button", { name: "Reconnect plugin:eng:notion" }).click()
     await expect.poll(() => app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened.length)).toBe(1)
     const [authorizationUrl] = await app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)
     const callback = await fetch(authorizationUrl!)
@@ -93,9 +98,15 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
     const composer = window.getByPlaceholder("Message the agent…")
     await composer.fill("What connectors do you have?")
     await composer.press("Enter")
-    await expect(window.getByText("Claude saw the imported Linear connector.")).toBeVisible({ timeout: 30_000 })
+    await expect(window.getByText("Claude saw the imported Notion plugin.")).toBeVisible({ timeout: 30_000 })
     const args: string[] = JSON.parse(readFileSync(argsFile, "utf8"))
-    expect(args).toContain("--strict-mcp-config")
+    // claude.ai connectors remain, so the session loads them natively instead of running strict.
+    expect(args).not.toContain("--strict-mcp-config")
+    expect(args[args.indexOf("--setting-sources") + 1]).toBe("user")
+    const overlay = JSON.parse(args[args.indexOf("--settings") + 1]!)
+    expect(overlay.disableAllHooks).toBe(true)
+    expect(overlay.deniedMcpServers.map(({ serverName }: { serverName: string }) => serverName)).toContain("plugin:eng:notion")
+    expect(args[args.indexOf("--allowedTools") + 1]).toContain("mcp__claude_ai_*")
     expect(args.filter((arg) => arg === "--mcp-config")).toHaveLength(1)
   } finally {
     await mcp.close()

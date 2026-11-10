@@ -95,7 +95,8 @@ const makeE2eCodexOAuth = (codexLoginHangs: boolean): CodexOAuthFlow => ({
         verificationUri: "https://login.example.test/device",
         expiresInSeconds: 600
       })
-      await delay(100, undefined, { signal })
+      // Long enough for the e2e to see the code before the sheet closes on success.
+      await delay(1500, undefined, { signal })
     }
     return {
       access: "e2e-codex-access",

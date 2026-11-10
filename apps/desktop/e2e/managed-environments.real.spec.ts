@@ -288,12 +288,14 @@ const authenticateProvider = async (
     if (!config.allowClaudeReauthentication) {
       throw new Error("Claude reauthentication was not explicitly enabled");
     }
-    await window.getByRole("button", { name: "Use Claude CLI" }).click();
+    await window.getByRole("button", { name: "Connect Claude Code", exact: true }).click();
+    await window.getByRole("dialog").getByRole("button", { name: "Connect with Claude Code" }).click();
     await expect(
       window.getByText("Claude CLI subscription", { exact: true }).last(),
     ).toBeVisible({ timeout: 5 * 60_000 });
   } else {
-    await window.getByRole("button", { name: "Open browser" }).click();
+    await window.getByRole("button", { name: "Connect Codex", exact: true }).click();
+    await window.getByRole("dialog").getByRole("button", { name: "Open browser" }).click();
     await expect(
       window.getByText("ChatGPT Codex subscription", { exact: true }).last(),
     ).toBeVisible({ timeout: 5 * 60_000 });

@@ -49,7 +49,8 @@ const startProviderAuthentication = async (
       "Set JINGLER_REAL_CODEX_REAUTH=1 to explicitly start interactive Codex browser login.",
     );
     if (!allowCodexReauthentication) return;
-    await window.getByRole("button", { name: "Open browser" }).click();
+    await window.getByRole("button", { name: "Connect Codex", exact: true }).click();
+    await window.getByRole("dialog").getByRole("button", { name: "Open browser" }).click();
   } else {
     test.skip(
       !allowClaudeReauthentication,
@@ -192,14 +193,16 @@ const ensureAuthenticated = async (
       "Set JINGLER_REAL_CODEX_REAUTH=1 to explicitly start interactive Codex browser login.",
     );
     if (!allowCodexReauthentication) return;
-    await window.getByRole("button", { name: "Reconnect in browser" }).click();
+    await window.getByRole("button", { name: "Reconnect", exact: true }).click();
+    await window.getByRole("dialog").getByRole("button", { name: "Open browser" }).click();
   } else {
     test.skip(
       !allowClaudeReauthentication,
       "Set JINGLER_REAL_CLAUDE_REAUTH=1 to explicitly use the local Claude CLI login.",
     );
     if (!allowClaudeReauthentication) return;
-    await window.getByRole("button", { name: "Reconnect Claude CLI" }).click();
+    await window.getByRole("button", { name: "Reconnect", exact: true }).click();
+    await window.getByRole("dialog").getByRole("button", { name: "Connect with Claude Code" }).click();
   }
 
   await expect(reauthentication).toHaveCount(0, { timeout: 5 * 60_000 });

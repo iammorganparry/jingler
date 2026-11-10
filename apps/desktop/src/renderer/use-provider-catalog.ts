@@ -1,7 +1,5 @@
 import type {
-  AuthKind,
   Environment,
-  CodexLoginMethod,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId
@@ -81,42 +79,6 @@ export function useProviderCatalog(environments: readonly Environment[] = []) {
     mutationFn: rpc.providerRemoveConnection,
     onSuccess: refreshCatalog
   })
-  const connectClaude = useMutation({
-    mutationFn: ({ connectionId, token }: {
-      connectionId: ProviderConnectionId
-      token: string
-    }) => rpc.providerConnectClaudeToken({
-      id: connectionId,
-      token,
-      targetId: "desktop"
-    }),
-    onSuccess: refreshCatalog
-  })
-  const startCodex = useMutation({
-    mutationFn: ({ connectionId, method }: {
-      connectionId: ProviderConnectionId
-      method: CodexLoginMethod
-    }) =>
-      rpc.providerStartCodexLogin({
-        id: connectionId,
-        targetId: "desktop",
-        method
-      }),
-    onSuccess: refreshCatalog
-  })
-  const setApiKey = useMutation({
-    mutationFn: ({ connectionId, providerId, apiKey }: {
-      connectionId: ProviderConnectionId
-      providerId: ProviderId
-      apiKey: string
-    }) => rpc.providerSetApiKey({
-      id: connectionId,
-      providerId,
-      apiKey,
-      targetId: "desktop"
-    }),
-    onSuccess: refreshCatalog
-  })
   const makeDefault = useMutation({
     mutationFn: ({ connectionId, providerId, modelId }: {
       connectionId: ProviderConnectionId
@@ -126,56 +88,15 @@ export function useProviderCatalog(environments: readonly Environment[] = []) {
     onSuccess: (config) => queryClient.setQueryData(["config"], config)
   })
 
-  /** Provider.cancelLogin for the `ProviderConnectSheet` OAuth-waiting Cancel button. */
-  const cancelLogin = async (connectionId: ProviderConnectionId) => {
-    await rpc.providerCancelLogin(connectionId)
-    await refreshCatalog()
-  }
-
-  /**
-   * Sets then verifies an API key for `ProviderConnectSheet` (Provider.setApiKey +
-   * Provider.verifyModel), resolving ok/error instead of throwing so the sheet can
-   * keep the typed value on an invalid key.
-   */
-  const saveApiKey = async (
-    connectionId: ProviderConnectionId,
-    providerId: ProviderId,
-    apiKey: string
-  ): Promise<{ ok: true } | { ok: false; error: string }> => {
-    try {
-      await setApiKey.mutateAsync({ connectionId, providerId, apiKey })
-      const updated = await queryClient.fetchQuery({ queryKey: CATALOG_KEY, queryFn: rpc.providerList })
-      const entry = updated.connections.find(({ connection }) => connection.id === connectionId)
-      const modelId = entry?.models.find(({ selectable }) => selectable)?.id
-      if (modelId) await verify.mutateAsync({ connectionId, modelId })
-      return { ok: true }
-    } catch (error) {
-      return { ok: false, error: messageOf(error) }
-    } finally {
-      await refreshCatalog()
-    }
-  }
-
   const activeMutation = [
     refresh,
     verify,
     logout,
     remove,
-    connectClaude,
-    startCodex,
-    setApiKey,
     makeDefault
   ].find(
     ({ isPending, error }) => isPending || error !== null
   )
-  const pendingAuthKind: AuthKind | null = connectClaude.isPending
-    ? "claude-setup-token"
-    : startCodex.isPending
-      ? "openai-codex-oauth"
-      : setApiKey.isPending
-        ? "api-key"
-        : null
-
   return {
     nativeEndpointLogin: {
       start: rpc.agentEndpointStartLogin,
@@ -203,11 +124,7 @@ export function useProviderCatalog(environments: readonly Environment[] = []) {
       verify.isPending ||
       logout.isPending ||
       remove.isPending ||
-      connectClaude.isPending ||
-      startCodex.isPending ||
-      setApiKey.isPending ||
       makeDefault.isPending,
-    pendingAuthKind,
     error: catalogError([catalog.error, endpointCatalog.error, activeMutation?.error, ...remoteCatalogs.map(({ error }) => error)]),
     reload: refreshCatalog,
     refresh: refresh.mutate,
@@ -215,21 +132,6 @@ export function useProviderCatalog(environments: readonly Environment[] = []) {
       verify.mutate({ connectionId, modelId }),
     logout: logout.mutate,
     remove: remove.mutate,
-    connectClaude: (
-      connectionId: ProviderConnectionId,
-      token: string
-    ) => connectClaude.mutate({ connectionId, token }),
-    startCodex: (
-      connectionId: ProviderConnectionId,
-      method: CodexLoginMethod
-    ) => startCodex.mutate({ connectionId, method }),
-    setApiKey: (
-      connectionId: ProviderConnectionId,
-      providerId: ProviderId,
-      apiKey: string
-    ) => setApiKey.mutate({ connectionId, providerId, apiKey }),
-    makeDefault: makeDefault.mutate,
-    cancelLogin,
-    saveApiKey
+    makeDefault: makeDefault.mutate
   }
 }

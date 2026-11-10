@@ -71,6 +71,7 @@ export interface SessionSplitProps {
   debugStopSequences?: Readonly<Record<string, number>>
   onOpenSettings?: () => void
   onOpenProviderSettings?: () => void
+  onOpenMcpSettings?: () => void
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void; onSelectReview: () => void }) => ReactNode
   /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
   tabContributions?: ReadonlyArray<TabContribution>
@@ -149,6 +150,7 @@ export function SessionSplit(props: SessionSplitProps) {
       debugStopSequence={props.debugStopSequences?.[session.id] ?? 0}
       onOpenSettings={props.onOpenSettings}
       onOpenProviderSettings={props.onOpenProviderSettings}
+      onOpenMcpSettings={props.onOpenMcpSettings}
       selectTabRequest={props.selectTabRequest ?? undefined}
       onTabRequestHandled={props.onTabRequestHandled}
       renderPullRequest={props.renderPullRequest}

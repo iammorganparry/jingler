@@ -559,7 +559,8 @@ onOpenSettings: providerConnections
             ? () => openSettings("providers")
             : undefined,
 onOpenProviderSettings: providerConnections ? () => openSettings("providers") : undefined,
-onOpenGithubSettings: providerConnections ? () => openSettings("github") : undefined
+onOpenGithubSettings: providerConnections ? () => openSettings("github") : undefined,
+onOpenMcpSettings: providerConnections ? () => openSettings("connectors") : undefined
     }
   }
 
@@ -1063,7 +1064,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<
-    "providers" | "github" | "agents" | "runtime" | "projects" | "plugins"
+    "providers" | "github" | "agents" | "runtime" | "projects" | "plugins" | "connectors"
   >("providers")
   const openSettings = useCallback(
     (section: typeof settingsSection = settingsSection) => {
