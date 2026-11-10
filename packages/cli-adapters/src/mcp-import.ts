@@ -366,8 +366,8 @@ interface RowsCache {
 // Keyed by home: main and the runtime can list different Claude configs (e2e, custom homes).
 const rowsCaches = new Map<string, RowsCache>()
 const rowsCache = (cwd: string): RowsCache => {
-  let cache = rowsCaches.get(cwd)
-  if (cache === undefined) rowsCaches.set(cwd, cache = { rows: [], checkedAt: 0, refresh: null })
+  const cache = rowsCaches.get(cwd) ?? { rows: [], checkedAt: 0, refresh: null }
+  rowsCaches.set(cwd, cache)
   return cache
 }
 /** Last `claude mcp list` result for this home; empty until the first refresh lands. */
