@@ -168,6 +168,7 @@ import { useMcpSettings } from "./use-mcp-settings.js";
 import { useVoiceSettings } from "./use-voice-settings.js";
 import { McpImportPrompt } from "./mcp-import-prompt.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
+import { useProviderConnect } from "./use-provider-connect.js";
 import { useAgentsSettings } from "./use-agents-settings.js";
 import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useEnvironments } from "./use-environments.js";
@@ -555,6 +556,7 @@ function AuthedApp({
   const providerCatalog = useProviderCatalog(environmentController.environments);
   const agentsSettings = useAgentsSettings();
   const runtimeInspector = useRuntimeInspector();
+  const providerConnect = useProviderConnect();
   const agentEndpointCatalog = useMemo<AgentEndpointCatalog | null>(() => {
     const catalogs = [
       ...(providerCatalog.endpointCatalog ? [providerCatalog.endpointCatalog] : []),
@@ -1705,6 +1707,7 @@ function AuthedApp({
       <ObsidianSaveToast />
       <SubagentLaneViewProvider>
       <SideChatLaneActionsProvider sessions={sessions}>
+      {providerConnect.sheet}
       <AgentEditsMarkerContext.Provider value={renderAgentEditsMarker}>
       <JinglerApp
         tabContributions={pluginTabs}
@@ -1881,7 +1884,6 @@ function AuthedApp({
           defaultConnectionId,
           defaultModelId,
           busy: providerCatalog.busy,
-          pendingAuthKind: providerCatalog.pendingAuthKind,
           error: providerCatalog.error,
           onReload: providerCatalog.reload,
           onRefresh: providerCatalog.refresh,
@@ -1889,11 +1891,7 @@ function AuthedApp({
           onMakeDefault: providerCatalog.makeDefault,
           onLogout: providerCatalog.logout,
           onRemove: providerCatalog.remove,
-          onConnectClaude: providerCatalog.connectClaude,
-          onStartCodex: providerCatalog.startCodex,
-          onSetApiKey: providerCatalog.setApiKey,
-          onCancelLogin: providerCatalog.cancelLogin,
-          onSaveApiKey: providerCatalog.saveApiKey,
+          onConnect: providerConnect.connect,
         }}
         agents={{
           resources: agentsSettings.snapshot.context.resources,
@@ -2650,17 +2648,24 @@ function renderAuthedAppGate(
     );
   }
   return state.matches("setup")
-    ? renderAppSetup(state, github, repos, reposDir, send)
+    ? <AppSetup state={state} github={github} repos={repos} reposDir={reposDir} send={send} />
     : null;
 }
 
-function renderAppSetup(
-  state: import("xstate").SnapshotFrom<typeof appMachine>,
-  github: ReturnType<typeof useGitHubConnection>,
-  repos: import("xstate").SnapshotFrom<typeof appMachine>["context"]["repos"],
-  reposDir: string | null,
-  send: import("xstate").ActorRefFrom<typeof appMachine>["send"]
-) {
+function AppSetup({
+  state,
+  github,
+  repos,
+  reposDir,
+  send,
+}: {
+  state: import("xstate").SnapshotFrom<typeof appMachine>;
+  github: ReturnType<typeof useGitHubConnection>;
+  repos: import("xstate").SnapshotFrom<typeof appMachine>["context"]["repos"];
+  reposDir: string | null;
+  send: import("xstate").ActorRefFrom<typeof appMachine>["send"];
+}) {
+  const providerConnect = useProviderConnect(() => send({ type: "PROVIDER_CONNECTED" }));
   const setupStep = state.matches({ setup: "github" })
     ? "github"
     : state.matches({ setup: "provider" })
@@ -2670,9 +2675,10 @@ function renderAppSetup(
         : "workspace";
   const providerBusy =
     state.matches({ setup: { provider: "refreshing" } }) ||
-    state.matches({ setup: { provider: "authenticating" } }) ||
     state.matches({ setup: { provider: "completing" } });
   return (
+    <>
+    {providerConnect.sheet}
     <SetupWithCloneDialog onCloned={() => send({ type: "CONTINUE" })}>
       {(openClone) => (
     <SetupScreen
@@ -2689,8 +2695,6 @@ function renderAppSetup(
           return catalog.endpoints.some(({ endpoint }) => endpoint.id === endpointId && endpoint.status === "ready")
         }
       }}
-      providerLoginEvent={state.context.providerLoginEvent}
-      providerPendingAuthKind={state.context.providerPendingAuthKind}
       error={state.context.error}
       providerFailure={
         state.matches({ setup: { provider: "loadFailed" } })
@@ -2722,49 +2726,16 @@ function renderAppSetup(
         github.cancel();
         send({ type: "SKIP_GITHUB" });
       }}
-      onConnectClaude={(token) =>
-        send({
-          type: "CONNECT_CLAUDE",
-          kind: "claude-setup-token",
-          id: crypto.randomUUID(),
-          token,
-          targetId: "desktop",
-        })
-      }
-      onStartCodex={(method) =>
-        send({
-          type: "START_CODEX",
-          kind: "openai-codex-oauth",
-          id: crypto.randomUUID(),
-          method,
-          targetId: "desktop",
-        })
-      }
-      onConnectApi={(providerId, apiKey) =>
-        send({
-          type: "CONNECT_API",
-          kind: "api-key",
-          id: crypto.randomUUID(),
-          providerId,
-          apiKey,
-          targetId: "desktop",
-        })
-      }
+      onConnect={providerConnect.connect}
       onContinueProvider={() => send({ type: "CONTINUE_PROVIDER" })}
       onSkipProvider={() => send({ type: "SKIP_PROVIDER" })}
-      onCancelAuth={() => send({ type: "CANCEL_AUTH" })}
-      onRetryProvider={() => {
-        if (state.matches({ setup: { provider: "authFailed" } })) {
-          send({ type: "RETRY_AUTH" });
-        } else {
-          send({ type: "RETRY_PROVIDER" });
-        }
-      }}
+      onRetryProvider={() => send({ type: "RETRY_PROVIDER" })}
       onSkipImportSessions={() => send({ type: "SKIP_IMPORT_SESSIONS" })}
       onContinueImportSessions={() => send({ type: "CONTINUE_IMPORT_SESSIONS" })}
     />
       )}
     </SetupWithCloneDialog>
+    </>
   );
 }
 

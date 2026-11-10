@@ -4,7 +4,6 @@ import {
   AgentEndpointCatalog,
   ProviderCatalog,
   type GitHubConnection,
-  type ProviderConnectionId,
 } from "@jingler/core";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -127,12 +126,9 @@ const props = (
   onCloneRepository: vi.fn(),
   onConnectGithub: vi.fn(),
   onSkipGithub: vi.fn(),
-  onConnectClaude: vi.fn(),
-  onStartCodex: vi.fn(),
-  onConnectApi: vi.fn(),
+  onConnect: vi.fn(),
   onContinueProvider: vi.fn(),
   onSkipProvider: vi.fn(),
-  onCancelAuth: vi.fn(),
   onRetryProvider: vi.fn(),
     onSkipImportSessions: vi.fn(),
     onContinueImportSessions: vi.fn(),
@@ -244,53 +240,27 @@ describe("SetupScreen", () => {
     render(<SetupScreen {...props({ step: "provider", agentEndpointCatalog: endpointCatalog })} />)
     expect(screen.getByText("PI · Claude Max, ready")).toBeTruthy()
     expect(screen.getByText("Claude Code, signed-out")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Connect Claude through PI" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Connect Claude Code" })).toBeTruthy()
   })
 
-  it("connects Claude through PI without collecting credentials", () => {
-    const onConnectClaude = vi.fn();
-    render(<SetupScreen {...props({ step: "provider", onConnectClaude })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect Claude through PI" }));
+  it("opens the connect sheet for Claude without collecting credentials", () => {
+    const onConnect = vi.fn();
+    render(<SetupScreen {...props({ step: "provider", onConnect })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect Claude Code" }));
 
-    expect(onConnectClaude).toHaveBeenCalledWith("claude-cli");
+    expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({ providerId: "anthropic", mode: "subscription" }));
     expect(screen.queryByPlaceholderText("Claude setup-token")).toBeNull();
   });
 
-  it("submits a trimmed Claude API key without connecting the local subscription", () => {
-    const onConnectApi = vi.fn();
-    const onConnectClaude = vi.fn();
-    render(<SetupScreen {...props({ step: "provider", onConnectApi, onConnectClaude })} />);
-    fireEvent.click(screen.getByText("Use an API key instead"));
-    const input = screen.getByPlaceholderText("Provider API key");
-    expect(input.getAttribute("type")).toBe("password");
-    fireEvent.change(input, { target: { value: "  test-claude-key  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Save API key" }));
+  it("opens the connect sheet for Codex and for an API key with fresh connection ids", () => {
+    const onConnect = vi.fn();
+    render(<SetupScreen {...props({ step: "provider", onConnect })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use an API key instead" }));
 
-    expect(onConnectApi).toHaveBeenCalledWith("anthropic", "test-claude-key");
-    expect(onConnectClaude).not.toHaveBeenCalled();
-    expect((input as HTMLInputElement).value).toBe("");
-  });
-
-  it("submits an API key for the selected BeUI provider", () => {
-    const onConnectApi = vi.fn();
-    render(<SetupScreen {...props({ step: "provider", onConnectApi })} />);
-    fireEvent.click(screen.getByText("Use an API key instead"));
-    fireEvent.click(screen.getByRole("button", { name: "API provider" }));
-    fireEvent.click(screen.getByRole("option", { name: "Google API" }));
-    fireEvent.change(screen.getByPlaceholderText("Provider API key"), {
-      target: { value: "test-key" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save API key" }));
-    expect(onConnectApi).toHaveBeenCalledWith("google", "test-key");
-  });
-
-  it("offers browser and device-code Codex subscription login", () => {
-    const onStartCodex = vi.fn();
-    render(<SetupScreen {...props({ step: "provider", onStartCodex })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open browser" }));
-    fireEvent.click(screen.getByRole("button", { name: "Use device code" }));
-    expect(onStartCodex).toHaveBeenNthCalledWith(1, "browser");
-    expect(onStartCodex).toHaveBeenNthCalledWith(2, "device-code");
+    expect(onConnect).toHaveBeenNthCalledWith(1, expect.objectContaining({ providerId: "openai-codex", mode: "subscription" }));
+    expect(onConnect).toHaveBeenNthCalledWith(2, expect.objectContaining({ mode: "api-key" }));
+    expect(onConnect.mock.calls[0]?.[0].connectionId).not.toBe(onConnect.mock.calls[1]?.[0].connectionId);
   });
 
   it("continues after authentication without requiring model selection", () => {
@@ -321,27 +291,12 @@ describe("SetupScreen", () => {
     );
 
     const accountDetails = screen
-      .getByRole("button", { name: "Connect Claude through PI" })
+      .getByRole("button", { name: "Connect Claude Code" })
       .closest("details");
     expect(accountDetails?.open).toBe(false);
     fireEvent.click(screen.getByText("Add another account"));
     expect(accountDetails?.open).toBe(true);
-    expect(screen.getByRole("button", { name: "Open browser" })).toBeTruthy();
-  });
-
-  it("shows the provider-specific connecting state", () => {
-    render(
-      <SetupScreen
-        {...props({
-          step: "provider",
-          busy: true,
-          providerPendingAuthKind: "openai-codex-oauth",
-        })}
-      />,
-    );
-
-    expect(screen.getByText("Connecting Codex…", { selector: "button" })).toBeTruthy();
-    expect(screen.getByText("Connecting Codex…", { selector: "span" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect Codex" })).toBeTruthy();
   });
 
   it("keeps Continue disabled without auth and exposes Skip for now", () => {
@@ -367,31 +322,11 @@ describe("SetupScreen", () => {
       screen.getAllByText("Claude CLI subscription needs attention"),
     ).toHaveLength(1);
     expect(screen.getByText(/billed as API credits/u)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Connect Claude through PI" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect Claude Code" })).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-  });
-
-  it("presents a device code without exposing OAuth credentials", () => {
-    render(
-      <SetupScreen
-        {...props({
-          step: "provider",
-          busy: true,
-          providerLoginEvent: {
-            type: "device-code",
-            connectionId: "codex-1" as ProviderConnectionId,
-            userCode: "ABCD-EFGH",
-            verificationUri: "https://example.test/device",
-            expiresInSeconds: 600,
-          },
-        })}
-      />,
-    );
-    expect(screen.getByText("ABCD-EFGH")).toBeTruthy();
-    expect(screen.getByText("https://example.test/device")).toBeTruthy();
   });
 
   it("renders the import-sessions step and skips it with its own handler", () => {

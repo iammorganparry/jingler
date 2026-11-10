@@ -57,7 +57,6 @@ import {
   ProviderResumeCard,
   ProviderLimitBanner,
   ProviderAccountChoice,
-  ProviderConnectSheet,
   PlanReview,
   SideChatPanel,
   useWindowDock,
@@ -70,6 +69,7 @@ import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
 import { useSideChat } from "./use-side-chat.js"
+import { useProviderConnect } from "./use-provider-connect.js"
 import { useConnectivity } from "./connectivity.js"
 import { DeviceOfflineBanner } from "@jingler/ui"
 import { clearInterruptedChat, useInterruptedChats } from "./interrupted-chats.js"
@@ -341,11 +341,9 @@ function ProviderSignedOutRecovery({
   chatId: string
   recovery: ProviderRecovery | undefined
 }) {
-  const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
+  const providerConnect = useProviderConnect()
   const signedOut = recovery?.kind === "signed-out" ? recovery : undefined
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["provider-catalog"] })
   if (signedOut === undefined && reconnecting) {
     return (
       <ProviderResumeCard
@@ -357,8 +355,7 @@ function ProviderSignedOutRecovery({
     )
   }
   if (signedOut?.connectionId === undefined || signedOut.providerId === undefined) return null
-  const connectionId = signedOut.connectionId
-  const providerId = signedOut.providerId
+  const { connectionId, providerId } = signedOut
   return (
     <>
       <ProviderSignedOutCard
@@ -366,39 +363,10 @@ function ProviderSignedOutRecovery({
         message={signedOut.message}
         onReconnect={() => {
           setReconnecting(true)
-          setOpen(true)
+          providerConnect.connect({ connectionId, providerId, mode: "subscription" })
         }}
       />
-      <ProviderConnectSheet
-        open={open}
-        onOpenChange={setOpen}
-        providerId={providerId}
-        providerLabel={signedOut.title.replace(/ signed out.*$/u, "")}
-        onStartOauth={async () => {
-          await rpc.providerStartCodexLogin({ id: connectionId, targetId: "desktop", method: "browser" })
-          void refresh()
-          return connectionId
-        }}
-        onStartDeviceCode={async () => {
-          await rpc.providerStartCodexLogin({ id: connectionId, targetId: "desktop", method: "device-code" })
-          void refresh()
-          return connectionId
-        }}
-        onCancelLogin={async () => {
-          await rpc.providerCancelLogin(connectionId)
-          void refresh()
-        }}
-        onReopenBrowser={() => {}}
-        onSaveApiKey={async (apiKey) => {
-          try {
-            await rpc.providerSetApiKey({ id: connectionId, providerId, apiKey, targetId: "desktop" })
-            void refresh()
-            return { ok: true as const }
-          } catch (error) {
-            return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
-          }
-        }}
-      />
+      {providerConnect.sheet}
     </>
   )
 }

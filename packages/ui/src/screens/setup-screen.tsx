@@ -1,11 +1,8 @@
 import type { NativeEndpointLoginActions } from "../composites/native-endpoint-login.js"
 import type {
   AgentEndpointCatalog,
-  AuthKind,
-  CodexLoginMethod,
   GitHubConnection,
   ProviderCatalog,
-  ProviderLoginEvent,
   Repo
 } from "@jingler/core"
 import { ArrowRight, GitBranch } from "lucide-react"
@@ -20,6 +17,7 @@ import { StatusDot } from "../components/status-dot.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
 import { ProjectsFolderStep } from "./setup/projects-folder-step.js"
 import { ProviderSetupStep } from "./setup/provider-setup-step.js"
+import type { ProviderConnectRequest } from "../composites/provider-connect-sheet.js"
 
 export interface SetupScreenProps {
   step: "workspace" | "github" | "provider" | "importSessions"
@@ -27,8 +25,6 @@ export interface SetupScreenProps {
   providerCatalog?: ProviderCatalog | null
   nativeEndpointLogin?: NativeEndpointLoginActions
   agentEndpointCatalog?: AgentEndpointCatalog | null
-  providerLoginEvent?: ProviderLoginEvent | null
-  providerPendingAuthKind?: AuthKind | null
   error?: string | null
   providerFailure?: "loadFailed" | "completionFailed" | null
   repos?: ReadonlyArray<Repo>
@@ -44,12 +40,10 @@ export interface SetupScreenProps {
   onConnectGithub: () => void
   onSkipGithub: () => void
   onRetryGithub?: () => void
-  onConnectClaude: (token: string) => void
-  onStartCodex: (method: CodexLoginMethod) => void
-  onConnectApi: (providerId: string, apiKey: string) => void
+  /** Opens the connect sheet (boards 15a–15c) for a new account. */
+  onConnect: (request: ProviderConnectRequest) => void
   onContinueProvider: () => void
   onSkipProvider: () => void
-  onCancelAuth: () => void
   onRetryProvider: () => void
   onSkipImportSessions: () => void
   onContinueImportSessions: () => void
@@ -130,8 +124,6 @@ export function SetupScreen({
   providerCatalog = null,
   agentEndpointCatalog = null,
   nativeEndpointLogin,
-  providerLoginEvent = null,
-  providerPendingAuthKind = null,
   error = null,
   providerFailure = null,
   repos = [],
@@ -147,12 +139,9 @@ export function SetupScreen({
   onConnectGithub,
   onSkipGithub,
   onRetryGithub,
-  onConnectClaude,
-  onStartCodex,
-  onConnectApi,
+  onConnect,
   onContinueProvider,
   onSkipProvider,
-  onCancelAuth,
   onRetryProvider,
   onSkipImportSessions,
   onContinueImportSessions
@@ -256,17 +245,12 @@ return (<ProviderSetupStep
             catalog={providerCatalog}
             endpointCatalog={agentEndpointCatalog}
             nativeEndpointLogin={nativeEndpointLogin}
-            loginEvent={providerLoginEvent}
             busy={busy}
-            pendingAuthKind={providerPendingAuthKind}
             error={error}
             failure={providerFailure}
-            onConnectClaude={onConnectClaude}
-            onStartCodex={onStartCodex}
-            onConnectApi={onConnectApi}
+            onConnect={onConnect}
             onContinue={onContinueProvider}
             onSkip={onSkipProvider}
-            onCancel={onCancelAuth}
             onRetry={onRetryProvider}
           />)
 }
