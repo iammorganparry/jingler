@@ -131,3 +131,23 @@ export const McpWaitingForBrowser: Story = mcpState("Waiting for browser… Fini
 export const McpConnected: Story = mcpState("Connected. runpod tools are available.", "Done")
 /** MCP sign-in: Sign-in failed · Retry. */
 export const McpSignInFailed: Story = mcpState("Sign-in failed. Check the browser sign-in and try again.", "Retry", true)
+
+/** Several servers need sign-in: one card, the rest collapse into "+N more" (opens Settings › MCP servers). */
+export const McpCollapsed: Story = {
+  render: () => (
+    <div className="w-[640px] bg-panel p-4">
+      <RuntimeRecoveryCard
+        label="MCP server recovery"
+        kind="MCP server"
+        title="Reconnect linear"
+        message="Needs sign-in. The linear MCP server needs authorization before its tools can run. Other tools keep working."
+        icon={<Server size={13} />}
+        actionLabel="Authorize"
+        onAction={() => {}}
+        moreLabel="+6 more"
+        onMore={() => {}}
+        onDismiss={() => {}}
+      />
+    </div>
+  )
+}

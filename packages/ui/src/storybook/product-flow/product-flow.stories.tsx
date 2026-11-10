@@ -92,11 +92,7 @@ const useProviderSettings = (): NonNullable<SettingsViewProps["providerConnectio
       setDefaultModelId(modelId)
     },
     onLogout: noop,
-    onConnectClaude: noop,
-    onStartCodex: noop,
-    onSetApiKey: noop,
-    onCancelLogin: async () => {},
-    onSaveApiKey: async () => ({ ok: true })
+    onConnect: () => {},
   }
 }
 
@@ -283,7 +279,6 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
       repos={FLOW_REPOS}
       reposDir={snapshot.context.workspaceChosen ? "/Users/morgan/Code" : null}
       providerCatalog={catalog}
-      providerPendingAuthKind={snapshot.context.providerPendingAuthKind}
       busy={snapshot.matches("providerConnecting")}
       onChooseDir={() => send({ type: "CHOOSE_WORKSPACE" })}
       onContinue={() => send({ type: "CONTINUE" })}
@@ -293,21 +288,16 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
       onCloneRepository={noop}
       onConnectGithub={() => send({ type: "CONNECT_GITHUB" })}
       onSkipGithub={() => send({ type: "SKIP_GITHUB" })}
-      onConnectClaude={() => send({
+      onConnect={(request) => send({
         type: "CONNECT_PROVIDER",
-        authKind: "claude-setup-token"
-      })}
-      onStartCodex={() => send({
-        type: "CONNECT_PROVIDER",
-        authKind: "openai-codex-oauth"
-      })}
-      onConnectApi={() => send({
-        type: "CONNECT_PROVIDER",
-        authKind: "api-key"
+        authKind: request.mode === "api-key"
+          ? "api-key"
+          : request.providerId === "anthropic"
+            ? "claude-setup-token"
+            : "openai-codex-oauth"
       })}
       onContinueProvider={() => send({ type: "CONTINUE" })}
       onSkipProvider={() => send({ type: "SKIP_PROVIDER" })}
-      onCancelAuth={noop}
       onRetryProvider={noop}
       onSkipImportSessions={noop}
       onContinueImportSessions={noop}
@@ -360,12 +350,9 @@ export const WorkspaceScanFailed: Story = {
       onCloneRepository={noop}
       onConnectGithub={noop}
       onSkipGithub={noop}
-      onConnectClaude={noop}
-      onStartCodex={noop}
-      onConnectApi={noop}
+      onConnect={() => {}}
       onContinueProvider={noop}
       onSkipProvider={noop}
-      onCancelAuth={noop}
       onRetryProvider={noop}
       onSkipImportSessions={noop}
       onContinueImportSessions={noop}
@@ -386,12 +373,9 @@ const githubStep = (github: typeof FLOW_GITHUB) => frame(
     onConnectGithub={noop}
     onSkipGithub={noop}
     onRetryGithub={noop}
-    onConnectClaude={noop}
-    onStartCodex={noop}
-    onConnectApi={noop}
+    onConnect={() => {}}
     onContinueProvider={noop}
     onSkipProvider={noop}
-    onCancelAuth={noop}
     onRetryProvider={noop}
     onSkipImportSessions={noop}
     onContinueImportSessions={noop}
@@ -421,12 +405,9 @@ export const WorkspaceEmpty: Story = {
       onCloneRepository={noop}
       onConnectGithub={noop}
       onSkipGithub={noop}
-      onConnectClaude={noop}
-      onStartCodex={noop}
-      onConnectApi={noop}
+      onConnect={() => {}}
       onContinueProvider={noop}
       onSkipProvider={noop}
-      onCancelAuth={noop}
       onRetryProvider={noop}
       onSkipImportSessions={noop}
       onContinueImportSessions={noop}
@@ -451,12 +432,9 @@ export const WorkspaceRepoList: Story = {
       onCloneRepository={noop}
       onConnectGithub={noop}
       onSkipGithub={noop}
-      onConnectClaude={noop}
-      onStartCodex={noop}
-      onConnectApi={noop}
+      onConnect={() => {}}
       onContinueProvider={noop}
       onSkipProvider={noop}
-      onCancelAuth={noop}
       onRetryProvider={noop}
       onSkipImportSessions={noop}
       onContinueImportSessions={noop}
@@ -513,12 +491,9 @@ const providerStep = (props: Partial<React.ComponentProps<typeof SetupScreen>>) 
     onCloneRepository={noop}
     onConnectGithub={noop}
     onSkipGithub={noop}
-    onConnectClaude={noop}
-    onStartCodex={noop}
-    onConnectApi={noop}
+    onConnect={() => {}}
     onContinueProvider={noop}
     onSkipProvider={noop}
-    onCancelAuth={noop}
     onRetryProvider={noop}
     onSkipImportSessions={noop}
     onContinueImportSessions={noop}

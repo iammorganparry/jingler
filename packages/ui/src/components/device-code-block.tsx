@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink } from "lucide-react"
+import { Check, Clock, Copy, ExternalLink } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "./button.js"
 
@@ -15,14 +15,17 @@ export interface DeviceCodeBlockProps {
   /** Seconds remaining until the code expires; null hides the countdown. */
   expiresInSeconds: number | null
   onReopenBrowser: () => void
+  /** Renders Cancel next to Reopen browser (board 15b). */
+  onCancel?: () => void
 }
 
-/** Device-code OAuth step: large mono code, copy, expiry countdown, and a way back into the browser. */
+/** Device-code OAuth step (board 15b): mono code + Copy, expiry countdown, Reopen browser / Cancel. */
 export function DeviceCodeBlock({
   code,
   verificationUri,
   expiresInSeconds,
-  onReopenBrowser
+  onReopenBrowser,
+  onCancel
 }: DeviceCodeBlockProps) {
   const [remaining, setRemaining] = useState(expiresInSeconds)
   const [copied, setCopied] = useState(false)
@@ -40,32 +43,44 @@ export function DeviceCodeBlock({
   }, [remaining])
 
   const copyCode = async () => {
-    await navigator.clipboard.writeText(code)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard refused (sandboxed view); the code stays selectable.
+    }
   }
 
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-line bg-sunken p-4 text-center">
-      <span className="text-[11px] text-muted-foreground">
-        Enter this code at <span className="text-text-body">{verificationUri}</span>
-      </span>
-      <div className="flex items-center gap-2">
-        <span data-testid="device-code" className="font-mono text-[20px] font-semibold tracking-wide text-text-bright">
+    <div className="flex flex-col items-center gap-4 rounded-xl border border-hairline bg-panel px-6 py-8 text-center">
+      <div className="flex flex-col items-center gap-1">
+        <span className="text-[13px] text-muted-foreground">Enter this device code in the opened browser</span>
+        <span className="font-mono text-[11px] text-dim">{verificationUri}</span>
+      </div>
+      <div className="flex items-center gap-3 rounded-lg border border-line bg-canvas px-4 py-3">
+        <span data-testid="device-code" className="select-all font-mono text-[20px] leading-7 tracking-[0.12em] text-text-bright">
           {code}
         </span>
-        <Button variant="ghost" size="sm" aria-label="Copy code" onClick={copyCode}>
-          {copied ? <Check size={13} /> : <Copy size={13} />}
+        <Button variant="secondary" size="sm" aria-label="Copy code" onClick={copyCode} className="px-2.5">
+          {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "Copied" : "Copy"}
         </Button>
       </div>
       {remaining !== null && (
-        <span data-testid="device-code-countdown" className="font-mono text-[10.5px] text-dim">
-          Expires in {formatCountdown(remaining)}
+        <span data-testid="device-code-countdown" className="flex items-center gap-1.5 font-mono text-[12px] text-muted-foreground">
+          <Clock size={14} className="text-dim" /> Expires in {formatCountdown(remaining)}
         </span>
       )}
-      <Button variant="secondary" size="sm" onClick={onReopenBrowser}>
-        <ExternalLink size={12} /> Reopen browser
-      </Button>
+      <div className="flex gap-2">
+        <Button variant="secondary" size="sm" onClick={onReopenBrowser}>
+          <ExternalLink size={14} /> Reopen browser
+        </Button>
+        {onCancel && (
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

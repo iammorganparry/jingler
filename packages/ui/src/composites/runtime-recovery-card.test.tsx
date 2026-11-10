@@ -52,6 +52,14 @@ describe("RuntimeRecoveryCard", () => {
     expect(onDismiss).toHaveBeenCalledOnce()
   })
 
+  it("offers a +N more action beside the primary action", () => {
+    const onMore = vi.fn()
+    render(<RuntimeRecoveryCard title="Reconnect linear" message="m" actionLabel="Authorize" onAction={() => {}} moreLabel="+3 more" onMore={onMore} />)
+    fireEvent.click(screen.getByRole("button", { name: "+3 more" }))
+    expect(onMore).toHaveBeenCalledOnce()
+    expect(screen.getByRole("button", { name: /Authorize/ })).toBeTruthy()
+  })
+
   it("is not dismissable unless the host opts in", () => {
     render(<RuntimeRecoveryCard title="Reconnect" message="m" actionLabel="Go" onAction={() => {}} />)
     expect(screen.queryByRole("button", { name: DISMISS })).toBeNull()

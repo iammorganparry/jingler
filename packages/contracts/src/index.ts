@@ -71,6 +71,8 @@ import {
   McpServerStatus,
   SetMcpApiKeyInput,
   McpAuthorizationStart,
+  ClaudeConnector,
+  McpRegistryEntry,
   OffloadComputeSettings,
   PrMergeMethod,
   BackgroundTask,
@@ -1085,6 +1087,15 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
+  /** Turn MCP servers off for one chat; the next turn leaves them out. */
+  Rpc.make("Agent.setChatMcp", {
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      disabledMcp: Schema.Array(Schema.String)
+    }
+  }),
+
   /** Change a session's HITL permission mode (ask / accept-edits / auto / plan). */
   Rpc.make("Agent.setMode", {
     payload: {
@@ -1700,6 +1711,23 @@ export class AssetListRpcs extends RpcGroup.make(
   Rpc.make("Mcp.status", {
     success: Schema.Array(McpServerStatus),
     error: ConfigError
+  }),
+
+  /**
+   * claude.ai connectors the Claude CLI loads natively, with health from
+   * `claude mcp list`. Cached in main; `refresh` re-runs the slow listing.
+   */
+  Rpc.make("Mcp.claudeConnectors", {
+    success: Schema.Array(ClaudeConnector),
+    error: ConfigError,
+    payload: { refresh: Schema.optional(Schema.Boolean) }
+  }),
+
+  /** Search the official MCP registry (registry.modelcontextprotocol.io) for addable servers. */
+  Rpc.make("Mcp.registrySearch", {
+    success: Schema.Array(McpRegistryEntry),
+    error: ConfigError,
+    payload: { query: Schema.String }
   }),
 
   /**

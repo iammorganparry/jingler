@@ -30,6 +30,24 @@ export const claudeToolArguments = (artifacts: boolean): ReadonlyArray<string> =
   ? ["--tools", "Artifact,Read", "--allowedTools", "mcp__jingler__* Artifact"]
   : ["--tools", "", "--allowedTools", "mcp__jingler__*"]
 
+/**
+ * Setting-source, tool and strict-MCP flags. `--strict-mcp-config` and empty
+ * setting sources both drop claude.ai connectors, so a non-null
+ * `claudeConnectorSettings` overlay switches to user settings and allows
+ * `mcp__claude_ai_*` tools.
+ */
+export const claudeConnectorArguments = (
+  connectorSettings: string | null,
+  tools: ReadonlyArray<string>
+): { readonly sources: ReadonlyArray<string>; readonly tools: ReadonlyArray<string>; readonly strict: ReadonlyArray<string> } =>
+  connectorSettings === null
+    ? { sources: ["--setting-sources", ""], tools, strict: ["--strict-mcp-config"] }
+    : {
+        sources: ["--setting-sources", "user", "--settings", connectorSettings],
+        tools: tools.map((arg, index) => tools[index - 1] === "--allowedTools" ? `${arg} mcp__claude_ai_*` : arg),
+        strict: []
+      }
+
 /** Listed in the compiled active-tools catalog so the prompt agrees with the CLI flags. */
 export const claudeArtifactCapability: PromptToolCapability = {
   id: "Artifact",

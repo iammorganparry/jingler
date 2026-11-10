@@ -14,8 +14,8 @@ if (args[0] === "mcp" && args[1] === "list") {
   console.log([
     "Checking MCP server health…",
     "",
-    `claude.ai Linear: ${mcpUrl} - ! Needs authentication`,
-    `claude.ai Supabase - GTM Grid: ${mcpUrl} - ✔ Connected`,
+    "claude.ai Linear: https://connector.example/linear/mcp - ! Needs authentication",
+    "claude.ai Supabase - GTM Grid: https://connector.example/supabase/mcp - ✔ Connected",
     `plugin:eng:notion: ${mcpUrl} (HTTP) - ! Needs authentication`,
     "plugin:eng:google calendar:  (HTTP) - - Not configured"
   ].join("\n"))
@@ -33,8 +33,8 @@ const say = (text) => {
 }
 // Jingler interrupts Claude after a relay tool call and re-runs it with the result in the transcript.
 if (transcript.includes("called mcp_search with")) {
-  say(transcript.includes("claude-ai-linear") && transcript.includes("lookup")
-    ? "Claude saw the imported Linear connector."
+  say(transcript.includes("plugin-eng-notion") && transcript.includes("lookup")
+    ? "Claude saw the imported Notion plugin."
     : `Claude missed the connector: ${transcript}`)
 }
 const { url, headers } = JSON.parse(readFileSync(args[args.indexOf("--mcp-config") + 1], "utf8")).mcpServers.jingler
@@ -43,6 +43,6 @@ process.on("SIGINT", () => process.exit(0))
 await fetch(url, {
   method: "POST",
   headers: { ...headers, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
-  body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "mcp_search", arguments: { query: "", server: "claude-ai-linear" } } })
+  body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "mcp_search", arguments: { query: "", server: "plugin-eng-notion" } } })
 })
 await new Promise(() => {})

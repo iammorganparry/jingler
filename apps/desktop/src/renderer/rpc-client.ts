@@ -1,4 +1,4 @@
-import type { ProjectConfig, RoutineInput, RoutineDocument, RoutineRun } from "@jingler/core"
+import type { ClaudeConnector, McpRegistryEntry, ProjectConfig, RoutineInput, RoutineDocument, RoutineRun } from "@jingler/core"
 /**
  * Renderer-side RPC client. Mirror image of `src/main/rpc.ts`: a custom
  * `RpcClient.Protocol` that shuttles encoded frames over the preload bridge
@@ -410,6 +410,10 @@ export const rpc = {
   }> => runAssetList((c) => c.Mcp.list()),
   mcpStatus: (): Promise<ReadonlyArray<McpServerStatus>> =>
     runAssetList((c) => c.Mcp.status()),
+  mcpClaudeConnectors: (refresh?: boolean): Promise<ReadonlyArray<ClaudeConnector>> =>
+    runAssetList((c) => c.Mcp.claudeConnectors({ refresh })),
+  mcpRegistrySearch: (query: string): Promise<ReadonlyArray<McpRegistryEntry>> =>
+    runAssetList((c) => c.Mcp.registrySearch({ query })),
   mcpLogTail: (server: string, lines?: number): Promise<{ readonly lines: ReadonlyArray<string> }> =>
     runAssetList((c) => c.Mcp.logTail({ server, lines })),
   mcpWrite: (name: string, entry: McpConfigEntry): Promise<void> =>
@@ -831,6 +835,11 @@ export const rpc = {
     workMode: WorkMode,
     autoSwitch?: boolean
   ): Promise<void> => run((c) => c.Agent.setWorkMode({ sessionId, chatId, workMode, ...(autoSwitch === undefined ? {} : { autoSwitch }) })),
+  agentSetChatMcp: (
+    sessionId: string,
+    chatId: string,
+    disabledMcp: ReadonlyArray<string>
+  ): Promise<void> => run((c) => c.Agent.setChatMcp({ sessionId, chatId, disabledMcp })),
   agentSetReasoning: (
     sessionId: string,
     chatId: string,

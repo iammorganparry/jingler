@@ -1,18 +1,15 @@
 import { NativeEndpointLogin, type NativeEndpointLoginActions } from "../../composites/native-endpoint-login.js"
 import type {
   AgentEndpointCatalog,
-  AuthKind,
-  CodexLoginMethod,
   ProviderCatalog,
-  ProviderLoginEvent,
 } from "@jingler/core";
-import { Plus, X } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "../../components/button.js";
 import { Callout } from "../../components/callout.js";
 import { Eyebrow } from "../../components/eyebrow.js";
-import { Spinner } from "../../components/loading.js";
 import { HarnessCard } from "../../composites/harness-card.js";
 import { ProviderAuthForms } from "../../composites/provider-auth-forms.js";
+import type { ProviderConnectRequest } from "../../composites/provider-connect-sheet.js";
 import {
   entitlementIssueLabel,
   providerAuthRouteLabel,
@@ -22,33 +19,19 @@ export interface ProviderSetupStepProps {
   catalog: ProviderCatalog | null;
   nativeEndpointLogin?: NativeEndpointLoginActions;
   endpointCatalog?: AgentEndpointCatalog | null;
-  loginEvent: ProviderLoginEvent | null;
   busy: boolean;
-  pendingAuthKind?: AuthKind | null;
   error: string | null;
   /** Which machine failure state the step is in, if any. */
   failure?: "loadFailed" | "completionFailed" | null;
-  onConnectClaude: (token: string) => void;
-  onStartCodex: (method: CodexLoginMethod) => void;
-  onConnectApi: (providerId: string, apiKey: string) => void;
+  onConnect: (request: ProviderConnectRequest) => void;
   onContinue: () => void;
   onSkip: () => void;
-  onCancel: () => void;
   onRetry: () => void;
 }
 
 const canUseProviderCatalog = (catalog: ProviderCatalog | null, endpoints: AgentEndpointCatalog["endpoints"]): boolean =>
   endpoints.some(({ endpoint, models }) => endpoint.status === "ready" && models.some(({ selectable }) => selectable)) ||
   catalog?.connections.some(({ connection }) => connection.status === "authenticated") === true
-
-const providerProgressLabel = (pendingAuthKind: AuthKind | null) =>
-    pendingAuthKind === "claude-setup-token"
-      ? "Connecting Claude…"
-      : pendingAuthKind === "openai-codex-oauth"
-        ? "Connecting Codex…"
-        : pendingAuthKind === "api-key"
-          ? "Saving API key…"
-          : "Updating provider connections…";
 
 const failureText = (failure: "loadFailed" | "completionFailed" | null, error: string): string =>
   failure === "loadFailed"
@@ -92,33 +75,21 @@ export function ProviderSetupStep({
   catalog,
   endpointCatalog = null,
   nativeEndpointLogin,
-  loginEvent,
   busy,
-  pendingAuthKind = null,
   error,
   failure = null,
-  onConnectClaude,
-  onStartCodex,
-  onConnectApi,
+  onConnect,
   onContinue,
   onSkip,
-  onCancel,
   onRetry,
 }: ProviderSetupStepProps) {
   const detectedEndpoints = endpointCatalog?.endpoints ?? []
   const canContinue = canUseProviderCatalog(catalog, detectedEndpoints)
   const { authenticatedConnections, unconfirmedConnections } = splitConnections(catalog)
   const continueBlockedReason = continueBlockedText(busy, canContinue)
-  const progressLabel = providerProgressLabel(pendingAuthKind)
 
   const authForms = (
-    <ProviderAuthForms
-      busy={busy}
-      pendingAuthKind={pendingAuthKind}
-      onConnectClaude={onConnectClaude}
-      onStartCodex={onStartCodex}
-      onConnectApi={onConnectApi}
-    />
+    <ProviderAuthForms busy={busy} onConnect={onConnect} />
   );
 
   return (
@@ -203,35 +174,6 @@ export function ProviderSetupStep({
         </>
       )}
 
-      {busy && (
-        <div className="flex items-center justify-between rounded-lg border border-line bg-hover px-3 py-2 text-[12px] text-muted-foreground">
-          <span className="flex items-center gap-2">
-            <Spinner size={13} /> {progressLabel}
-          </span>
-          <Button variant="ghost" size="sm" onClick={onCancel}>
-            <X size={13} /> Cancel
-          </Button>
-        </div>
-      )}
-
-      {loginEvent?.type === "device-code" && (
-        <div className="rounded-lg border border-blue/40 bg-hover px-3 py-3">
-          <div className="text-[11px] text-muted-foreground">
-            Enter this device code in the opened browser
-          </div>
-          <div className="mt-1 font-mono text-[20px] font-semibold tracking-[0.18em] text-text-bright">
-            {loginEvent.userCode}
-          </div>
-          <div className="mt-1 truncate font-mono text-[10px] text-dim">
-            {loginEvent.verificationUri}
-          </div>
-        </div>
-      )}
-      {(loginEvent?.type === "info" || loginEvent?.type === "progress") && (
-        <div className="text-[11px] text-muted-foreground">
-          {loginEvent.message}
-        </div>
-      )}
 
       <div className="flex flex-wrap items-center gap-2.5 pt-1">
         <Button

@@ -26,7 +26,7 @@ import {
   type RelayedToolCall
 } from "./claude-cli-sampling-relay.js"
 import { recordClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
-import { claudeArtifactEnvironment, claudeToolArguments, publishedArtifactUrl, withClaudeCliPath } from "./claude-cli-environment.js"
+import { claudeArtifactEnvironment, claudeConnectorArguments, claudeToolArguments, publishedArtifactUrl, withClaudeCliPath } from "./claude-cli-environment.js"
 import { ClaudeRequestUsage, ClaudeTurnUsage } from "./claude-cli-usage.js"
 import { makeClaudeCliToolRescue, toolResultTexts } from "./claude-cli-tool-rescue.js"
 import { makeTextToolCallGuard } from "./claude-cli-text-tool-call.js"
@@ -87,6 +87,8 @@ export interface ClaudeCliProviderOptions {
   readonly checkAuth?: (signal?: AbortSignal) => Promise<void>
   readonly startToolRelay?: typeof startClaudeCliToolRelay
   readonly spawnProcess?: typeof spawn
+  /** `claudeConnectorSettings` for this run, or null to keep strict MCP flags. */
+  readonly connectorSettings?: () => Promise<string | null>
 }
 
 const subscriptionEnvironment = (
@@ -317,24 +319,28 @@ export const claudeCliArguments = (
   context: TranscriptContext,
   options: SimpleStreamOptions,
   mcpConfigPath: string,
-  artifacts = false
-): ReadonlyArray<string> => [
-  "-p",
-  "--output-format", "stream-json",
-  "--input-format", "stream-json",
-  "--include-partial-messages",
-  "--verbose",
-  "--no-session-persistence",
-  "--setting-sources", "",
-  "--disable-slash-commands",
-  "--no-chrome",
-  "--strict-mcp-config",
-  "--mcp-config", mcpConfigPath,
-  ...claudeToolArguments(artifacts),
-  "--model", model.id,
-  "--system-prompt", systemPrompt(context),
-  ...effortArgs(options.reasoning)
-]
+  artifacts = false,
+  connectorSettings: string | null = null
+): ReadonlyArray<string> => {
+  const flags = claudeConnectorArguments(connectorSettings, claudeToolArguments(artifacts))
+  return [
+    "-p",
+    "--output-format", "stream-json",
+    "--input-format", "stream-json",
+    "--include-partial-messages",
+    "--verbose",
+    "--no-session-persistence",
+    ...flags.sources,
+    "--disable-slash-commands",
+    "--no-chrome",
+    ...flags.strict,
+    "--mcp-config", mcpConfigPath,
+    ...flags.tools,
+    "--model", model.id,
+    "--system-prompt", systemPrompt(context),
+    ...effortArgs(options.reasoning)
+  ]
+}
 
 const appendText = (
   partial: AssistantMessage,
@@ -628,10 +634,11 @@ async function* runClaudeCli(
       checkClaudeSubscription(binary, environment, signal)))(options.signal)
     if (options.signal?.aborted) throw new Error("Claude CLI request was aborted")
     relay = await (providerOptions.startToolRelay ?? startClaudeCliToolRelay)(getCurrentTools(context.messages))
+    const connectorSettings = await providerOptions.connectorSettings?.().catch(() => null) ?? null
     if (options.signal?.aborted) throw new Error("Claude CLI request was aborted")
     child = trackChild((providerOptions.spawnProcess ?? spawn)(
       binary,
-      [...claudeCliArguments(model, context, options, relay.mcpConfigPath, providerOptions.artifacts)],
+      [...claudeCliArguments(model, context, options, relay.mcpConfigPath, providerOptions.artifacts, connectorSettings)],
       { cwd: providerOptions.cwd, env: environment, stdio: ["pipe", "pipe", "pipe"] }
     ))
     const processClosed = new Promise<void>((resolve, reject) => {

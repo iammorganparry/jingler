@@ -6,19 +6,14 @@
  */
 import type {
   AgentEndpointCatalog,
-  AuthKind,
-  CodexLoginMethod,
   ProviderCatalog,
-  ProviderConnection,
-  ProviderConnectionId,
-  ProviderLoginEvent,
   PublishCheckpoint,
   Repo,
   Session,
   WorkspaceConfig,
 } from "@jingler/core";
 import { activeCheckoutOf, reduceCheckouts, type SessionCheckout } from "@jingler/core";
-import { assign, fromCallback, fromPromise, setup } from "xstate";
+import { assign, fromPromise, setup } from "xstate";
 import { rpc } from "./rpc-client.js";
 
 const editActiveCheckout = (session: Session, patch: Partial<Omit<SessionCheckout, "id">>): Session =>
@@ -30,8 +25,6 @@ export interface AppContext {
   readonly sessions: ReadonlyArray<Session>;
   readonly providerCatalog: ProviderCatalog | null;
   readonly agentEndpointCatalog: AgentEndpointCatalog | null;
-  readonly providerLoginEvent: ProviderLoginEvent | null;
-  readonly providerPendingAuthKind: AuthKind | null;
   /** Paths of the scanned repositories ticked on onboarding step 1. */
   readonly selectedRepoPaths: ReadonlyArray<string>;
   readonly error: string | null;
@@ -156,27 +149,6 @@ const loadSessions = fromPromise<ReadonlyArray<Session>>(async () =>
   rpc.sessionsList(),
 );
 
-export type ProviderAuthInput =
-  | {
-      readonly kind: "claude-setup-token";
-      readonly id: string;
-      readonly token: string;
-      readonly targetId: string;
-    }
-  | {
-      readonly kind: "openai-codex-oauth";
-      readonly id: string;
-      readonly method: CodexLoginMethod;
-      readonly targetId: string;
-    }
-  | {
-      readonly kind: "api-key";
-      readonly id: string;
-      readonly providerId: string;
-      readonly apiKey: string;
-      readonly targetId: string;
-    };
-
 const loadProviderCatalog = fromPromise<ProviderCatalog>(async () =>
   rpc.providerList(),
 );
@@ -184,39 +156,6 @@ const loadProviderCatalog = fromPromise<ProviderCatalog>(async () =>
 const completeProviderSetup = fromPromise<void>(async () => {
   await rpc.configCompleteProviderSetup();
 });
-
-const watchProviderLoginEvents = fromCallback<{
-  readonly type: "PROVIDER_LOGIN_EVENT";
-  readonly event: ProviderLoginEvent;
-}>(({ sendBack }) =>
-  rpc.providerLoginEvents((event) =>
-    sendBack({ type: "PROVIDER_LOGIN_EVENT", event }),
-  ),
-);
-
-/** Credentials are actor inputs only: XState never assigns them into persistent context. */
-const connectProvider = fromPromise<ProviderConnection, ProviderAuthInput>(
-  async ({ input, signal }) => {
-    if (input.kind === "claude-setup-token") {
-      return rpc.providerConnectClaudeToken(input);
-    }
-    if (input.kind === "api-key") return rpc.providerSetApiKey(input);
-
-    let settled = false;
-    const cancel = () => {
-      if (!settled)
-        void rpc.providerCancelLogin(input.id as ProviderConnectionId);
-    };
-    signal.addEventListener("abort", cancel, { once: true });
-    try {
-      const connection = await rpc.providerStartCodexLogin(input);
-      settled = true;
-      return connection;
-    } finally {
-      signal.removeEventListener("abort", cancel);
-    }
-  },
-);
 
 export const appMachine = setup({
   types: {
@@ -229,25 +168,11 @@ export const appMachine = setup({
       | { type: "ADD_PROJECTS" }
       | { type: "SKIP_GITHUB" }
       | { type: "GITHUB_CONNECTED" }
-      | ({ type: "CONNECT_CLAUDE" } & Extract<
-          ProviderAuthInput,
-          { kind: "claude-setup-token" }
-        >)
-      | ({ type: "START_CODEX" } & Extract<
-          ProviderAuthInput,
-          { kind: "openai-codex-oauth" }
-        >)
-      | ({ type: "CONNECT_API" } & Extract<
-          ProviderAuthInput,
-          { kind: "api-key" }
-        >)
       | { type: "CONTINUE_PROVIDER" }
       | { type: "SKIP_PROVIDER" }
-      | { type: "CANCEL_AUTH" }
-      | { type: "RETRY_AUTH" }
+      | { type: "PROVIDER_CONNECTED" }
       | { type: "ENDPOINT_CATALOG"; catalog: AgentEndpointCatalog }
       | { type: "RETRY_PROVIDER" }
-      | { type: "PROVIDER_LOGIN_EVENT"; event: ProviderLoginEvent }
       | { type: "SKIP_IMPORT_SESSIONS" }
       | { type: "CONTINUE_IMPORT_SESSIONS" }
       | { type: "SESSION_CREATED"; session: Session }
@@ -268,8 +193,6 @@ export const appMachine = setup({
     loadSessions,
     loadProviderCatalog,
     completeProviderSetup,
-    watchProviderLoginEvents,
-    connectProvider,
   },
 }).createMachine({
   id: "app",
@@ -280,8 +203,6 @@ export const appMachine = setup({
     sessions: [],
     providerCatalog: null,
     agentEndpointCatalog: null,
-    providerLoginEvent: null,
-    providerPendingAuthKind: null,
     selectedRepoPaths: [],
     error: null,
   },
@@ -417,14 +338,9 @@ export const appMachine = setup({
         },
         provider: {
           initial: "refreshing",
-          invoke: { src: "watchProviderLoginEvents" },
           on: {
             ENDPOINT_CATALOG: { actions: assign({ agentEndpointCatalog: ({ event }) => event.catalog }) },
-            PROVIDER_LOGIN_EVENT: {
-              actions: assign(({ event }) => ({
-                providerLoginEvent: event.event,
-              })),
-            },
+            PROVIDER_CONNECTED: ".refreshing",
           },
           states: {
             refreshing: {
@@ -460,30 +376,6 @@ export const appMachine = setup({
                     ) === true,
                 },
                 SKIP_PROVIDER: "completing",
-                CONNECT_CLAUDE: {
-                  target: "authenticating",
-                  actions: assign({
-                    providerLoginEvent: null,
-                    providerPendingAuthKind: "claude-setup-token",
-                    error: null,
-                  }),
-                },
-                START_CODEX: {
-                  target: "authenticating",
-                  actions: assign({
-                    providerLoginEvent: null,
-                    providerPendingAuthKind: "openai-codex-oauth",
-                    error: null,
-                  }),
-                },
-                CONNECT_API: {
-                  target: "authenticating",
-                  actions: assign({
-                    providerLoginEvent: null,
-                    providerPendingAuthKind: "api-key",
-                    error: null,
-                  }),
-                },
               },
             },
             completing: {
@@ -501,62 +393,6 @@ export const appMachine = setup({
             completionFailed: {
               on: { RETRY_PROVIDER: "completing" },
             },
-            authenticating: {
-              invoke: {
-                src: "connectProvider",
-                input: ({ event }) => {
-                  if (event.type === "CONNECT_CLAUDE") {
-                    return {
-                      kind: event.kind,
-                      id: event.id,
-                      token: event.token,
-                      targetId: event.targetId,
-                    };
-                  }
-                  if (event.type === "START_CODEX") {
-                    return {
-                      kind: event.kind,
-                      id: event.id,
-                      method: event.method,
-                      targetId: event.targetId,
-                    };
-                  }
-                  if (event.type === "CONNECT_API") {
-                    return {
-                      kind: event.kind,
-                      id: event.id,
-                      providerId: event.providerId,
-                      apiKey: event.apiKey,
-                      targetId: event.targetId,
-                    };
-                  }
-                  throw new Error(
-                    "Provider authentication requires a typed connection event.",
-                  );
-                },
-                onDone: {
-                  target: "refreshing",
-                  actions: assign({ providerPendingAuthKind: null }),
-                },
-                onError: {
-                  target: "authFailed",
-                  actions: assign(({ event }) => ({
-                    error: messageOf(event.error),
-                    providerPendingAuthKind: null,
-                  })),
-                },
-              },
-              on: {
-                CANCEL_AUTH: {
-                  target: "idle",
-                  actions: assign({
-                    providerLoginEvent: null,
-                    providerPendingAuthKind: null,
-                  }),
-                },
-              },
-            },
-            authFailed: { on: { RETRY_AUTH: "idle" } },
           },
         },
         importSessions: {

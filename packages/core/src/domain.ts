@@ -407,6 +407,8 @@ export const Chat = Schema.Struct({
   /** The agent may switch Plan/Build itself via `jingler_set_work_mode`; absent means off. */
   autoSwitch: Schema.optional(Schema.Boolean),
   reasoning: Schema.optional(ReasoningSetting),
+  /** mcp.json server names (or `claude.ai <Name>` connectors) turned off for this chat only. */
+  disabledMcp: Schema.optional(Schema.Array(Schema.String)),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   contextTokens: Schema.optional(Schema.Number),
   /** Canonical runtime endpoint, provider model, and owned continuation. */
