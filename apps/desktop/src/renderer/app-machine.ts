@@ -17,12 +17,24 @@ import type {
   Session,
   WorkspaceConfig,
 } from "@jingler/core";
-import { activeCheckoutOf, reduceCheckouts, type SessionCheckout } from "@jingler/core";
+import { activeCheckoutOf, checkoutPrsOf, reduceCheckouts, type SessionCheckout } from "@jingler/core";
 import { assign, fromCallback, fromPromise, setup } from "xstate";
 import { rpc } from "./rpc-client.js";
 
 const editActiveCheckout = (session: Session, patch: Partial<Omit<SessionCheckout, "id">>): Session =>
   reduceCheckouts(session, { type: "update", checkoutId: activeCheckoutOf(session).id, patch });
+
+/** Keep a live PR link when a stale session snapshot arrives without one. */
+const preserveLinkedPr = (current: Session, incoming: Session): Session => {
+  const currentCheckout = activeCheckoutOf(current);
+  const incomingCheckout = activeCheckoutOf(incoming);
+  const linkedPrs = checkoutPrsOf(currentCheckout);
+  if (linkedPrs.length === 0 || checkoutPrsOf(incomingCheckout).length > 0) return incoming;
+  return editActiveCheckout(incoming, {
+    prNumber: currentCheckout.prNumber,
+    prs: linkedPrs,
+  });
+};
 
 export interface AppContext {
   readonly reposDir: string | null;
@@ -631,7 +643,7 @@ export const appMachine = setup({
                 ? context.sessions.map((session) =>
                     session.id === event.session.id
                       ? {
-                          ...event.session,
+                          ...preserveLinkedPr(session, event.session),
                           // RPC replies can arrive after setup has finished.
                           // Lifecycle timestamps belong to the durable workflow,
                           // independently of status/title and other session writes.

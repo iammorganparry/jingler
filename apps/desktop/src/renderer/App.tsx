@@ -1282,7 +1282,6 @@ function AuthedApp({
   // sweep. Read the latest sessions through a ref so ordinary session updates do
   // not restart the interval and immediately re-scan every worktree.
   useEffect(() => {
-    if (!autoDetect) return;
     const detect = () => {
       // An unfocused window still polled every worktree; the post-run re-detect covers new PRs meanwhile.
       if (!document.hasFocus()) return;
@@ -1309,9 +1308,10 @@ function AuthedApp({
       }
     };
     detect();
+    if (!autoDetect) return;
     const timer = window.setInterval(detect, ARCHIVE_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [autoDetect, canUseGitHubForSession, send]);
+  }, [autoDetect, canUseGitHubForSession, send, sessions]);
 
   // When a session's live run COMPLETES (its live status goes present → absent),
   // do two independent things:
@@ -1326,22 +1326,32 @@ function AuthedApp({
     prevLiveRef.current = liveActivity;
     const completed = completedSessionIds(prev, liveActivity, sessions);
     refreshCompletedSessions(completed, sessions, send, startAutoPublish);
-    if (!autoDetect) return;
+    // Tool output can contain the PR URL even when the run-status edge is
+    // missed, so reconcile visible session links whenever activity updates.
+    for (const session of sessions) {
+      if (activeCheckoutOf(session).prNumber !== null || !canUseGitHubForSession(session)) continue;
+      const outputPr = prNumberFromConversation(session);
+      if (outputPr !== null) send({ type: "SESSION_PR_LINKED", sessionId: session.id, prNumber: outputPr });
+    }
+    // A completed agent run may have created a PR explicitly, so detect once
+    // after every run even when background PR polling is disabled.
     for (const id of completed) {
       const session = sessions.find((candidate) => candidate.id === id);
       if (!(session && canUseGitHubForSession(session))) continue;
-      void rpc.githubDetectPr(id).then((n) => {
-        if (n != null) {
-          send({ type: "SESSION_PR_LINKED", sessionId: id, prNumber: n });
-        }
-      });
+      const outputPr = prNumberFromConversation(session);
+      if (outputPr !== null) {
+        send({ type: "SESSION_PR_LINKED", sessionId: id, prNumber: outputPr });
+      } else {
+        void rpc.githubDetectPr(id).then((n) => {
+          if (n != null) send({ type: "SESSION_PR_LINKED", sessionId: id, prNumber: n });
+        });
+      }
       // Partial key (id only) — matches regardless of the linked PR number.
       void qc.invalidateQueries({ queryKey: ["pr-state", id] });
     }
   }, [
     liveActivity,
     sessions,
-    autoDetect,
     canUseGitHubForSession,
     send,
     qc,
@@ -2842,6 +2852,12 @@ function appStoredPreferences(config: Awaited<ReturnType<typeof rpc.configGet>> 
 
 function hasEnabledDebugPlugin(catalog: ReturnType<typeof usePluginCatalog>): boolean {
   return catalog?.plugins.some((plugin) => plugin.enabled && plugin.manifest.id === "debug") ?? false;
+}
+
+function prNumberFromConversation(session: Session): number | null {
+  const text = JSON.stringify(getConversationActor(session).getSnapshot().context.messages);
+  const match = text.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)/i);
+  return match?.[1] ? Number(match[1]) : null;
 }
 
 function shouldAutoDetectPr(connected: boolean, config: GithubConfig | null): boolean {

@@ -65,6 +65,8 @@ test("Create PR shows the Base selector and publishes against the chosen base", 
     base: "main",
     head: expect.stringMatching(/^acme:/)
   })
+  await window.getByTestId("header-link-pr").click()
+  await expect(window.getByTestId("header-view-checks")).toHaveAttribute("aria-pressed", "true")
 })
 
 test("PR stack rail orders layers base-up and ⌥] moves to the next PR with Checks following", async ({ launchApp }) => {
