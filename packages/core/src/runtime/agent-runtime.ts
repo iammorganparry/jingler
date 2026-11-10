@@ -68,6 +68,8 @@ export const AgentRunSpec = Schema.Struct({
   mode: RuntimeMode,
   /** Optional operator override; omitted preserves pi's model-native default. */
   reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
+  /** Per-chat MCP servers to leave out of this run (mcp.json names or `claude.ai <Name>`). */
+  disabledMcp: Schema.optional(Schema.Array(Schema.String)),
   cwd: Schema.String,
   prompt: Schema.String,
   /** Operator text before Jingler adds turn instructions; portable commands use this only. */

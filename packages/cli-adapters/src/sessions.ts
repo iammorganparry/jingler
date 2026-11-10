@@ -1385,6 +1385,12 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           chats: session.chats.map((chat) => (chat.id === chatId ? { ...chat, workMode, ...propertiesWhen(autoSwitch !== undefined, { autoSwitch }) } : chat))
         }))
 
+      const setChatMcp = (id: string, chatId: string, disabledMcp: ReadonlyArray<string>) =>
+        update(id, (session) => ({
+          ...session,
+          chats: session.chats.map((chat) => (chat.id === chatId ? { ...chat, disabledMcp: [...disabledMcp] } : chat))
+        }))
+
       const setAgentModel = (
         id: string,
         chatId: string,
@@ -2287,6 +2293,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         reopenChat,
         setMode,
         setWorkMode,
+        setChatMcp,
         setAgentModel,
         confirmAgentStart,
         confirmAgentModel,

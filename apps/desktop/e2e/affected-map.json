@@ -270,6 +270,8 @@
     ],
     "specs": [
       "mcp-import-claudeai.spec.ts",
+      "mcp-discover.spec.ts",
+      "mcp-composer-menu.spec.ts",
       "mcp-import-dialog.spec.ts",
       "mcp-recovery.spec.ts",
       "mcp-server-detail.spec.ts",

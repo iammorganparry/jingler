@@ -22,6 +22,9 @@ export interface RuntimeRecoveryCardProps {
   readonly onInspect?: () => void
   /** Hide the card. Omit for recoveries the operator must act on. */
   readonly onDismiss?: () => void
+  /** Collapsed siblings ("+3 more"); ignored when `onInspect` is set. */
+  readonly moreLabel?: string
+  readonly onMore?: () => void
 }
 
 /** Actionable runtime recovery without exposing credentials or tool arguments. */
@@ -38,7 +41,9 @@ export function RuntimeRecoveryCard({
   onAction,
   inspectLabel = "Inspect changes",
   onInspect,
-  onDismiss
+  onDismiss,
+  moreLabel,
+  onMore
 }: RuntimeRecoveryCardProps) {
   const actionButton = (
     <Button key="action" variant="secondary" size="sm" disabled={actionDisabled} onClick={onAction}>
@@ -53,7 +58,14 @@ export function RuntimeRecoveryCard({
         </Button>,
         actionButton
       ]
-    : [actionButton]
+    : onMore && moreLabel
+      ? [
+          <Button key="more" variant="ghost" size="sm" onClick={onMore}>
+            {moreLabel}
+          </Button>,
+          actionButton
+        ]
+      : [actionButton]
 
   return (
     <section aria-label={label} className="flex-none">

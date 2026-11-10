@@ -114,6 +114,8 @@ export interface ConversationPaneCtx {
   onOpenPullRequest: () => void
   /** Open provider settings for authentication or certification recovery. */
   onOpenProviderSettings: () => void
+  /** Open Settings › MCP servers from collapsed MCP recovery banners. */
+  onOpenMcpSettings?: () => void
   /** Present the first renderable streamed draft using this pane's width. */
   onPlanDraftAvailable?: () => void
   /** Drop a pending presentation when its streamed draft becomes invalid. */
@@ -233,6 +235,8 @@ export interface SessionPaneProps {
   onOpenSettings?: () => void
   /** Open provider settings for runtime connection recovery. */
   onOpenProviderSettings?: () => void
+  /** Open Settings › MCP servers from collapsed MCP recovery banners. */
+  onOpenMcpSettings?: () => void
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void; onSelectReview: () => void }) => ReactNode
   /**
@@ -818,6 +822,7 @@ function SessionPaneBody(props: SessionPaneProps) {
           onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),
           onOpenPullRequest: () => ctx.onSelectTab(BUILTIN_TAB.checks),
           onOpenProviderSettings: props.onOpenProviderSettings ?? connectGithub,
+          onOpenMcpSettings: props.onOpenMcpSettings,
           onPlanDraftAvailable: () => presentPlanDraftFor(session.activeChatId),
           onPlanDraftUnavailable: () => dismissPlanDraftFor(session.activeChatId),
           planStepId:

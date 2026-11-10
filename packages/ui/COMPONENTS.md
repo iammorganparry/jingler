@@ -201,7 +201,9 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | RoutinesSettingsView | `composites/routines-settings-view.tsx` | Settings › Routines. | templates, template, templateLoad, projects, projectId, models | yes | — |
 | RunStats | `composites/run-stats.tsx` | Live run elapsed time. | — | no | — |
 | RuntimeInspector | `composites/runtime-inspector.tsx` | Settings › Runtime inspector. | snapshot, loading, exported, error, onRefresh, onExport | no | — |
-| RuntimeRecoveryCard | `composites/runtime-recovery-card.tsx` | Actionable runtime recovery card. | label, kind, title, message, icon, detail | no | #376 (2.11) |
+| McpConnectorsView, McpComposerMenu | `composites/mcp-connectors.tsx` | Settings › MCP (Yours table across sources, Discover grouped claude.ai / Claude Code / Codex / opencode / registry) and the composer `+ › MCP` submenu with per-chat toggles. Boards 25a/25b/25e. | rows, catalog, initialTab, onReconnect, onOpen, onAddCustom, onAddFromCatalog, onToggle, reconnectLimit | yes | — |
+| McpServerDrawer, McpAddServerDialog | `composites/mcp-server-drawer.tsx` | One server's detail drawer (auth, agents, per-tool toggles, logs; claude.ai rows reconnect on claude.ai) and the Add server dialog with trust note. Boards 25c/25d. | row, toolNames, disabledTools, onToggleTool, onReconnect, onTest, onRemove, add, onBrowse | yes | — |
+| RuntimeRecoveryCard | `composites/runtime-recovery-card.tsx` | Actionable runtime recovery card; `moreLabel`/`onMore` collapse sibling recoveries into "+N more". | label, kind, title, message, icon, detail, moreLabel, onMore | no | #376 (2.11) |
 | SessionHoverCard | `composites/session-hover-card.tsx` | Hover card for a sidebar session row. | — | no | — |
 | SessionRow | `composites/session-row.tsx` | Sidebar session row. | — | no | #381 (2.16) |
 | SettingsDialog | `composites/settings-dialog.tsx` | Settings dialog shell. | — | no | — |

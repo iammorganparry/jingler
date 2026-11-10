@@ -3,8 +3,10 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  claudeConnectorSettings,
   dedupeCandidates,
   discoverClaudeConnectors,
+  parseClaudeMcpRows,
   managedMcpPaths,
   readClaudeFileServers,
   parseClaudeMcp,
@@ -291,19 +293,15 @@ describe("parseClaudeMcpList", () => {
       ["plugin-engineering-local", "plugin"],
       ["claude-ai-browser", "claude.ai"]
     ])
-    expect(candidates[0]).toEqual({
+    expect(candidates[0]).toMatchObject({
       name: "claude-ai-linear",
-      source: "claude",
       origin: "claude.ai",
+      entry: null,
+      problem: expect.stringContaining("natively")
+    })
+    expect(candidates.find(({ name }) => name === "plugin-engineering-notion")).toMatchObject({
       problem: null,
-      entry: {
-        type: "remote",
-        url: "https://mcp.linear.app/mcp",
-        headers: {},
-        auth: { type: "oauth" },
-        displayName: "claude.ai Linear",
-        enabled: true
-      }
+      entry: { type: "remote", url: "https://mcp.notion.com/mcp", auth: { type: "oauth" } }
     })
   })
 
@@ -316,13 +314,54 @@ describe("parseClaudeMcpList", () => {
 
   it("never overwrites existing names and flags in-listing collisions", () => {
     const candidates = parseClaudeMcpList(
-      "claude.ai Linear: https://a.example/mcp - ✓ Connected\nclaude.ai  Linear: https://b.example/mcp - ✓ Connected",
-      new Set(["claude-ai-linear"])
+      "plugin:eng:linear: https://a.example/mcp (HTTP) - ✓ Connected\nplugin:eng:Linear: https://b.example/mcp (HTTP) - ✓ Connected",
+      new Set(["plugin-eng-linear"])
     )
     expect(candidates).toHaveLength(2)
     for (const candidate of candidates) {
       expect(candidate).toMatchObject({ entry: null, problem: expect.stringContaining("already exists") })
     }
+  })
+})
+
+describe("claudeConnectorSettings", () => {
+  const rows = parseClaudeMcpRows([
+    "Checking MCP server health…",
+    "claude.ai Linear: https://mcp.linear.app/mcp - ! Needs authentication",
+    "claude.ai Supabase - GTM Grid: https://mcp.supabase.com/mcp?project_ref=x - ✔ Connected",
+    "plugin:eng:notion: https://mcp.notion.com/mcp (HTTP) - ! Needs authentication",
+    "obsidian: npx obsidian-mcp - ✔ Connected"
+  ].join("\n"))
+
+  it("parses every row with its CLI name and state", () => {
+    expect(rows.map(({ name, state }) => [name, state])).toEqual([
+      ["claude.ai Linear", "needs-auth"],
+      ["claude.ai Supabase - GTM Grid", "connected"],
+      ["plugin:eng:notion", "needs-auth"],
+      ["obsidian", "connected"]
+    ])
+  })
+
+  it("denies every non-connector and connectors already in mcp.json", () => {
+    const settings = JSON.parse(claudeConnectorSettings(rows, ["https://mcp.linear.app/mcp/"])!)
+    expect(settings.disableAllHooks).toBe(true)
+    expect(settings.deniedMcpServers.map(({ serverName }: { serverName: string }) => serverName)).toEqual([
+      "claude.ai Linear",
+      "plugin:eng:notion",
+      "obsidian"
+    ])
+    expect(settings.allowedMcpServers).toBeUndefined()
+  })
+
+  it("denies connectors turned off for this chat", () => {
+    const settings = JSON.parse(claudeConnectorSettings(rows, [], ["claude.ai Linear"])!)
+    expect(settings.deniedMcpServers.map(({ serverName }: { serverName: string }) => serverName)).toContain("claude.ai Linear")
+    expect(claudeConnectorSettings(rows, [], ["claude.ai Linear", "claude.ai Supabase - GTM Grid"])).toBeNull()
+  })
+
+  it("is null when no connector is left to load", () => {
+    expect(claudeConnectorSettings(rows.filter(({ name }) => !name.startsWith("claude.ai")), [])).toBeNull()
+    expect(claudeConnectorSettings(rows, ["https://mcp.linear.app/mcp", "https://mcp.supabase.com/mcp?project_ref=x"])).toBeNull()
   })
 })
 
@@ -355,7 +394,7 @@ describe("discoverClaudeConnectors", () => {
       'if [ "$1" = auth ]; then echo \'{"loggedIn":true,"authMethod":"claude.ai"}\'; else echo "claude.ai Linear: https://mcp.linear.app/mcp - ! Needs authentication"; fi'
     )
     const result = await discoverClaudeConnectors({ ...options, binary })
-    expect(result).toEqual([expect.objectContaining({ name: "claude-ai-linear", problem: null })])
+    expect(result).toEqual([expect.objectContaining({ name: "claude-ai-linear", entry: null, problem: expect.stringContaining("natively") })])
   })
 
   it("reports a failing listing as a problem", async () => {

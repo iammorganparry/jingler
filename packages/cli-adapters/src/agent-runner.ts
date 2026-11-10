@@ -415,6 +415,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* SessionStore.setWorkMode(sessionId, chatId, workMode, autoSwitch).pipe(Effect.ignore)
       })
 
+    /** Per-chat MCP toggles; read on the next turn's spec. */
+    const setChatMcp = (sessionId: string, chatId: string, disabledMcp: ReadonlyArray<string>) =>
+      SessionStore.setChatMcp(sessionId, chatId, disabledMcp).pipe(Effect.ignore)
+
     // Plan overrides the approval level for enforcement; the stored level stays untouched.
     const turnModes = (chatId: string, stored: { readonly workMode?: WorkMode; readonly mode?: PermissionMode }) =>
       Effect.gen(function* () {
@@ -1626,6 +1630,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       answerQuestion,
       setMode,
       setWorkMode,
+      setChatMcp,
       setModel,
       steer,
       stop,
@@ -1746,6 +1751,7 @@ function prepareTurnSpec(
     images,
     mode,
     reasoning: reasoning ?? chat.reasoning ?? null,
+    ...(chat.disabledMcp === undefined || chat.disabledMcp.length === 0 ? {} : { disabledMcp: chat.disabledMcp }),
     mcp
   }
   return spec

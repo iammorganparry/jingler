@@ -1,6 +1,7 @@
 import { workspaceRestricted } from "../../workspace-admission.js"
 import { makeSharedPlanningRuntime } from "./shared-planning.js"
 import { createHash } from "node:crypto"
+import { homedir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
 import type {
   ManagedResource,
@@ -48,6 +49,7 @@ import { ProviderConnections,
 import { makePortableRuntime } from "../resources/portable-runtime.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { McpConfigService } from "../../mcp-config-service.js"
+import { cachedClaudeMcpRows, claudeConnectorSettings, refreshClaudeMcpRows } from "../../mcp-import.js"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
@@ -225,6 +227,16 @@ export const makePiAgentRuntimeLive = (
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(AppPaths, paths)
     )
+    // Never blocks a turn on the slow listing: the first turns run strict until the cache lands.
+    const connectorSettings = async (disabled: ReadonlyArray<string> = []): Promise<string | null> => {
+      void refreshClaudeMcpRows(homedir())
+      const configured = await Effect.runPromise(configuredMcp)
+      return claudeConnectorSettings(
+        cachedClaudeMcpRows(),
+        configured.flatMap((server) => server.transport === "stdio" ? [] : [server.url]),
+        disabled
+      )
+    }
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
     const pluginRegistry = yield* PluginRegistry
@@ -283,6 +295,7 @@ export const makePiAgentRuntimeLive = (
       childCredentials,
       subagentBroker,
       resolveConnection: (spec) => validateProviderConnection(providers, spec),
+      connectorSettings,
       resolveSubagentConfig: (spec) => Effect.gen(function* () {
         const saved = yield* config.get()
         const enabled = !workspaceRestricted(spec.sessionId) && (saved?.subagentDelegationEnabled ?? true)
@@ -478,7 +491,9 @@ export const makePiAgentRuntimeLive = (
             ...(runWebSearch === undefined ? {} : { webSearch: runWebSearch }),
             mcp: {
               ...context.mcp,
-              configured: managedMcp.map((server) => resolveManagedMcpCwd(server, spec.cwd))
+              configured: managedMcp
+                .filter((server) => !(spec.disabledMcp ?? []).includes(server.name))
+                .map((server) => resolveManagedMcpCwd(server, spec.cwd))
             },
             // Per-run attachments (the browser lease rotates every turn on a
             // retained session) resolve from the LIVE context at call time.
@@ -828,7 +843,10 @@ export const makePiAgentRuntimeLive = (
       runtimeId: "pi" as const,
       runtime,
       ownsEndpoint: piEndpointTargets
-    }, makeClaudeRuntimeRegistration(nativeTools),
+    }, makeClaudeRuntimeRegistration({
+      ...nativeTools,
+      connectorSettings: (spec) => connectorSettings(spec.disabledMcp)
+    }),
     makeCodexRuntimeRegistration(nativeTools),
     makeOpenCodeRuntimeRegistration(nativeTools)].map((registration) => ({ ...registration, runtime: portable(planning(registration.runtime)) })))
   })

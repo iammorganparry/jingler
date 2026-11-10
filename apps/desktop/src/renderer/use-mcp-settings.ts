@@ -26,6 +26,17 @@ export function useMcpSettings(): McpSettingsProps {
     refetchInterval: 5_000
   })
 
+  const connectorsKey = ["mcp-claude-connectors"] as const
+  const connectors = useQuery({
+    queryKey: connectorsKey,
+    queryFn: () => rpc.mcpClaudeConnectors(),
+    refetchInterval: 30_000
+  })
+  const refreshConnectors = useMutation({
+    mutationFn: () => rpc.mcpClaudeConnectors(true),
+    onSuccess: (rows) => queryClient.setQueryData(connectorsKey, rows)
+  })
+
   const invalidate = () => {
     setStatuses(null)
     return queryClient.invalidateQueries({ queryKey: mcpKey })
@@ -38,6 +49,11 @@ export function useMcpSettings(): McpSettingsProps {
 
   return {
     servers: query.data?.servers ?? [],
+    claudeConnectors: connectors.data ?? [],
+    connectorsRefreshing: refreshConnectors.isPending,
+    refreshClaudeConnectors: () => refreshConnectors.mutate(),
+    openClaudeConnectors: () => { void window.jingler.openExternal("https://claude.ai/customize/connectors") },
+    registrySearch: rpc.mcpRegistrySearch,
     parseError: query.data?.error ?? null,
     loading: query.isLoading,
     statuses,

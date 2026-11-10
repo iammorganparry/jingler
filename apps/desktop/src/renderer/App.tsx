@@ -99,6 +99,7 @@ import { SessionSubagentTabs, SubagentLaneViewProvider } from "./session-chat-ta
 import { SideChatLaneActionsProvider } from "./side-chat-lane-actions.js";
 import { useAgentEditsMarkerRenderer } from "./file-agent-edits.js";
 import { sessionPrRows } from "@jingler/ui";
+import { mcpRows as toMcpRows } from "@jingler/ui";
 import { requestSessionPr } from "./session-pr-request.js";
 import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
@@ -2079,8 +2080,10 @@ function AuthedApp({
               ctx.onSelectBrowser?.();
             }}
             onOpenProviderSettings={ctx.onOpenProviderSettings}
+            onOpenMcpSettings={ctx.onOpenMcpSettings}
             onAddMcp={mcp.add}
             mcpServers={mcp.servers}
+            mcpRows={toMcpRows(mcp.servers, mcp.statuses, mcp.claudeConnectors ?? [])}
             onSetMcpApiKey={mcp.setApiKey}
             onSetMcpAuth={mcp.setAuth}
             onAuthorizeMcp={mcp.startAuthorization}

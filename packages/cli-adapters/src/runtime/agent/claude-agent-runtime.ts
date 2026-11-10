@@ -31,6 +31,8 @@ export interface ClaudeAgentRuntimeOptions extends NativeRuntimeToolsOptions {
   readonly environment?: NodeJS.ProcessEnv
   readonly spawnProcess?: (binary: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams
   readonly checkAuth?: (signal?: AbortSignal) => Promise<void>
+  /** `claudeConnectorSettings` for this run, or null to keep strict MCP flags. */
+  readonly connectorSettings?: (spec: AgentRunSpec) => Promise<string | null>
 }
 
 const modelName = (modelId: string): string =>
@@ -64,9 +66,13 @@ export const claudeAgentArguments = (
   spec: AgentRunSpec,
   sessionId: string,
   mcpConfigPath?: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  /** `claudeConnectorSettings` overlay; non-null loads claude.ai connectors natively. */
+  connectorSettings: string | null = null
 ): ReadonlyArray<string> => {
   const sideChat = spec.role === "side-chat"
+  const connectors = !sideChat && mcpConfigPath !== undefined && connectorSettings !== null
+  const tools = sideChat ? ["--tools", ""] : claudeToolArguments(claudeArtifactsAllowed(spec.role, spec.mode))
   return [
   "-p",
   "--output-format", "stream-json",
@@ -74,13 +80,14 @@ export const claudeAgentArguments = (
   "--include-partial-messages",
   "--verbose",
   "--model", modelName(spec.modelId),
-  "--setting-sources", "",
+  // `--strict-mcp-config` and empty setting sources both drop claude.ai connectors.
+  ...(connectors ? ["--setting-sources", "user", "--settings", connectorSettings] : ["--setting-sources", ""]),
   "--disable-slash-commands",
   "--system-prompt-snapshot", "off",
   ...(systemPrompt === undefined ? [] : ["--system-prompt", systemPrompt]),
   "--no-chrome",
-  ...(sideChat ? ["--tools", ""] : claudeToolArguments(claudeArtifactsAllowed(spec.role, spec.mode))),
-  "--strict-mcp-config",
+  ...(connectors ? tools.map((arg, index) => tools[index - 1] === "--allowedTools" ? `${arg} mcp__claude_ai_*` : arg) : tools),
+  ...(connectors ? [] : ["--strict-mcp-config"]),
   ...(sideChat || mcpConfigPath === undefined ? [] : ["--mcp-config", mcpConfigPath]),
   ...permissionArgs(spec.mode),
   ...reasoningArgs(spec.reasoning),
@@ -363,10 +370,11 @@ async function* runClaude(
       { signal }
     )
     relay = prepared.relay
+    const connectorSettings = await options.connectorSettings?.(spec).catch(() => null) ?? null
     signal.throwIfAborted()
     child = trackChild((options.spawnProcess ?? spawn)(
       binary,
-      [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath, prepared.systemPrompt)],
+      [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath, prepared.systemPrompt, connectorSettings)],
       { cwd: spec.cwd, env: { ...worktreeEnv(environment, spec.cwd), ...relay.environment, ...trustedWorkspaceEnvironment(spec.workspaceEnvironment) }, stdio: ["pipe", "pipe", "pipe"] }
     ))
     const spawned = child

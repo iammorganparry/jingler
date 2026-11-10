@@ -56,6 +56,7 @@ const lockedCapabilityFingerprint = (
   toolIds: [...spec.targetCapabilities.toolIds].sort(),
   resourceIds: [...spec.targetCapabilities.resourceIds].sort(),
   mcp: mcpCapabilityFingerprint(context.mcp),
+  disabledMcp: [...(spec.disabledMcp ?? [])].sort(),
   dynamicCatalog
 })
 
