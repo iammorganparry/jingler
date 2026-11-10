@@ -1,5 +1,6 @@
 import { stopRoutinesBeforeQuit } from "./routine-shutdown.js"
 import { RoutinesService } from "./routines.js"
+import { trustExtraCaCerts } from "./extra-ca-certs.js"
 /**
  * Electron main entry — standard electron-vite lifecycle. On ready it forces the
  * Effect runtime to build (which forks the RPC server and registers the IPC
@@ -441,6 +442,7 @@ if (!gotPrimaryLock) {
   }
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
+    void trustExtraCaCerts().catch(() => 0)
     const packagedSubagentRoot = join(process.resourcesPath, "subagent-runtime")
     process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??= app.isPackaged
       ? join(packagedSubagentRoot, "jingler-child-tools.mjs")

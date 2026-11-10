@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises"
 import { Either, Option, Schema } from "effect"
 import { parse as parseToml } from "smol-toml"
 import { resolveClaudeBinary } from "./claude-cli-resolver.js"
+import { withLoginShellNetwork } from "./runtime/providers/native-cli-environment.js"
 
 /**
  * Pure parsers that read other tools' MCP configs into `McpConfigEntry`
@@ -411,19 +412,22 @@ export const claudeConnectorSettings = (
   })
 }
 
-const run = (
+// A Dock-launched app lacks the shell's proxy/CA exports; without them every connector reads as broken.
+const run = async (
   binary: string,
   args: ReadonlyArray<string>,
   options: { readonly cwd: string; readonly timeoutMs: number }
-): Promise<string> =>
-  new Promise((resolve, reject) => {
+): Promise<string> => {
+  const env = await withLoginShellNetwork(process.env)
+  return new Promise((resolve, reject) => {
     execFile(
       binary,
       [...args],
-      { cwd: options.cwd, timeout: options.timeoutMs, maxBuffer: 4_000_000, encoding: "utf8" },
+      { cwd: options.cwd, env, timeout: options.timeoutMs, maxBuffer: 4_000_000, encoding: "utf8" },
       (error, stdout) => (error === null ? resolve(stdout) : reject(error))
     )
   })
+}
 
 const connectorNote = (problem: string): McpImportCandidate => ({
   name: "claude.ai connectors",

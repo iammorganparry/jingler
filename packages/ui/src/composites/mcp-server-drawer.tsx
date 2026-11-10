@@ -27,6 +27,8 @@ export interface McpServerDrawerProps {
   readonly lastCheck?: string
   /** Clears a signed-in OAuth credential; absent hides Sign out. */
   readonly onSignOut?: () => void
+  /** Last failed action (reconnect, test, remove); the page callout sits behind the drawer. */
+  readonly error?: string | null
 }
 
 type Tab = "overview" | "tools" | "logs"
@@ -93,7 +95,8 @@ export function McpServerDrawer({
   logLines,
   logLoading = false,
   lastCheck,
-  onSignOut
+  onSignOut,
+  error = null
 }: McpServerDrawerProps) {
   const [tab, setTab] = React.useState<Tab>("overview")
   const disabled = new Set(disabledTools)
@@ -129,6 +132,7 @@ export function McpServerDrawer({
             />
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+            {error !== null && <div role="alert"><Callout tone="red">{error}</Callout></div>}
             {tab === "overview" && <DrawerOverview row={row} native={native} onReconnect={onReconnect} lastCheck={lastCheck} />}
             {tab === "tools" && <ToolList names={toolNames} disabled={disabled} onToggle={onToggleTool} />}
             {tab === "logs" && <LogTail lines={logLines} loading={logLoading} />}
