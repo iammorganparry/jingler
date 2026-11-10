@@ -20,6 +20,9 @@ const model = realProviderTarget("claude")
 const echoServer = join(import.meta.dirname, "fake-echo-mcp.mjs")
 const ALLOW_ONCE = /Allow once/u
 
+// A Jingler agent running this spec leaks its own PI_/JINGLER_ vars (PI_CODING_AGENT_DIR fails the pi bootstrap).
+const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(PI_|JINGLER_)/u.test(key)))
+
 const claudeAiConnector = (): string | undefined => {
   try {
     const out = execFileSync("claude", ["mcp", "list"], { encoding: "utf8", timeout: 150_000 })
@@ -115,7 +118,7 @@ test.describe("real Claude CLI MCP", () => {
     const app = await electron.launch({
       args: [MAIN_ENTRY, `--user-data-dir=${join(home, "chromium")}`],
       env: {
-        ...process.env,
+        ...hostEnv,
         ELECTRON_RENDERER_URL: "",
         JINGLER_DISABLE_AUTO_UPDATE: "1",
         JINGLER_E2E: "0",
