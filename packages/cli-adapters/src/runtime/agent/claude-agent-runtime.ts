@@ -21,6 +21,7 @@ import { trackChild } from "../../child-registry.js"
 import { resolveClaudeBinary } from "../../claude-cli-resolver.js"
 import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import type { RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
+import { withLoginShellNetwork } from "../providers/native-cli-environment.js"
 import { claudeArtifactsAllowed, claudeCliEnvironment, claudeConnectorArguments, claudeToolArguments } from "../providers/claude-cli-environment.js"
 import { textOf } from "../providers/claude-cli-tool-rescue.js"
 import { ClaudeRequestUsage, ClaudeTurnUsage, claudeUsageTokens } from "../providers/claude-cli-usage.js"
@@ -356,7 +357,7 @@ async function* runClaude(
   // A side chat forks the main session and must run while that session's own turn holds its id.
   const reservation = spec.role === "side-chat" ? randomUUID() : sessionId
   const binary = await resolveClaudeBinary(options.binary)
-  const environment = claudeCliEnvironment(options.environment ?? process.env)
+  const environment = claudeCliEnvironment(await withLoginShellNetwork(options.environment ?? process.env))
   const scope = await Effect.runPromise(Scope.make())
   await reserveClaudeSession(reserved, reservation, scope)
   let relay: RegistryMcpRelay | undefined

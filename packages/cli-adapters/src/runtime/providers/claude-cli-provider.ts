@@ -26,6 +26,7 @@ import {
   type RelayedToolCall
 } from "./claude-cli-sampling-relay.js"
 import { recordClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
+import { withLoginShellNetwork } from "./native-cli-environment.js"
 import { claudeArtifactEnvironment, claudeConnectorArguments, claudeToolArguments, publishedArtifactUrl, withClaudeCliPath } from "./claude-cli-environment.js"
 import { ClaudeRequestUsage, ClaudeTurnUsage } from "./claude-cli-usage.js"
 import { makeClaudeCliToolRescue, toolResultTexts } from "./claude-cli-tool-rescue.js"
@@ -621,7 +622,7 @@ async function* runClaudeCli(
   const partial = partialMessage(model)
   yield { type: "start", partial: { ...partial } }
   const binary = await resolveClaudeBinary(providerOptions.binary)
-  const environment = subscriptionEnvironment(providerOptions.environment ?? process.env)
+  const environment = subscriptionEnvironment(await withLoginShellNetwork(providerOptions.environment ?? process.env))
   const output: ClaudeOutputState = { result: null, usage: null, open: null, rescued: null }
   let relay: ClaudeCliToolRelay | null = null
   let child: ChildProcessWithoutNullStreams | null = null

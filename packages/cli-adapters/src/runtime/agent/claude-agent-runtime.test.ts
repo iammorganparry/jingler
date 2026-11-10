@@ -18,7 +18,7 @@ import {
 import { probeClaudeEndpoint } from "../providers/claude-endpoint.js"
 import * as toolRelay from "../providers/registry-mcp-relay.js"
 import { claudeCliEnvironment } from "../providers/claude-cli-environment.js"
-import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
+import { nativeCliEnvironment, withLoginShellNetwork } from "../providers/native-cli-environment.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import { AgentRuntimeError, inactiveRuntimeActivity } from "./agent-runtime.js"
 
@@ -219,6 +219,21 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{}}));
       OPENAI_API_KEY: "secret",
       CUSTOM_TOKEN: "secret"
     })).toEqual({ PATH: "/bin", HOME: "/home/test" })
+  })
+
+  it("keeps proxy and CA settings so TLS-inspecting networks still connect", () => {
+    expect(nativeCliEnvironment({
+      PATH: "/bin",
+      HTTPS_PROXY: "http://proxy.corp:8080",
+      NODE_EXTRA_CA_CERTS: "/opt/homebrew/var/hs-certifi/cacert.pem",
+      CUSTOM_TOKEN: "secret"
+    })).toEqual({ PATH: "/bin", HTTPS_PROXY: "http://proxy.corp:8080", NODE_EXTRA_CA_CERTS: "/opt/homebrew/var/hs-certifi/cacert.pem" })
+  })
+
+  it("fills missing network settings from the login shell without overriding the app's own", async () => {
+    const shell = async () => ({ NODE_EXTRA_CA_CERTS: "/shell/ca.pem", HTTPS_PROXY: "http://shell:1", SECRET: "x" })
+    expect(await withLoginShellNetwork({ PATH: "/bin", HTTPS_PROXY: "http://app:2" }, shell))
+      .toEqual({ PATH: "/bin", HTTPS_PROXY: "http://app:2", NODE_EXTRA_CA_CERTS: "/shell/ca.pem" })
   })
 
   it("adds Homebrew binary directories for a macOS GUI environment", () => {
