@@ -29,6 +29,8 @@ const preserveLinkedPr = (current: Session, incoming: Session): Session => {
   const currentCheckout = activeCheckoutOf(current);
   const incomingCheckout = activeCheckoutOf(incoming);
   const linkedPrs = checkoutPrsOf(currentCheckout);
+  // A different active checkout is a real switch, not a stale snapshot.
+  if (currentCheckout.id !== incomingCheckout.id) return incoming;
   if (linkedPrs.length === 0 || checkoutPrsOf(incomingCheckout).length > 0) return incoming;
   return editActiveCheckout(incoming, {
     prNumber: currentCheckout.prNumber,
