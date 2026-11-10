@@ -51,7 +51,7 @@ import { Effect, Either, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { displayNameFromCreativeSlug, freeCreativeName } from "./creative-name.js"
 import { GitHubApi } from "./github-api.js"
-import { GitService } from "./git.js"
+import { defaultBranchOf, GitService } from "./git.js"
 import { runGit } from "./command.js"
 import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime-identity.js"
 
@@ -109,6 +109,13 @@ const carriedChatSettings = (from: Chat | undefined) => {
 
 const propertiesWhen = <T extends object>(condition: boolean, properties: T) =>
   condition ? properties : {}
+
+/** Make the active chat's own checkout the active one, so cwd, header PR and Changes follow the chat. */
+export const focusChatCheckout = (session: Session): Session => {
+  const checkoutId = session.chats.find((chat) => chat.id === session.activeChatId)?.checkoutId
+  if (checkoutId === undefined || checkoutId === activeCheckoutOf(session).id) return session
+  return reduceCheckouts(session, { type: "switch", checkoutId })
+}
 
 const chatIdFor = (sessionId: string, suffix: string): string => `c_${sessionId}_${suffix}`
 
@@ -1254,26 +1261,64 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           chats: session.chats.map((chat) => (chat.id === chatId ? patch(chat) : chat))
         }))
 
+      /** A worktree checkout for a new chat, forked fresh off the active checkout's base; null where chats share (direct/Auto). */
+      const forkChatCheckout = (session: Session, stamp: string) =>
+        Effect.gen(function* () {
+          const active = activeCheckoutOf(session)
+          if (workspaceModeOf(active) !== "worktree" || !active.repoPath || !active.worktreePath) return null
+          const baseBranch = active.baseBranch ?? (yield* defaultBranchOf(active.repoPath))
+          const worktree = yield* GitService.createDetachedWorktree({
+            repoPath: active.repoPath,
+            repoName: active.repo,
+            slug: `${basename(active.worktreePath)}-${stamp}`,
+            baseBranch
+          })
+          // Reuse the session's semantic branch name; createTaskBranch claims the next free suffix.
+          const semantic = semanticBranchProposalFromName(active.branch) ? active.branch : "chore/chat"
+          const branch = yield* GitService.createTaskBranch(worktree.path, semantic)
+          const checkout: SessionCheckout = {
+            id: `co_${stamp}`,
+            ...propertiesWhen(active.projectId !== undefined, { projectId: active.projectId }),
+            repo: active.repo,
+            repoPath: active.repoPath,
+            worktreePath: worktree.path,
+            workspaceMode: "worktree",
+            branch,
+            baseBranch,
+            prNumber: null,
+            ...propertiesWhen(active.githubSlug !== undefined, { githubSlug: active.githubSlug })
+          }
+          return checkout
+        })
+
       const createChat = (sessionId: string) =>
         Effect.gen(function* () {
           const now = new Date().toISOString()
+          const stamp = `${Date.now().toString(36)}_${nextOpId()}`
+          const checkout = yield* forkChatCheckout(yield* get(sessionId), stamp)
           yield* update(sessionId, (session) => {
             const source =
               session.chats.find((chat) => chat.id === session.activeChatId) ??
               session.chats[0]
             const chat: Chat = {
-              id: chatIdFor(sessionId, `${Date.now().toString(36)}_${nextOpId()}`),
+              id: chatIdFor(sessionId, stamp),
               title: null,
+              ...propertiesWhen(checkout !== null, { checkoutId: checkout?.id }),
               createdAt: now,
               updatedAt: now,
               ...carriedChatSettings(source)
             }
-            return {
-              ...session,
-              chats: [...session.chats, chat],
-              activeChatId: chat.id,
-              updatedAt: now
+            if (checkout === null) {
+              return { ...session, chats: [...session.chats, chat], activeChatId: chat.id, updatedAt: now }
             }
+            // Existing unbound chats stay on the checkout they were using.
+            const activeId = activeCheckoutOf(session).id
+            const chats = session.chats.map((c) => (c.checkoutId === undefined ? { ...c, checkoutId: activeId } : c))
+            const migrated = migrateSessionCheckouts(session)
+            return withCheckouts(
+              { ...session, chats: [...chats, chat], activeChatId: chat.id, updatedAt: now },
+              { ...migrated, checkouts: [...checkoutsOf(migrated), checkout], activeCheckoutId: checkout.id }
+            )
           })
           return yield* get(sessionId)
         })
@@ -1282,7 +1327,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         Effect.gen(function* () {
           yield* update(sessionId, (session) =>
             session.chats.some((chat) => chat.id === chatId)
-              ? { ...session, activeChatId: chatId }
+              ? focusChatCheckout({ ...session, activeChatId: chatId })
               : session
           )
           return yield* get(sessionId)
@@ -1322,13 +1367,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               session.activeChatId === chatId
                 ? chats[Math.min(index, chats.length - 1)]!.id
                 : session.activeChatId
-            return {
+            return focusChatCheckout({
               ...session,
               chats,
               closedChats: closedChatsAfter(closed!, session.closedChats ?? [], discard),
               activeChatId,
               updatedAt: now
-            }
+            })
           })
           return yield* get(sessionId)
         })
@@ -1348,13 +1393,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* update(sessionId, (session) => {
             const reopened = (session.closedChats ?? []).find((chat) => chat.id === chatId)
             if (reopened === undefined) return session
-            return {
+            return focusChatCheckout({
               ...session,
               chats: [...session.chats, reopened],
               closedChats: (session.closedChats ?? []).filter((chat) => chat.id !== chatId),
               activeChatId: reopened.id,
               updatedAt: now
-            }
+            })
           })
           return yield* get(sessionId)
         })

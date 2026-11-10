@@ -398,6 +398,8 @@ export const Chat = Schema.Struct({
   id: Schema.String,
   /** Null until the first message provides an automatic title. */
   title: Schema.NullOr(Schema.String),
+  /** The session checkout (worktree, branch, PR stack) this chat works in; absent shares the active one. */
+  checkoutId: Schema.optional(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
   /** Permission choices are restored independently for each chat. */

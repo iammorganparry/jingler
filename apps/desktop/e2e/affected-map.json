@@ -338,6 +338,7 @@
       "enormous-review-diff.spec.ts",
       "canonical-file-changes.spec.ts",
       "changes-per-chat.spec.ts",
+      "chat-checkout-pr.spec.ts",
       "changes-committed-branch-work.spec.ts",
       "review-findings-dismiss.spec.ts",
       "deslop.spec.ts",
@@ -383,6 +384,7 @@
     "specs": [
       "pr-view.spec.ts",
       "pr-stack.spec.ts",
+      "chat-checkout-pr.spec.ts",
       "pr-conflict-resolve.spec.ts",
       "pr-review-session-switch.spec.ts",
       "github-cli-pr.spec.ts",

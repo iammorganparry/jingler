@@ -20,12 +20,19 @@ import type {
 } from "@jingler/core"
 import {
   activeCheckoutOf,
+  checkoutPrsOf,
   sessionPrsOf,
   issueReferenceOf,
   issueReferencesOf,
   UNTITLED_SESSION
 } from "@jingler/core"
 import { WidthTierProvider } from "../hooks/width-tier.js"
+
+/** A chat bound to its own checkout shows only that checkout's PRs; otherwise every checkout's. */
+const chatPrsOf = (session: Session) =>
+  session.chats.find((chat) => chat.id === session.activeChatId)?.checkoutId === undefined
+    ? sessionPrsOf(session)
+    : checkoutPrsOf(activeCheckoutOf(session))
 import {
   BUILTIN_TAB,
   builtinTabContributions,
@@ -1064,13 +1071,14 @@ function SessionPaneBody(props: SessionPaneProps) {
       onOpen: () => selectTab(BUILTIN_TAB.checks)
     })
   }
+  const headerPrs = chatPrsOf(active)
   const prRows = sessionPrRows(
     [
-      ...sessionPrsOf(active).map((pr) => pr.number),
+      ...headerPrs.map((pr) => pr.number),
       ...(active.linkedPrs ?? [])
     ],
     props.subagentPrNodes?.[active.id] ?? [],
-    new Map(sessionPrsOf(active).flatMap((pr) => (pr.repo === undefined ? [] : [[pr.number, pr.repo] as const])))
+    new Map(headerPrs.flatMap((pr) => (pr.repo === undefined ? [] : [[pr.number, pr.repo] as const])))
   )
   const linkedIssue = issueReferenceOf(active)
   const issueTab = tabs.find((tab) => linkedIssue !== undefined && tab.issueProviderId === linkedIssue.providerId)

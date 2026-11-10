@@ -634,6 +634,36 @@ describe("SessionStore", () => {
     expect(exit.value.replaced.chats[0]!.modelId).toBe(modelId)
   })
 
+  it("gives each new chat its own worktree checkout and follows it on select", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Per chat" }), { defaultMode: "auto" })
+        const firstChatId = created.activeChatId
+        const forked = yield* SessionStore.createChat(created.id)
+        const backToFirst = yield* SessionStore.selectChat(created.id, firstChatId)
+        const backToSecond = yield* SessionStore.selectChat(created.id, forked.activeChatId)
+        return { created, firstChatId, forked, backToFirst, backToSecond }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    const { created, firstChatId, forked, backToFirst, backToSecond } = exit.value
+    const primary = activeCheckoutOf(created)
+    const own = activeCheckoutOf(forked)
+    expect(forked.checkouts).toHaveLength(2)
+    expect(own.id).not.toBe(primary.id)
+    expect(own.worktreePath).not.toBe(primary.worktreePath)
+    expect(existsSync(own.worktreePath!)).toBe(true)
+    expect(execFileSync("git", ["-C", own.worktreePath!, "branch", "--show-current"], { encoding: "utf8" }).trim()).toBe(own.branch)
+    expect(forked.chats.find((chat) => chat.id === firstChatId)?.checkoutId).toBe(primary.id)
+    expect(forked.chats.find((chat) => chat.id === forked.activeChatId)?.checkoutId).toBe(own.id)
+    expect(activeCheckoutOf(backToFirst).id).toBe(primary.id)
+    expect(activeCheckoutOf(backToFirst).worktreePath).toBe(primary.worktreePath)
+    expect(activeCheckoutOf(backToSecond).id).toBe(own.id)
+  })
+
   it("discards a chat without retaining it in closed history", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
