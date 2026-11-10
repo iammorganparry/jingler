@@ -310,6 +310,7 @@ export function McpPage(props: McpSettingsProps) {
         {...(signedIn(openServer) ? { onSignOut: () => run(() => signOut(openServer.name)) } : {})}
         logLines={logLines}
         logLoading={logLoading}
+        error={actionError}
       />
       <McpAddServerDialog
         open={addOpen}

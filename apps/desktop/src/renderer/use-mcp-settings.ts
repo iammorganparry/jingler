@@ -52,7 +52,11 @@ export function useMcpSettings(): McpSettingsProps {
     claudeConnectors: connectors.data ?? [],
     connectorsRefreshing: refreshConnectors.isPending,
     refreshClaudeConnectors: () => refreshConnectors.mutate(),
-    openClaudeConnectors: () => { void window.jingler.openExternal("https://claude.ai/customize/connectors") },
+    openClaudeConnectors: () => {
+      void window.jingler.openExternal("https://claude.ai/customize/connectors")
+      // Sign-in happens in the browser; skip the 5-minute listing cache when the operator comes back.
+      window.addEventListener("focus", () => refreshConnectors.mutate(), { once: true })
+    },
     registrySearch: rpc.mcpRegistrySearch,
     parseError: query.data?.error ?? null,
     loading: query.isLoading,

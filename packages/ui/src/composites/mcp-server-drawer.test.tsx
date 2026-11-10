@@ -31,6 +31,11 @@ describe("McpServerDrawer", () => {
     expect(onToggleTool).toHaveBeenCalledWith("update", true)
   })
 
+  it("shows a failed action inside the drawer", () => {
+    drawer({ error: "fetch failed: self-signed certificate in certificate chain" })
+    expect(screen.getByRole("alert").textContent).toContain("self-signed certificate")
+  })
+
   it("sends claude.ai connectors to claude.ai and blocks Remove", () => {
     drawer({ row: { ...row, source: "claude.ai" } })
     expect(screen.getByRole("button", { name: "Connect on claude.ai" })).toBeTruthy()
