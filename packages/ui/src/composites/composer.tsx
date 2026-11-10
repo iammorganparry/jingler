@@ -551,12 +551,6 @@ const composerMcpMenuAction = (rows: McpComposerMenuProps["rows"], open: () => v
   }
 }
 
-const composerMcpEntries = (
-  menu: { readonly rows: McpComposerMenuProps["rows"] } | undefined,
-  legacy: ReadonlyArray<ComposerAction>,
-  open: () => void
-): ReadonlyArray<ComposerAction> => menu === undefined ? legacy : [composerMcpMenuAction(menu.rows, open)]
-
 const composerMcpActions = (
   enabled: boolean,
   servers: ReadonlyArray<McpServer>,
@@ -1166,7 +1160,7 @@ export function Composer(props: ComposerProps) {
       disabled: skills.length === 0,
       run: () => { closeActions(); openSkills() }
     },
-    ...composerMcpEntries(mcpMenu, mcpActions, () => setMcpMenuOpen(true))
+    ...(mcpMenu === undefined ? mcpActions : [composerMcpMenuAction(mcpMenu.rows, () => setMcpMenuOpen(true))])
   ].filter((action) => actionMatches(actionsQuery, action))
   const activeActionElementId = actionOptionId(actionsListId, actionResults[actionsIndex])
   useEffect(() => {

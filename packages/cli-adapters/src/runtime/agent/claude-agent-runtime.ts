@@ -21,7 +21,7 @@ import { trackChild } from "../../child-registry.js"
 import { resolveClaudeBinary } from "../../claude-cli-resolver.js"
 import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import type { RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
-import { claudeArtifactsAllowed, claudeCliEnvironment, claudeToolArguments } from "../providers/claude-cli-environment.js"
+import { claudeArtifactsAllowed, claudeCliEnvironment, claudeConnectorArguments, claudeToolArguments } from "../providers/claude-cli-environment.js"
 import { textOf } from "../providers/claude-cli-tool-rescue.js"
 import { ClaudeRequestUsage, ClaudeTurnUsage, claudeUsageTokens } from "../providers/claude-cli-usage.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
@@ -71,8 +71,8 @@ export const claudeAgentArguments = (
   connectorSettings: string | null = null
 ): ReadonlyArray<string> => {
   const sideChat = spec.role === "side-chat"
-  const connectors = !sideChat && mcpConfigPath !== undefined && connectorSettings !== null
   const tools = sideChat ? ["--tools", ""] : claudeToolArguments(claudeArtifactsAllowed(spec.role, spec.mode))
+  const flags = claudeConnectorArguments(sideChat || mcpConfigPath === undefined ? null : connectorSettings, tools)
   return [
   "-p",
   "--output-format", "stream-json",
@@ -80,14 +80,13 @@ export const claudeAgentArguments = (
   "--include-partial-messages",
   "--verbose",
   "--model", modelName(spec.modelId),
-  // `--strict-mcp-config` and empty setting sources both drop claude.ai connectors.
-  ...(connectors ? ["--setting-sources", "user", "--settings", connectorSettings] : ["--setting-sources", ""]),
+  ...flags.sources,
   "--disable-slash-commands",
   "--system-prompt-snapshot", "off",
   ...(systemPrompt === undefined ? [] : ["--system-prompt", systemPrompt]),
   "--no-chrome",
-  ...(connectors ? tools.map((arg, index) => tools[index - 1] === "--allowedTools" ? `${arg} mcp__claude_ai_*` : arg) : tools),
-  ...(connectors ? [] : ["--strict-mcp-config"]),
+  ...flags.tools,
+  ...flags.strict,
   ...(sideChat || mcpConfigPath === undefined ? [] : ["--mcp-config", mcpConfigPath]),
   ...permissionArgs(spec.mode),
   ...reasoningArgs(spec.reasoning),

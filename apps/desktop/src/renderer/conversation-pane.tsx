@@ -207,41 +207,39 @@ function McpRecoveryCards({
     )
   }
   // One card only: an in-flight sign-in wins so its feedback stays visible; the rest collapse into "+N more".
-  const first = visible.find((server) => phaseOf(server) !== "needs-sign-in") ?? visible[0]
+  const server = visible.find((candidate) => phaseOf(candidate) !== "needs-sign-in") ?? visible[0]
   const hidden = visible.length - 1
+  const phase = server === undefined ? "hidden" : phaseOf(server)
+  const oauth = server?.authKind === "oauth"
+  const copy = server === undefined ? undefined : mcpRecoveryCopy(server, phase)
   return (
     <>
-      {(first === undefined ? [] : [first]).map((server) => {
-        const phase = phaseOf(server)
-        const oauth = server.authKind === "oauth"
-        const copy = mcpRecoveryCopy(server, phase)
-        return (
-          <RuntimeRecoveryCard
-            key={server.name}
-            icon={<McpBrand server={server} />}
-            label="MCP server recovery"
-            kind="MCP server"
-            title={`Reconnect ${server.displayName}`}
-            message={copy.message}
-            detail={attempts[server.name]?.error}
-            failed={phase === "failed"}
-            onDismiss={phase === "needs-sign-in" ? () => {
-              dismissMcpRecovery(mcpRecoveryKey(server))
-              setDismissed((count) => count + 1)
-            } : undefined}
-            actionLabel={copy.action}
-            actionDisabled={phase === "needs-sign-in" || phase === "failed" ? (oauth ? authorize === undefined : setApiKey === undefined) : false}
-            onAction={() => {
-              if (phase === "waiting") setAttempt(server.name, "cancelled")
-              else if (phase === "connected") setAttempt(server.name, undefined)
-              else if (!oauth) setApiKeyServer(server)
-              else connect(server)
-            }}
-            moreLabel={hidden > 0 ? `+${hidden} more` : undefined}
-            onMore={hidden > 0 ? onOpenSettings : undefined}
-          />
-        )
-      })}
+      {server !== undefined && (
+        <RuntimeRecoveryCard
+          key={server.name}
+          icon={<McpBrand server={server} />}
+          label="MCP server recovery"
+          kind="MCP server"
+          title={`Reconnect ${server.displayName}`}
+          message={copy?.message ?? ""}
+          detail={attempts[server.name]?.error}
+          failed={phase === "failed"}
+          onDismiss={phase === "needs-sign-in" ? () => {
+            dismissMcpRecovery(mcpRecoveryKey(server))
+            setDismissed((count) => count + 1)
+          } : undefined}
+          actionLabel={copy?.action ?? ""}
+          actionDisabled={phase === "needs-sign-in" || phase === "failed" ? (oauth ? authorize === undefined : setApiKey === undefined) : false}
+          onAction={() => {
+            if (phase === "waiting") setAttempt(server.name, "cancelled")
+            else if (phase === "connected") setAttempt(server.name, undefined)
+            else if (!oauth) setApiKeyServer(server)
+            else connect(server)
+          }}
+          moreLabel={hidden > 0 ? `+${hidden} more` : undefined}
+          onMore={hidden > 0 ? onOpenSettings : undefined}
+        />
+      )}
       {setApiKey !== undefined && (
         <McpApiKeyDialog
           server={apiKeyServer}
