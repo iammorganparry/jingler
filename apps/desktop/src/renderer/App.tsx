@@ -1326,22 +1326,10 @@ function AuthedApp({
     prevLiveRef.current = liveActivity;
     const completed = completedSessionIds(prev, liveActivity, sessions);
     refreshCompletedSessions(completed, sessions, send, startAutoPublish);
-    if (!autoDetect) return;
-    for (const id of completed) {
-      const session = sessions.find((candidate) => candidate.id === id);
-      if (!(session && canUseGitHubForSession(session))) continue;
-      void rpc.githubDetectPr(id).then((n) => {
-        if (n != null) {
-          send({ type: "SESSION_PR_LINKED", sessionId: id, prNumber: n });
-        }
-      });
-      // Partial key (id only) — matches regardless of the linked PR number.
-      void qc.invalidateQueries({ queryKey: ["pr-state", id] });
-    }
+    detectPrsForCompleted(completed, sessions, canUseGitHubForSession, send, qc);
   }, [
     liveActivity,
     sessions,
-    autoDetect,
     canUseGitHubForSession,
     send,
     qc,
@@ -2842,6 +2830,26 @@ function appStoredPreferences(config: Awaited<ReturnType<typeof rpc.configGet>> 
 
 function hasEnabledDebugPlugin(catalog: ReturnType<typeof usePluginCatalog>): boolean {
   return catalog?.plugins.some((plugin) => plugin.enabled && plugin.manifest.id === "debug") ?? false;
+}
+
+type AppSend = import("xstate").ActorRefFrom<typeof appMachine>["send"];
+
+// A completed agent run may have created a PR explicitly, so detect once after
+// every run even when background PR polling is disabled. The backend verifies
+// the live branch, persists the link and sets up relay routing.
+function detectPrsForCompleted(completed: readonly string[], sessions: ReadonlyArray<Session>, canUseGitHub: (session: Session) => boolean, send: AppSend, qc: ReturnType<typeof useQueryClient>) {
+  for (const id of completed) {
+    const session = sessions.find((candidate) => candidate.id === id);
+    if (!(session && canUseGitHub(session))) continue;
+    void rpc
+      .githubDetectPr(id)
+      .then((n) => {
+        if (n != null) send({ type: "SESSION_PR_LINKED", sessionId: id, prNumber: n });
+      })
+      .catch(() => {});
+    // Partial key (id only) — matches regardless of the linked PR number.
+    void qc.invalidateQueries({ queryKey: ["pr-state", id] });
+  }
 }
 
 function shouldAutoDetectPr(connected: boolean, config: GithubConfig | null): boolean {

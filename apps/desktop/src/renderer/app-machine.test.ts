@@ -488,6 +488,88 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
+  it("preserves a newly linked PR when a stale session update arrives", async () => {
+    const session = {
+      id: "session-pr-race",
+      repo: "acme/widget",
+      branch: "feat/pr-race",
+      title: "PR race",
+      status: "idle",
+      diff: { added: 1, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      chats: [],
+      activeChatId: "chat-1",
+      updatedAt: "2026-08-05T08:00:00.000Z",
+    } as Session;
+    const configured = appMachine.provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => ({
+          configured: true,
+          providerReady: true,
+          reposDir: "/repos",
+          repos: [],
+          sessions: [session],
+          providerCatalog,
+        })),
+      },
+    });
+    const actor = createActor(configured).start();
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"));
+
+    actor.send({ type: "SESSION_PR_LINKED", sessionId: session.id, prNumber: 77 });
+    actor.send({ type: "SESSION_UPDATED", session });
+
+    expect(activeCheckoutOf(actor.getSnapshot().context.sessions[0]!)).toMatchObject({
+      prNumber: 77,
+      prs: [{ number: 77 }],
+    });
+    actor.stop();
+  });
+
+  it("does not carry a PR across when the active checkout switches", async () => {
+    const checkout = (id: string, prNumber: number | null) => ({ id, repo: `acme/${id}`, branch: `feat/${id}`, prNumber });
+    const session = {
+      id: "session-switch",
+      repo: "acme/a",
+      branch: "feat/a",
+      title: "Switch",
+      status: "idle",
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      chats: [],
+      activeChatId: "chat-1",
+      updatedAt: "2026-08-05T08:00:00.000Z",
+      checkouts: [checkout("a", null), checkout("b", null)],
+      activeCheckoutId: "a",
+    } as Session;
+    const configured = appMachine.provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => ({
+          configured: true,
+          providerReady: true,
+          reposDir: "/repos",
+          repos: [],
+          sessions: [session],
+          providerCatalog,
+        })),
+      },
+    });
+    const actor = createActor(configured).start();
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"));
+
+    actor.send({ type: "SESSION_PR_LINKED", sessionId: session.id, prNumber: 77 });
+    actor.send({ type: "SESSION_UPDATED", session: { ...session, activeCheckoutId: "b" } });
+
+    const active = activeCheckoutOf(actor.getSnapshot().context.sessions[0]!);
+    expect(active.id).toBe("b");
+    expect(active.prNumber).toBeNull();
+    actor.stop();
+  });
+
   it("resumes into the app when the separate GitHub machine reports connected", async () => {
     const actor = createActor(unconfigured()).start();
     await waitFor(actor, (snapshot) =>
