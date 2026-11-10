@@ -302,7 +302,7 @@ export function McpConnectorsView({
         )}
         <span className="flex-1" />
         <SearchField value={query} onChange={setQuery} placeholder={tab === "yours" ? "Search servers" : "Search registry"} className="w-56" />
-        <Button size="sm" onClick={onAddCustom}><Plus size={12} /> Add</Button>
+        <Button size="sm" onClick={onAddCustom}><Plus size={12} /> Add server</Button>
       </div>
 
       {tab === "yours" ? (

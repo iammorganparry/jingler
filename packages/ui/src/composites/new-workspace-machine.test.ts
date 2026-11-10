@@ -579,6 +579,24 @@ describe("newWorkspaceMachine", () => {
   })
 })
 
+it("picks the saved default model on a pi endpoint, not the first one listed", async () => {
+  const opus = providerCatalog.connections[0]!.models[1]!
+  const piEndpoint = piEndpointId("desktop", connectionId)
+  const endpointCatalog: AgentEndpointCatalog = {
+    refreshedAt: "2026-09-25T00:00:00.000Z", stale: false,
+    endpoints: [{
+      endpoint: { id: piEndpoint, runtimeId: "pi", targetId: "desktop", label: "PI · anthropic", status: "ready", version: null, features: { steer: "text", planReview: true, subagentFleet: false, backgroundTasks: false } },
+      models: providerCatalog.connections[0]!.models.map((model) => ({ ...model, status: "ready" as const }))
+    }]
+  }
+  const actor = actorFor(undefined, { agentEndpointCatalog: endpointCatalog, defaultModelId: opus.id }).start()
+  try {
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, snapshot => snapshot.matches("editing"))
+    expect(actor.getSnapshot().context).toMatchObject({ endpointId: piEndpoint, modelId: opus.id })
+  } finally { actor.stop() }
+})
+
 it("retains the selected provider when overlapping native models refresh", async () => {
   const endpointId = nativeCliEndpointId("desktop", "opencode")
   const beta = ProviderId.make("beta")
