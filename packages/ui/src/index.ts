@@ -12,6 +12,8 @@ export * from "./tokens.js"
 // Where a transcript thumbnail fetches bytes the transcript deliberately omits.
 export * from "./components/attachment-source.js"
 export * from "./app/title-search.js"
+export * from "./app/terminal-find.js"
+export { matchGlobalSearchChord } from "./app/app-shortcuts.js"
 // BeUI-backed atoms and Jingler product primitives
 export * from "./components/status-dot.js"
 export * from "./components/spin.js"

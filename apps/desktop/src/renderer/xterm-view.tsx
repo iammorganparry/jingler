@@ -14,7 +14,7 @@
  * does NOT kill the PTY; it keeps running in main and is re-attachable.
  */
 import { useEffect, useRef, useState } from "react"
-import { useThemeTokens } from "@jingler/ui"
+import { TerminalFind, useThemeTokens } from "@jingler/ui"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebglAddon } from "@xterm/addon-webgl"
@@ -22,6 +22,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links"
 import "@xterm/xterm/css/xterm.css"
 import { rpc } from "./rpc-client.js"
 import { mirrorWrite } from "./agent-command-tabs.js"
+import { useTerminalSearch } from "./use-terminal-search.js"
 
 /**
  * The terminal is themed like everything else, but through a different pipe:
@@ -53,6 +54,7 @@ export interface XtermViewProps {
 export function XtermView({ terminalId, active = true, onExit, mirror }: XtermViewProps) {
   const isMirror = mirror !== undefined
   const containerRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   // Keep the latest onExit without re-running the (expensive) mount effect.
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
@@ -72,6 +74,7 @@ export function XtermView({ terminalId, active = true, onExit, mirror }: XtermVi
   // State, not a ref: the WebGL and theme effects below must re-run when the
   // mount effect rebuilds the Terminal, and a ref mutation cannot tell them.
   const [term, setTerm] = useState<Terminal | null>(null)
+  const search = useTerminalSearch(term, active, palette, rootRef)
   // What a mirror has already written to the current Terminal instance.
   const shownRef = useRef("")
 
@@ -191,5 +194,10 @@ export function XtermView({ terminalId, active = true, onExit, mirror }: XtermVi
     if (term !== null) term.options.theme = { ...palette }
   }, [palette, term])
 
-  return <div ref={containerRef} className="h-full w-full" />
+  return (
+    <div ref={rootRef} className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full" />
+      {search.open && <TerminalFind ref={search.inputRef} query={search.query} count={search.count} onChange={search.change} />}
+    </div>
+  )
 }

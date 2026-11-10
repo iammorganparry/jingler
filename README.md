@@ -111,6 +111,11 @@ finds an older version.
 
 5. If the Jingler GitHub App is connected, create or link a pull request from the PR view.
 
+With a terminal focused, **⌘F** (**Ctrl+F** on Windows/Linux) searches its output.
+Use **Enter** for the next match, **Shift+Enter** for the previous match, and
+**Escape** to close Find and return to the terminal. This also works in read-only
+agent command tabs.
+
 ## Common commands
 
 Run these from the repository root:

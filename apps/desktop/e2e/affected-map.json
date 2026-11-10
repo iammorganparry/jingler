@@ -23,6 +23,19 @@
   },
   {
     "paths": [
+      "apps/desktop/src/renderer/terminal-search-machine.ts",
+      "apps/desktop/src/renderer/use-terminal-search.ts",
+      "packages/ui/src/app/terminal-find.tsx"
+    ],
+    "specs": [
+      "terminal-search.spec.ts",
+      "terminal.spec.ts",
+      "agent-command-terminal.spec.ts",
+      "command-palette.spec.ts"
+    ]
+  },
+  {
+    "paths": [
       "apps/desktop/src/renderer/agent-command-",
       "apps/desktop/src/renderer/xterm-view.tsx",
       "packages/ui/src/components/beui/tool-result.tsx",
