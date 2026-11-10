@@ -551,6 +551,13 @@ const composerMcpMenuAction = (rows: McpComposerMenuProps["rows"], open: () => v
   }
 }
 
+// Kept out of Composer: an inline ternary pushes it past biome's complexity limit.
+const composerMcpEntries = (
+  menu: { readonly rows: McpComposerMenuProps["rows"] } | undefined,
+  legacy: ReadonlyArray<ComposerAction>,
+  open: () => void
+): ReadonlyArray<ComposerAction> => menu === undefined ? legacy : [composerMcpMenuAction(menu.rows, open)]
+
 const composerMcpActions = (
   enabled: boolean,
   servers: ReadonlyArray<McpServer>,
@@ -1160,7 +1167,7 @@ export function Composer(props: ComposerProps) {
       disabled: skills.length === 0,
       run: () => { closeActions(); openSkills() }
     },
-    ...(mcpMenu === undefined ? mcpActions : [composerMcpMenuAction(mcpMenu.rows, () => setMcpMenuOpen(true))])
+    ...composerMcpEntries(mcpMenu, mcpActions, () => setMcpMenuOpen(true))
   ].filter((action) => actionMatches(actionsQuery, action))
   const activeActionElementId = actionOptionId(actionsListId, actionResults[actionsIndex])
   useEffect(() => {
