@@ -1,5 +1,16 @@
 # @jingler/desktop
 
+## 0.27.0
+
+### Minor Changes
+
+- f5cf2ec: Connecting a model provider now uses one connect sheet everywhere: onboarding, Settings › Providers and the chat's "signed out" card. Codex shows a clear waiting state for browser sign-in or a device code you can copy, Claude connects through your existing `claude auth login`, and API keys are tested before they're saved. Settings › Providers groups accounts per provider, with a star on the default account, a menu to make another account default or sign out, and "Add another account".
+
+### Patch Changes
+
+- 14cf878: claude.ai connectors now load behind corporate proxies and TLS-inspecting networks: Jingler's connector check and MCP sign-in use your proxy and NODE_EXTRA_CA_CERTS settings. Reconnect errors now show inside the server panel, and the connector list refreshes when you come back from claude.ai.
+  - @jingler/plannotator-ext@0.27.0
+
 ## 0.26.1
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @jingler/auth-state
 
+## 0.27.0
+
+### Patch Changes
+
+- @jingler/core@0.27.0
+
 ## 0.26.1
 
 ### Patch Changes
