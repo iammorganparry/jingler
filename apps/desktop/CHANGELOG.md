@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.24.1
+
+### Patch Changes
+
+- cf7cd10: PRs an agent opens from a chat link to the session again, so you can click through to view them in Jingler.
+  - @jingler/plannotator-ext@0.24.1
+
 ## 0.24.0
 
 ### Minor Changes

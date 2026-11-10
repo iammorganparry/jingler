@@ -1,5 +1,7 @@
 # @jingler/plugin-linear
 
+## 0.24.1
+
 ## 0.24.0
 
 ## 0.23.1
