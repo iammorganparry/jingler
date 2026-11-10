@@ -32,6 +32,7 @@ import {
   applyStreamEvent,
   assistantMessage,
   activeCheckoutOf,
+  reduceCheckouts,
   AgentRunError,
   BranchDriftError,
   checkoutsOf,
@@ -1830,12 +1831,16 @@ const resolveTurnChat = (sessionId: string, chatId: string) =>
       )
     }
     return {
-      session,
+      session: inChatCheckout(session, chat.checkoutId),
       chat: { ...chat, runtimeId, endpointId },
       connectionId,
       modelId: chat.modelId
     }
   })
+
+/** A chat bound to its own checkout runs there, even while another chat is focused. */
+const inChatCheckout = (session: Session, checkoutId: string | undefined): Session =>
+  checkoutId === undefined ? session : reduceCheckouts(session, { type: "switch", checkoutId })
 
 const resolveTurnWorktree = (sessionId: string, session: Session) =>
   Effect.gen(function* () {

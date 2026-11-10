@@ -37,6 +37,7 @@ import {
 } from "./agent-runner.js"
 import { ContextManager } from "./context-manager.js"
 import { SessionStore } from "./sessions.js"
+import { GitService } from "./git.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { workspaceActivityCount } from "./workspace-admission.js"
@@ -200,7 +201,7 @@ describe("AgentRunner session completion", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default, BrowserControlMcpServiceTest, InMemorySecretStoreLive,
         ConfigService.Default, SessionStore.Default, TranscriptStore.Default,
-        BackgroundTaskStore.Default, adapter, ContextManager.Default, temp.layer
+        BackgroundTaskStore.Default, adapter, ContextManager.Default, GitService.Default, temp.layer
       )
       yield* Effect.gen(function* () {
         const runner = yield* AgentRunner
@@ -982,7 +983,7 @@ describe("AgentRunner resume across restarts", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default, BrowserControlMcpServiceTest, InMemorySecretStoreLive,
         ConfigService.Default, SessionStore.Default, TranscriptStore.Default,
-        BackgroundTaskStore.Default, adapter, ContextManager.Default, temp.layer
+        BackgroundTaskStore.Default, adapter, ContextManager.Default, GitService.Default, temp.layer
       )
       await Effect.runPromise(Effect.gen(function* () {
         yield* SessionStore.setContinuation(SESSION, SESSION, piContinuation("prior-resume"))
@@ -1041,7 +1042,7 @@ describe("AgentRunner resume across restarts", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default, BrowserControlMcpServiceTest, InMemorySecretStoreLive,
       ConfigService.Default, SessionStore.Default, TranscriptStore.Default,
-      BackgroundTaskStore.Default, adapter, ContextManager.Default, temp.layer
+      BackgroundTaskStore.Default, adapter, ContextManager.Default, GitService.Default, temp.layer
     )
     await Effect.runPromise(Effect.gen(function* () {
       const claude = nativeCliEndpointId("desktop", "claude")
