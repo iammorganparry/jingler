@@ -172,6 +172,9 @@
       "packages/ui/src/composites/agents-",
       "packages/ui/src/composites/agent-",
       "apps/desktop/src/renderer/use-provider-catalog.ts",
+      "apps/desktop/src/renderer/use-provider-connect.tsx",
+      "apps/desktop/src/renderer/app-machine.ts",
+      "packages/ui/src/screens/setup",
       "apps/desktop/src/renderer/provider-recovery.ts",
       "apps/desktop/src/renderer/use-agents-settings.ts",
       "apps/desktop/src/renderer/agents-settings-machine.ts",
@@ -182,6 +185,7 @@
     "specs": [
       "provider-onboarding.spec.ts",
       "provider-models.real.spec.ts",
+      "provider-connect.real.spec.ts",
       "claude-model-list.spec.ts",
       "agent-imports.spec.ts",
       "settings-pages.spec.ts",

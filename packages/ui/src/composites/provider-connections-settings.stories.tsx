@@ -88,11 +88,7 @@ export const MultipleAccounts: Story = {
         onVerify={() => {}}
         onMakeDefault={() => {}}
         onLogout={() => {}}
-        onConnectClaude={() => {}}
-        onStartCodex={() => {}}
-        onSetApiKey={() => {}}
-        onCancelLogin={async () => {}}
-        onSaveApiKey={async () => ({ ok: true })}
+        onConnect={() => {}}
       />
     </div>
   )
@@ -108,11 +104,7 @@ export const Empty: Story = {
         onVerify={() => {}}
         onMakeDefault={() => {}}
         onLogout={() => {}}
-        onConnectClaude={() => {}}
-        onStartCodex={() => {}}
-        onSetApiKey={() => {}}
-        onCancelLogin={async () => {}}
-        onSaveApiKey={async () => ({ ok: true })}
+        onConnect={() => {}}
       />
     </div>
   )

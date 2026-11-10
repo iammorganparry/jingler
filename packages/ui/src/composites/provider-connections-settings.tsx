@@ -13,18 +13,19 @@ import {
   type ProviderModelId
 } from "@jingler/core"
 import { useMachine } from "@xstate/react"
-import { Check, LogOut, Plus, RefreshCw, Star } from "lucide-react"
+import { Check, LogOut, Plus, RefreshCw } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { Badge, type BadgeTone } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Spinner } from "../components/loading.js"
-import { ProviderIcon } from "../components/provider-icon.js"
+import { providerLabel } from "../components/provider-icon.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
-import { providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
+import { entitlementIssueLabel, providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
 import { ProviderAuthForms } from "./provider-auth-forms.js"
-import { ProviderConnectSheet } from "./provider-connect-sheet.js"
+import type { ProviderConnectRequest } from "./provider-connect-sheet.js"
+import { EntitlementWarning, ProviderAccountsCard } from "./provider-accounts-card.js"
 import { providerConnectionsSettingsMachine } from "./provider-connections-settings-machine.js"
 
 const EMPTY_CONNECTIONS: ProviderCatalog["connections"] = []
@@ -257,70 +258,85 @@ function AgentRuntimeSetup({
   )
 }
 
-const connectionDotTone = (status: AuthStatus): string =>
-  status === "authenticated" ? "bg-green" : status === "connecting" ? "bg-yellow" : "bg-red"
+const PROVIDER_NAMES: Partial<Record<string, string>> = { anthropic: "Claude Code", "openai-codex": "Codex" }
 
+const newConnectRequest = (providerId: ProviderId): ProviderConnectRequest => ({
+  connectionId: ProviderConnectionId.make(crypto.randomUUID()),
+  providerId,
+  mode: "subscription"
+})
+
+const accountLabel = (connection: ProviderCatalog["connections"][number]["connection"]): string =>
+  connection.account?.displayLabel ?? connection.account?.fingerprint ?? providerAuthRouteLabel(connection.authKind)
+
+/** Board 15d: one card per provider, one row per account; the selected row's details show below. */
 function ConnectionsList({
   connections,
   endpoints,
   selectedId,
   defaultConnectionId,
-  busy,
   onSelect,
-  onRemove
+  onRemove,
+  onRefresh,
+  onMakeDefault,
+  onConnect
 }: {
   readonly connections: ProviderCatalog["connections"]
   readonly endpoints: AgentEndpointCatalog["endpoints"]
   readonly selectedId: ProviderConnectionId | null
   readonly defaultConnectionId: ProviderConnectionId | null
-  readonly busy: boolean
   readonly onSelect: (connectionId: ProviderConnectionId) => void
   readonly onRemove: (connectionId: ProviderConnectionId) => void
+  readonly onRefresh: (connectionId: ProviderConnectionId) => void
+  readonly onMakeDefault: ProviderConnectionsSettingsProps["onMakeDefault"]
+  readonly onConnect: (request: ProviderConnectRequest) => void
 }) {
+  const groups = new Map<ProviderId, Array<ProviderCatalog["connections"][number]>>()
+  for (const entry of connections) groups.set(entry.connection.providerId, [...(groups.get(entry.connection.providerId) ?? []), entry])
   return (
-    <section className="flex flex-col gap-2">
-      <h3 className="text-[13px] font-semibold text-text-bright">Connections</h3>
+    <section className="flex flex-col gap-3">
       {connections.length === 0 && endpoints.length === 0 && (
         <p className="text-[12.5px] text-muted-foreground">
           No provider connection is configured. Add one here when you are ready.
         </p>
       )}
-      <div className="flex flex-col divide-y divide-hairline">
-        {connections.map(({ connection, models }) => (
-          <div
-            key={connection.id}
-            className={cn("flex items-center gap-2 rounded-md", selectedId === connection.id && "bg-hover")}
+      {[...groups].map(([providerId, entries]) => {
+        const unconfirmed = entries.find(({ connection }) => connection.status === "entitlement-unconfirmed")
+        const healthy = entries.every(({ connection }) => connection.status === "authenticated")
+        const subscription = entries.every(({ connection }) => connection.authKind !== "api-key")
+        return (
+          <ProviderAccountsCard
+            key={providerId}
+            providerId={providerId}
+            name={PROVIDER_NAMES[providerId] ?? providerLabel(providerId)}
+            status={healthy ? "ready" : "needs-attention"}
+            detail={`${entries.length} ${entries.length === 1 ? "account" : "accounts"} · ${subscription ? "subscription" : "API key"}`}
+            accounts={entries.map(({ connection }) => ({
+              id: connection.id,
+              label: accountLabel(connection),
+              plan: connection.subscription.planLabel
+            }))}
+            defaultAccountId={defaultConnectionId}
+            selectedAccountId={selectedId}
+            onSelectAccount={(id) => onSelect(ProviderConnectionId.make(id))}
+            onMakeDefault={(id) => {
+              const entry = entries.find(({ connection }) => connection.id === id)
+              const model = entry?.models.find(({ selectable }) => selectable) ?? entry?.models[0]
+              if (entry && model) onMakeDefault({ connectionId: entry.connection.id, providerId: model.providerId, modelId: model.id })
+            }}
+            onSignOut={(id) => onRemove(ProviderConnectionId.make(id))}
+            onAddAccount={() => onConnect(newConnectRequest(providerId))}
           >
-            <Button
-              variant="ghost"
-              onClick={() => onSelect(connection.id)}
-              className="h-auto min-w-0 flex-1 justify-start gap-2.5 px-2 py-2.5 text-left"
-            >
-              <StatusDot tone={connectionDotTone(connection.status)} size={7} />
-              <ProviderIcon providerId={connection.providerId} size={14} />
-              <span className="text-[13px] font-medium text-text-bright">
-                {providerAuthRouteLabel(connection.authKind)}
-              </span>
-              {connection.id === defaultConnectionId && (
-                <Star size={11} className="shrink-0 fill-current text-dim" aria-label="Default connection" />
-              )}
-              <span className="ml-auto font-mono text-[11px] font-normal text-dim">
-                {connection.targetId} · {models.filter(({ selectable }) => selectable).length} certified
-              </span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={`Sign out ${providerAuthRouteLabel(connection.authKind)} connection`}
-              disabled={busy}
-              onClick={() => onRemove(connection.id)}
-              className="mr-1 flex-none text-dim hover:text-red"
-            >
-              <LogOut size={12} /> Sign out
-            </Button>
-          </div>
-        ))}
-      </div>
+            {unconfirmed && (
+              <EntitlementWarning
+                message={entitlementIssueLabel(unconfirmed.connection.subscription)}
+                onRetry={() => onRefresh(unconfirmed.connection.id)}
+                onUseAnother={() => onConnect(newConnectRequest(providerId))}
+              />
+            )}
+          </ProviderAccountsCard>
+        )
+      })}
       {endpoints.length > 0 && (
         <fieldset className="m-0 flex min-w-0 flex-col divide-y divide-hairline border-0 p-0">
           <legend className="sr-only">Agent runtime endpoints</legend>
@@ -343,7 +359,6 @@ export interface ProviderConnectionsSettingsProps {
   defaultConnectionId?: ProviderConnectionId | null
   defaultModelId?: ProviderModelId | null
   busy?: boolean
-  pendingAuthKind?: AuthKind | null
   error?: string | null
   onReload?: () => void
   onRefresh: (connectionId: ProviderConnectionId) => void
@@ -356,97 +371,38 @@ export interface ProviderConnectionsSettingsProps {
   onLogout: (connectionId: ProviderConnectionId) => void
   /** Irreversibly removes a connection row (credential + persisted record). */
   onRemove?: (connectionId: ProviderConnectionId) => void
-  onConnectClaude: (connectionId: ProviderConnectionId, token: string) => void
-  onStartCodex: (
-    connectionId: ProviderConnectionId,
-    method: CodexLoginMethod
-  ) => void
-  onSetApiKey: (
-    connectionId: ProviderConnectionId,
-    providerId: ProviderId,
-    apiKey: string
-  ) => void
-  /** Provider.cancelLogin for the reconnect `ProviderConnectSheet`'s OAuth-waiting Cancel button. */
-  onCancelLogin: (connectionId: ProviderConnectionId) => Promise<void>
-  /** Sets and verifies an API key from the reconnect `ProviderConnectSheet`; resolves ok or an error message. */
-  onSaveApiKey: (
-    connectionId: ProviderConnectionId,
-    providerId: ProviderId,
-    apiKey: string
-  ) => Promise<{ ok: true } | { ok: false; error: string }>
+  /** Opens the connect sheet (boards 15a–15c) to add or reconnect an account. */
+  onConnect: (request: ProviderConnectRequest) => void
 }
 
 type ConnectionEntry = ProviderCatalog["connections"][number]
 
+/** Reconnect keeps the connection id, so the sheet re-authenticates the same row. */
+export const reconnectRequest = (connection: ConnectionEntry["connection"]): ProviderConnectRequest =>
+  connection.authKind === "api-key"
+    ? { connectionId: connection.id, providerId: connection.providerId, mode: "api-key", apiProviderId: connection.providerId }
+    : { connectionId: connection.id, providerId: connection.providerId, mode: "subscription" }
+
 function ReconnectPanel({
   entry,
   busy,
-  pendingAuthKind,
-  open,
-  onOpenChange,
-  onConnectClaude,
-  onStartCodex,
-  onSetApiKey,
-  onCancelLogin,
-  onSaveApiKey
+  onConnect
 }: {
   readonly entry: ConnectionEntry
   readonly busy: boolean
-  readonly pendingAuthKind: AuthKind | null
-  readonly open: boolean
-  readonly onOpenChange: (open: boolean) => void
-} & Pick<
-  ProviderConnectionsSettingsProps,
-  "onConnectClaude" | "onStartCodex" | "onSetApiKey" | "onCancelLogin" | "onSaveApiKey"
->) {
+} & Pick<ProviderConnectionsSettingsProps, "onConnect">) {
   const { connection } = entry
-  const sheetAuth = connection.authKind === "openai-codex-oauth" || connection.authKind === "api-key"
   return (
     <div className="flex flex-col gap-3 border-t border-hairline pt-4">
       <Callout tone="blue">
         Reauthentication required. Jingler has not retained usable credentials for this connection.
       </Callout>
-      {sheetAuth ? (
-        <>
-          <div>
-            <Button variant="primary" disabled={busy} onClick={() => onOpenChange(true)}>
-              Reconnect
-            </Button>
-          </div>
-          <ProviderConnectSheet
-            open={open}
-            onOpenChange={onOpenChange}
-            providerId={connection.providerId}
-            providerLabel={providerAuthRouteLabel(connection.authKind)}
-            busy={busy}
-            onStartOauth={async () => {
-              onStartCodex(connection.id, "browser")
-              return connection.id
-            }}
-            onStartDeviceCode={
-              connection.authKind === "openai-codex-oauth"
-                ? async () => {
-                    onStartCodex(connection.id, "device-code")
-                    return connection.id
-                  }
-                : undefined
-            }
-            onCancelLogin={() => onCancelLogin(connection.id)}
-            onReopenBrowser={() => {}}
-            onSaveApiKey={(apiKey) => onSaveApiKey(connection.id, connection.providerId, apiKey)}
-          />
-        </>
-      ) : (
-        <ProviderAuthForms
-          busy={busy}
-          mode="reconnect"
-          pendingAuthKind={pendingAuthKind}
-          authKinds={[connection.authKind]}
-          apiProviderId={connection.providerId}
-          onConnectClaude={(token) => onConnectClaude(connection.id, token)}
-          onStartCodex={(method) => onStartCodex(connection.id, method)}
-          onConnectApi={(_providerId, apiKey) => onSetApiKey(connection.id, connection.providerId, apiKey)}
-        />
+      {connection.authKind !== "device-environment" && (
+        <div>
+          <Button variant="primary" disabled={busy} onClick={() => onConnect(reconnectRequest(connection))}>
+            Reconnect
+          </Button>
+        </div>
       )}
     </div>
   )
@@ -526,19 +482,13 @@ export function ProviderConnectionsSettings({
   defaultConnectionId = null,
   defaultModelId = null,
   busy = false,
-  pendingAuthKind = null,
   error = null,
   onRefresh,
   onMakeDefault,
   onLogout,
   onRemove,
-  onConnectClaude,
-  onStartCodex,
-  onSetApiKey,
-  onCancelLogin,
-  onSaveApiKey
+  onConnect
 }: ProviderConnectionsSettingsProps) {
-  const [reconnectOpen, setReconnectOpen] = useState(false)
   const connections = catalog?.connections ?? EMPTY_CONNECTIONS
   const connectionIds = useMemo(
     () => connections.map(({ connection }) => connection.id),
@@ -557,7 +507,6 @@ export function ProviderConnectionsSettings({
       : connections.find(
           ({ connection }) => connection.id === selection.context.selectedId
         ) ?? connections[0] ?? null
-  const newConnectionId = () => ProviderConnectionId.make(crypto.randomUUID())
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
@@ -579,9 +528,11 @@ export function ProviderConnectionsSettings({
           endpoints={endpointCatalog?.endpoints ?? []}
           selectedId={selected?.connection.id ?? null}
           defaultConnectionId={defaultConnectionId}
-          busy={busy}
           onSelect={(connectionId) => sendSelection({ type: "SELECT", connectionId })}
           onRemove={onRemove ?? onLogout}
+          onRefresh={onRefresh}
+          onMakeDefault={onMakeDefault}
+          onConnect={onConnect}
         />
         {selected ? (
           <section className="flex flex-col gap-4 border-t border-hairline pt-4">
@@ -590,14 +541,7 @@ export function ProviderConnectionsSettings({
               <ReconnectPanel
                 entry={selected}
                 busy={busy}
-                pendingAuthKind={pendingAuthKind}
-                open={reconnectOpen}
-                onOpenChange={setReconnectOpen}
-                onConnectClaude={onConnectClaude}
-                onStartCodex={onStartCodex}
-                onSetApiKey={onSetApiKey}
-                onCancelLogin={onCancelLogin}
-                onSaveApiKey={onSaveApiKey}
+                onConnect={onConnect}
               />
             )}
             <ModelList
@@ -620,15 +564,7 @@ export function ProviderConnectionsSettings({
               endpointCatalog={endpointCatalog}
               nativeEndpointLogin={nativeEndpointLogin}
               piSetup={(
-                <ProviderAuthForms
-                  busy={busy}
-                  pendingAuthKind={pendingAuthKind}
-                  onConnectClaude={(token) => onConnectClaude(newConnectionId(), token)}
-                  onStartCodex={(method) => onStartCodex(newConnectionId(), method)}
-                  onConnectApi={(providerId, apiKey) =>
-                    onSetApiKey(newConnectionId(), ProviderId.make(providerId), apiKey)
-                  }
-                />
+                <ProviderAuthForms busy={busy} onConnect={onConnect} />
               )}
             />
           </section>
