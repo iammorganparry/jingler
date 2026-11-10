@@ -1,6 +1,6 @@
 import type { McpConnectorRow } from "@jingler/ui"
 import { describe, expect, it } from "vitest"
-import { chatMcpKey, chatMcpRows, toggleChatMcp } from "./use-chat-mcp-menu.js"
+import { chatMcpKey, chatMcpRows, toggleChatMcp } from "./chat-mcp.js"
 
 const row = (id: string, over: Partial<McpConnectorRow> = {}): McpConnectorRow => ({
   id, displayName: id, iconUrl: null, target: "", source: "jingler", agents: "All agents",
