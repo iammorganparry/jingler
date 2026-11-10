@@ -18,6 +18,10 @@ export type PortalLayout = {
     width: number;
     height: number;
   };
+  viewport: {
+    width: number;
+    height: number;
+  };
 };
 
 function sameLayout(a: PortalLayout | null, b: PortalLayout) {
@@ -27,7 +31,9 @@ function sameLayout(a: PortalLayout | null, b: PortalLayout) {
     a.trigger.width === b.trigger.width &&
     a.trigger.height === b.trigger.height &&
     a.content.width === b.content.width &&
-    a.content.height === b.content.height
+    a.content.height === b.content.height &&
+    a.viewport.width === b.viewport.width &&
+    a.viewport.height === b.viewport.height
   );
 }
 
@@ -58,6 +64,10 @@ export function usePopoverPortalPosition<
       content: {
         width: content.offsetWidth,
         height: content.offsetHeight,
+      },
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
       },
     };
     setLayout((current) => (sameLayout(current, next) ? current : next));

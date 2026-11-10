@@ -136,7 +136,7 @@ function getTriggerTitle() {
           type="button"
           aria-label={ariaLabel}
           className={cn(
-            "min-w-0 outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-ring",
+            "inline-flex min-w-0 items-center outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-ring",
             appearance === "quiet" && "inline-flex min-h-10 items-center",
             trigger && "w-full text-left"
           )}

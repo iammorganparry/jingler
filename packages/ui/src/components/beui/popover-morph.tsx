@@ -18,11 +18,9 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { usePopoverPortalPosition } from "./popover-position.js";
+import { positionPopover, type PopoverAlign as Align, type PopoverSide as Side } from "./popover-layout.js";
 import { EASE_OUT, SPRING_PANEL } from "./ease.js";
 import { cn } from "../../lib/cn.js";
-
-type Side = "top" | "right" | "bottom" | "left";
-type Align = "start" | "end";
 
 type MorphContextValue = {
   open: boolean;
@@ -252,7 +250,7 @@ export function MorphPopoverContent({
          function renderPopoverPortal() {
            return (<motion.div
           data-morph-popover-portal=""
-          data-side={side}
+          data-side={resolvedSide}
           // Wrapper carries the shadow as a drop-shadow filter, which hugs the
           // clipped shape below (box-shadow would just get clipped away).
           variants={wrap}
@@ -264,7 +262,7 @@ export function MorphPopoverContent({
             left,
             top,
             visibility: layout ? "visible" : "hidden",
-            transformOrigin: originFor(side, align),
+            transformOrigin: originFor(resolvedSide, align),
           }}
           className="pointer-events-auto fixed z-[9999] [filter:drop-shadow(0_10px_18px_var(--sb-shadow))]"
         >
@@ -274,7 +272,15 @@ export function MorphPopoverContent({
             role="dialog"
             aria-labelledby={ctx.triggerId}
             variants={clip}
-            style={{ borderRadius: radius, width: matchTriggerWidth && layout ? layout.trigger.width : undefined }}
+            style={{
+              borderRadius: radius,
+              width: position?.width,
+              maxWidth: position?.maxWidth,
+              maxHeight: position?.maxHeight,
+              overflowX: "hidden",
+              overflowY: "auto",
+              overscrollBehavior: "contain",
+            }}
             className={cn(
               "overflow-hidden border border-line bg-panel",
               className,
@@ -283,20 +289,6 @@ export function MorphPopoverContent({
             {children}
           </motion.div>
         </motion.div>)
-         }
-
-         function getTop(layout: NonNullable<ReturnType<typeof usePopoverPortalPosition>>) {
-           if (side === "bottom") return (layout.trigger.top + layout.trigger.height + sideOffset)
-           if (side === "top") return (layout.trigger.top - layout.content.height - sideOffset)
-           if (align === "end") return (layout.trigger.top + layout.trigger.height - layout.content.height)
-           return (layout.trigger.top)
-         }
-
-         function getLeft(layout: NonNullable<ReturnType<typeof usePopoverPortalPosition>>) {
-           if (side === "left") return (layout.trigger.left - contentWidth - sideOffset)
-           if (side === "right") return (layout.trigger.left + layout.trigger.width + sideOffset)
-           if (align === "end") return (layout.trigger.left + layout.trigger.width - contentWidth)
-           return (layout.trigger.left)
          }
 
   const ctx = useMorphContext("MorphPopoverContent");
@@ -309,13 +301,10 @@ export function MorphPopoverContent({
   );
 
   useEffect(() => setPortalReady(true), []);
-  const contentWidth = layout && matchTriggerWidth ? layout.trigger.width : layout?.content.width ?? 0;
-  const left = layout
-    ? getLeft(layout)
-    : 0;
-  const top = layout
-    ? getTop(layout)
-    : 0;
+  const position = layout ? positionPopover(layout, side, align, sideOffset, matchTriggerWidth) : null;
+  const left = position?.left ?? 0;
+  const top = position?.top ?? 0;
+  const resolvedSide = position?.side ?? side;
 
   // Both directions travel between the exact same hidden/show states. Exit
   // targets "hidden" directly instead of introducing separate choreography.
@@ -329,7 +318,7 @@ export function MorphPopoverContent({
     ? undefined
     : {
         hidden: {
-          clipPath: clipHidden(side, align, radius),
+          clipPath: clipHidden(resolvedSide, align, radius),
           transition: MORPH_CLIP_TRANSITION,
         },
         show: {

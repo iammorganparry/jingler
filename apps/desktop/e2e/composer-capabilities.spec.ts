@@ -6,6 +6,8 @@ const CONNECTION_ID = "jingler-e2e-connection"
 const PROVIDER_ID = "jingler-e2e"
 const MODEL_ID = "jingler-e2e/eval-model"
 const MODEL_LABEL = "Deterministic pi model"
+const MODEL_TRIGGER = /^Model: Deterministic pi model/
+const LAST_MODEL_OPTION = /^Deterministic pi model 29\b/
 const PI_FIXTURE = {
   scenarioId: "composer-capabilities",
   authRoute: "api-key" as const,
@@ -85,6 +87,63 @@ test("offers certified models with canonical route identity", async ({ launchApp
     `${encodeURIComponent(`desktop:pi:${CONNECTION_ID}`)}:${PROVIDER_ID}:${encodeURIComponent(MODEL_ID)}`
   )
 })
+
+for (const workspace of ["existing", "new"] as const) {
+  test(`keeps the ${workspace} workspace model picker inside a short window`, async ({ launchApp }, testInfo) => {
+    const { window } = await launchApp({
+      configured: true,
+      withRepo: true,
+      piFixture: { ...PI_FIXTURE, modelCount: 30 },
+      sessions: sessions("s_picker_bounds")
+    })
+    await expect(appShell(window)).toBeVisible()
+    await window.setViewportSize({ width: 1000, height: 650 })
+    if (workspace === "new") await window.getByTestId("new-session").click()
+
+    await openModelSettings(window)
+    await window.getByRole("button", { name: MODEL_TRIGGER }).click()
+    const search = window.getByRole("textbox", { name: "Search models" })
+    const panel = window.locator("[data-morph-popover-portal]").filter({
+      has: window.getByRole("button", { name: MODEL_TRIGGER })
+    })
+    await expect(search).toBeVisible()
+    await expect.poll(() => window.getByRole("option").count()).toBeGreaterThanOrEqual(30)
+
+    const expectInsideWindow = async () => {
+      let previous = ""
+      let stable = 0
+      await expect.poll(async () => {
+        const bounds = await panel.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          return {
+            position: [rect.x, rect.y, rect.width, rect.height].map((value) => Math.round(value * 10)).join(","),
+            margin: Math.min(rect.top, rect.left, window.innerHeight - rect.bottom, window.innerWidth - rect.right)
+          }
+        })
+        stable = bounds.position === previous ? stable + 1 : 0
+        previous = bounds.position
+        return stable >= 3 ? bounds.margin : Number.NEGATIVE_INFINITY
+      }, { intervals: [150] }).toBeGreaterThanOrEqual(7)
+    }
+
+    try {
+      await expectInsideWindow()
+      await window.screenshot({ path: testInfo.outputPath("picker-expanded.png") })
+      await window.setViewportSize({ width: 900, height: 600 })
+      await expectInsideWindow()
+      await search.fill("model 29")
+      const lastModel = window.getByRole("option", { name: LAST_MODEL_OPTION })
+      await expect(lastModel).toBeVisible()
+      await search.press("ArrowDown")
+      await expect(lastModel).toBeFocused()
+      await lastModel.press("Enter")
+      await expect(window.getByRole("button", { name: "Model: Deterministic pi model 29", exact: true })).toBeVisible()
+      await expectInsideWindow()
+    } finally {
+      await window.screenshot({ path: testInfo.outputPath("picker-short-window.png") })
+    }
+  })
+}
 
 test("offers the same Jingler permission modes for every certified model", async ({ launchApp }) => {
   const launched = await launchApp({
