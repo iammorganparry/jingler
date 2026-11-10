@@ -143,6 +143,30 @@ export const registryTarget = (entry: McpRegistryEntry | null): string => {
   return entry.entry.type === "remote" ? entry.entry.url : entry.entry.command.join(" ")
 }
 
+const signedIn = (server: McpServer | undefined): server is McpServer =>
+  server?.authKind === "oauth" && server.authState === "ready"
+
+const toggledTools = (disabled: ReadonlyArray<string> | undefined, tool: string, enabled: boolean): ReadonlyArray<string> =>
+  enabled ? (disabled ?? []).filter((name) => name !== tool) : [...new Set([...(disabled ?? []), tool])]
+
+function McpPageNotices({ parseError, actionError, registryError, children }: {
+  readonly parseError: string | null
+  readonly actionError: string | null
+  readonly registryError: string | null
+  readonly children?: React.ReactNode
+}) {
+  return (
+    <>
+      {parseError !== null && (
+        <Callout tone="red">mcp.json could not be read: {parseError}. Sessions run without these servers until it parses again.</Callout>
+      )}
+      {actionError !== null && <div role="alert"><Callout tone="red">{actionError}</Callout></div>}
+      {registryError !== null && <Callout tone="red">Registry unavailable: {registryError}</Callout>}
+      {children}
+    </>
+  )
+}
+
 /** Settings › MCP: boards 25a–25d on real data. */
 export function McpPage(props: McpSettingsProps) {
   const {
@@ -263,14 +287,9 @@ export function McpPage(props: McpSettingsProps) {
           </>
         }
         notices={
-          <>
-            {parseError !== null && (
-              <Callout tone="red">mcp.json could not be read: {parseError}. Sessions run without these servers until it parses again.</Callout>
-            )}
-            {actionError !== null && <div role="alert"><Callout tone="red">{actionError}</Callout></div>}
-            {discover && registryError !== null && <Callout tone="red">Registry unavailable: {registryError}</Callout>}
-            {!discover && importEntry}
-          </>
+          <McpPageNotices parseError={parseError} actionError={actionError} registryError={discover ? registryError : null}>
+            {discover ? null : importEntry}
+          </McpPageNotices>
         }
       />
       <McpServerDrawer
@@ -279,11 +298,7 @@ export function McpPage(props: McpSettingsProps) {
         toolNames={statuses?.find((status) => status.name === openId)?.toolNames ?? []}
         disabledTools={openServer?.disabledTools ?? []}
         onToggleTool={(tool, enabled) => {
-          if (openServer === undefined) return
-          const next = new Set(openServer.disabledTools ?? [])
-          if (enabled) next.delete(tool)
-          else next.add(tool)
-          run(() => setDisabledTools(openServer.name, [...next]))
+          if (openServer !== undefined) run(() => setDisabledTools(openServer.name, toggledTools(openServer.disabledTools, tool, enabled)))
         }}
         onEnabledChange={(enabled) => { if (openServer !== undefined) run(() => setEnabled(openServer.name, enabled)) }}
         onReconnect={() => { if (openRow !== null) reconnect(openRow) }}
@@ -292,9 +307,7 @@ export function McpPage(props: McpSettingsProps) {
           if (openServer === undefined) return
           run(async () => { await remove(openServer.name); setOpenId(null) })
         }}
-        {...(openServer?.authKind === "oauth" && openServer.authState === "ready"
-          ? { onSignOut: () => run(() => signOut(openServer.name)) }
-          : {})}
+        {...(signedIn(openServer) ? { onSignOut: () => run(() => signOut(openServer.name)) } : {})}
         logLines={logLines}
         logLoading={logLoading}
       />

@@ -659,13 +659,13 @@ const CONNECTOR_STATE_LABEL: Record<ClaudeConnector["state"], string> = {
 
 /** claude.ai connectors run by the Claude CLI with claude.ai auth. Claude sessions only. */
 function ClaudeConnectorList({
-  connectors,
-  refreshing,
+  connectors = [],
+  refreshing = false,
   refresh,
   open
 }: {
-  readonly connectors: ReadonlyArray<ClaudeConnector>
-  readonly refreshing: boolean
+  readonly connectors?: ReadonlyArray<ClaudeConnector>
+  readonly refreshing?: boolean
   readonly refresh?: () => void
   readonly open?: () => void
 }) {
@@ -730,8 +730,8 @@ function McpHeader({ probing, probe, canProbe, reveal, addButton }: { readonly p
 
 export function McpSettings({
   servers,
-  claudeConnectors = [],
-  connectorsRefreshing = false,
+  claudeConnectors,
+  connectorsRefreshing,
   refreshClaudeConnectors,
   openClaudeConnectors,
   parseError,
