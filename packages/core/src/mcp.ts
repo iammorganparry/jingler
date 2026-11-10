@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { McpConfigEntry } from "./mcp-config.js"
 
 /**
  * Renderer-safe metadata for an MCP server managed by Jingler.
@@ -96,6 +97,34 @@ export const SetMcpApiKeyInput = Schema.Struct({
   apiKey: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))
 })
 export type SetMcpApiKeyInput = Schema.Schema.Type<typeof SetMcpApiKeyInput>
+
+/** A claude.ai connector the Claude CLI loads with its own claude.ai auth (from `claude mcp list`). */
+export const ClaudeConnector = Schema.Struct({
+  /** CLI name, e.g. "claude.ai Linear". */
+  name: Schema.String,
+  url: Schema.String,
+  state: Schema.Literal("connected", "needs-auth", "failed", "unknown"),
+  /** True when mcp.json already has this URL; Jingler's copy runs instead. */
+  duplicate: Schema.Boolean
+})
+export type ClaudeConnector = Schema.Schema.Type<typeof ClaudeConnector>
+
+/** One official-registry server mapped to an addable mcp.json entry (Settings › MCP › Discover). */
+export const McpRegistryEntry = Schema.Struct({
+  /** Registry id, e.g. "app.linear/linear". */
+  registryName: Schema.String,
+  /** Suggested mcp.json name. */
+  name: Schema.String,
+  displayName: Schema.String,
+  description: Schema.String,
+  iconUrl: Schema.NullOr(Schema.String),
+  /** "Remote", "Local · npx", … */
+  kind: Schema.String,
+  entry: Schema.NullOr(McpConfigEntry),
+  /** Why it cannot be added; null when it can. */
+  problem: Schema.NullOr(Schema.String)
+})
+export type McpRegistryEntry = Schema.Schema.Type<typeof McpRegistryEntry>
 
 export const McpAuthorizationStart = Schema.Struct({
   authorizationUrl: Schema.String,

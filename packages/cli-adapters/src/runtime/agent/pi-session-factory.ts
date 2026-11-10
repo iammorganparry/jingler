@@ -201,6 +201,8 @@ export interface PiSessionFactoryOptions {
     readonly connections: ReadonlyArray<ProviderConnection>
   }, Error>
   readonly promptCompiler?: PromptCompiler
+  /** claude.ai connector overlay for Claude CLI subscription sessions; null keeps strict MCP. */
+  readonly connectorSettings?: (disabled?: ReadonlyArray<string>) => Promise<string | null>
   readonly toolRegistry?: ToolRegistry | ((context: AgentRuntimeContext) => ToolRegistry)
   readonly createToolRegistry?: (
     spec: AgentRunSpec,
@@ -399,6 +401,13 @@ interface EmbeddedSession {
 
 }
 
+/** Side chats stay strict: they fork the main session and get no tools. */
+const claudeCliOptions = (spec: AgentRunSpec, connectorSettings: PiSessionFactoryOptions["connectorSettings"]) => ({
+  cwd: spec.cwd,
+  artifacts: claudeArtifactsAllowed(spec.role, spec.mode),
+  ...(connectorSettings === undefined || spec.role === "side-chat" ? {} : { connectorSettings: () => connectorSettings(spec.disabledMcp) })
+})
+
 const createEmbeddedSession = (
   input: EmbeddedSessionInput
 ): Effect.Effect<EmbeddedSession, AgentRuntimeError> =>
@@ -421,9 +430,7 @@ const createEmbeddedSession = (
       await options.configureModelRuntime?.(modelRuntime)
       if (connection.providerId === "openai-codex") await registerJinglerModels(modelRuntime)
       if (workspaceRestricted(spec.sessionId) && usesClaudeCli(connection)) throw new PiSessionFactoryError({ message: "Restricted sessions requires managed Pi provider access; the Claude CLI subscription route has unsupported process ownership." })
-      if (usesClaudeCli(connection)) {
-        registerClaudeCliProvider(modelRuntime, { cwd: spec.cwd, artifacts: claudeArtifactsAllowed(spec.role, spec.mode) })
-      }
+      if (usesClaudeCli(connection)) registerClaudeCliProvider(modelRuntime, claudeCliOptions(spec, options.connectorSettings))
       const rawModelId = modelIdForProvider(spec, connection)
       const model = modelRuntime.getModel(connection.providerId, rawModelId)
       if (!model) {

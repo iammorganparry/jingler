@@ -190,6 +190,8 @@ export interface SessionConversationProps {
   onOpenProviderSettings?: () => void
   /** Open Settings directly on GitHub from a repository-access recovery action. */
   onOpenGithubSettings?: () => void
+  /** Open Settings › MCP servers from collapsed MCP recovery banners. */
+  onOpenMcpSettings?: () => void
   /** Sign out (from the sidebar account menu). */
   onSignOut?: () => void
   /** Open the optional sign-in dialog (sidebar footer, while signed out). */
@@ -399,6 +401,7 @@ export function SessionConversation(props: SessionConversationProps) {
             debugStopSequences={props.debugStopSequences}
             onOpenSettings={props.onOpenGithubSettings ?? props.onOpenSettings}
             onOpenProviderSettings={props.onOpenProviderSettings ?? props.onOpenSettings}
+            onOpenMcpSettings={props.onOpenMcpSettings ?? props.onOpenSettings}
             renderPullRequest={props.renderPullRequest}
             tabContributions={props.tabContributions}
             onSelectIssue={props.onSelectIssue}

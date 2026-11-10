@@ -122,7 +122,10 @@ const message = (cause: unknown): string => {
 }
 
 const isUnauthorized = (cause: unknown): boolean =>
-  cause instanceof UnauthorizedError || UNAUTHORIZED.test(message(cause))
+  cause instanceof UnauthorizedError ||
+  // StreamableHTTPError puts the status in `code`; its message can be blank.
+  (typeof cause === "object" && cause !== null && "code" in cause && cause.code === 401) ||
+  UNAUTHORIZED.test(message(cause))
 
 /**
  * Probe one server. Never fails — a probe that cannot connect is a `failed` status,
@@ -164,7 +167,8 @@ export const probeServer = (
     Effect.catchAll((error) =>
       Effect.succeed({
         ...base,
-        state: error.unauthorized && entry.server.authKind !== "none"
+        // A 401 from a remote with no auth block still means "sign in": Connect upgrades it to managed OAuth.
+        state: error.unauthorized && (entry.server.authKind !== "none" || entry.launch.transport === "http")
           ? "needs-auth" as const
           : "failed" as const,
         toolCount: null,

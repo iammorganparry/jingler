@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process"
+import { createServer } from "node:http"
+import type { AddressInfo } from "node:net"
 import { fileURLToPath } from "node:url"
 import { Duration, Effect } from "effect"
 import { describe, expect, it } from "vitest"
@@ -126,6 +128,18 @@ describe("probeServer — reachable states", () => {
     // Port 1 on loopback refuses immediately — no network access needed.
     const status = await run(probeServer(remote("dead", "http://127.0.0.1:1/mcp"), null, now))
     expect(status.state).toBe("failed")
+  })
+
+  it("reports needs-auth when a remote with no auth block answers 401", async () => {
+    const server = createServer((_request, response) => { response.writeHead(401).end() })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    try {
+      const { port } = server.address() as AddressInfo
+      const status = await run(probeServer(remote("locked", `http://127.0.0.1:${port}/mcp`), null, now, SHORT))
+      expect(status.state).toBe("needs-auth")
+    } finally {
+      server.close()
+    }
   })
 
   it("reports failed rather than throwing when a stdio entry has no command", async () => {

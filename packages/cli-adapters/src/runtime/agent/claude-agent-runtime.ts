@@ -21,7 +21,7 @@ import { trackChild } from "../../child-registry.js"
 import { resolveClaudeBinary } from "../../claude-cli-resolver.js"
 import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import type { RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
-import { claudeArtifactsAllowed, claudeCliEnvironment, claudeToolArguments } from "../providers/claude-cli-environment.js"
+import { claudeArtifactsAllowed, claudeCliEnvironment, claudeConnectorArguments, claudeToolArguments } from "../providers/claude-cli-environment.js"
 import { textOf } from "../providers/claude-cli-tool-rescue.js"
 import { ClaudeRequestUsage, ClaudeTurnUsage, claudeUsageTokens } from "../providers/claude-cli-usage.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
@@ -31,6 +31,8 @@ export interface ClaudeAgentRuntimeOptions extends NativeRuntimeToolsOptions {
   readonly environment?: NodeJS.ProcessEnv
   readonly spawnProcess?: (binary: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams
   readonly checkAuth?: (signal?: AbortSignal) => Promise<void>
+  /** `claudeConnectorSettings` for this run, or null to keep strict MCP flags. */
+  readonly connectorSettings?: (spec: AgentRunSpec) => Promise<string | null>
 }
 
 const modelName = (modelId: string): string =>
@@ -64,9 +66,13 @@ export const claudeAgentArguments = (
   spec: AgentRunSpec,
   sessionId: string,
   mcpConfigPath?: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  /** `claudeConnectorSettings` overlay; non-null loads claude.ai connectors natively. */
+  connectorSettings: string | null = null
 ): ReadonlyArray<string> => {
   const sideChat = spec.role === "side-chat"
+  const tools = sideChat ? ["--tools", ""] : claudeToolArguments(claudeArtifactsAllowed(spec.role, spec.mode))
+  const flags = claudeConnectorArguments(sideChat || mcpConfigPath === undefined ? null : connectorSettings, tools)
   return [
   "-p",
   "--output-format", "stream-json",
@@ -74,13 +80,13 @@ export const claudeAgentArguments = (
   "--include-partial-messages",
   "--verbose",
   "--model", modelName(spec.modelId),
-  "--setting-sources", "",
+  ...flags.sources,
   "--disable-slash-commands",
   "--system-prompt-snapshot", "off",
   ...(systemPrompt === undefined ? [] : ["--system-prompt", systemPrompt]),
   "--no-chrome",
-  ...(sideChat ? ["--tools", ""] : claudeToolArguments(claudeArtifactsAllowed(spec.role, spec.mode))),
-  "--strict-mcp-config",
+  ...flags.tools,
+  ...flags.strict,
   ...(sideChat || mcpConfigPath === undefined ? [] : ["--mcp-config", mcpConfigPath]),
   ...permissionArgs(spec.mode),
   ...reasoningArgs(spec.reasoning),
@@ -363,10 +369,11 @@ async function* runClaude(
       { signal }
     )
     relay = prepared.relay
+    const connectorSettings = await options.connectorSettings?.(spec).catch(() => null) ?? null
     signal.throwIfAborted()
     child = trackChild((options.spawnProcess ?? spawn)(
       binary,
-      [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath, prepared.systemPrompt)],
+      [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath, prepared.systemPrompt, connectorSettings)],
       { cwd: spec.cwd, env: { ...worktreeEnv(environment, spec.cwd), ...relay.environment, ...trustedWorkspaceEnvironment(spec.workspaceEnvironment) }, stdio: ["pipe", "pipe", "pipe"] }
     ))
     const spawned = child

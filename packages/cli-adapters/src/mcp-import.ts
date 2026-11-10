@@ -314,7 +314,10 @@ export const parseClaudeMcpList = (
     if (origin === null) continue
     const name = slug(original)
     const target = rawTarget.trim()
-    const problem = listProblem(target, kind, status, seen.has(name), name)
+    // claude.ai connectors authenticate through claude.ai; the Claude CLI runs them natively.
+    const problem = origin === "claude.ai"
+      ? "Runs natively in Claude sessions — manage sign-in on claude.ai"
+      : listProblem(target, kind, status, seen.has(name), name)
     seen.add(name)
     out.push({
       ...candidate(
@@ -329,6 +332,83 @@ export const parseClaudeMcpList = (
     })
   }
   return out
+}
+
+/** One `claude mcp list` row as the CLI names it (`claude.ai Linear`, `plugin:eng:notion`, `obsidian`). */
+export interface ClaudeMcpRow {
+  readonly name: string
+  readonly url: string
+  readonly state: "connected" | "needs-auth" | "failed" | "unknown"
+}
+
+const rowState = (mark: string | undefined): ClaudeMcpRow["state"] =>
+  mark === "✔" || mark === "✓" ? "connected" : mark === "!" ? "needs-auth" : mark === "✘" || mark === "✗" ? "failed" : "unknown"
+
+export const parseClaudeMcpRows = (output: string): ReadonlyArray<ClaudeMcpRow> =>
+  output.split("\n").flatMap((line) => {
+    const match = LIST_LINE.exec(line.trim())
+    if (match === null) return []
+    const [, name = "", target = "", , mark] = match
+    return [{ name, url: target.trim(), state: rowState(mark) }]
+  })
+
+/** Every server the Claude CLI loads, with its health. Slow: the CLI connects to each one. */
+export const listClaudeMcpRows = async (options: { readonly cwd: string }): Promise<ReadonlyArray<ClaudeMcpRow>> =>
+  parseClaudeMcpRows(await run(await resolveClaudeBinary(undefined), ["mcp", "list"], { cwd: options.cwd, timeoutMs: 90_000 }))
+
+const CLAUDE_AI_PREFIX = "claude.ai "
+const ROWS_MAX_AGE_MS = 5 * 60_000
+interface RowsCache {
+  rows: ReadonlyArray<ClaudeMcpRow>
+  checkedAt: number
+  refresh: Promise<ReadonlyArray<ClaudeMcpRow>> | null
+}
+// Keyed by home: main and the runtime can list different Claude configs (e2e, custom homes).
+const rowsCaches = new Map<string, RowsCache>()
+const rowsCache = (cwd: string): RowsCache => {
+  const cache = rowsCaches.get(cwd) ?? { rows: [], checkedAt: 0, refresh: null }
+  rowsCaches.set(cwd, cache)
+  return cache
+}
+/** Last `claude mcp list` result for this home; empty until the first refresh lands. */
+export const cachedClaudeMcpRows = (cwd: string): ReadonlyArray<ClaudeMcpRow> => rowsCache(cwd).rows
+/** Refresh this home's cached rows when stale; one listing at a time. A failed listing keeps the old rows. */
+export const refreshClaudeMcpRows = (
+  cwd: string,
+  options: { readonly force?: boolean } = {}
+): Promise<ReadonlyArray<ClaudeMcpRow>> => {
+  const cache = rowsCache(cwd)
+  if (!options.force && Date.now() - cache.checkedAt < ROWS_MAX_AGE_MS) return Promise.resolve(cache.rows)
+  cache.refresh ??= listClaudeMcpRows({ cwd })
+    .then((rows) => { cache.rows = rows; return rows })
+    .catch(() => cache.rows)
+    .finally(() => { cache.checkedAt = Date.now(); cache.refresh = null })
+  return cache.refresh
+}
+const sameUrl = (url: string) => url.replace(/\/+$/, "")
+
+/**
+ * `--settings` overlay that lets a `--setting-sources user` Claude session load
+ * claude.ai connectors and nothing else from the user's Claude config: hooks
+ * off, every non-connector server denied by name, and connectors whose URL is
+ * already in mcp.json denied too (Jingler's copy wins — dedupe). Deny only:
+ * any `allowedMcpServers` entry drops every connector (verified on CLI 2.1.3xx).
+ * Null when no connector is left, so the session keeps strict MCP flags.
+ */
+export const claudeConnectorSettings = (
+  rows: ReadonlyArray<ClaudeMcpRow>,
+  configuredUrls: ReadonlyArray<string>,
+  /** Per-chat `claude.ai <Name>` connectors turned off. */
+  disabled: ReadonlyArray<string> = []
+): string | null => {
+  const configured = new Set(configuredUrls.map(sameUrl))
+  const native = (row: ClaudeMcpRow) =>
+    row.name.startsWith(CLAUDE_AI_PREFIX) && !configured.has(sameUrl(row.url)) && !disabled.includes(row.name)
+  if (!rows.some(native)) return null
+  return JSON.stringify({
+    disableAllHooks: true,
+    deniedMcpServers: rows.filter((row) => !native(row)).map((row) => ({ serverName: row.name }))
+  })
 }
 
 const run = (

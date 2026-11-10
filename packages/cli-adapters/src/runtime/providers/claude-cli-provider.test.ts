@@ -77,6 +77,16 @@ describe("Claude CLI provider relay", () => {
     expect(args).toContain("high")
   })
 
+  it("loads claude.ai connectors with user settings when a connector overlay is given", () => {
+    const overlay = JSON.stringify({ disableAllHooks: true, deniedMcpServers: [{ serverName: "obsidian" }] })
+    const args = claudeCliArguments(model, context, {}, "/tmp/mcp.json", false, overlay)
+    expect(args[args.indexOf("--setting-sources") + 1]).toBe("user")
+    expect(args[args.indexOf("--settings") + 1]).toBe(overlay)
+    expect(args).not.toContain("--strict-mcp-config")
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("mcp__jingler__* mcp__claude_ai_*")
+    expect(args[args.indexOf("--mcp-config") + 1]).toBe("/tmp/mcp.json")
+  })
+
   it("requires Claude to use a named Jingler MCP service before other work", () => {
     const mcpContext = normalizeContext({
       ...rawContext,

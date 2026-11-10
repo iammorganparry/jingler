@@ -1,7 +1,7 @@
 import { updateTranscriptRowKeys } from "./transcript-row-keys.js"
 import { useJumpToTurn } from "./jump-to-turn.js"
 import { defaultProps } from "../lib/default-props.js"
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react"
 import { planDocumentToPlan } from "@jingler/core"
 import type {
   AgentEndpointCatalog,
@@ -217,6 +217,8 @@ export interface ConversationViewProps {
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>
   onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>
   onAuthorizeMcp?: (name: string) => Promise<void>
+  /** Composer `+ › MCP` submenu with per-chat toggles (board 25e). */
+  mcpMenu?: ComponentProps<typeof Composer>["mcpMenu"]
   paused?: boolean
   /** Git branch backing the session's worktree, shown in the composer. */
   branch?: string
@@ -395,7 +397,7 @@ const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: Con
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, checkouts, activeCheckoutId, onSwitchCheckout, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, waitingIds, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, workMode, autoSwitch, onSetWorkMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, subagentNeedsAttention, skills, files, paused, branch, branchPending, repo, checkouts, activeCheckoutId, onSwitchCheckout, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, waitingIds, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, workMode, autoSwitch, onSetWorkMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, mcpMenu, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, voiceInput, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     loadingHistory: false,
     skills: [],
@@ -567,6 +569,7 @@ function renderSessionAnalytics() {
                 onSetMcpApiKey={onSetMcpApiKey}
                 onSetMcpAuth={onSetMcpAuth}
                 onAuthorizeMcp={onAuthorizeMcp}
+                mcpMenu={mcpMenu}
                 paused={paused}
                 branch={branch}
                 branchPending={branchPending}

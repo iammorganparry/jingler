@@ -60,6 +60,7 @@ import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
 import { McpApiKeyDialog, McpAuthSetupDialog, McpBrand, McpServerDialog } from "./mcp-settings.js";
+import { McpComposerMenu, type McpComposerMenuProps } from "./mcp-connectors.js";
 import { planTaskCounts, PlanTaskList, type PlanStageActionHandler } from "./plan-progress-dock.js";
 import { PromptInputSurface } from "./beui/work.js";
 import { CheckoutSwitcher } from "./checkout-switcher.js";
@@ -330,6 +331,8 @@ type ComposerProps =  {
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>;
   onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>;
   onAuthorizeMcp?: (name: string) => Promise<void>;
+  /** Claude-style `+ › MCP` submenu (board 25e); replaces the per-server MCP actions when set. */
+  mcpMenu?: Omit<McpComposerMenuProps, "embedded" | "reconnectLimit">;
   /** Creation request in flight, separate from agent busy/queue. */
   submitting?: boolean;
   /** Creation owns the draft until success. */
@@ -534,6 +537,27 @@ const composerMcpAction = (server: McpServer, controls: ComposerMcpActionControl
   }
 })
 
+/** One `MCP` row (board 25e); opening it swaps the popover to the submenu. */
+const composerMcpMenuAction = (rows: McpComposerMenuProps["rows"], open: () => void): ComposerAction => {
+  const blocked = rows.filter((row) => row.state === "needs-auth").length
+  const on = rows.filter((row) => row.enabled && row.state !== "needs-auth" && row.state !== "local-only").length
+  return {
+    id: "mcp:menu",
+    section: "MCP servers",
+    label: "MCP",
+    description: blocked > 0 ? `${blocked} need sign-in` : `${on} on in this chat`,
+    icon: <Server size={15} />,
+    run: open
+  }
+}
+
+// Kept out of Composer: an inline ternary pushes it past biome's complexity limit.
+const composerMcpEntries = (
+  menu: { readonly rows: McpComposerMenuProps["rows"] } | undefined,
+  legacy: ReadonlyArray<ComposerAction>,
+  open: () => void
+): ReadonlyArray<ComposerAction> => menu === undefined ? legacy : [composerMcpMenuAction(menu.rows, open)]
+
 const composerMcpActions = (
   enabled: boolean,
   servers: ReadonlyArray<McpServer>,
@@ -674,6 +698,30 @@ export function Composer(props: ComposerProps) {
               </button>
             </MorphPopoverTrigger>
             <MorphPopoverContent side="top" sideOffset={8} align="start" radius={16} matchTriggerWidth className="p-2">
+              {mcpMenu !== undefined && mcpMenuOpen ? renderMcpSubmenu(mcpMenu) : renderActionList()}
+            </MorphPopoverContent>
+          </MorphPopover>
+          {renderToolbarTail()}
+        </div>)
+  }
+
+  function renderMcpSubmenu(menu: NonNullable<typeof mcpMenu>) {
+    return (<div className="max-h-[min(520px,60vh)] overflow-y-auto p-1">
+          <button type="button" onClick={() => setMcpMenuOpen(false)} className="mb-1 px-2 py-1 text-xs text-dim hover:text-text-bright">
+            ‹ Back
+          </button>
+          <McpComposerMenu
+            {...menu}
+            embedded
+            onBrowse={() => { closeActions(); menu.onBrowse() }}
+            onManage={() => { closeActions(); menu.onManage() }}
+            onReconnect={(row) => { closeActions(); menu.onReconnect(row) }}
+          />
+        </div>)
+  }
+
+  function renderActionList() {
+    return (
               <div className="max-h-[min(520px,60vh)] overflow-y-auto p-1" id={actionsListId} role="listbox" aria-label="Composer actions">
                 {actionResults.map((action, index) => (
                   <div key={action.id}>
@@ -696,9 +744,11 @@ export function Composer(props: ComposerProps) {
                   </div>
                 ))}
                 {actionResults.length === 0 && <p className="px-2 py-5 text-center text-xs text-dim">No matching actions.</p>}
-              </div>
-            </MorphPopoverContent>
-          </MorphPopover>
+              </div>)
+  }
+
+  function renderToolbarTail() {
+    return (<>
           {onToggleFollowAgent !== undefined && (
             <button
               type="button"
@@ -741,7 +791,7 @@ export function Composer(props: ComposerProps) {
             {voiceInput && <ComposerVoiceControl voice={voiceInput} />}
             {getDisabledReason()}
           </span>
-        </div>)
+        </>)
   }
 
   function renderBranchMetadata() {
@@ -834,7 +884,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, checkouts, activeCheckoutId, onSwitchCheckout, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, workMode, autoSwitch, onSetWorkMode, paused, disabledReason, busy, placeholder, inputLabel, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
+  const { voiceInput, submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, mcpMenu, onSend, onStop, branch, branchPending, repo, checkouts, activeCheckoutId, onSwitchCheckout, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, workMode, autoSwitch, onSetWorkMode, paused, disabledReason, busy, placeholder, inputLabel, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -1021,6 +1071,7 @@ export function Composer(props: ComposerProps) {
   const [actionsDraft, setActionsDraft] = useState<string | null>(null);
   const [actionsIndex, setActionsIndex] = useState(0);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
+  const [mcpMenuOpen, setMcpMenuOpen] = useState(false);
   const [mcpApiKeyServer, setMcpApiKeyServer] = useState<McpServer | null>(null);
   const [mcpAuthSetupServer, setMcpAuthSetupServer] = useState<McpServer | null>(null);
   const [mcpActionError, setMcpActionError] = useState<string | null>(null);
@@ -1052,6 +1103,7 @@ export function Composer(props: ComposerProps) {
     if (actionsDraft !== null) setValue(actionsDraft)
     setActionsDraft(null)
     setActionsOpen(false)
+    setMcpMenuOpen(false)
   }
   const changeActionsOpen = (open: boolean) => {
     if (!open) return closeActions()
@@ -1115,7 +1167,7 @@ export function Composer(props: ComposerProps) {
       disabled: skills.length === 0,
       run: () => { closeActions(); openSkills() }
     },
-    ...mcpActions
+    ...composerMcpEntries(mcpMenu, mcpActions, () => setMcpMenuOpen(true))
   ].filter((action) => actionMatches(actionsQuery, action))
   const activeActionElementId = actionOptionId(actionsListId, actionResults[actionsIndex])
   useEffect(() => {

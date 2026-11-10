@@ -24,7 +24,8 @@ import type {
   SubagentFleetNode,
   ToolCall
 } from "@jingler/core"
-import type { ToastInput } from "@jingler/ui"
+import type { McpConnectorRow, ToastInput } from "@jingler/ui"
+import { useChatMcpMenu } from "./use-chat-mcp-menu.js"
 import {
   activeCheckoutOf,
   agentFileActivityOf,
@@ -63,7 +64,7 @@ import {
   useContainerWidth,
   OPEN_THREAD_SWITCHER_EVENT
 } from "@jingler/ui"
-import { mcpSignInPhase, type McpSignInAttempt } from "./mcp-sign-in-card.js"
+import { mcpSignInPhase, type McpSignInAttempt, type McpSignInPhase } from "./mcp-sign-in-card.js"
 import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, mcpRecoveryKey } from "./mcp-recovery-dismissals.js"
 import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
@@ -148,14 +149,27 @@ const localMcp = (
   ? { servers: servers ?? [], add, setApiKey, setAuth, authorize }
   : { servers: [], add: undefined, setApiKey: undefined, setAuth: undefined, authorize: undefined }
 
+function mcpRecoveryCopy(server: McpServer, phase: McpSignInPhase): { readonly message: string; readonly action: string } {
+  const oauth = server.authKind === "oauth"
+  return {
+    "needs-sign-in": { message: `Needs sign-in. The ${server.displayName} MCP server needs ${oauth ? "authorization" : "a new API key"} before its tools can run. Other tools keep working.`, action: oauth ? "Authorize" : "Add API key" },
+    waiting: { message: "Waiting for browser… Finish signing in there, or cancel.", action: "Cancel" },
+    connected: { message: `Connected. ${server.displayName} tools are available.`, action: "Done" },
+    failed: { message: "Sign-in failed. Check the browser sign-in and try again.", action: "Retry" },
+    hidden: { message: "", action: "" }
+  }[phase]
+}
+
 function McpRecoveryCards({
   servers,
   setApiKey,
-  authorize
+  authorize,
+  onOpenSettings
 }: {
   readonly servers: ReadonlyArray<McpServer>
   readonly setApiKey?: (name: string, apiKey: string) => Promise<void>
   readonly authorize?: (name: string) => Promise<void>
+  readonly onOpenSettings?: () => void
 }) {
   const [apiKeyServer, setApiKeyServer] = useState<McpServer | null>(null)
   const [attempts, setAttempts] = useState<Readonly<Record<string, { attempt: McpSignInAttempt; error?: string }>>>({})
@@ -192,43 +206,40 @@ function McpRecoveryCards({
       setAttempt(server.name, "failed", cause instanceof Error ? cause.message : "MCP authorization failed")
     )
   }
+  // One card only: an in-flight sign-in wins so its feedback stays visible; the rest collapse into "+N more".
+  const server = visible.find((candidate) => phaseOf(candidate) !== "needs-sign-in") ?? visible[0]
+  const hidden = visible.length - 1
+  const phase = server === undefined ? "hidden" : phaseOf(server)
+  const oauth = server?.authKind === "oauth"
+  const copy = server === undefined ? undefined : mcpRecoveryCopy(server, phase)
   return (
     <>
-      {visible.map((server) => {
-        const phase = phaseOf(server)
-        const oauth = server.authKind === "oauth"
-        const copy = {
-          "needs-sign-in": { message: `Needs sign-in. The ${server.displayName} MCP server needs ${oauth ? "authorization" : "a new API key"} before its tools can run. Other tools keep working.`, action: oauth ? "Authorize" : "Add API key" },
-          waiting: { message: "Waiting for browser… Finish signing in there, or cancel.", action: "Cancel" },
-          connected: { message: `Connected. ${server.displayName} tools are available.`, action: "Done" },
-          failed: { message: "Sign-in failed. Check the browser sign-in and try again.", action: "Retry" },
-          hidden: { message: "", action: "" }
-        }[phase]
-        return (
-          <RuntimeRecoveryCard
-            key={server.name}
-            icon={<McpBrand server={server} />}
-            label="MCP server recovery"
-            kind="MCP server"
-            title={`Reconnect ${server.displayName}`}
-            message={copy.message}
-            detail={attempts[server.name]?.error}
-            failed={phase === "failed"}
-            onDismiss={phase === "needs-sign-in" ? () => {
-              dismissMcpRecovery(mcpRecoveryKey(server))
-              setDismissed((count) => count + 1)
-            } : undefined}
-            actionLabel={copy.action}
-            actionDisabled={phase === "needs-sign-in" || phase === "failed" ? (oauth ? authorize === undefined : setApiKey === undefined) : false}
-            onAction={() => {
-              if (phase === "waiting") setAttempt(server.name, "cancelled")
-              else if (phase === "connected") setAttempt(server.name, undefined)
-              else if (!oauth) setApiKeyServer(server)
-              else connect(server)
-            }}
-          />
-        )
-      })}
+      {server !== undefined && (
+        <RuntimeRecoveryCard
+          key={server.name}
+          icon={<McpBrand server={server} />}
+          label="MCP server recovery"
+          kind="MCP server"
+          title={`Reconnect ${server.displayName}`}
+          message={copy?.message ?? ""}
+          detail={attempts[server.name]?.error}
+          failed={phase === "failed"}
+          onDismiss={phase === "needs-sign-in" ? () => {
+            dismissMcpRecovery(mcpRecoveryKey(server))
+            setDismissed((count) => count + 1)
+          } : undefined}
+          actionLabel={copy?.action ?? ""}
+          actionDisabled={phase === "needs-sign-in" || phase === "failed" ? (oauth ? authorize === undefined : setApiKey === undefined) : false}
+          onAction={() => {
+            if (phase === "waiting") setAttempt(server.name, "cancelled")
+            else if (phase === "connected") setAttempt(server.name, undefined)
+            else if (!oauth) setApiKeyServer(server)
+            else connect(server)
+          }}
+          moreLabel={hidden > 0 ? `+${hidden} more` : undefined}
+          onMore={hidden > 0 ? onOpenSettings : undefined}
+        />
+      )}
       {setApiKey !== undefined && (
         <McpApiKeyDialog
           server={apiKeyServer}
@@ -499,8 +510,10 @@ export function ConversationPane({
   onSelectBrowser,
   onOpenArtifact,
   onOpenProviderSettings,
+  onOpenMcpSettings,
   onAddMcp,
   mcpServers,
+  mcpRows,
   onSetMcpApiKey,
   onSetMcpAuth,
   onAuthorizeMcp,
@@ -551,9 +564,13 @@ export function ConversationPane({
   onOpenArtifact?: (url: string) => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
   onOpenProviderSettings?: () => void
+  /** Open Settings › MCP servers from collapsed MCP recovery banners. */
+  onOpenMcpSettings?: () => void
   /** Add or repair global MCP connections from the composer/chat. */
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>
   mcpServers?: ReadonlyArray<McpServer>
+  /** Every MCP row (mcp.json + claude.ai) for the composer `+ › MCP` submenu. */
+  mcpRows?: ReadonlyArray<McpConnectorRow>
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>
   onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>
   onAuthorizeMcp?: (name: string) => Promise<void>
@@ -589,6 +606,7 @@ export function ConversationPane({
     onSetMcpAuth,
     onAuthorizeMcp
   )
+  const mcpMenu = useChatMcpMenu(session, activeChat, mcpRows, onAuthorizeMcp, onOpenMcpSettings)
   const convo = useConversation(session, activeChat.id)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
   const offlineDevice = offlineDeviceOf(environments, session.environmentId, () => continueEnvironmentMutation.mutate(undefined))
@@ -1220,6 +1238,7 @@ export function ConversationPane({
         servers={localMcpConfig.servers}
         setApiKey={localMcpConfig.setApiKey}
         authorize={localMcpConfig.authorize}
+        onOpenSettings={onOpenMcpSettings}
       />
       {mutationRecovery.error !== null && (
         <div
@@ -1286,6 +1305,7 @@ export function ConversationPane({
                 onSetMcpApiKey: localMcpConfig.setApiKey,
                 onSetMcpAuth: localMcpConfig.setAuth,
                 onAuthorizeMcp: localMcpConfig.authorize,
+                mcpMenu,
                 session,
                 liveDiffs,
                 environments,
@@ -1467,6 +1487,7 @@ function renderMainConversation({
   onSetMcpApiKey,
   onSetMcpAuth,
   onAuthorizeMcp,
+  mcpMenu,
   session,
   liveDiffs,
   environments,
@@ -1511,6 +1532,7 @@ function renderMainConversation({
   onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
   onSetMcpAuth: ((name: string, auth: McpRemoteAuth) => Promise<void>) | undefined;
   onAuthorizeMcp: ((name: string) => Promise<void>) | undefined;
+  mcpMenu: ReturnType<typeof useChatMcpMenu>;
   session: Session;
   liveDiffs: Record<string, LiveDiffStat>;
   environments: Parameters<typeof ConversationPane>[0]["environments"];
@@ -1562,6 +1584,7 @@ function renderMainConversation({
     onSetMcpApiKey={onSetMcpApiKey}
     onSetMcpAuth={onSetMcpAuth}
     onAuthorizeMcp={onAuthorizeMcp}
+    mcpMenu={mcpMenu}
     paused={convo.paused}
     branch={checkout.branch}
     branchPending={session.semanticBranchPending === true}

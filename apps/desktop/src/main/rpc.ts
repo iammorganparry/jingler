@@ -105,6 +105,8 @@ import {
   probeAll,
   mcpLogTail,
   discoverClaudeConnectors,
+  searchMcpRegistry,
+  refreshClaudeMcpRows,
   parseClaudeMcp,
   managedMcpPaths,
   dedupeCandidates,
@@ -536,6 +538,20 @@ const mcpStatus = () =>
     return yield* probeAll(entries, null, () => new Date().toISOString());
   });
 
+const mcpClaudeConnectors = (refresh: boolean) =>
+  Effect.gen(function* () {
+    // Returns the cache when fresh; otherwise waits for the listing (the renderer query is async).
+    const rows = yield* Effect.promise(() => refreshClaudeMcpRows(mcpImportHome(), { force: refresh }));
+    const configured = new Set(
+      (yield* mcpList()).servers
+        .filter((server) => server.transport !== "stdio")
+        .map((server) => server.target.replace(/\/+$/, "")),
+    );
+    return rows
+      .filter((row) => row.name.startsWith("claude.ai "))
+      .map((row) => ({ ...row, duplicate: configured.has(row.url.replace(/\/+$/, "")) }));
+  });
+
 const mcpEntry = (name: string) =>
   McpConfigService.parsed().pipe(
     Effect.mapError((cause) => mcpError(cause.message, cause)),
@@ -566,7 +582,14 @@ const mcpSetApiKey = (name: string, apiKey: string) =>
 
 const mcpStartAuthorization = (name: string) =>
   Effect.gen(function* () {
-    const entry = yield* mcpEntry(name);
+    const found = yield* mcpEntry(name);
+    // A remote with no auth block that answered 401: Connect switches it to managed OAuth.
+    if (found.server.authKind === "none" && found.launch.transport === "http") {
+      yield* McpConfigService.setAuth(name, { type: "oauth" }).pipe(
+        Effect.mapError((cause) => mcpError(cause.message, cause)),
+      );
+    }
+    const entry = found.server.authKind === "none" ? yield* mcpEntry(name) : found;
     const secretStore = yield* SecretStore;
     const authorizationUrl = yield* startMcpOAuthAuthorization(entry, secretStore).pipe(
       Effect.mapError((cause) => mcpError(cause.message, cause)),
@@ -5818,6 +5841,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     Effect.flatMap(AgentRunner, (runner) =>
       runner.setWorkMode(sessionId, chatId, workMode, autoSwitch),
     ),
+  "Agent.setChatMcp": ({ sessionId, chatId, disabledMcp }) =>
+    Effect.flatMap(AgentRunner, (runner) =>
+      runner.setChatMcp(sessionId, chatId, disabledMcp),
+    ),
   "Agent.setReasoning": ({ sessionId, chatId, reasoning }) =>
     setReasoning(sessionId, chatId, reasoning),
   "Agent.setModel": ({
@@ -6709,6 +6736,12 @@ const AssetListHandlersLayer = AssetListRpcs.toLayer({
   "Mcp.dismissImport": () => ConfigService.setMcpImportDismissed(true).pipe(Effect.asVoid),
   "Mcp.list": () => mcpList(),
   "Mcp.status": () => mcpStatus(),
+  "Mcp.claudeConnectors": ({ refresh }) => mcpClaudeConnectors(refresh === true),
+  "Mcp.registrySearch": ({ query }) =>
+    Effect.tryPromise({
+      try: () => searchMcpRegistry(query),
+      catch: (cause) => mcpError(cause instanceof Error ? cause.message : "MCP registry search failed", cause),
+    }),
   "Mcp.logTail": ({ server, lines }) =>
     Effect.succeed({ lines: mcpLogTail(server, lines) }),
   "Mcp.write": ({ name, entry }) =>

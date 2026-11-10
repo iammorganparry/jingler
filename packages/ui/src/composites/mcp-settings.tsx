@@ -1,8 +1,10 @@
 import type {
+  ClaudeConnector,
   McpConfigEntry,
   McpImportCandidateView,
   McpImportResolution,
   McpImportSourceId,
+  McpRegistryEntry,
   McpRemoteAuth,
   McpServer,
   McpServerStatus
@@ -41,6 +43,14 @@ import { McpServerDetailDialog } from "./mcp-server-detail-dialog.js"
  */
 export interface McpSettingsProps {
   readonly servers: ReadonlyArray<McpServer>
+  /** claude.ai connectors the Claude CLI runs natively (read-only; auth lives on claude.ai). */
+  readonly claudeConnectors?: ReadonlyArray<ClaudeConnector>
+  readonly connectorsRefreshing?: boolean
+  readonly refreshClaudeConnectors?: () => void
+  /** Opens claude.ai › Customize › Connectors, where these connectors sign in. */
+  readonly openClaudeConnectors?: () => void
+  /** Official MCP registry search for Discover. */
+  readonly registrySearch?: (query: string) => Promise<ReadonlyArray<McpRegistryEntry>>
   /** Why mcp.json could not be parsed; the list is empty then. */
   readonly parseError: string | null
   readonly loading: boolean
@@ -526,7 +536,7 @@ export function McpApiKeyDialog({
   )
 }
 
-export function McpBrand({ server, compact = false }: { readonly server: McpServer; readonly compact?: boolean }) {
+export function McpBrand({ server, compact = false }: { readonly server: Pick<McpServer, "displayName" | "iconUrl">; readonly compact?: boolean }) {
   return (
     <span className={`relative grid flex-none place-items-center overflow-hidden border border-line bg-surface font-semibold text-text-bright ${compact ? "size-6 rounded-md text-[10px]" : "size-8 rounded-lg text-[12px]"}`}>
       {server.displayName.slice(0, 1).toLocaleUpperCase()}
@@ -538,7 +548,7 @@ export function McpBrand({ server, compact = false }: { readonly server: McpServ
 }
 
 function McpServerHelp({ server, status, onConnect }: { readonly server: McpServer; readonly status: McpServerStatus | null; readonly onConnect: () => void }) {
-  const needsAuth = server.authState === "needs-auth"
+  const needsAuth = server.authState === "needs-auth" || status?.state === "needs-auth"
   if (!status && !needsAuth) return null
   const failed = status?.state === "failed"
   const toolCount = status?.toolCount ?? 0
@@ -640,6 +650,64 @@ function McpServerList({
   )
 }
 
+const CONNECTOR_STATE_LABEL: Record<ClaudeConnector["state"], string> = {
+  connected: "Connected",
+  "needs-auth": "Needs sign-in",
+  failed: "Failed",
+  unknown: "Unknown"
+}
+
+/** claude.ai connectors run by the Claude CLI with claude.ai auth. Claude sessions only. */
+function ClaudeConnectorList({
+  connectors = [],
+  refreshing = false,
+  refresh,
+  open
+}: {
+  readonly connectors?: ReadonlyArray<ClaudeConnector>
+  readonly refreshing?: boolean
+  readonly refresh?: () => void
+  readonly open?: () => void
+}) {
+  if (connectors.length === 0) return null
+  return (
+    <SettingsCard title="claude.ai connectors">
+      <div className="flex items-center justify-between gap-3 px-4 py-2 text-[11px] text-muted-foreground">
+        <span>Run natively in Claude sessions with your claude.ai sign-in. Manage them on claude.ai.</span>
+        {refresh && (
+          <Button variant="ghost" size="sm" onClick={refresh} disabled={refreshing}>
+            {refreshing ? "Checking…" : "Refresh"}
+          </Button>
+        )}
+      </div>
+      {connectors.map((connector) => (
+        <SettingsRow
+          key={connector.name}
+          label={
+            <div className="flex min-w-0 items-center gap-2 text-[13px] font-medium text-text-bright">
+              {connector.name.replace(/^claude\.ai /, "")}
+              <StatusDot tone={MCP_STATE_TONE[connector.state] ?? "bg-line-strong"} size={6} />
+              <span className="sr-only">{CONNECTOR_STATE_LABEL[connector.state]}</span>
+            </div>
+          }
+          help={
+            <StatusRow failed={connector.state === "failed"}>
+              {connector.duplicate ? "Also in mcp.json — Jingler's copy is used" : CONNECTOR_STATE_LABEL[connector.state]}
+            </StatusRow>
+          }
+          control={
+            connector.state === "needs-auth" && open ? (
+              <Button variant="secondary" size="sm" onClick={open} aria-label={`Connect ${connector.name}`}>
+                Connect
+              </Button>
+            ) : null
+          }
+        />
+      ))}
+    </SettingsCard>
+  )
+}
+
 function McpHeader({ probing, probe, canProbe, reveal, addButton }: { readonly probing: boolean; readonly probe: () => void; readonly canProbe: boolean; readonly reveal: () => void; readonly addButton: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-4">
@@ -662,6 +730,10 @@ function McpHeader({ probing, probe, canProbe, reveal, addButton }: { readonly p
 
 export function McpSettings({
   servers,
+  claudeConnectors,
+  connectorsRefreshing,
+  refreshClaudeConnectors,
+  openClaudeConnectors,
   parseError,
   loading,
   statuses,
@@ -741,6 +813,13 @@ export function McpSettings({
           remove={remove}
         />
       )}
+
+      <ClaudeConnectorList
+        connectors={claudeConnectors}
+        refreshing={connectorsRefreshing}
+        refresh={refreshClaudeConnectors}
+        open={openClaudeConnectors}
+      />
 
       <McpServerDialog open={addOpen} onOpenChange={setAddOpen} add={add} setApiKey={setApiKey} />
       <ImportFlow importCandidates={importCandidates} applyImport={applyImport} />

@@ -114,6 +114,20 @@ describe("ClaudeAgentRuntime", () => {
       .toEqual(["--effort", "max"])
   })
 
+  it("loads claude.ai connectors natively only when an overlay is supplied", () => {
+    const strict = claudeAgentArguments(spec({ mode: "auto" }), "s", "/tmp/relay/mcp.json")
+    expect(strict).toContain("--strict-mcp-config")
+    expect(strict[strict.indexOf("--setting-sources") + 1]).toBe("")
+    const overlay = "{\"disableAllHooks\":true,\"deniedMcpServers\":[]}"
+    const native = claudeAgentArguments(spec({ mode: "auto" }), "s", "/tmp/relay/mcp.json", undefined, overlay)
+    expect(native).not.toContain("--strict-mcp-config")
+    expect(native.slice(native.indexOf("--setting-sources"), native.indexOf("--setting-sources") + 4))
+      .toEqual(["--setting-sources", "user", "--settings", overlay])
+    expect(native[native.indexOf("--allowedTools") + 1]).toBe("mcp__jingler__* Artifact mcp__claude_ai_*")
+    const side = claudeAgentArguments(spec({ role: "side-chat", mode: "read-only" }), "s", "/tmp/relay/mcp.json", undefined, overlay)
+    expect(side).toContain("--strict-mcp-config")
+  })
+
   it("forks side chats into an unpersisted, tool-less session with no relay", () => {
     const continuation = { runtimeId: "claude" as const, endpointId, id: "main-session" }
     const args = claudeAgentArguments(spec({ role: "side-chat", mode: "read-only", continuation }), "s", "/tmp/relay/mcp.json")
