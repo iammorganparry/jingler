@@ -353,38 +353,38 @@ export const parseClaudeMcpRows = (output: string): ReadonlyArray<ClaudeMcpRow> 
   })
 
 /** Every server the Claude CLI loads, with its health. Slow: the CLI connects to each one. */
-export const listClaudeMcpRows = async (options: {
-  readonly cwd: string
-  readonly binary?: string
-  readonly timeoutMs?: number
-}): Promise<ReadonlyArray<ClaudeMcpRow>> =>
-  parseClaudeMcpRows(await run(await resolveClaudeBinary(options.binary), ["mcp", "list"], {
-    cwd: options.cwd,
-    timeoutMs: options.timeoutMs ?? 90_000
-  }))
+export const listClaudeMcpRows = async (options: { readonly cwd: string }): Promise<ReadonlyArray<ClaudeMcpRow>> =>
+  parseClaudeMcpRows(await run(await resolveClaudeBinary(undefined), ["mcp", "list"], { cwd: options.cwd, timeoutMs: 90_000 }))
 
 const CLAUDE_AI_PREFIX = "claude.ai "
 const ROWS_MAX_AGE_MS = 5 * 60_000
-let cachedRows: ReadonlyArray<ClaudeMcpRow> = []
-let rowsCheckedAt = 0
-let rowsRefresh: Promise<ReadonlyArray<ClaudeMcpRow>> | null = null
-
-/** Last `claude mcp list` result; empty until the first refresh lands. */
-export const cachedClaudeMcpRows = (): ReadonlyArray<ClaudeMcpRow> => cachedRows
-
-/** Refresh the cached rows when stale; one listing at a time. A failed listing keeps the old rows. */
+interface RowsCache {
+  rows: ReadonlyArray<ClaudeMcpRow>
+  checkedAt: number
+  refresh: Promise<ReadonlyArray<ClaudeMcpRow>> | null
+}
+// Keyed by home: main and the runtime can list different Claude configs (e2e, custom homes).
+const rowsCaches = new Map<string, RowsCache>()
+const rowsCache = (cwd: string): RowsCache => {
+  let cache = rowsCaches.get(cwd)
+  if (cache === undefined) rowsCaches.set(cwd, cache = { rows: [], checkedAt: 0, refresh: null })
+  return cache
+}
+/** Last `claude mcp list` result for this home; empty until the first refresh lands. */
+export const cachedClaudeMcpRows = (cwd: string): ReadonlyArray<ClaudeMcpRow> => rowsCache(cwd).rows
+/** Refresh this home's cached rows when stale; one listing at a time. A failed listing keeps the old rows. */
 export const refreshClaudeMcpRows = (
   cwd: string,
-  options: { readonly force?: boolean; readonly binary?: string } = {}
+  options: { readonly force?: boolean } = {}
 ): Promise<ReadonlyArray<ClaudeMcpRow>> => {
-  if (!options.force && Date.now() - rowsCheckedAt < ROWS_MAX_AGE_MS) return Promise.resolve(cachedRows)
-  rowsRefresh ??= listClaudeMcpRows({ cwd, ...(options.binary === undefined ? {} : { binary: options.binary }) })
-    .then((rows) => { cachedRows = rows; return rows })
-    .catch(() => cachedRows)
-    .finally(() => { rowsCheckedAt = Date.now(); rowsRefresh = null })
-  return rowsRefresh
+  const cache = rowsCache(cwd)
+  if (!options.force && Date.now() - cache.checkedAt < ROWS_MAX_AGE_MS) return Promise.resolve(cache.rows)
+  cache.refresh ??= listClaudeMcpRows({ cwd })
+    .then((rows) => { cache.rows = rows; return rows })
+    .catch(() => cache.rows)
+    .finally(() => { cache.checkedAt = Date.now(); cache.refresh = null })
+  return cache.refresh
 }
-
 const sameUrl = (url: string) => url.replace(/\/+$/, "")
 
 /**

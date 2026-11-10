@@ -16,6 +16,7 @@ const Remote = Schema.Struct({
 const Package = Schema.Struct({
   registryType: Schema.String,
   identifier: Schema.String,
+  version: Schema.optional(Schema.String),
   transport: Schema.optional(Schema.Struct({ type: Schema.String })),
   environmentVariables: Schema.optional(Schema.Array(Variable))
 })
@@ -33,6 +34,11 @@ const RegistryResponse = Schema.Struct({
 type RegistryServer = Schema.Schema.Type<typeof RegistryServer>
 
 const RUNNERS: Readonly<Record<string, string>> = { npm: "npx", pypi: "uvx" }
+const PIN: Readonly<Record<string, string>> = { npm: "@", pypi: "==" }
+
+/** Pin to the published version so a later (possibly compromised) release isn't picked up silently. */
+const pinned = (pkg: { readonly registryType: string; readonly identifier: string; readonly version?: string | undefined }): string =>
+  pkg.version === undefined || pkg.version === "latest" ? pkg.identifier : `${pkg.identifier}${PIN[pkg.registryType]}${pkg.version}`
 
 /** `io.github.owner/linear-mcp` → `linear-mcp`; always a valid mcp.json name. */
 export const registrySlug = (name: string): string =>
@@ -67,7 +73,7 @@ const toEntry = (server: RegistryServer): { entry: McpConfigEntry | null; kind: 
     return {
       kind: `Local · ${runner}`,
       problem: null,
-      entry: { type: "local", command: runner === "npx" ? ["npx", "-y", pkg.identifier] : [runner, pkg.identifier], environment, enabled: true, ...meta }
+      entry: { type: "local", command: runner === "npx" ? ["npx", "-y", pinned(pkg)] : [runner, pinned(pkg)], environment, enabled: true, ...meta }
     }
   }
   return { kind: server.remotes?.length ? "Remote" : "Package", entry: null, problem: "Needs headers or a runtime Jingler can't set up yet" }

@@ -2,6 +2,7 @@ import type { ClaudeConnector, McpImportCandidateView, McpImportSourceId, McpReg
 import * as React from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
+import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { McpConnectorsView, type McpCatalogEntry, type McpCatalogOrigin, type McpConnectorRow, type McpRowState } from "./mcp-connectors.js"
 import { McpAddServerDialog, McpServerDrawer } from "./mcp-server-drawer.js"
 import { McpApiKeyDialog, type McpSettingsProps } from "./mcp-settings.js"
@@ -136,6 +137,12 @@ const registryEntry = (
   }]
 }
 
+/** What a registry add will run or connect to, shown in the confirm step. */
+export const registryTarget = (entry: McpRegistryEntry | null): string => {
+  if (entry?.entry == null) return ""
+  return entry.entry.type === "remote" ? entry.entry.url : entry.entry.command.join(" ")
+}
+
 /** Settings › MCP: boards 25a–25d on real data. */
 export function McpPage(props: McpSettingsProps) {
   const {
@@ -157,6 +164,7 @@ export function McpPage(props: McpSettingsProps) {
   const [registryLoading, setRegistryLoading] = React.useState(false)
   const [registryError, setRegistryError] = React.useState<string | null>(null)
   const [catalogNonce, setCatalogNonce] = React.useState(0)
+  const [pendingAdd, setPendingAdd] = React.useState<McpRegistryEntry | null>(null)
 
   const run = (action: () => Promise<void>) => {
     setActionError(null)
@@ -212,17 +220,22 @@ export function McpPage(props: McpSettingsProps) {
     void logTail(row.id).then((result) => setLogLines(result.lines)).finally(() => setLogLoading(false))
   }
 
+  const addFromRegistry = (entry: McpRegistryEntry) => {
+    if (entry.entry === null) return
+    const config = entry.entry
+    const taken = new Set(servers.map((server) => server.name))
+    let name = entry.name
+    for (let n = 2; taken.has(name); n += 1) name = `${entry.name}-${n}`
+    return add(name, config).then(() => setCatalogNonce((value) => value + 1))
+  }
+
+  // Registry entries are untrusted: show what will run before it lands in mcp.json.
   const addFromCatalog = (entry: McpCatalogEntry) => {
     const action = catalog.actions.get(entry.id)
     if (action === undefined) return
+    if (action.kind === "registry") { setPendingAdd(action.entry); return }
     run(async () => {
-      if (action.kind === "import") await applyImport(action.source, [action.name], undefined, action.source === "claude")
-      else if (action.entry.entry !== null) {
-        const taken = new Set(servers.map((server) => server.name))
-        let name = action.entry.name
-        for (let n = 2; taken.has(name); n += 1) name = `${action.entry.name}-${n}`
-        await add(name, action.entry.entry)
-      }
+      await applyImport(action.source, [action.name], undefined, action.source === "claude")
       setCatalogNonce((value) => value + 1)
     })
   }
@@ -291,6 +304,23 @@ export function McpPage(props: McpSettingsProps) {
         add={add}
         setApiKey={setApiKey}
         onBrowse={() => { setAddOpen(false); setDiscover(true); setViewKey((value) => value + 1) }}
+      />
+      <ConfirmDialog
+        open={pendingAdd !== null}
+        onOpenChange={(next) => { if (!next) setPendingAdd(null) }}
+        title={`Add ${pendingAdd?.displayName ?? "server"}?`}
+        description={
+          <>
+            <span>From the MCP registry. Agents can call its tools once it's added.</span>
+            <code className="mt-2 block break-all rounded bg-canvas px-2 py-1 font-mono text-[11px] text-text-body">{registryTarget(pendingAdd)}</code>
+          </>
+        }
+        confirmLabel="Add server"
+        onConfirm={() => {
+          if (pendingAdd === null) return
+          setActionError(null)
+          return addFromRegistry(pendingAdd)?.catch((cause) => setActionError(cause instanceof Error ? cause.message : "MCP action failed"))
+        }}
       />
       <McpApiKeyDialog
         server={apiKeyServer}

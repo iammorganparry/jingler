@@ -232,7 +232,7 @@ export const makePiAgentRuntimeLive = (
       void refreshClaudeMcpRows(homedir())
       const configured = await Effect.runPromise(configuredMcp)
       return claudeConnectorSettings(
-        cachedClaudeMcpRows(),
+        cachedClaudeMcpRows(homedir()),
         configured.flatMap((server) => server.transport === "stdio" ? [] : [server.url]),
         disabled
       )

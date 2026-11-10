@@ -19,7 +19,7 @@ const page = {
     { server: {
       name: "io.github.acme/postgres-mcp",
       description: "Query Postgres.",
-      packages: [{ registryType: "npm", identifier: "@acme/postgres-mcp", transport: { type: "stdio" }, environmentVariables: [{ name: "DATABASE_URL", isRequired: true }] }]
+      packages: [{ registryType: "npm", identifier: "@acme/postgres-mcp", version: "1.2.3", transport: { type: "stdio" }, environmentVariables: [{ name: "DATABASE_URL", isRequired: true }] }]
     } },
     { server: { name: "app.linear/linear", description: "duplicate version" } },
     { server: { broken: true } }
@@ -45,8 +45,17 @@ describe("parseMcpRegistry", () => {
     expect(pg).toMatchObject({
       kind: "Local · npx",
       problem: null,
-      entry: { type: "local", command: ["npx", "-y", "@acme/postgres-mcp"], environment: { DATABASE_URL: "{env:DATABASE_URL}" } }
+      entry: { type: "local", command: ["npx", "-y", "@acme/postgres-mcp@1.2.3"], environment: { DATABASE_URL: "{env:DATABASE_URL}" } }
     })
+  })
+
+  it("pins pypi packages with == and leaves a 'latest' version unpinned", () => {
+    const [py, latest] = parseMcpRegistry({ servers: [
+      { server: { name: "io.github.acme/py-mcp", packages: [{ registryType: "pypi", identifier: "py-mcp", version: "0.4.0" }] } },
+      { server: { name: "io.github.acme/edge-mcp", packages: [{ registryType: "npm", identifier: "edge-mcp", version: "latest" }] } }
+    ] })
+    expect(py?.entry).toMatchObject({ command: ["uvx", "py-mcp==0.4.0"] })
+    expect(latest?.entry).toMatchObject({ command: ["npx", "-y", "edge-mcp"] })
   })
 
   it("flags servers it can't set up, drops duplicates and malformed rows", () => {

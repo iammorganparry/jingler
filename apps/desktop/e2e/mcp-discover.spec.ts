@@ -65,6 +65,10 @@ test("Discover imports a Codex server and adds one from the MCP registry", async
     await window.getByPlaceholder("Search registry").fill("linear")
     await expect.poll(() => registry.queries.includes("linear")).toBe(true)
     await registrySection.getByRole("button", { name: "Add Linear" }).click()
+    // Registry adds are confirmed first, showing exactly what will be connected.
+    const confirm = window.getByRole("dialog", { name: "Add Linear?" })
+    await expect(confirm.getByText("https://mcp.linear.example/mcp")).toBeVisible()
+    await confirm.getByRole("button", { name: "Add server" }).click()
     await expect.poll(() => mcpJson().linear?.url).toBe("https://mcp.linear.example/mcp")
 
     // Both show up in Yours.

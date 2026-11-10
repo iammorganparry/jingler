@@ -105,7 +105,6 @@ import {
   probeAll,
   mcpLogTail,
   discoverClaudeConnectors,
-  cachedClaudeMcpRows,
   searchMcpRegistry,
   refreshClaudeMcpRows,
   parseClaudeMcp,
