@@ -514,3 +514,24 @@ it("rejects sanitized duplicate MCP tool ids deterministically", async () => {
   expect(result._tag).toBe("Left")
   expect(registry.capabilitiesFor("conversation", "ask")).toEqual([])
 })
+
+it("indexes claude.ai connectors by name and points at native tools without listing schemas", async () => {
+  const state: FakeClientState = { calls: [], closes: 0 }
+  const search = async (native: boolean, query: string) => {
+    const registry = new ToolRegistry()
+    registerProgressiveMcpTools(registry, [], fakeFactory(state), {
+      native,
+      connectors: [{ name: "claude.ai Slack", state: "connected" }, { name: "claude.ai HubSpot", state: "needs-auth" }]
+    })
+    const description = registry.capabilitiesFor("conversation", "auto").find(({ id }) => id === "mcp_search")?.description
+    const result = await Effect.runPromise(registry.execute({ id: "mcp_search", arguments: { query }, role: "conversation", mode: "auto" }))
+    return { description, matches: (result.value as { matches: ReadonlyArray<{ server: string; use?: string }> }).matches }
+  }
+  const claude = await search(true, "slack channel")
+  expect(claude.description).toContain("claude.ai connectors (search one to see how to use it): Slack, HubSpot")
+  expect(claude.matches.map(({ server }) => server)).toEqual(["claude.ai Slack"])
+  expect(claude.matches[0]?.use).toContain("ToolSearch")
+  const other = await search(false, "hubspot")
+  expect(other.matches[0]?.use).toContain("only Claude models")
+  expect(other.matches[0]?.use).toContain("sign-in")
+})

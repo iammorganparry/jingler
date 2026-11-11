@@ -169,6 +169,8 @@ export const startRegistryMcpRelay = async (
     await writeFile(mcpConfigPath, JSON.stringify({
       mcpServers: { jingler: {
         type: "http",
+        // Never deferred behind ToolSearch: Jingler's own tools must be callable on turn one.
+        alwaysLoad: true,
         timeout: INTERACTIVE_TOOL_TIMEOUT_MS,
         url: `http://${expectedHost}/mcp`,
         headers: { Authorization: `Bearer \${${tokenVariable}}` }

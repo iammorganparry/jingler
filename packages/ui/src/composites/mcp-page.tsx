@@ -17,13 +17,22 @@ const serverState = (server: McpServer, status: McpServerStatus | undefined): Mc
   return "pending"
 }
 
-/** mcp.json servers plus the claude.ai connectors the Claude CLI runs natively (duplicates dropped). */
+/**
+ * mcp.json servers plus the claude.ai connectors the Claude CLI runs natively, one row per URL:
+ * a signed-in mcp.json copy hides the connector; an unsigned copy hides behind it (chats run the connector).
+ */
 export const mcpRows = (
   servers: ReadonlyArray<McpServer>,
   statuses: ReadonlyArray<McpServerStatus> | null,
   connectors: ReadonlyArray<ClaudeConnector>
-): ReadonlyArray<McpConnectorRow> => [
-  ...servers.map((server): McpConnectorRow => {
+): ReadonlyArray<McpConnectorRow> => {
+  const unsigned = new Map(servers
+    .filter((server) => server.transport !== "stdio" && server.authState === "needs-auth")
+    .map((server) => [sameUrl(server.target), server.name]))
+  const live = connectors.filter((connector) => !connector.duplicate)
+  const hidden = new Set(live.flatMap((connector) => unsigned.get(sameUrl(connector.url)) ?? []))
+  return [
+  ...servers.filter((server) => !hidden.has(server.name)).map((server): McpConnectorRow => {
     const status = statuses?.find((candidate) => candidate.name === server.name)
     return {
       id: server.name,
@@ -37,7 +46,7 @@ export const mcpRows = (
       enabled: server.enabled
     }
   }),
-  ...connectors.filter((connector) => !connector.duplicate).map((connector): McpConnectorRow => ({
+  ...live.map((connector): McpConnectorRow => ({
     id: `claude.ai:${connector.name}`,
     displayName: connector.name.replace(CLAUDE_AI, ""),
     iconUrl: null,
@@ -46,9 +55,11 @@ export const mcpRows = (
     agents: "Claude",
     state: connector.state === "needs-auth" ? "needs-auth" : connector.state === "failed" ? "failed" : connector.state === "connected" ? "connected" : "pending",
     toolCount: null,
-    enabled: true
+    enabled: true,
+    ...(unsigned.has(sameUrl(connector.url)) ? { jinglerCopy: unsigned.get(sameUrl(connector.url)) } : {})
   }))
-]
+  ]
+}
 
 type CatalogAction =
   | { readonly kind: "import"; readonly source: McpImportSourceId; readonly name: string }
@@ -313,6 +324,7 @@ export function McpPage(props: McpSettingsProps) {
         logLines={logLines}
         logLoading={logLoading}
         error={actionError}
+        onRemoveCopy={(name) => run(() => remove(name))}
       />
       <McpAddServerDialog
         open={addOpen}

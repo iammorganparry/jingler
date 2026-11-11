@@ -31,6 +31,8 @@ export interface McpConnectorRow {
   readonly toolCount: number | null
   /** On for this chat (composer submenu only). */
   readonly enabled: boolean
+  /** claude.ai rows: name of an unsigned mcp.json copy of the same URL, hidden behind this row. */
+  readonly jinglerCopy?: string
 }
 
 /** Where a Discover entry comes from: another harness on this machine, or the official registry. */

@@ -49,7 +49,7 @@ import { ProviderConnections,
 import { makePortableRuntime } from "../resources/portable-runtime.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { McpConfigService } from "../../mcp-config-service.js"
-import { cachedClaudeMcpRows, claudeConnectorSettings, preferClaudeConnectors, refreshClaudeMcpRows } from "../../mcp-import.js"
+import { cachedClaudeMcpRows, claudeConnectorSettings, nativeClaudeConnectors, preferClaudeConnectors, refreshClaudeMcpRows, remoteMcpUrls } from "../../mcp-import.js"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
@@ -84,7 +84,7 @@ import { makeOpenCodeAgentRuntime, makeOpenCodeRuntimeRegistration } from "../op
 import type { NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 import { makePiAgentRuntime, type PiSessionFactory } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
-import { makePiSessionFactory } from "./pi-session-factory.js"
+import { makePiSessionFactory, usesClaudeCli } from "./pi-session-factory.js"
 import { registerNativeSubagentTool, type NativeSubagentDelegate } from "./native-subagent-tool.js"
 import { makeDirectNativeSubagentDelegate } from "./direct-native-subagent.js"
 import {
@@ -232,11 +232,7 @@ export const makePiAgentRuntimeLive = (
     const connectorSettings = async (disabled: ReadonlyArray<string> = []): Promise<string | null> => {
       void refreshClaudeMcpRows(homedir())
       const configured = await Effect.runPromise(configuredMcp)
-      return claudeConnectorSettings(
-        cachedClaudeMcpRows(homedir()),
-        configured.flatMap((server) => server.transport === "stdio" ? [] : [server.url]),
-        disabled
-      )
+      return claudeConnectorSettings(cachedClaudeMcpRows(homedir()), remoteMcpUrls(configured), disabled)
     }
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
@@ -476,7 +472,13 @@ export const makePiAgentRuntimeLive = (
           managedFiles: preparedCatalog === undefined
             ? managedResources.enabledForTarget(spec.targetCapabilities.targetId)
             : Effect.succeed(preparedCatalog.managedFiles),
-          plugins: pluginSetup
+          plugins: pluginSetup,
+          native: spec.runtimeId === "claude"
+            ? Effect.succeed(true)
+            : providers.status.pipe(
+                Effect.map((all) => all.some((connection) => connection.id === spec.connectionId && usesClaudeCli(connection))),
+                Effect.orElseSucceed(() => false)
+              )
         }).pipe(
           Effect.mapError((cause) =>
             new AgentRuntimeError({
@@ -485,7 +487,7 @@ export const makePiAgentRuntimeLive = (
               cause
             })
           ),
-          Effect.flatMap(({ managedMcp, managedFiles, plugins }) => createJinglerTools({
+          Effect.flatMap(({ managedMcp, managedFiles, plugins, native }) => createJinglerTools({
             context,
             cwd: spec.cwd,
             workspace,
@@ -494,7 +496,11 @@ export const makePiAgentRuntimeLive = (
               ...context.mcp,
               configured: managedMcp
                 .filter((server) => !(spec.disabledMcp ?? []).includes(server.name))
-                .map((server) => resolveManagedMcpCwd(server, spec.cwd))
+                .map((server) => resolveManagedMcpCwd(server, spec.cwd)),
+              claudeConnectors: {
+                native,
+                connectors: nativeClaudeConnectors(cachedClaudeMcpRows(homedir()), remoteMcpUrls(managedMcp), spec.disabledMcp)
+              }
             },
             // Per-run attachments (the browser lease rotates every turn on a
             // retained session) resolve from the LIVE context at call time.

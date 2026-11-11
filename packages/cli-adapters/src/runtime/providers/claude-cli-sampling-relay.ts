@@ -124,6 +124,8 @@ export const startClaudeCliToolRelay = async (
       mcpServers: {
         jingler: {
           type: "http",
+          // Never deferred behind ToolSearch: Jingler's own tools must be callable on turn one.
+          alwaysLoad: true,
           url: `http://${expectedHost}/mcp`,
           headers: { Authorization: `Bearer ${token}` }
         }
