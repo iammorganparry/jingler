@@ -28,6 +28,17 @@ describe("mcpRows", () => {
     expect(rows[2]).toMatchObject({ displayName: "Linear", agents: "Claude" })
   })
 
+  it("shows one row per URL: an unsigned copy hides behind the claude.ai connector", () => {
+    const rows = mcpRows(
+      [server("gdocs", { authKind: "oauth", authState: "needs-auth", target: "https://docs.example/mcp/" })],
+      null,
+      [connector("Docs", { state: "connected" })]
+    )
+    expect(rows.map(({ id, source, state, jinglerCopy }) => [id, source, state, jinglerCopy])).toEqual([
+      ["claude.ai:claude.ai Docs", "claude.ai", "connected", "gdocs"]
+    ])
+  })
+
   it("treats a 401 probe on a no-auth server as needs sign-in", () => {
     expect(mcpRows([server("posthog")], [status("posthog", "needs-auth")], [])[0]?.state).toBe("needs-auth")
   })

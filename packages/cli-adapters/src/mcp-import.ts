@@ -401,6 +401,21 @@ export const preferClaudeConnectors = <S extends RuntimeMcpServer>(
   return servers.filter((server) => server.transport === "stdio" || server.needsAuth !== true || !native.has(sameUrl(server.url)))
 }
 
+/** claude.ai connectors a Claude run loads natively: not served by mcp.json, not turned off for the chat. */
+export const nativeClaudeConnectors = (
+  rows: ReadonlyArray<ClaudeMcpRow>,
+  configuredUrls: ReadonlyArray<string>,
+  disabled: ReadonlyArray<string> = []
+): ReadonlyArray<ClaudeMcpRow> => {
+  const configured = new Set(configuredUrls.map(sameUrl))
+  return rows.filter((row) =>
+    row.name.startsWith(CLAUDE_AI_PREFIX) && !configured.has(sameUrl(row.url)) && !disabled.includes(row.name))
+}
+
+/** Remote URLs of runtime MCP attachments, for connector dedupe. */
+export const remoteMcpUrls = (servers: ReadonlyArray<RuntimeMcpServer>): ReadonlyArray<string> =>
+  servers.flatMap((server) => server.transport === "stdio" ? [] : [server.url])
+
 /**
  * `--settings` overlay that lets a `--setting-sources user` Claude session load
  * claude.ai connectors and nothing else from the user's Claude config: hooks
@@ -415,13 +430,11 @@ export const claudeConnectorSettings = (
   /** Per-chat `claude.ai <Name>` connectors turned off. */
   disabled: ReadonlyArray<string> = []
 ): string | null => {
-  const configured = new Set(configuredUrls.map(sameUrl))
-  const native = (row: ClaudeMcpRow) =>
-    row.name.startsWith(CLAUDE_AI_PREFIX) && !configured.has(sameUrl(row.url)) && !disabled.includes(row.name)
-  if (!rows.some(native)) return null
+  const native = new Set(nativeClaudeConnectors(rows, configuredUrls, disabled))
+  if (native.size === 0) return null
   return JSON.stringify({
     disableAllHooks: true,
-    deniedMcpServers: rows.filter((row) => !native(row)).map((row) => ({ serverName: row.name }))
+    deniedMcpServers: rows.filter((row) => !native.has(row)).map((row) => ({ serverName: row.name }))
   })
 }
 

@@ -36,6 +36,13 @@ describe("McpServerDrawer", () => {
     expect(screen.getByRole("alert").textContent).toContain("self-signed certificate")
   })
 
+  it("offers to remove the unsigned Jingler copy behind a claude.ai connector", () => {
+    const onRemoveCopy = vi.fn()
+    drawer({ row: { ...row, source: "claude.ai", state: "connected", jinglerCopy: "gdocs" }, onRemoveCopy })
+    fireEvent.click(screen.getByRole("button", { name: "Remove Jingler copy" }))
+    expect(onRemoveCopy).toHaveBeenCalledWith("gdocs")
+  })
+
   it("sends claude.ai connectors to claude.ai and blocks Remove", () => {
     drawer({ row: { ...row, source: "claude.ai" } })
     expect(screen.getByRole("button", { name: "Connect on claude.ai" })).toBeTruthy()

@@ -44,7 +44,11 @@ export const claudeConnectorArguments = (
     ? { sources: ["--setting-sources", ""], tools, strict: ["--strict-mcp-config"] }
     : {
         sources: ["--setting-sources", "user", "--settings", connectorSettings],
-        tools: tools.map((arg, index) => tools[index - 1] === "--allowedTools" ? `${arg} mcp__claude_ai_*` : arg),
+        // ToolSearch keeps connector schemas out of the prompt until needed (an enterprise org inherits dozens).
+        tools: tools.map((arg, index) => {
+          if (tools[index - 1] === "--tools") return arg === "" ? "ToolSearch" : `${arg},ToolSearch`
+          return tools[index - 1] === "--allowedTools" ? `${arg} mcp__claude_ai_* ToolSearch` : arg
+        }),
         strict: []
       }
 

@@ -29,6 +29,8 @@ export interface McpServerDrawerProps {
   readonly onSignOut?: () => void
   /** Last failed action (reconnect, test, remove); the page callout sits behind the drawer. */
   readonly error?: string | null
+  /** Deletes the unsigned mcp.json copy a claude.ai row hides (`row.jinglerCopy`). */
+  readonly onRemoveCopy?: (name: string) => void
 }
 
 type Tab = "overview" | "tools" | "logs"
@@ -81,6 +83,17 @@ function DrawerOverview({
   )
 }
 
+function JinglerCopyNotice({ name, onRemove }: { readonly name: string; readonly onRemove: (name: string) => void }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Callout>
+        Your mcp.json also has an unsigned copy ({name}). Chats use this claude.ai connector instead, so the copy does nothing.
+      </Callout>
+      <Button variant="secondary" size="sm" className="self-start" onClick={() => onRemove(name)}>Remove Jingler copy</Button>
+    </div>
+  )
+}
+
 /** Board 25c: one server's auth, which agents use it, per-tool toggles and logs. */
 export function McpServerDrawer({
   row,
@@ -96,7 +109,8 @@ export function McpServerDrawer({
   logLoading = false,
   lastCheck,
   onSignOut,
-  error = null
+  error = null,
+  onRemoveCopy
 }: McpServerDrawerProps) {
   const [tab, setTab] = React.useState<Tab>("overview")
   const disabled = new Set(disabledTools)
@@ -133,6 +147,9 @@ export function McpServerDrawer({
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
             {error !== null && <div role="alert"><Callout tone="red">{error}</Callout></div>}
+            {row.jinglerCopy !== undefined && onRemoveCopy && (
+              <JinglerCopyNotice name={row.jinglerCopy} onRemove={onRemoveCopy} />
+            )}
             {tab === "overview" && <DrawerOverview row={row} native={native} onReconnect={onReconnect} lastCheck={lastCheck} />}
             {tab === "tools" && <ToolList names={toolNames} disabled={disabled} onToggle={onToggleTool} />}
             {tab === "logs" && <LogTail lines={logLines} loading={logLoading} />}

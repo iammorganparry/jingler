@@ -83,7 +83,8 @@ describe("Claude CLI provider relay", () => {
     expect(args[args.indexOf("--setting-sources") + 1]).toBe("user")
     expect(args[args.indexOf("--settings") + 1]).toBe(overlay)
     expect(args).not.toContain("--strict-mcp-config")
-    expect(args[args.indexOf("--allowedTools") + 1]).toBe("mcp__jingler__* mcp__claude_ai_*")
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("mcp__jingler__* mcp__claude_ai_* ToolSearch")
+    expect(args[args.indexOf("--tools") + 1]).toBe("ToolSearch")
     expect(args[args.indexOf("--mcp-config") + 1]).toBe("/tmp/mcp.json")
   })
 

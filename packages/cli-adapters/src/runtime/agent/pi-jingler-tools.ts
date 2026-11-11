@@ -245,8 +245,9 @@ const registerJinglerMcpSources = (
         : registerMcpTools(registry, eagerMcpSources))
       registry.setMcpHealth(report.health)
     }
-    if (configuredMcpSources.length > 0) {
-      registerProgressiveMcpTools(registry, configuredMcpSources, input.mcpClientFactory)
+    const connectors = input.mcp?.claudeConnectors
+    if (configuredMcpSources.length > 0 || (connectors?.connectors.length ?? 0) > 0) {
+      registerProgressiveMcpTools(registry, configuredMcpSources, input.mcpClientFactory, connectors)
     }
   })
 

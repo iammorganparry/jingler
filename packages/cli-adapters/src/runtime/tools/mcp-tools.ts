@@ -31,6 +31,7 @@ const progressiveCallInput = Schema.Struct({
 })
 type ProgressiveMcpMatch =
   | { readonly server: string; readonly error: string }
+  | { readonly server: string; readonly state: string; readonly use: string }
   | {
       readonly server: string
       readonly tool: string
@@ -95,7 +96,36 @@ export interface JinglerMcpAttachments {
   readonly browser?: RuntimeMcpServer | null
   /** Operator-configured servers from `~/jingler/mcp.json`. */
   readonly configured?: ReadonlyArray<RuntimeMcpServer>
+  readonly claudeConnectors?: ClaudeConnectorIndex
 }
+
+/** claude.ai connectors by name only: the Claude CLI owns their tools, so mcp_search just points at them. */
+export interface ClaudeConnectorIndex {
+  readonly connectors: ReadonlyArray<{ readonly name: string; readonly state: string }>
+  /** This run's model goes through the Claude CLI, which loads the connectors as native tools. */
+  readonly native: boolean
+}
+
+const CLAUDE_AI_PREFIX = /^claude\.ai /
+const WORDS = /\s+/
+
+const connectorUse = (native: boolean, name: string, state: string): string => {
+  const signIn = state === "needs-auth" ? " It needs sign-in on claude.ai first." : ""
+  return native
+    ? `claude.ai connector, loaded natively in this Claude session as mcp__claude_ai_* tools. Load them with ToolSearch (query "${name.replace(CLAUDE_AI_PREFIX, "")}") and call them directly; mcp_call cannot reach it.${signIn}`
+    : `claude.ai connector: only Claude models (Claude CLI subscription) can use it. Ask the operator to switch this chat to a Claude model.${signIn}`
+}
+
+const connectorMatches = (
+  index: ClaudeConnectorIndex | undefined,
+  requested: string | undefined,
+  needle: string
+): ReadonlyArray<ProgressiveMcpMatch> =>
+  (index?.connectors ?? [])
+    .filter(({ name }) => requested === undefined
+      ? needle.length === 0 || needle.split(WORDS).some((word) => name.toLocaleLowerCase().includes(word))
+      : name === requested || name === `claude.ai ${requested}`)
+    .map(({ name, state }) => ({ server: name, state, use: connectorUse(index?.native === true, name, state) }))
 
 const serverCapabilityIdentity = (server: RuntimeMcpServer): string =>
   `${server.name}:${server.transport ?? "http"}`
@@ -506,7 +536,8 @@ const progressiveHealth = (
 export const registerProgressiveMcpTools = (
   registry: ToolRegistry,
   sources: ReadonlyArray<McpToolSource>,
-  factory: McpToolClientFactory = makeMcpToolClient
+  factory: McpToolClientFactory = makeMcpToolClient,
+  connectors?: ClaudeConnectorIndex
 ): void => {
   const existingHealth = registry.mcpHealth()
   const statuses = new Map<string, RuntimeDiagnosticMcpHealth["status"]>()
@@ -515,7 +546,9 @@ export const registerProgressiveMcpTools = (
     registry.setMcpHealth([...existingHealth, ...progressiveHealth(sources, statuses)])
   }
   registry.setMcpHealth([...existingHealth, ...progressiveHealth(sources, statuses)])
-  const serverNames = sources.map(({ server }) => server.name).join(", ")
+  const connectorNames = (connectors?.connectors ?? []).map(({ name }) => name.replace(CLAUDE_AI_PREFIX, "")).join(", ")
+  const serverNames = sources.map(({ server }) => server.name).join(", ") +
+    (connectorNames === "" ? "" : `. claude.ai connectors (search one to see how to use it): ${connectorNames}`)
   const callRisk: ToolRisk = sources.some(({ risk }) => risk === "execute") ? "execute" : "network"
 
   registry.register({
@@ -540,8 +573,11 @@ export const registerProgressiveMcpTools = (
     cancellable: true,
     idempotency: "safe",
     execute: async ({ query, server: requested }) => {
-      const selected = requested === undefined ? sources : [sourceByName(sources, requested)]
       const needle = query.trim().toLocaleLowerCase()
+      const connectorHits = connectorMatches(connectors, requested, needle)
+      const selected = requested === undefined || connectorHits.length > 0
+        ? sources.filter(({ server }) => requested === undefined || server.name === requested)
+        : [sourceByName(sources, requested)]
       const discoveries = await Effect.runPromise(Effect.forEach(
         selected,
         (source) => discoverSource(factory, source),
@@ -563,7 +599,7 @@ export const registerProgressiveMcpTools = (
                 inputSchema: tool.inputSchema
               }))
       )
-      return { matches: matches.slice(0, 40) }
+      return { matches: [...connectorHits, ...matches].slice(0, 40) }
     }
   })
 

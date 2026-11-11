@@ -231,7 +231,7 @@ export interface PiSessionFactoryOptions {
   }, AgentRuntimeError>
 }
 
-const usesClaudeCli = (connection: ProviderConnection): boolean =>
+export const usesClaudeCli = (connection: ProviderConnection): boolean =>
   connection.providerId === "anthropic" &&
   connection.authKind === "claude-setup-token" &&
   isClaudeCliRoute(connection.subscription.observedRoute)
