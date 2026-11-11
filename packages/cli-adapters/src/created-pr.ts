@@ -18,6 +18,8 @@ export const createdPrFromToolOutput = (
   return null
 }
 
+const PORCELAIN_RECORD = /\n\s*\n/u
+
 export type LinkCandidate = { readonly id: string; readonly slug: string | null; readonly branch: string | null }
 
 /**
@@ -32,4 +34,17 @@ export const checkoutForCreatedPr = (
 ): string | null => {
   if (!viewerLogin || pr.author?.toLowerCase() !== viewerLogin.toLowerCase() || !pr.headRefName) return null
   return checkouts.find((c) => c.slug === pr.repository.toLowerCase() && c.branch === pr.headRefName)?.id ?? null
+}
+
+/**
+ * The worktree path `git worktree list --porcelain` shows with `branch` checked out, or null.
+ * An agent can open a PR from a worktree it made itself; this finds it so the session can adopt it.
+ */
+export const worktreeForBranch = (porcelain: string, branch: string): string | null => {
+  for (const record of porcelain.trim().split(PORCELAIN_RECORD)) {
+    const lines = record.split("\n").map((line) => line.trim())
+    const path = lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length)
+    if (path && lines.includes(`branch refs/heads/${branch}`)) return path
+  }
+  return null
 }

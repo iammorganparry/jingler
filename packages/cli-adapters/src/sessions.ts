@@ -1887,6 +1887,42 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           return reduceCheckouts(session, { type: "update", checkoutId, patch: { prs: next.prs, prNumber: next.prNumber } })
         })
 
+      /**
+       * Attach a worktree the agent made itself (in `source`'s repo) as a checkout bound to `chatId`,
+       * so a PR opened from it can link. Returns the checkout id; reuses one already at that path.
+       */
+      const adoptAgentWorktree = (id: string, chatId: string, sourceCheckoutId: string, worktreePath: string, branch: string) =>
+        Effect.gen(function* () {
+          const current = yield* get(id)
+          const existing = checkoutsOf(current).find((c) => c.worktreePath === worktreePath)
+          if (existing) return existing.id
+          const checkoutId = `co_${basename(worktreePath)}`
+          yield* update(id, (session) => {
+            const migrated = migrateSessionCheckouts(session)
+            const source = checkoutsOf(migrated).find((c) => c.id === sourceCheckoutId)
+            if (!source || checkoutsOf(migrated).some((c) => c.id === checkoutId)) return session
+            const checkout: SessionCheckout = {
+              id: checkoutId,
+              ...propertiesWhen(source.projectId !== undefined, { projectId: source.projectId }),
+              repo: source.repo,
+              ...propertiesWhen(source.repoPath !== undefined, { repoPath: source.repoPath }),
+              worktreePath,
+              workspaceMode: "worktree",
+              branch,
+              ...propertiesWhen(source.baseBranch !== undefined, { baseBranch: source.baseBranch }),
+              prNumber: null,
+              ...propertiesWhen(source.githubSlug !== undefined, { githubSlug: source.githubSlug })
+            }
+            // Unbound chats keep the checkout they were using; the chat that made the worktree owns it.
+            const activeId = activeCheckoutOf(migrated).id
+            const chats = session.chats.map((c) =>
+              c.id === chatId ? { ...c, checkoutId } : c.checkoutId === undefined ? { ...c, checkoutId: activeId } : c
+            )
+            return focusChatCheckout(withCheckouts({ ...session, chats }, { ...migrated, checkouts: [...checkoutsOf(migrated), checkout] }))
+          })
+          return checkoutId
+        })
+
       /** Persist the live worktree/PR identity as one routing transition. */
       const setGitHubLink = (
         id: string,
@@ -2367,6 +2403,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setCheckoutBranch,
         appendPr,
         linkAgentPr,
+        adoptAgentWorktree,
         setGitHubLink,
         claimGitHubFeedback,
         markGitHubFeedbackDispatched,
