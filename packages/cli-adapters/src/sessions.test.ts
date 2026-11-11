@@ -664,6 +664,32 @@ describe("SessionStore", () => {
     expect(activeCheckoutOf(backToSecond).id).toBe(own.id)
   })
 
+  it("adopts a worktree the agent made for the chat that made it", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Agent worktree" }), { defaultMode: "auto" })
+        const agentWorktree = join(repos.dir, "agent-made")
+        execFileSync("git", ["-C", repoPath, "worktree", "add", "-b", "fix/agent-made", agentWorktree])
+        const primaryId = activeCheckoutOf(created).id
+        const chatId = created.activeChatId
+        const checkoutId = yield* SessionStore.adoptAgentWorktree(created.id, chatId, primaryId, agentWorktree, "fix/agent-made")
+        const again = yield* SessionStore.adoptAgentWorktree(created.id, chatId, primaryId, agentWorktree, "fix/agent-made")
+        yield* SessionStore.linkAgentPr(created.id, checkoutId, 1003)
+        return { checkoutId, again, chatId, agentWorktree, session: yield* SessionStore.get(created.id) }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    const { checkoutId, again, chatId, agentWorktree, session } = exit.value
+    expect(again).toBe(checkoutId)
+    expect(session.checkouts).toHaveLength(2)
+    expect(session.chats.find((chat) => chat.id === chatId)?.checkoutId).toBe(checkoutId)
+    const active = activeCheckoutOf(session)
+    expect(active).toMatchObject({ id: checkoutId, worktreePath: agentWorktree, branch: "fix/agent-made", prNumber: 1003 })
+  })
+
   it("discards a chat without retaining it in closed history", async () => {
     const exit = await runExit(
       Effect.gen(function* () {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { checkoutForCreatedPr, createdPrFromToolOutput } from "./created-pr.js"
+import { checkoutForCreatedPr, createdPrFromToolOutput, worktreeForBranch } from "./created-pr.js"
 
 const slugs = new Set(["acme/widget"])
 const url = "https://github.com/Acme/Widget/pull/7\n"
@@ -34,5 +34,22 @@ describe("checkoutForCreatedPr", () => {
     expect(checkoutForCreatedPr(pr, null, checkouts)).toBeNull()
     expect(checkoutForCreatedPr({ ...pr, headRefName: "main" }, "me", checkouts)).toBeNull()
     expect(checkoutForCreatedPr({ ...pr, repository: "acme/other" }, "me", checkouts)).toBeNull()
+  })
+})
+
+describe("worktreeForBranch", () => {
+  const porcelain = [
+    "worktree /repos/widget\nHEAD aaa\nbranch refs/heads/main",
+    "worktree /wt/session\nHEAD bbb\nbranch refs/heads/fix/session",
+    "worktree /wt/agent\nHEAD ccc\nbranch refs/heads/fix/agent-made",
+    "worktree /wt/detached\nHEAD ddd\ndetached"
+  ].join("\n\n")
+
+  it("finds the worktree with the branch checked out", () => {
+    expect(worktreeForBranch(porcelain, "fix/agent-made")).toBe("/wt/agent")
+  })
+  it("does not match a branch prefix or a missing branch", () => {
+    expect(worktreeForBranch(porcelain, "fix/agent")).toBeNull()
+    expect(worktreeForBranch(porcelain, "feat/none")).toBeNull()
   })
 })

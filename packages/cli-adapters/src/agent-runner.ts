@@ -50,7 +50,7 @@ import {
 import { FileSystem, type Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
-import { checkoutForCreatedPr, createdPrFromToolOutput, isGhPrCreate } from "./created-pr.js"
+import { checkoutForCreatedPr, createdPrFromToolOutput, isGhPrCreate, worktreeForBranch, type LinkCandidate } from "./created-pr.js"
 import { gitLine, runString } from "./command.js"
 import { parseGitHubRemote } from "./github-remote.js"
 import { responseStyleNote } from "./response-style-prompt.js"
@@ -907,7 +907,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   // Remember an edit's target path so its ToolEnd can tie back to a step.
                   yield* rememberTurnFile(touchedFiles, chatId, worktreePath, event)
                   // A PR the agent opened from some other worktree still belongs to this session.
-                  yield* linkAgentCreatedPr(toolCommands, sessionId, event, out.offer({ _tag: "SessionIssueLinksChanged" }).pipe(Effect.asVoid))
+                  yield* linkAgentCreatedPr(toolCommands, sessionId, chatId, event, out.offer({ _tag: "SessionIssueLinksChanged" }).pipe(Effect.asVoid))
                   yield* adoptTurnScratchRepo(projectService, sessionId, event, out.offer({ _tag: "SessionIssueLinksChanged" }).pipe(Effect.asVoid))
                   // Canonical plan writes must land BEFORE the event is offered.
                   // `Done` makes the renderer leave its invoked stream immediately;
@@ -1934,6 +1934,30 @@ const createdPrIdentity = (repository: string, number: number) => {
   )
 }
 
+/**
+ * The agent may open a PR from a worktree it created itself. When the viewer authored it and a
+ * worktree of the same repo has its head branch checked out, adopt that worktree for this chat.
+ */
+const adoptPrWorktree = (
+  session: Session,
+  chatId: string,
+  repository: string,
+  identity: { readonly viewerLogin: string | null; readonly author: string | null; readonly headRefName: string | null },
+  candidates: ReadonlyArray<LinkCandidate>
+) =>
+  Effect.gen(function* () {
+    const { viewerLogin, author, headRefName } = identity
+    if (!viewerLogin || author?.toLowerCase() !== viewerLogin.toLowerCase() || !headRefName) return null
+    const source = candidates.find((c) => c.slug === repository.toLowerCase())
+    const checkout = source && checkoutsOf(session).find((c) => c.id === source.id)
+    const dir = checkout?.worktreePath ?? checkout?.repoPath
+    if (!source || !dir) return null
+    const porcelain = yield* runString("git", "-C", dir, "worktree", "list", "--porcelain")
+    const worktreePath = porcelain === null ? null : worktreeForBranch(porcelain, headRefName)
+    if (worktreePath === null) return null
+    return yield* SessionStore.adoptAgentWorktree(session.id, chatId, source.id, worktreePath, headRefName)
+  })
+
 /** Remember a `gh pr create` command at its ToolStart; take (and forget) it at its ToolEnd. */
 const takeGhPrCreate = (toolCommands: Ref.Ref<Map<string, string>>, event: StreamEvent) =>
   Ref.modify(toolCommands, (current) => {
@@ -1952,6 +1976,7 @@ const takeGhPrCreate = (toolCommands: Ref.Ref<Map<string, string>>, event: Strea
 const linkAgentCreatedPr = (
   toolCommands: Ref.Ref<Map<string, string>>,
   sessionId: string,
+  chatId: string,
   event: StreamEvent,
   announce: Effect.Effect<void>
 ) =>
@@ -1964,7 +1989,8 @@ const linkAgentCreatedPr = (
     const created = createdPrFromToolOutput(command, event.output ?? "", slugs)
     if (created === null) return
     const identity = yield* createdPrIdentity(created.repository, created.number)
-    const checkoutId = identity && checkoutForCreatedPr({ repository: created.repository, ...identity }, identity.viewerLogin, candidates)
+    const matched = identity && checkoutForCreatedPr({ repository: created.repository, ...identity }, identity.viewerLogin, candidates)
+    const checkoutId = matched || (identity && (yield* adoptPrWorktree(session, chatId, created.repository, identity, candidates)))
     if (!checkoutId) {
       yield* Effect.logWarning(`Not linking ${created.repository}#${created.number}: author, repo or branch doesn't match this session`)
       return
