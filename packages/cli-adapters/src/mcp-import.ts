@@ -6,6 +6,7 @@ import { Either, Option, Schema } from "effect"
 import { parse as parseToml } from "smol-toml"
 import { resolveClaudeBinary } from "./claude-cli-resolver.js"
 import { withLoginShellNetwork } from "./runtime/providers/native-cli-environment.js"
+import type { RuntimeMcpServer } from "./runtime/mcp/attachment.js"
 
 /**
  * Pure parsers that read other tools' MCP configs into `McpConfigEntry`
@@ -387,6 +388,18 @@ export const refreshClaudeMcpRows = (
   return cache.refresh
 }
 const sameUrl = (url: string) => url.replace(/\/+$/, "")
+
+/**
+ * Drop mcp.json OAuth servers that have no token when a claude.ai connector serves the same URL,
+ * so the signed-in connector runs instead of a copy that 401s (Slack can't sign in through Jingler: no DCR).
+ */
+export const preferClaudeConnectors = <S extends RuntimeMcpServer>(
+  servers: ReadonlyArray<S>,
+  rows: ReadonlyArray<ClaudeMcpRow>
+): ReadonlyArray<S> => {
+  const native = new Set(rows.filter((row) => row.name.startsWith(CLAUDE_AI_PREFIX)).map((row) => sameUrl(row.url)))
+  return servers.filter((server) => server.transport === "stdio" || server.needsAuth !== true || !native.has(sameUrl(server.url)))
+}
 
 /**
  * `--settings` overlay that lets a `--setting-sources user` Claude session load

@@ -49,7 +49,7 @@ import { ProviderConnections,
 import { makePortableRuntime } from "../resources/portable-runtime.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { McpConfigService } from "../../mcp-config-service.js"
-import { cachedClaudeMcpRows, claudeConnectorSettings, refreshClaudeMcpRows } from "../../mcp-import.js"
+import { cachedClaudeMcpRows, claudeConnectorSettings, preferClaudeConnectors, refreshClaudeMcpRows } from "../../mcp-import.js"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
@@ -223,6 +223,7 @@ export const makePiAgentRuntimeLive = (
     // Operator-configured servers from `~/jingler/mcp.json`, re-read per run so
     // hand-edits apply to the next turn without a restart.
     const configuredMcp = McpConfigService.resolveAuthenticated(secretStore).pipe(
+      Effect.map((servers) => preferClaudeConnectors(servers, cachedClaudeMcpRows(homedir()))),
       Effect.provide(McpConfigService.Default),
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(AppPaths, paths)

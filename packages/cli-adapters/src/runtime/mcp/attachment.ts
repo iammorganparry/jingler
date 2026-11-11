@@ -17,6 +17,8 @@ export interface RuntimeRemoteMcpServer {
   readonly headerEnvironment?: Readonly<Record<string, string>>
   /** Tool names the operator disabled; the runtime skips registering these. */
   readonly disabledTools?: ReadonlyArray<string>
+  /** OAuth server with no token yet: every call would fail with 401. */
+  readonly needsAuth?: true
 }
 
 /** Secret-bearing stdio attachment. Its executable and environment are target-local. */

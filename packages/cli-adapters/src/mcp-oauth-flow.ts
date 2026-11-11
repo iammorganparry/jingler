@@ -210,5 +210,15 @@ export const startMcpOAuthAuthorization = (
       throw cause
     }
   },
-  catch: (cause) => cause instanceof Error ? cause : new Error(String(cause))
+  catch: (cause) => mcpOAuthStartError(entry.server.displayName, cause)
 })
+
+const NO_DCR = /dynamic client registration/i
+
+/** The SDK's DCR refusal names no next step; servers like Slack only sign in with a pre-registered client. */
+export const mcpOAuthStartError = (name: string, cause: unknown): Error => {
+  const error = cause instanceof Error ? cause : new Error(String(cause))
+  return NO_DCR.test(error.message)
+    ? new Error(`${name} doesn't let apps register for sign-in. Connect it on claude.ai and remove this copy, or set auth.clientId in mcp.json.`, { cause: error })
+    : error
+}
