@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   claudeConnectorSettings,
+  preferClaudeConnectors,
   dedupeCandidates,
   discoverClaudeConnectors,
   parseClaudeMcpRows,
@@ -401,5 +402,19 @@ describe("discoverClaudeConnectors", () => {
     const binary = fakeCli("exit 1")
     const result = await discoverClaudeConnectors({ ...options, binary })
     expect(result).toEqual([expect.objectContaining({ entry: null, problem: expect.stringContaining("failed") })])
+  })
+})
+
+describe("preferClaudeConnectors", () => {
+  const rows = parseClaudeMcpRows("claude.ai Slack: https://mcp.slack.com/mcp - ✔ Connected")
+  const remote = (name: string, url: string, needsAuth?: true) => ({ name, url, headers: {}, ...(needsAuth ? { needsAuth } : {}) })
+
+  it("drops a tokenless copy of a claude.ai connector and keeps signed-in or unrelated servers", () => {
+    const servers = [
+      remote("slack", "https://mcp.slack.com/mcp/", true),
+      remote("slack-signed-in", "https://mcp.slack.com/mcp"),
+      remote("sentry", "https://mcp.sentry.dev/mcp", true)
+    ]
+    expect(preferClaudeConnectors(servers, rows).map((server) => server.name)).toEqual(["slack-signed-in", "sentry"])
   })
 })

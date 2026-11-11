@@ -159,7 +159,7 @@ const withCredential = async (
       }
     }
   }
-  if (credential?.type !== "oauth") return runtime
+  if (credential?.type !== "oauth" || credential.tokens === undefined) return { ...runtime, needsAuth: true }
   return {
     ...runtime,
     authProvider: makeMcpOAuthProvider(

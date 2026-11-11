@@ -544,7 +544,8 @@ const mcpClaudeConnectors = (refresh: boolean) =>
     const rows = yield* Effect.promise(() => refreshClaudeMcpRows(mcpImportHome(), { force: refresh }));
     const configured = new Set(
       (yield* mcpList()).servers
-        .filter((server) => server.transport !== "stdio")
+        // A tokenless copy doesn't hide the connector: the runtime runs claude.ai's instead.
+        .filter((server) => server.transport !== "stdio" && server.authState !== "needs-auth")
         .map((server) => server.target.replace(/\/+$/, "")),
     );
     return rows

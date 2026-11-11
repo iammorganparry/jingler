@@ -232,8 +232,10 @@ export function McpPage(props: McpSettingsProps) {
     if (row.source === "claude.ai") { openClaudeConnectors?.(); return }
     const server = serverFor(row)
     if (server === undefined) return
-    if (server.authKind === "api-key") setApiKeyServer(server)
-    else run(() => startAuthorization(server.name))
+    if (server.authKind === "api-key") { setApiKeyServer(server); return }
+    // Open the drawer so a failed sign-in shows next to the server, not in a callout scrolled out of view.
+    setOpenId(row.id)
+    run(() => startAuthorization(server.name))
   }
 
   const open = (row: McpConnectorRow) => {
