@@ -6182,6 +6182,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ConfigService.setNotifications(notifications),
   "Config.setDefaultMode": ({ defaultMode }) =>
     ConfigService.setDefaultMode(defaultMode),
+  "Config.setTelemetryEnabled": ({ enabled }) =>
+    ConfigService.setTelemetryEnabled(enabled),
   "Config.setSubagentDelegationEnabled": ({ enabled }) =>
     ConfigService.setSubagentDelegationEnabled(enabled),
   "Config.setSubagentModel": ({ providerId, agent, modelId }) =>

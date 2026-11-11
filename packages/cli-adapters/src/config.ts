@@ -45,7 +45,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   // A saved false (or zero) is a real value, not an absent section.
   const definedKeys = [
     "connectionSelectionRequired", "providerSetupCompleted", "planAutoRun", "adhdMode", "mcpImportDismissed", "fontScale",
-    "subagentDelegationEnabled"
+    "subagentDelegationEnabled", "telemetryEnabled"
   ] as const
   return Object.fromEntries([
     ...truthyKeys.filter((key) => Boolean(existing[key])).map((key) => [key, existing[key]]),
@@ -200,6 +200,8 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       const setSubagentDelegationEnabled = (subagentDelegationEnabled: boolean) =>
         patch({ subagentDelegationEnabled })
 
+      const setTelemetryEnabled = (telemetryEnabled: boolean) => patch({ telemetryEnabled })
+
       const setSubagentModel = (
         providerId: ProviderId,
         agent: JinglerSubagentName,
@@ -346,6 +348,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setObsidianExplanations,
         setDefaultMode,
         setSubagentDelegationEnabled,
+        setTelemetryEnabled,
         setSubagentModel,
         setPlanAutoRun,
         setVoice,

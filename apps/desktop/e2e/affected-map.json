@@ -458,6 +458,8 @@
   {
     "paths": [
       "packages/ui/src/composites/settings-view.tsx",
+      "apps/desktop/src/renderer/telemetry",
+      "apps/desktop/src/main/telemetry-proxy",
       "packages/ui/src/composites/themes-settings.tsx",
       "packages/ui/src/composites/voice-settings.tsx",
       "packages/ui/src/composites/web-search-settings.tsx",
@@ -499,7 +501,8 @@
       "workspace-routines.spec.ts",
       "workspace-workflow.spec.ts",
       "offload-compute.spec.ts",
-      "branding.spec.ts"
+      "branding.spec.ts",
+      "telemetry-settings.spec.ts"
     ]
   },
   {

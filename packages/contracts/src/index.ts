@@ -1429,6 +1429,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: Schema.Struct({ defaultMode: ExecutionMode })
   }),
 
+  /** Opt in or out of usage telemetry and session replay. */
+  Rpc.make("Config.setTelemetryEnabled", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: Schema.Struct({ enabled: Schema.Boolean })
+  }),
+
   Rpc.make("Config.setSubagentDelegationEnabled", {
     success: WorkspaceConfig,
     error: ConfigError,

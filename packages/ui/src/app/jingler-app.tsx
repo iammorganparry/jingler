@@ -328,6 +328,9 @@ export interface JinglerAppProps {
   /** Multiplier for conversation + code text size; absent means 1×. */
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => Promise<void> | void
+  /** Usage telemetry + session replay; absent means on. */
+  telemetryEnabled?: boolean | null
+  onSaveTelemetryEnabled?: (enabled: boolean) => Promise<void> | void
   /**
    * Everything Settings › Themes needs. Optional so the Storybook shell and the
    * component gallery can mount the app without a theme catalog; absent renders
@@ -810,6 +813,8 @@ function getActiveTabContext(active: Session) {
               onSaveResponseStyle={onSaveResponseStyle}
               fontScale={fontScale}
               onSaveFontScale={onSaveFontScale}
+              telemetryEnabled={props.telemetryEnabled}
+              onSaveTelemetryEnabled={props.onSaveTelemetryEnabled}
               themes={themes}
               headerViews={headerViews && onHeaderViewsChange ? { views: settingsHeaderViews(), pinned: headerViews, onChange: onHeaderViewsChange } : undefined}
               usage={onLoadUsage ? { usage, report: usageReport, loading: usageLoading, onExport: onExportUsage, onOpen: refreshUsage } : undefined}

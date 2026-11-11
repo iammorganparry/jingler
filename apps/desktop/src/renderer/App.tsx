@@ -166,6 +166,7 @@ import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useMcpSettings } from "./use-mcp-settings.js";
 import { useVoiceSettings } from "./use-voice-settings.js";
+import { applyTelemetry } from "./telemetry.js";
 import { McpImportPrompt } from "./mcp-import-prompt.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useProviderConnect } from "./use-provider-connect.js";
@@ -606,6 +607,11 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
+  const telemetryEnabled = configQuery.data?.telemetryEnabled;
+  const configLoaded = configQuery.data !== undefined;
+  useEffect(() => {
+    if (configLoaded) applyTelemetry(telemetryEnabled);
+  }, [configLoaded, telemetryEnabled]);
   const obsidianVaultConfigured = useObsidianVaultConfigured();
   const webSearchQuery = useQuery({
     queryKey: ["web-search-settings"],
@@ -745,6 +751,10 @@ function AuthedApp({
     });
   const saveFontScale = (value: number) =>
     rpc.configSetFontScale(value).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
+  const saveTelemetryEnabled = (enabled: boolean) =>
+    rpc.configSetTelemetryEnabled(enabled).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
 
@@ -1836,6 +1846,8 @@ function AuthedApp({
         onSaveResponseStyle={saveResponseStyle}
         fontScale={fontScale}
         onSaveFontScale={saveFontScale}
+        telemetryEnabled={configQuery.data?.telemetryEnabled}
+        onSaveTelemetryEnabled={saveTelemetryEnabled}
         themes={themeSettings}
         plugins={plugins}
         devices={{
