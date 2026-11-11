@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.27.3
+
+### Patch Changes
+
+- a7ccc02: A PR an agent opens from a worktree it created itself now links to the chat that opened it, instead of being dropped as "doesn't match this session".
+  - @jingler/plannotator-ext@0.27.3
+
 ## 0.27.2
 
 ### Patch Changes
