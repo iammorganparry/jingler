@@ -5677,7 +5677,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     reasoning,
     externalInstruction,
   }) =>
-    Stream.unwrap(
+    observeTurn(sessionId, chatId, displayText ?? text, Stream.unwrap(
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId);
         const runner = yield* AgentRunner;
@@ -5689,20 +5689,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           {
             execute: () =>
               Effect.succeed(
-                observeTurn(
+                runner.prompt(
                   sessionId,
                   chatId,
-                  displayText ?? text,
-                  runner.prompt(
-                    sessionId,
-                    chatId,
-                    text,
-                    images ?? [],
-                    reasoning,
-                    undefined,
-                    externalInstruction,
-                    displayText,
-                  ),
+                  text,
+                  images ?? [],
+                  reasoning,
+                  undefined,
+                  externalInstruction,
+                  displayText,
                 ),
               ),
           },
@@ -5777,7 +5772,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           ),
         ),
       ),
-    ),
+    )),
   "Agent.decideGate": ({ sessionId, chatId, gateId, decision }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);

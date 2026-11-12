@@ -1462,12 +1462,17 @@ function GeneralSection({
           <SettingsCard title="Privacy">
             <GeneralToggleRow
               label="Share AI telemetry"
-              description="Sends each agent turn to Jingler's PostHog so we can debug problems you hit: your prompts, the agent's replies, tool calls and their output, model, tokens and cost. This can include code and file paths. Off unless you turn it on."
+              description="Sends each agent turn to Jingler's PostHog so we can debug problems you hit: your prompts, the agent's replies, tool calls and their output, model, tokens and cost. This can include code, file paths and anything secret a tool prints, like keys from a .env file. Off unless you turn it on."
               checked={telemetryDraft}
               onChange={(next) => {
                 setTelemetryDraft(next)
                 // A failed save must not leave the switch claiming a state that isn't in effect.
-                Promise.resolve(onSaveTelemetryEnabled(next)).catch(() => setTelemetryDraft(!next))
+                const revert = () => setTelemetryDraft(!next)
+                try {
+                  Promise.resolve(onSaveTelemetryEnabled(next)).catch(revert)
+                } catch {
+                  revert()
+                }
               }}
             />
           </SettingsCard>

@@ -107,6 +107,17 @@ describe("General settings · privacy", () => {
   });
 });
 
+describe("General settings · privacy (sync throw)", () => {
+  it("puts the switch back when the save throws synchronously", async () => {
+    const onSaveTelemetryEnabled = vi.fn(() => { throw new Error("boom"); });
+    render(<SettingsView githubConnection={githubDisconnected} telemetryEnabled onSaveTelemetryEnabled={onSaveTelemetryEnabled} />);
+    fireEvent.click(screen.getByRole("button", { name: /General/ }));
+    const toggle = screen.getByRole("switch", { name: "Share AI telemetry" });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+  });
+});
+
 describe("General settings · offload status", () => {
   const renderGeneral = (offloadStatus: "priming" | "ready" | "failed", onRetryOffload = vi.fn()) => {
     render(

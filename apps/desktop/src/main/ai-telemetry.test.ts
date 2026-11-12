@@ -91,4 +91,35 @@ describe("observeTurn", () => {
     expect([...seen]).toEqual(events)
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
   })
+
+  it("never records a turn that started while opted out, even if opted in mid-turn", async () => {
+    let enabled = false
+    const { fetch, deps: d } = deps({ enabled: async () => enabled })
+    const late = Stream.fromIterable(events).pipe(Stream.tap(() => Effect.sync(() => { enabled = true })))
+    await Effect.runPromise(Stream.runCollect(observeTurn("s1", "c1", "p", late, d)))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe("collection bounds and status", () => {
+  it("caps the reply while recording, not only when serializing", () => {
+    const turn = newTurn("s", "c", "p")
+    for (let i = 0; i < 100; i++) recordEvent(turn, { _tag: "Assistant", text: "y".repeat(1000) })
+    expect(turn.reply.length).toBeLessThanOrEqual(4001)
+  })
+
+  it("marks an interrupted tool as an error", () => {
+    const turn = newTurn("s", "c", "p")
+    recordEvent(turn, { _tag: "ToolStart", id: "t", name: "Bash", target: null })
+    expect(turnEvents(turn, "x")[2]?.properties.$ai_is_error).toBe(true)
+  })
+
+  it("logs a rejected batch instead of treating it as sent", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const { deps: d } = deps({ fetch: (async () => new Response("bad", { status: 400 })) as unknown as typeof fetch })
+    await sendTurn(finished(), d)
+    expect(error).toHaveBeenCalledWith("AI telemetry rejected", 400)
+    error.mockRestore()
+  })
 })
