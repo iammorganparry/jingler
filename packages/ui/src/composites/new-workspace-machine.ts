@@ -549,6 +549,7 @@ export const newWorkspaceMachine = setup({
         onError: { target: "editing", actions: "setLoadError" }
       },
       on: {
+        OPEN: { target: "loading", reenter: true, actions: "seed" },
         CLOSE: { target: "closed", actions: "close" },
         SET_PROJECT: { target: "loading", reenter: true, actions: "selectProject" },
         SET_ENVIRONMENT: {
@@ -570,6 +571,7 @@ export const newWorkspaceMachine = setup({
     },
     editing: {
       on: {
+        OPEN: { target: "loading", actions: "seed" },
         CLOSE: { target: "closed", actions: "close" },
         SET_PROJECT: { target: "loading", actions: "selectProject" },
         SET_ENVIRONMENT: { target: "loading", actions: assign(({ context, event }) => ({ environmentId: event.environmentId, ...providerSelection(context.getDeps(), event.environmentId), branches: [], baseBranch: "", resolvedProject: null, ...resetSource, error: null })) },
@@ -599,6 +601,7 @@ export const newWorkspaceMachine = setup({
         onError: { target: "editing", actions: "setSourceError" }
       },
       on: {
+        OPEN: { target: "loading", actions: "seed" },
         CLOSE: { target: "closed", actions: "close" },
         SET_PROJECT: { target: "loading", actions: "selectProject" },
         SET_SOURCE: [

@@ -23,7 +23,7 @@ import { activeCheckoutOf, checkoutsOf } from "@jingler/core"
 import type { FilterMenuAction } from "../components/filter-menu.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
-import { EmptyConversation, type HomeStart, type HomeVoiceProvider } from "./empty-conversation.js"
+import { EmptyConversation } from "./empty-conversation.js"
 import type { ConversationPaneCtx } from "./session-pane.js"
 import { BUILTIN_TAB, type TabContribution, type TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
@@ -152,8 +152,6 @@ export interface SessionConversationProps {
   importCard?: ReactNode
   /** Home › To Do + My PRs element. */
   homeToday?: ReactNode
-  /** Home › owns dictation for the composer. */
-  homeVoiceProvider?: HomeVoiceProvider
   /** Sessions whose last run was cut off by a restart. */
   interruptedSessions?: ReadonlySet<string>
   /** Live activity by session, then chat, for the sidebar tree. */
@@ -173,10 +171,10 @@ export interface SessionConversationProps {
   debugStopSequences?: Readonly<Record<string, number>>
   /** Open the New Session view. */
   onNewSession?: () => void
-  /** Home composer submit: open New workspace with this prompt and project. */
-  onStartWithPrompt?: (start: HomeStart) => void
-  /** Branch list for the Home from-chip. */
-  loadBranches?: (repoPath: string) => Promise<ReadonlyArray<string>>
+  /** Home › the New session composer; Home is where every new session starts. */
+  homeComposer?: ReactNode
+  /** Home › first-run starters preselect a PR or issue source in the composer. */
+  onStartFrom?: (source: "pr" | "github") => void
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
   /** Open the Usage & limits modal (from the sidebar account menu). */
@@ -203,10 +201,6 @@ export interface SessionConversationProps {
    * conversation) while the sidebar stays visible. `onOpenSettings` toggles it.
    */
   settingsView?: ReactNode
-  /** New-session creation takeover; keeps the sidebar visible. */
-  newSessionView?: ReactNode
-  /** Whether the mounted new-session view currently owns the main pane. */
-  newSessionViewActive?: boolean
   /** Remote creation remains navigable before its durable Session record exists. */
   pendingEnvironmentSession?: PendingEnvironmentSession | null
   onSelectPendingEnvironmentSession?: () => void
@@ -356,18 +350,14 @@ export function SessionConversation(props: SessionConversationProps) {
            if (props.settingsView) return (props.settingsView)
            if (props.showEmpty) return (<EmptyConversation
             version={props.version}
-            onNewSession={openNewSession}
-            onStartWithPrompt={props.onStartWithPrompt}
-            loadBranches={props.loadBranches}
-            projects={projects}
-            selectedProjectId={activeProjectId ?? null}
+            composer={props.homeComposer}
+            onStartFrom={props.onStartFrom}
             userName={props.user?.name}
             sessions={props.sessions}
             liveActivity={props.liveActivity}
             allowFor={props.allowFor}
             importCard={props.importCard}
             today={props.homeToday}
-            voiceProvider={props.homeVoiceProvider}
             onOpenSession={props.onSelectSession}
           />)
            return (<SessionSplit
@@ -499,17 +489,12 @@ export function SessionConversation(props: SessionConversationProps) {
         issuesActive={props.issuesActive}
         onOpenIssues={props.onOpenIssues}
         pendingEnvironmentSession={props.pendingEnvironmentSession}
-        pendingEnvironmentSessionActive={props.newSessionViewActive}
+        pendingEnvironmentSessionActive={Boolean(props.homeActive && props.pendingEnvironmentSession)}
         onSelectPendingEnvironmentSession={props.onSelectPendingEnvironmentSession}
       />
 
       <div data-testid="session-main-pane" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-hairline bg-editor">
-        {props.newSessionView && (
-          <div className={props.newSessionViewActive ? "flex min-h-0 flex-1" : "hidden"}>
-            {props.newSessionView}
-          </div>
-        )}
-        {!props.newSessionViewActive && (getProps())}
+        {getProps()}
       </div>
     </div>
   )

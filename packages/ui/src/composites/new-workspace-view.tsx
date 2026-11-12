@@ -28,7 +28,6 @@ import {
   LoaderCircle,
   Server,
   SquarePen,
-  X,
 } from "lucide-react";
 import { Button } from "../components/button.js";
 import { GithubMark } from "../components/github-mark.js";
@@ -235,6 +234,8 @@ export interface NewWorkspaceViewProps {
   onClose: () => void;
   /** Adds the mic to the composer; omitted hosts get no voice input. */
   voiceProvider?: HomeVoiceProvider;
+  /** Bumped to refocus the composer (⌘N while already on Home). */
+  focusKey?: number;
 }
 
 const startupEnvironment = (startup: PendingEnvironmentSession | null | undefined, selected: Environment | undefined) =>
@@ -290,7 +291,7 @@ function WorkspaceComposer({ submitting, context, props, catalog, unavailableRea
   unavailableReason: string | undefined; controls: React.ReactNode; selectedProject: Project | undefined; send: WorkspaceSend
 }) {
   const { draft, attachments, source, selectedPr, baseBranch, environmentId, connectionId, providerId, modelId, mode, reasoning } = context
-  const composer = (voiceInput?: ComposerVoiceInput) => <Composer voiceInput={voiceInput} submitting={submitting} preserveDraftOnSend autoFocus focusKey="new-session" value={draft} onValueChange={(value) => send({ type: "SET_DRAFT", draft: value })} attachments={attachments} onAttachmentsChange={(next) => send({ type: "SET_ATTACHMENTS", attachments: next })} onSend={() => send({ type: "SUBMIT" })} placeholder={workspacePrompt(source)} repo={selectedProject?.name} branch={selectedBranch(source, selectedPr?.headRefName, baseBranch)} environments={props.environments} environmentId={remoteEnvironmentId(environmentId)} onSetEnvironment={(props.environments?.length ?? 0) > 0 ? (value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" }) : undefined} providerCatalog={props.providerCatalog} agentEndpointCatalog={catalog} endpointId={context.endpointId} connectionId={connectionId} providerId={providerId} modelId={modelId} onSetModel={(selection) => send({ type: "SET_MODEL", ...selection })} mode={mode} onSetMode={(value) => send({ type: "SET_MODE", mode: value })} reasoningEffort={reasoning?.effort} thinkingEnabled={reasoning?.enabled} onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })} disabledReason={unavailableReason} contextControls={controls} />
+  const composer = (voiceInput?: ComposerVoiceInput) => <Composer voiceInput={voiceInput} submitting={submitting} preserveDraftOnSend autoFocus focusKey={`new-session:${props.focusKey ?? 0}:${unavailableReason === undefined}`} inputLabel="What should we build?" value={draft} onValueChange={(value) => send({ type: "SET_DRAFT", draft: value })} attachments={attachments} onAttachmentsChange={(next) => send({ type: "SET_ATTACHMENTS", attachments: next })} onSend={() => send({ type: "SUBMIT" })} placeholder={workspacePrompt(source)} repo={selectedProject?.name} branch={selectedBranch(source, selectedPr?.headRefName, baseBranch)} environments={props.environments} environmentId={remoteEnvironmentId(environmentId)} onSetEnvironment={(props.environments?.length ?? 0) > 0 ? (value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" }) : undefined} providerCatalog={props.providerCatalog} agentEndpointCatalog={catalog} endpointId={context.endpointId} connectionId={connectionId} providerId={providerId} modelId={modelId} onSetModel={(selection) => send({ type: "SET_MODEL", ...selection })} mode={mode} onSetMode={(value) => send({ type: "SET_MODE", mode: value })} reasoningEffort={reasoning?.effort} thinkingEnabled={reasoning?.enabled} onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })} disabledReason={unavailableReason} contextControls={controls} />
   const VoiceProvider = props.voiceProvider
   return VoiceProvider ? <VoiceProvider onText={(update) => send({ type: "SET_DRAFT", draft: update(draft) })}>{composer}</VoiceProvider> : composer()
 }
@@ -326,19 +327,16 @@ function NewWorkspaceContent({ props, context, send, submitting, failed, loading
 }) {
   const { source, draft, error } = context
   const startup = props.environmentStartup || (submitting && selectedEnvironment !== undefined)
-  return <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="new-session-view">
-    <div className="flex h-12 flex-none items-center border-b border-hairline px-5"><h1 className="text-[13px] font-semibold text-text-bright">New session</h1><span className="flex-1" /><WakeChip environment={selectedEnvironment} onWake={props.onWakeEnvironment} /><Button variant="ghost" size="icon" aria-label="Close new session" title="Close new session" disabled={submitting && !props.environmentStartup?.error} onClick={() => send({ type: "CLOSE" })}><X size={15} /></Button></div>
-    <div className="flex min-h-0 min-w-0 flex-1 overflow-auto px-4 py-10 sm:px-6">{startup || submitting || failed
-      ? <ProgressPane props={props} context={context} send={send} startup={Boolean(startup)} failed={failed} environment={selectedEnvironment} />
-      : <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
-          <div className="flex min-w-0 items-center gap-3"><div className="min-w-0"><p className="max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Describe the task. Jingler creates the branch and starts the agent.</p></div></div>
-          <WorkspaceStartFrom props={props} context={context} send={send} icon={selectedSource?.icon} label={sourceLabel} loading={sourceLoading} />
-          {source === "branch" && <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.</p>}
-          <WorkspaceComposer submitting={submitting} context={context} props={props} catalog={catalog} unavailableReason={unavailableReason} selectedProject={selectedProject} send={send} controls={<ProjectControls context={context} props={props} sourceOptions={sourceOptions} loading={loading} send={send} />} />
-          {draft.trim().length === 0 && unavailableReason === undefined && <div className="flex justify-end"><Button variant="secondary" aria-label="Create workspace" onClick={() => send({ type: "SUBMIT" })}><MessageCircle size={14} /> Create without a first message</Button></div>}
-          {error && <p role="alert" className="text-[11px] text-red">{error}</p>}
-        </div>}
-    </div>
+  return <div className="flex w-full min-w-0 flex-col gap-4" data-testid="new-session-view">{startup || submitting || failed
+    ? <ProgressPane props={props} context={context} send={send} startup={Boolean(startup)} failed={failed} environment={selectedEnvironment} />
+    : <>
+        <WakeChip environment={selectedEnvironment} onWake={props.onWakeEnvironment} />
+        <WorkspaceStartFrom props={props} context={context} send={send} icon={selectedSource?.icon} label={sourceLabel} loading={sourceLoading} />
+        {source === "branch" && <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.</p>}
+        <WorkspaceComposer submitting={submitting} context={context} props={props} catalog={catalog} unavailableReason={unavailableReason} selectedProject={selectedProject} send={send} controls={<ProjectControls context={context} props={props} sourceOptions={sourceOptions} loading={loading} send={send} />} />
+        {draft.trim().length === 0 && unavailableReason === undefined && <div className="flex justify-end"><Button variant="secondary" aria-label="Create workspace" onClick={() => send({ type: "SUBMIT" })}><MessageCircle size={14} /> Create without a first message</Button></div>}
+        {error && <p role="alert" className="text-[11px] text-red">{error}</p>}
+      </>}
   </div>
 }
 
@@ -424,6 +422,13 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     if (props.open) send(openEvent(props));
     else send({ type: "CLOSE" });
   }, [props.open, props.requestedPr, props.requestedIssue, props.requestedProjectId, props.requestedDraft, props.requestedSource, props.requestedBaseBranch, props.requestedIsolation, send]);
+
+  // Home keeps this view mounted, so a finished create (which closes the machine) starts the next one.
+  const closed = state.matches("closed");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the closed transition reopens; the current request is read, not watched
+  React.useEffect(() => {
+    if (props.open && closed) send(openEvent(props));
+  }, [closed, props.open, send]);
 
   const projectRequest = props.requestedProjectId ?? props.defaultProjectId;
   const previousProjectRequest = React.useRef(projectRequest);

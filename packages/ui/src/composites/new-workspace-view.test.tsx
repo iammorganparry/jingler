@@ -91,12 +91,13 @@ it("shows send-button submission, ignores duplicate mouse/Enter and retains the 
   expect(screen.queryByTestId("workspace-provisioning")).toBeNull()
 })
 
-it("renders one chip row: project, from <branch>, checkout with explainers, and composer-first heading", async () => {
+it("renders one chip row: project, from <branch>, checkout with explainers, and no heading of its own", async () => {
   render(view("alpha"))
   const row = await screen.findByTestId("new-workspace-chip-row")
   await waitFor(() => expect(row.textContent).toContain("from main"))
-  expect(screen.getByRole("heading", { name: "New session" })).toBeDefined()
-  expect(screen.queryByRole("heading", { name: "New workspace" })).toBeNull()
+  // Home hosts this composer under its greeting, so it brings no header or close button.
+  expect(screen.queryByRole("heading")).toBeNull()
+  expect(screen.queryByRole("button", { name: "Close new session" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Session source" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Start from" }))

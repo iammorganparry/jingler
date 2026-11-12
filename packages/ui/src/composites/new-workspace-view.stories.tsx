@@ -389,8 +389,7 @@ function NewSessionStory({
         }}
         showEmpty
         version="2.0.3"
-        newSessionViewActive={open}
-        newSessionView={
+        homeComposer={
           open ? (
             <NewWorkspaceView
               {...args}
@@ -663,8 +662,7 @@ function SessionSourceStory({ initialSource }: { initialSource?: PreviewSource }
         onNewSession={() => {}}
         showEmpty
         version="2.0.3"
-        newSessionViewActive
-        newSessionView={<SessionSourcePrototype initialSource={initialSource} />}
+        homeComposer={<SessionSourcePrototype initialSource={initialSource} />}
       />
     </div>
   )
@@ -808,8 +806,7 @@ function MinimalConceptStory({ concept }: { concept: MinimalConcept }) {
         onNewSession={() => {}}
         showEmpty
         version="2.0.3"
-        newSessionViewActive
-        newSessionView={<MinimalSessionConcept concept={concept} />}
+        homeComposer={<MinimalSessionConcept concept={concept} />}
       />
     </div>
   )

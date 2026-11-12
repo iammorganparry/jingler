@@ -329,7 +329,7 @@ const openNewSession = async (
 ): Promise<void> => {
   await window.getByTestId("new-session").click();
   await expect(
-    window.getByRole("heading", { name: "New session" }),
+    window.getByTestId("new-session-view"),
   ).toBeVisible();
   await expect(
     window.getByRole("button", { name: `Model: ${model.label}` }),

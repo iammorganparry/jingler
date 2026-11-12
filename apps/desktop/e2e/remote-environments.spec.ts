@@ -63,7 +63,7 @@ const selectComposerEnvironment = async (window: Page, name = "buildbox") => {
 
 const createRemoteWorkspace = async (window: Page, projectPath: string): Promise<string> => {
   await window.getByTestId("new-session").click()
-  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+  await expect(window.getByTestId("new-session-view")).toBeVisible()
   await addProject(window, projectPath)
   await openModelSettings(window)
   await window.getByRole("button", { name: "Execution environment" }).click()
@@ -164,7 +164,7 @@ test("returns a new session to Local while remote project preparation is pending
   await expect(environment).toContainText("Local")
   await expect(app.window.getByRole("button", { name: "Ask Before Actions" })).toBeVisible()
   await expect(app.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
-  await expect(app.window.getByRole("button", { name: "Start from" })).toContainText("main")
+  await expect(app.window.getByRole("button", { name: "Start from", exact: true })).toContainText("main")
   await expect(app.window.getByRole("button", { name: "Create workspace" })).toBeEnabled()
 })
 

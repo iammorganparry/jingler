@@ -124,7 +124,7 @@ export const createWorkspace = async (
 ): Promise<void> => {
   await window.getByTestId("new-session").click();
   await expect(
-    window.getByRole("heading", { name: "New session" }),
+    window.getByTestId("new-session-view"),
   ).toBeVisible();
   // Sessions belong to projects. A launch with no seeded sessions has no
   // project to backfill, so register the repository the way a new user would.

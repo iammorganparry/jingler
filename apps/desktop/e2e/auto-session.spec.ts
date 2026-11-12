@@ -35,7 +35,7 @@ const allowGates = async (window: Page, until: () => Promise<boolean>): Promise<
  */
 const startAutoSession = async (window: Page, repoPath: string): Promise<void> => {
   await window.getByTestId("new-session").click()
-  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+  await expect(window.getByTestId("new-session-view")).toBeVisible()
   if ((await window.getByTestId("new-session-view").getByText("Add a project before starting a session.").count()) > 0) {
     await window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
     await window.getByRole("option", { name: "Add project…" }).click()

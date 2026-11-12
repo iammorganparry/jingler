@@ -73,13 +73,11 @@ function Flow() {
         search={<TitleSearch onOpen={() => {}} className="w-full" />}
         renderExplorer={(session, onOpenPath) => <Explorer onOpenPath={onOpenPath} />}
         onOpenExplorerFile={(sessionId, path) => setOpenFile({ sessionId, path })}
-        newSessionViewActive={creatingProjectId !== null}
-        newSessionView={
-          <div className="grid flex-1 place-items-center bg-canvas">
-            <div className="rounded-xl border border-line bg-panel px-8 py-6 text-center">
-              <div className="text-sm font-semibold text-text-bright">New session</div>
-              <div className="mt-1 text-xs text-dim">Project: {projects.find((project) => project.id === creatingProjectId)?.name ?? "new project"}</div>
-            </div>
+        showEmpty={creatingProjectId !== null}
+        homeComposer={
+          <div className="rounded-xl border border-line bg-panel px-8 py-6 text-center">
+            <div className="text-sm font-semibold text-text-bright">New session</div>
+            <div className="mt-1 text-xs text-dim">Project: {projects.find((project) => project.id === creatingProjectId)?.name ?? "new project"}</div>
           </div>
         }
         renderConversation={(session) => {
