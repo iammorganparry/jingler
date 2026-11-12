@@ -1,5 +1,15 @@
 # @jingler/desktop
 
+## 0.28.0
+
+### Minor Changes
+
+- df294e4: New opt-in AI telemetry: turn on Settings › General › Privacy › Share AI telemetry to send each agent turn (your prompt, the agent's reply, tool calls and their output, model, tokens and cost) to Jingler's PostHog so we can debug problems you hit. It's off unless you turn it on.
+
+### Patch Changes
+
+- @jingler/plannotator-ext@0.28.0
+
 ## 0.27.4
 
 ### Patch Changes
