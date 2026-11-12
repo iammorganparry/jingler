@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom"
 import { useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
-import { activeCheckoutOf, checkoutById, workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
+import { activeCheckoutOf, checkoutById, sessionPrsOf, workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
 import { isLanguageHoverPath } from "@jingler/contracts"
 import {
@@ -34,7 +34,7 @@ import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, Maximize2, Mes
 import type { FileBrowserController } from "./use-file-browser.js"
 import { fileSurfaceId, openSessionFileDiff, parseFileSurface, useFileBrowser } from "./use-file-browser.js"
 import { setReviewFilter, setReviewTrayHidden, useReviewTrayHidden, useSessionReviewState } from "./review-store.js"
-import { useReview } from "./use-review.js"
+import { reviewPrNumber, useReview } from "./use-review.js"
 import { ChangesExplorerPanel, useChangesReview, useReviewTurns } from "./changes-review.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
@@ -200,7 +200,7 @@ function useExplorerAgentActivity(session: Session): AssetAgentActivity {
 export function FileBrowserExplorer({ session, connected = false, onOpenPath }: FileBrowserExplorerProps) {
   const browser = useFileBrowser(session.id, activeCheckoutOf(session).worktreePath)
   const agentActivity = useExplorerAgentActivity(session)
-  const { filter } = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
+  const { filter, prLayer } = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
   // Show the diff actually listed: a PR with nothing fetchable (GitHub offline)
   // falls back to the uncommitted changes, and the control must not claim "PR".
   const { source, files } = useReview(session)
@@ -236,10 +236,10 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
       filter={shownFilter}
       onFilterChange={(next) => setReviewFilter(session.id, activeCheckoutOf(session).prNumber, next)}
       localAvailable={activeCheckoutOf(session).worktreePath != null}
-      prAvailable={activeCheckoutOf(session).prNumber != null}
+      prAvailable={sessionPrsOf(session).length > 0}
       localCount={localCount}
       prCount={prCount}
-      prNumber={activeCheckoutOf(session).prNumber ?? undefined}
+      prNumber={reviewPrNumber(session, undefined, prLayer) ?? undefined}
     >
         {filter !== "all" ? (
           <ChangesExplorerPanel

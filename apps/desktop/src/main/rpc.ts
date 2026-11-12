@@ -2157,7 +2157,7 @@ export const githubFiles = (sessionId: string, prNumber?: number, checkoutId?: s
 /** `Github.diff` handler — a PR layer's unified diff (empty without a linked PR). */
 export const githubDiff = (sessionId: string, prNumber?: number, checkoutId?: string) =>
   Effect.gen(function* () {
-    const resolved = yield* resolveCheckoutSession(sessionId, checkoutId);
+    const resolved = yield* resolveCheckoutSession(sessionId, checkoutId, prNumber);
     if (!resolved) return "";
     const { checkout } = resolved;
     if (!checkout.worktreePath) return "";

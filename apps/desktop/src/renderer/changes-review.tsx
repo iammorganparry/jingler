@@ -26,7 +26,7 @@ import {
 import { reviewCommentsContext } from "./review-references.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { useAgentTrees } from "./use-agent-trees.js"
-import { useReview } from "./use-review.js"
+import { reviewPrNumber, useReview } from "./use-review.js"
 import { useViewedChild } from "./subagent-tab-store.js"
 import { scopeBarState } from "./subagent-scope.js"
 import { useSubagentView } from "./use-subagent-view.js"
@@ -88,7 +88,7 @@ export function useChangesReview(session: Session, connected: boolean, checkoutI
 
 /** What the Changes rail button does: show this session's changes in the Explorer. */
 export const revealSessionChanges = (session: Session): void =>
-  setReviewFilter(session.id, activeCheckoutOf(session).prNumber, activeCheckoutOf(session).prNumber != null ? "pr" : "local")
+  setReviewFilter(session.id, activeCheckoutOf(session).prNumber, sessionPrsOf(session).length > 0 ? "pr" : "local")
 
 /** The agent turns that changed files, and which one the Changes list is narrowed to. */
 export function useReviewTurns(session: Session) {
@@ -197,7 +197,7 @@ function CheckoutChangesList({
       turnId={active ? (turn?.id ?? null) : null}
       onTurnChange={setTurn}
       prLayers={active ? sessionPrsOf(session) : []}
-      prNumber={prLayer ?? activeCheckoutOf(session).prNumber}
+      prNumber={reviewPrNumber(session, checkoutId, prLayer)}
       onPrNumberChange={selectLayer}
       files={files}
       chatScope={chatScope}
