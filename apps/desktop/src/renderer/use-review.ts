@@ -8,7 +8,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrFileChange, PrReviewThread, Session } from "@jingler/core"
-import { activeCheckoutOf } from "@jingler/core"
+import { activeCheckoutOf, checkoutById, sessionPrsOf } from "@jingler/core"
 import type { ReviewOmittedFile } from "@jingler/ui"
 import { diffBlocks, diffForPath } from "./review-diff-blocks.js"
 import { rpc } from "./rpc-client.js"
@@ -120,6 +120,14 @@ const reviewThreadsFor = (
 const checkoutKeyPart = (checkoutId: string | undefined): ReadonlyArray<string> =>
   checkoutId === undefined ? [] : [checkoutId]
 
+/**
+ * The PR a review reads: the chosen stack layer, else the named checkout's top,
+ * else the session's top PR — another repo's when the active checkout has none,
+ * so switching repos mid-session never blanks the Files view.
+ */
+export const reviewPrNumber = (session: Session, checkoutId: string | undefined, prLayer: number | null): number | null =>
+  prLayer ?? (checkoutId === undefined ? sessionPrsOf(session).at(-1)?.number : checkoutById(session, checkoutId).prNumber) ?? null
+
 const loadStateOf = (query: {
   readonly isLoading: boolean
   readonly error: Error | null
@@ -151,18 +159,19 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   // session pane (the review tray, the Explorer, the Files view), so unfiltered
   // it would diff every open session in the background for nothing.
   const reviewing = filter !== "all" || drafts.length > 0
+  const prNumber = reviewPrNumber(session, checkoutId, shared.prLayer)
 
   const prQuery = useQuery({
-    queryKey: ["github", "review", session.id, activeCheckoutOf(session).prNumber, shared.prLayer, ...checkoutKeyPart(checkoutId)],
-    enabled: reviewing && activeCheckoutOf(session).prNumber != null,
+    queryKey: ["github", "review", session.id, prNumber, ...checkoutKeyPart(checkoutId)],
+    enabled: reviewing && prNumber !== null,
     queryFn: async () => {
       // Settle independently: the file list and the diff are separate fetches
       // with separate permission surfaces, and a diff failure must not blank an
       // otherwise-complete review. (A single Promise.all rejection here showed
       // "No changes to review" even when 25 files had loaded.)
       const [filesResult, diffResult] = await Promise.allSettled([
-        rpc.githubFiles(session.id, shared.prLayer ?? undefined, checkoutId),
-        rpc.githubDiff(session.id, shared.prLayer ?? undefined, checkoutId)
+        rpc.githubFiles(session.id, prNumber ?? undefined, checkoutId),
+        rpc.githubDiff(session.id, prNumber ?? undefined, checkoutId)
       ])
       if (filesResult.status === "rejected") throw filesResult.reason
       return {
@@ -180,9 +189,9 @@ export function useReview(session: Session, checkoutId?: string): ReviewState {
   // within the stale window and never re-detected — a session stayed on its
   // old PR after a new one was opened.
   const threadsQuery = useQuery({
-    queryKey: threadsKey(session.id, activeCheckoutOf(session).prNumber),
-    queryFn: () => rpc.githubPr(session.id, undefined, checkoutId),
-    enabled: reviewing && filter === "pr" && activeCheckoutOf(session).prNumber != null
+    queryKey: threadsKey(session.id, prNumber),
+    queryFn: () => rpc.githubPr(session.id, prNumber ?? undefined, checkoutId),
+    enabled: reviewing && filter === "pr" && prNumber !== null
   })
   const localQuery = useQuery({
     queryKey: localKey(session.id, checkoutId),
