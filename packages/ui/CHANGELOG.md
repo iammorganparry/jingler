@@ -1,5 +1,14 @@
 # @jingler/ui
 
+## 0.27.4
+
+### Patch Changes
+
+- 3759f58: Home is now New session. Home's composer is the full New session composer (Auto repo, project, source, model, mode, environment), and every New session entry point (sidebar, ⌘N, command palette) takes you Home with the composer focused.
+  - @jingler/contracts@0.27.4
+  - @jingler/core@0.27.4
+  - @jingler/themes@0.27.4
+
 ## 0.27.3
 
 ### Patch Changes

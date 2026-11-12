@@ -1,5 +1,13 @@
 # @jingler/desktop
 
+## 0.27.4
+
+### Patch Changes
+
+- 3759f58: Home is now New session. Home's composer is the full New session composer (Auto repo, project, source, model, mode, environment), and every New session entry point (sidebar, ⌘N, command palette) takes you Home with the composer focused.
+- 0c280cb: Fixed the PR's Files view showing no changes in a multi-repo session after the agent switched to a repo without a PR. Changes now reads the PR from the checkout that owns it.
+  - @jingler/plannotator-ext@0.27.4
+
 ## 0.27.3
 
 ### Patch Changes
