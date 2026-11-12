@@ -30,7 +30,7 @@
  */
 import { readFile, realpath, stat } from "node:fs/promises"
 import { extname, join, resolve, sep } from "node:path"
-import { protocol, type CustomScheme } from "electron"
+import { protocol } from "electron"
 // Imported for their EXPORT NAMES only — the shims re-export off the renderer's
 // instances at runtime, never off these. Main and the renderer each load their
 // own copy of React; that is fine precisely because nothing here is ever called.
@@ -226,10 +226,8 @@ const notFound = () => new Response("Not found", { status: 404 })
  * - `supportFetchAPI` lets a plugin `fetch()` its own bundled assets.
  * - `stream` matters for anything large enough to be worth not buffering.
  */
-export const registerPluginScheme = (...extra: ReadonlyArray<CustomScheme>): void => {
-  // Electron honours only the first call, so every privileged scheme goes in this one.
+export const registerPluginScheme = (): void => {
   protocol.registerSchemesAsPrivileged([
-    ...extra,
     {
       scheme: PLUGIN_SCHEME,
       privileges: {

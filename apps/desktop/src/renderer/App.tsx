@@ -166,7 +166,6 @@ import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useMcpSettings } from "./use-mcp-settings.js";
 import { useVoiceSettings } from "./use-voice-settings.js";
-import { applyTelemetry } from "./telemetry.js";
 import { McpImportPrompt } from "./mcp-import-prompt.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useProviderConnect } from "./use-provider-connect.js";
@@ -607,11 +606,6 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
-  const telemetryEnabled = configQuery.data?.telemetryEnabled;
-  const configLoaded = configQuery.data !== undefined;
-  useEffect(() => {
-    if (configLoaded) applyTelemetry(telemetryEnabled);
-  }, [configLoaded, telemetryEnabled]);
   const obsidianVaultConfigured = useObsidianVaultConfigured();
   const webSearchQuery = useQuery({
     queryKey: ["web-search-settings"],

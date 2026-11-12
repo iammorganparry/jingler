@@ -1,4 +1,5 @@
 import { submitBugReport } from "./bug-report.js"
+import { observeTurn } from "./ai-telemetry.js";
 import { archiveMetadataOnly, restoreMetadataOnly } from "./metadata-only-archive.js"
 import { RoutinesService } from "./routines.js"
 import { AssetWriteIoError } from "@jingler/core";
@@ -5688,15 +5689,20 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           {
             execute: () =>
               Effect.succeed(
-                runner.prompt(
+                observeTurn(
                   sessionId,
                   chatId,
-                  text,
-                  images ?? [],
-                  reasoning,
-                  undefined,
-                  externalInstruction,
-                  displayText,
+                  displayText ?? text,
+                  runner.prompt(
+                    sessionId,
+                    chatId,
+                    text,
+                    images ?? [],
+                    reasoning,
+                    undefined,
+                    externalInstruction,
+                    displayText,
+                  ),
                 ),
               ),
           },

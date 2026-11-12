@@ -328,7 +328,7 @@ export interface JinglerAppProps {
   /** Multiplier for conversation + code text size; absent means 1×. */
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => Promise<void> | void
-  /** Usage telemetry + session replay; absent means on. */
+  /** AI telemetry (prompts, replies, tool calls); absent means off. */
   telemetryEnabled?: boolean | null
   onSaveTelemetryEnabled?: (enabled: boolean) => Promise<void> | void
   /**

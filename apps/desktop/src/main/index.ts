@@ -41,7 +41,6 @@ import { applyDefaultAuthUrl } from "./auth-endpoint.js"
 import { jinglerRoot } from "./app-paths.js"
 import { isExternallyOpenable, sameOrigin } from "./window-guards.js"
 import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
-import { registerTelemetryProtocolHandler, telemetrySchemePrivileges } from "./telemetry-proxy.js"
 import { makeHostRequestHandler, spawnHostProcess } from "./plugin-host-bridge.js"
 import { installPluginHost } from "./plugin-host-install.js"
 import { nativeConsentPrompt } from "./plugin-consent.js"
@@ -434,7 +433,7 @@ if (!gotPrimaryLock) {
   // privileged-scheme table when the protocol subsystem starts, so a call made
   // after ready is silently ignored and every plugin module 404s with nothing
   // in the log to say why.
-  registerPluginScheme(telemetrySchemePrivileges)
+  registerPluginScheme()
 
   // e2e: Chromium's fake mic (synthetic tone) with no permission prompt.
   if (process.env.JINGLER_E2E === "1") {
@@ -471,7 +470,6 @@ if (!gotPrimaryLock) {
     // Now that the subsystem is up, attach the handler that actually serves
     // plugin files (and the runtime shims) out of `~/jingler/plugins`.
     registerPluginProtocolHandler()
-    registerTelemetryProtocolHandler()
 
     // Hand the host service its Electron-shaped pieces. No process is spawned
     // here — the first activation event does that, which is the whole point of

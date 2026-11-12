@@ -286,7 +286,7 @@ export interface SettingsViewProps {
   /** Multiplier for conversation + code text size; absent means 1×. */
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
-  /** Usage telemetry + session replay; absent means on. */
+  /** AI telemetry (prompts, replies, tool calls); absent means off. */
   telemetryEnabled?: boolean | null
   onSaveTelemetryEnabled?: (enabled: boolean) => void | Promise<void>
   /** Close the view and return to the active session. */
@@ -1288,8 +1288,8 @@ function GeneralSection({
   onSaveTelemetryEnabled?: (enabled: boolean) => void | Promise<void>
   webSearch?: WebSearchSettingsProps
 }) {
-  const [telemetryDraft, setTelemetryDraft] = React.useState<boolean>(telemetryEnabled ?? true)
-  React.useEffect(() => setTelemetryDraft(telemetryEnabled ?? true), [telemetryEnabled])
+  const [telemetryDraft, setTelemetryDraft] = React.useState<boolean>(telemetryEnabled ?? false)
+  React.useEffect(() => setTelemetryDraft(telemetryEnabled ?? false), [telemetryEnabled])
   const [offloadDraft, setOffloadDraft] = React.useState<boolean>(
     offloadCompute?.enabled ?? false
   )
@@ -1461,12 +1461,13 @@ function GeneralSection({
         {onSaveTelemetryEnabled ? (
           <SettingsCard title="Privacy">
             <GeneralToggleRow
-              label="Share usage data and session replays"
-              description="Helps us debug problems you hit. Replays record clicks and layout with all text and inputs masked, so your code and prompts are never sent. Terminal output is not recorded."
+              label="Share AI telemetry"
+              description="Sends each agent turn to Jingler's PostHog so we can debug problems you hit: your prompts, the agent's replies, tool calls and their output, model, tokens and cost. This can include code and file paths. Off unless you turn it on."
               checked={telemetryDraft}
               onChange={(next) => {
                 setTelemetryDraft(next)
-                void onSaveTelemetryEnabled(next)
+                // A failed save must not leave the switch claiming a state that isn't in effect.
+                Promise.resolve(onSaveTelemetryEnabled(next)).catch(() => setTelemetryDraft(!next))
               }}
             />
           </SettingsCard>

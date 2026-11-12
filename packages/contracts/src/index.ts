@@ -1429,7 +1429,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: Schema.Struct({ defaultMode: ExecutionMode })
   }),
 
-  /** Opt in or out of usage telemetry and session replay. */
+  /** Opt in or out of AI telemetry (prompts, replies, tool calls per turn). */
   Rpc.make("Config.setTelemetryEnabled", {
     success: WorkspaceConfig,
     error: ConfigError,

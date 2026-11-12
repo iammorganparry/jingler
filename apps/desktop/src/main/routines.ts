@@ -5,6 +5,7 @@ import { GitError, type RoutineInput, type RoutineRun } from "@jingler/core"
 import { Effect, Runtime, Stream } from "effect"
 import { revalidateRoutineAuth, routineStartup } from "./routine-auth.js"
 import { RoutineScheduler } from "./routine-scheduler.js"
+import { observeTurn } from "./ai-telemetry.js"
 
 export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/Routines", {
   effect: Effect.gen(function* () {
@@ -56,7 +57,7 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
         signal.addEventListener("abort", stop, { once: true })
         try {
           if (signal.aborted) throw new Error("Routine cancelled before prompt")
-          await runEffect(runner.prompt(session.id, chatId, routine.prompt, [], routine.reasoning).pipe(Stream.runForEach(event => Effect.sync(() => {
+          await runEffect(observeTurn(session.id, chatId, routine.prompt, runner.prompt(session.id, chatId, routine.prompt, [], routine.reasoning)).pipe(Stream.runForEach(event => Effect.sync(() => {
             if (event._tag === "Done" && status !== "needs-attention") { status = "succeeded"; message = "Completed" }
             if (event._tag === "Failed" && status !== "needs-attention") { status = "failed"; message = event.message }
             if (event._tag === "GateRequested" || event._tag === "QuestionRequested") { status = "needs-attention"; message = "Operator approval or answer required"; stop() }

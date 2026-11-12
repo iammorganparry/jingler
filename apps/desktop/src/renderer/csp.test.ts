@@ -84,13 +84,12 @@ describe("renderer CSP", () => {
     expect(directive("default-src")).toBe("default-src 'self'")
   })
 
-  it("does NOT widen connect-src to any internet origin", () => {
+  it("does NOT widen connect-src for plugins", () => {
     // A plugin's renderer half can be loaded from disk but must not be able to
     // phone home. Outbound traffic belongs in the extension host, where the
     // operator's consent for a provider and its scopes is recorded and
-    // revocable. The one addition is the telemetry proxy scheme, which main
-    // only forwards to our PostHog project (main/telemetry-proxy.ts).
-    expect(directive("connect-src")).toBe("connect-src 'self' jingler-telemetry:")
+    // revocable. `connect-src` is absent, so it inherits `default-src 'self'`.
+    expect(directive("connect-src")).toBe("")
     expect(directive("default-src")).toBe("default-src 'self'")
   })
 

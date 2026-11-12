@@ -47,7 +47,6 @@
     "electron-updater": "^6.3.9",
     "jiti": "^2.7.0",
     "pi-subagents": "0.84.0",
-    "posthog-js": "1.440.0",
     "ws": "^8.18.0",
     "xstate": "^5.32.4"
   },

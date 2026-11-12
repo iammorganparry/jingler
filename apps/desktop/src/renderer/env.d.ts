@@ -5,9 +5,9 @@
 declare const __APP_VERSION__: string
 
 interface ImportMetaEnv {
-  /** PostHog project token, set at build time. Absent means telemetry never starts. */
+  /** PostHog project token, set at build time (read by main). Absent means AI telemetry never sends. */
   readonly VITE_POSTHOG_KEY?: string
-  /** PostHog ingestion host the main-process proxy forwards to; defaults to EU cloud. */
+  /** PostHog ingestion host; defaults to US cloud. */
   readonly VITE_POSTHOG_HOST?: string
 }
 
