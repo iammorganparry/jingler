@@ -923,6 +923,8 @@ export const rpc = {
   /** Turn plan mode's unattended (read-only) command execution on or off. */
   configSetDefaultMode: (defaultMode: ExecutionMode): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setDefaultMode({ defaultMode })),
+  configSetTelemetryEnabled: (enabled: boolean): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setTelemetryEnabled({ enabled })),
   configSetSubagentDelegationEnabled: (enabled: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setSubagentDelegationEnabled({ enabled })),
   configSetSubagentModel: (

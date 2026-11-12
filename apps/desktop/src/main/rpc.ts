@@ -1,4 +1,5 @@
 import { submitBugReport } from "./bug-report.js"
+import { observeTurn } from "./ai-telemetry.js";
 import { archiveMetadataOnly, restoreMetadataOnly } from "./metadata-only-archive.js"
 import { RoutinesService } from "./routines.js"
 import { AssetWriteIoError } from "@jingler/core";
@@ -5676,7 +5677,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     reasoning,
     externalInstruction,
   }) =>
-    Stream.unwrap(
+    observeTurn(sessionId, chatId, displayText ?? text, Stream.unwrap(
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId);
         const runner = yield* AgentRunner;
@@ -5771,7 +5772,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           ),
         ),
       ),
-    ),
+    )),
   "Agent.decideGate": ({ sessionId, chatId, gateId, decision }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
@@ -6182,6 +6183,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ConfigService.setNotifications(notifications),
   "Config.setDefaultMode": ({ defaultMode }) =>
     ConfigService.setDefaultMode(defaultMode),
+  "Config.setTelemetryEnabled": ({ enabled }) =>
+    ConfigService.setTelemetryEnabled(enabled),
   "Config.setSubagentDelegationEnabled": ({ enabled }) =>
     ConfigService.setSubagentDelegationEnabled(enabled),
   "Config.setSubagentModel": ({ providerId, agent, modelId }) =>

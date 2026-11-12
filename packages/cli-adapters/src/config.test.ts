@@ -69,6 +69,13 @@ describe("ConfigService", () => {
     if (exit._tag === "Success") expect(exit.value.subagentDelegationEnabled).toBe(false)
   })
 
+  it("persists a telemetry opt-out across unrelated saves", async () => {
+    await provided(ConfigService.setTelemetryEnabled(false))
+    const exit = await provided(ConfigService.setPlanAutoRun(true))
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") expect(exit.value.telemetryEnabled).toBe(false)
+  })
+
   it("migrates legacy subagent assignments into provider scopes", async () => {
     mkdirSync(temp.root, { recursive: true })
     writeFileSync(`${temp.root}/config.json`, JSON.stringify({

@@ -13,6 +13,7 @@ import { defineConfig } from "vitest/config"
  * needs it.
  */
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify("0.0.0-test") },
   test: {
     name: "desktop",
     environment: "node",

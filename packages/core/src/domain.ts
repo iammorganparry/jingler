@@ -1251,6 +1251,8 @@ export const WorkspaceConfig = Schema.Struct({
   subagentModelsByProvider: Schema.optional(SubagentProviderModelAssignments),
   /** Default-on master switch for orchestrator delegation. */
   subagentDelegationEnabled: Schema.optional(Schema.Boolean),
+  /** AI telemetry (PostHog): prompts, replies and tool calls per turn. Opt-in: only an explicit true sends anything. */
+  telemetryEnabled: Schema.optional(Schema.Boolean),
   connectionSelectionRequired: Schema.optional(Schema.Boolean),
   /** First-run provider authentication was completed or explicitly skipped. */
   providerSetupCompleted: Schema.optional(Schema.Boolean),

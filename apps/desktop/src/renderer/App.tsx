@@ -747,6 +747,10 @@ function AuthedApp({
     rpc.configSetFontScale(value).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
+  const saveTelemetryEnabled = (enabled: boolean) =>
+    rpc.configSetTelemetryEnabled(enabled).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
 
   /**
    * Settings › Themes.
@@ -1836,6 +1840,8 @@ function AuthedApp({
         onSaveResponseStyle={saveResponseStyle}
         fontScale={fontScale}
         onSaveFontScale={saveFontScale}
+        telemetryEnabled={configQuery.data?.telemetryEnabled}
+        onSaveTelemetryEnabled={saveTelemetryEnabled}
         themes={themeSettings}
         plugins={plugins}
         devices={{

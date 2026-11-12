@@ -4,6 +4,13 @@
 // electron.vite.config.ts). Available in main, preload and renderer.
 declare const __APP_VERSION__: string
 
+interface ImportMetaEnv {
+  /** PostHog project token, set at build time (read by main). Absent means AI telemetry never sends. */
+  readonly VITE_POSTHOG_KEY?: string
+  /** PostHog ingestion host; defaults to US cloud. */
+  readonly VITE_POSTHOG_HOST?: string
+}
+
 // The narrow, safe surface the preload bridge exposes on `window`. It only
 // shuttles opaque RPC frames — no business logic lives here. See
 // `src/preload/index.ts` and `src/renderer/rpc-client.ts`.

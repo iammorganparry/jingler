@@ -286,6 +286,9 @@ export interface SettingsViewProps {
   /** Multiplier for conversation + code text size; absent means 1×. */
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
+  /** AI telemetry (prompts, replies, tool calls); absent means off. */
+  telemetryEnabled?: boolean | null
+  onSaveTelemetryEnabled?: (enabled: boolean) => void | Promise<void>
   /** Close the view and return to the active session. */
   onClose?: () => void
   /** Recovery actions open directly on GitHub; ordinary Settings opens Providers. */
@@ -355,6 +358,8 @@ export function SettingsView({
   onSaveResponseStyle,
   fontScale,
   onSaveFontScale,
+  telemetryEnabled,
+  onSaveTelemetryEnabled,
   onClose,
   initialSection = "providers"
 }: SettingsViewProps) {
@@ -427,6 +432,8 @@ return (<GeneralSection
           onSaveResponseStyle={onSaveResponseStyle}
           fontScale={fontScale}
           onSaveFontScale={onSaveFontScale}
+          telemetryEnabled={telemetryEnabled}
+          onSaveTelemetryEnabled={onSaveTelemetryEnabled}
           webSearch={webSearch}
         />)
 }
@@ -1257,6 +1264,8 @@ function GeneralSection({
   onSaveResponseStyle,
   fontScale,
   onSaveFontScale,
+  telemetryEnabled,
+  onSaveTelemetryEnabled,
   webSearch
 }: {
   obsidianExplanations?: ObsidianExplanationsConfig | null
@@ -1275,8 +1284,12 @@ function GeneralSection({
   onSaveResponseStyle?: (responseStyle: ResponseStyle) => void | Promise<void>
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
+  telemetryEnabled?: boolean | null
+  onSaveTelemetryEnabled?: (enabled: boolean) => void | Promise<void>
   webSearch?: WebSearchSettingsProps
 }) {
+  const [telemetryDraft, setTelemetryDraft] = React.useState<boolean>(telemetryEnabled ?? false)
+  React.useEffect(() => setTelemetryDraft(telemetryEnabled ?? false), [telemetryEnabled])
   const [offloadDraft, setOffloadDraft] = React.useState<boolean>(
     offloadCompute?.enabled ?? false
   )
@@ -1444,6 +1457,22 @@ function GeneralSection({
         </SettingsCard>
 
         {webSearch ? <WebSearchSettings {...webSearch} /> : null}
+
+        {onSaveTelemetryEnabled ? (
+          <SettingsCard title="Privacy">
+            <GeneralToggleRow
+              label="Share AI telemetry"
+              description="Sends each agent turn to Jingler's PostHog so we can debug problems you hit: your prompts, the agent's replies, tool calls and their output, model, tokens and cost. This can include code, file paths and anything secret a tool prints, like keys from a .env file. Off unless you turn it on."
+              checked={telemetryDraft}
+              onChange={(next) => {
+                setTelemetryDraft(next)
+                // A failed save must not leave the switch claiming a state that isn't in effect.
+                // The executor runs synchronously, so a throw also lands in catch.
+                new Promise<void>((resolve) => resolve(onSaveTelemetryEnabled(next))).catch(() => setTelemetryDraft(!next))
+              }}
+            />
+          </SettingsCard>
+        ) : null}
 
         {obsidianVaultConfigured ? (
           <SettingsCard title="Obsidian">
