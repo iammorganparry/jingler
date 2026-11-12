@@ -344,11 +344,9 @@ export function SessionConversation(props: SessionConversationProps) {
     props.onNewSession?.()
   }
 
-         function getProps() {
-           if (props.pullRequestsView) return (props.pullRequestsView)
-           if (props.issuesView) return (props.issuesView)
-           if (props.settingsView) return (props.settingsView)
-           if (props.showEmpty) return (<EmptyConversation
+  const takeover = props.pullRequestsView || props.issuesView || props.settingsView || null
+  const homeVisible = !takeover && Boolean(props.showEmpty)
+  const home = (<EmptyConversation
             version={props.version}
             composer={props.homeComposer}
             onStartFrom={props.onStartFrom}
@@ -360,6 +358,9 @@ export function SessionConversation(props: SessionConversationProps) {
             today={props.homeToday}
             onOpenSession={props.onSelectSession}
           />)
+         function getProps() {
+           if (takeover) return takeover
+           if (props.showEmpty) return null
            return (<SessionSplit
             group={group}
             sessions={props.sessions}
@@ -494,6 +495,10 @@ export function SessionConversation(props: SessionConversationProps) {
       />
 
       <div data-testid="session-main-pane" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-hairline bg-editor">
+        {/* A pending or failed remote create keeps Home mounted while hidden, so its form (and Retry) survives navigation. */}
+        {homeVisible || (props.homeComposer !== undefined && props.pendingEnvironmentSession)
+          ? <div className={homeVisible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>{home}</div>
+          : null}
         {getProps()}
       </div>
     </div>

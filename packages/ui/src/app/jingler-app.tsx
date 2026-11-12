@@ -640,7 +640,7 @@ onOpenMcpSettings: providerConnections ? () => openSettings("connectors") : unde
 
 
 
-        homeActive={showEmpty && !pullRequestsOpen && !settingsOpen && inboxView !== "issues"}
+        homeActive={homeActive}
         onOpenHome={() => {
           setPullRequestsOpen(false)
           setSettingsOpen(false)
@@ -841,7 +841,10 @@ function getActiveTabContext(active: Session) {
     return (onCreateSession ? (
             <NewWorkspaceView
               open
-              focusKey={composerFocus}
+              // Home coming back into view refocuses, as its remount used to.
+              focusKey={`${composerFocus}:${homeActive}`}
+              startFrom={startFromRequest}
+              onDismissStartup={() => sendEnvironmentStartup({ type: "DISMISS" })}
               onClose={() => {
                 setRequestedNewSession(null)
                 if (pendingEnvironmentSession?.error) sendEnvironmentStartup({ type: "DISMISS" })
@@ -864,7 +867,8 @@ function getActiveTabContext(active: Session) {
               requestedSource={requestedNewSession?.source}
               requestedBaseBranch={requestedNewSession?.baseBranch}
               requestedIsolation={requestedNewSession?.isolation}
-              voiceProvider={props.homeVoiceProvider}
+              // Hidden Home must not own the global hold-to-talk key.
+              voiceProvider={homeActive ? props.homeVoiceProvider : undefined}
               providerCatalog={providerConnections?.catalog}
               agentEndpointCatalog={agentEndpointCatalog}
               defaultConnectionId={providerConnections?.defaultConnectionId}
@@ -1094,6 +1098,8 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
     },
     [selectSession]
   )
+  const [startFromRequest, setStartFromRequest] = useState<{ source: "blank" | "pr" | "github"; nonce: number } | null>(null)
+  const startFrom = (source: "pr" | "github") => setStartFromRequest({ source, nonce: Date.now() })
   // Home is New session: every entry point (⌘N, sidebar, palette) lands there with the composer focused.
   const goHome = split.goHome
   const openHomeComposer = useCallback((projectId: string | null) => {
@@ -1103,12 +1109,12 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
     // A plain open defaults to the active workspace's repo, read before goHome() clears the active session.
     setSelectedProjectId(projectId ?? workspaceProjectState(sessions.find((s) => s.id === selected) ?? null, projects).activeProjectId ?? null)
     goHome()
+    // A starter's PR/issue source with nothing picked disables the composer; New session starts from a blank task.
+    setStartFromRequest({ source: "blank", nonce: Date.now() })
     setComposerFocus((n) => n + 1)
   }, [goHome, sessions, selected, projects])
   const openNewSession = useCallback(() => openHomeComposer(null), [openHomeComposer])
   const openNewSessionForProject = useCallback((projectId: string) => openHomeComposer(projectId), [openHomeComposer])
-  const startFrom = (source: "pr" | "github") =>
-    setRequestedNewSession({ projectId: newWorkspaceDefaultProjectId() ?? "", source, nonce: Date.now() })
 
   const openPendingEnvironmentSession = useCallback(() => {
     setPullRequestsOpen(false)
@@ -1248,6 +1254,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
   // leaves no group at all, and that is the only thing the first-launch screen
   // should answer to.
   const showEmpty = Boolean(renderConversation) && group === null
+  const homeActive = showEmpty && !pullRequestsOpen && !settingsOpen && inboxView !== "issues"
 
   // ⌘N opens New Session; the rest is Arc's split map. Which chord means what is
   // `matchSplitShortcut`'s job — a pure function, and its own unit test, because

@@ -84,7 +84,7 @@ export type NewWorkspaceEvent =
   | { type: "SET_ENVIRONMENT"; environmentId: string }
   | { type: "SET_ISOLATION"; isolation: "worktree" | "direct" }
   | { type: "SET_BASE"; baseBranch: string }
-  | { type: "SET_SOURCE"; source: NewSessionSource }
+  | { type: "SET_SOURCE"; source: NewSessionSource; keepDraft?: boolean }
   | { type: "SET_SEARCH"; search: string }
   | { type: "SET_MINE"; mine: boolean }
   | { type: "RETRY_SOURCE" }
@@ -463,7 +463,7 @@ export const newWorkspaceMachine = setup({
       : {}),
     setMode: assign(({ event }) => event.type === "SET_MODE" ? { mode: event.mode } : {}),
     setReasoning: assign(({ event }) => event.type === "SET_REASONING" ? { reasoning: event.reasoning } : {}),
-    setSource: assign(({ event }) => event.type === "SET_SOURCE" ? { ...resetSource, source: event.source, draft: "", error: null } : {}),
+    setSource: assign(({ context, event }) => event.type === "SET_SOURCE" ? { ...resetSource, source: event.source, draft: event.keepDraft ? context.draft : "", error: null } : {}),
     applyBranches: assign(({ context, event }) => {
       const output = (event as unknown as { output: { project: Project | null; branches: ReadonlyArray<string> } }).output
       return {

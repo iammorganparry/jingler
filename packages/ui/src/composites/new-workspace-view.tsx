@@ -82,10 +82,12 @@ function EnvironmentStartupProgress({
   error,
   environment,
   onRetry,
+  onDismiss,
 }: {
   phase: SessionCreationPhase | null;
   error?: string | null;
   onRetry?: () => void;
+  onDismiss?: () => void;
   environment: Pick<Environment, "kind" | "name">;
 }) {
   const renderStartupStep = ((step, index) => {
@@ -188,7 +190,7 @@ function EnvironmentStartupProgress({
           {error}
         </p>
       )}
-      {error && onRetry && <div className="mt-4 flex justify-end"><Button onClick={onRetry}>Retry</Button></div>}
+      {error && (onRetry || onDismiss) && <div className="mt-4 flex justify-end gap-2">{onDismiss && <Button variant="ghost" onClick={onDismiss}>Back to edit</Button>}{onRetry && <Button onClick={onRetry}>Retry</Button>}</div>}
     </section>
   );
 }
@@ -234,8 +236,12 @@ export interface NewWorkspaceViewProps {
   onClose: () => void;
   /** Adds the mic to the composer; omitted hosts get no voice input. */
   voiceProvider?: HomeVoiceProvider;
-  /** Bumped to refocus the composer (⌘N while already on Home). */
-  focusKey?: number;
+  /** Changes to refocus the composer (⌘N, or Home coming back into view). */
+  focusKey?: number | string;
+  /** Clears the app-owned failed remote startup so the form can be edited again. */
+  onDismissStartup?: () => void;
+  /** Home's starters (and New session, back to blank): switch the live form's source, keeping its project and draft. */
+  startFrom?: { readonly source: "blank" | "pr" | "github"; readonly nonce: number } | null;
 }
 
 const startupEnvironment = (startup: PendingEnvironmentSession | null | undefined, selected: Environment | undefined) =>
@@ -310,7 +316,7 @@ function ProgressPane({ props, context, send, startup, failed, environment }: {
   props: NewWorkspaceViewProps; context: NewWorkspaceContext; send: WorkspaceSend; startup: boolean; failed: boolean; environment: Environment | undefined
 }) {
   const { provisioningPhase, failedPhase, error } = context
-  if (startup) return <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, environment)} onRetry={() => send({ type: "RETRY_PROVISION" })} />
+  if (startup) return <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, environment)} onRetry={() => send({ type: "RETRY_PROVISION" })} onDismiss={() => { send({ type: "EDIT_AFTER_FAILURE" }); props.onDismissStartup?.() }} />
   return <WorkspaceProvisioning phase={provisioningPhase} failedPhase={failed ? (failedPhase ?? provisioningPhase) : null} error={error} onCancel={() => send({ type: "CANCEL_PROVISION" })} onRetry={() => send({ type: "RETRY_PROVISION" })} onEdit={() => send({ type: "EDIT_AFTER_FAILURE" })} />
 }
 
@@ -425,10 +431,20 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
 
   // Home keeps this view mounted, so a finished create (which closes the machine) starts the next one.
   const closed = state.matches("closed");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only the closed transition reopens; the current request is read, not watched
+  const wasOpen = React.useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the open→closed transition reopens; the current request is read, not watched
   React.useEffect(() => {
-    if (props.open && closed) send(openEvent(props));
+    if (!closed) { wasOpen.current = true; return; }
+    const reopen = wasOpen.current && props.open;
+    wasOpen.current = false;
+    if (reopen) send(openEvent(props));
   }, [closed, props.open, send]);
+
+  const startFromNonce = props.startFrom?.nonce;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the nonce is the trigger
+  React.useEffect(() => {
+    if (props.startFrom) send({ type: "SET_SOURCE", source: props.startFrom.source, keepDraft: true });
+  }, [startFromNonce, send]);
 
   const projectRequest = props.requestedProjectId ?? props.defaultProjectId;
   const previousProjectRequest = React.useRef(projectRequest);
