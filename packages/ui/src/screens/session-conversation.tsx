@@ -290,6 +290,29 @@ export const workspaceProjectState = (activeSession: Session | null, projects: R
   return { activeProjectId, missingRepoPaths, activeMissingProject }
 }
 
+const takeoverOf = (props: SessionConversationProps) => props.pullRequestsView || props.issuesView || props.settingsView || null
+
+/** Home; a pending or failed remote create keeps it mounted while hidden, so its form (and Retry) survives navigation. */
+function HomeSlot({ props, visible }: { props: SessionConversationProps; visible: boolean }) {
+  if (!visible && (props.homeComposer === undefined || !props.pendingEnvironmentSession)) return null
+  return (
+    <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+      <EmptyConversation
+        version={props.version}
+        composer={props.homeComposer}
+        onStartFrom={props.onStartFrom}
+        userName={props.user?.name}
+        sessions={props.sessions}
+        liveActivity={props.liveActivity}
+        allowFor={props.allowFor}
+        importCard={props.importCard}
+        today={props.homeToday}
+        onOpenSession={props.onSelectSession}
+      />
+    </div>
+  )
+}
+
 export function SessionConversation(props: SessionConversationProps) {
   const projects = props.projects ?? []
   const activeSession = props.sessions.find((session) => session.id === props.activeSessionId) ?? null
@@ -344,20 +367,7 @@ export function SessionConversation(props: SessionConversationProps) {
     props.onNewSession?.()
   }
 
-  const takeover = props.pullRequestsView || props.issuesView || props.settingsView || null
-  const homeVisible = !takeover && Boolean(props.showEmpty)
-  const home = (<EmptyConversation
-            version={props.version}
-            composer={props.homeComposer}
-            onStartFrom={props.onStartFrom}
-            userName={props.user?.name}
-            sessions={props.sessions}
-            liveActivity={props.liveActivity}
-            allowFor={props.allowFor}
-            importCard={props.importCard}
-            today={props.homeToday}
-            onOpenSession={props.onSelectSession}
-          />)
+  const takeover = takeoverOf(props)
          function getProps() {
            if (takeover) return takeover
            if (props.showEmpty) return null
@@ -495,10 +505,7 @@ export function SessionConversation(props: SessionConversationProps) {
       />
 
       <div data-testid="session-main-pane" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-hairline bg-editor">
-        {/* A pending or failed remote create keeps Home mounted while hidden, so its form (and Retry) survives navigation. */}
-        {homeVisible || (props.homeComposer !== undefined && props.pendingEnvironmentSession)
-          ? <div className={homeVisible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>{home}</div>
-          : null}
+        <HomeSlot props={props} visible={!takeover && Boolean(props.showEmpty)} />
         {getProps()}
       </div>
     </div>
