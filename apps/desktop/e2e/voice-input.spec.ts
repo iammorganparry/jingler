@@ -163,6 +163,8 @@ test("the chosen language reaches the whisper CLI", async ({ launchApp }) => {
 const openHome = async (launchApp: Parameters<Parameters<typeof test>[2]>[0]["launchApp"], e2eEnv: Record<string, string>) => {
   const launched = await launchApp({ configured: true, withRepo: true, e2eEnv })
   await expect(appShell(launched.window)).toBeVisible()
+  // Home's composer is New session's, which needs a project before it accepts text.
+  await addProject(launched.window, launched.repoPath)
   return { ...launched, composer: launched.window.getByRole("textbox", { name: "What should we build?" }) }
 }
 
@@ -179,7 +181,7 @@ test("dictating on Home puts the transcript in the composer without starting a w
   await window.getByRole("button", { name: "Stop recording", exact: true }).click()
 
   await expect(composer).toHaveValue("Please add a retry to the login test", { timeout: 20_000 })
-  await expect(window.getByTestId("new-session-view")).toHaveCount(0)
+  await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(0)
 })
 
 test("with Superwhisper installed Home's mic drives it and its paste lands in the composer", async ({ launchApp }) => {
@@ -210,12 +212,13 @@ test("holding the key on Home dictates into the composer, and does nothing once 
   await window.keyboard.up("F9")
   await expect(composer).toHaveValue("add a retry to the login test", { timeout: 20_000 })
 
-  await window.getByTestId("new-session").click()
-  await expect(window.getByTestId("new-session-view")).toBeVisible()
+  // New session is Home now, so leave Home through Settings.
+  await window.keyboard.press("Meta+,")
+  await expect(window.getByRole("button", { name: "Close settings", exact: true })).toBeVisible()
   await window.keyboard.down("F9")
   await window.waitForTimeout(500)
   await window.keyboard.up("F9")
-  await window.getByRole("button", { name: "Close new session", exact: true }).click()
+  await window.getByRole("button", { name: "Close settings", exact: true }).click()
   await expect(composer).toBeVisible()
   await expect(window.getByRole("button", { name: "Voice input", exact: true })).toBeEnabled()
   await expect(composer).toHaveValue("")
@@ -227,8 +230,8 @@ test("leaving Home mid-recording stops Superwhisper", async ({ launchApp }) => {
   await composer.click()
   await window.getByRole("button", { name: "Voice input", exact: true }).click()
   await expect(window.getByRole("button", { name: "Stop recording", exact: true })).toBeVisible()
-  await window.getByTestId("new-session").click()
-  await expect(window.getByTestId("new-session-view")).toBeVisible()
+  await window.keyboard.press("Meta+,")
+  await expect(window.getByRole("button", { name: "Close settings", exact: true })).toBeVisible()
   await expect.poll(() => readFileSync(log, "utf8")).toBe("superwhisper://record/start\nsuperwhisper://record/stop\n")
   rmSync(log, { force: true })
 })

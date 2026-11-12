@@ -1,4 +1,4 @@
-import type { HomeStart, HomeVoiceProvider } from "../screens/empty-conversation.js"
+import type { HomeVoiceProvider } from "../screens/empty-conversation.js"
 import type { UserMenuProps } from "../composites/user-menu.js"
 import type { SubagentFleetNode } from "@jingler/core"
 import type { UseSessionTerminals } from "./terminal-panel.js"
@@ -550,8 +550,7 @@ export function JinglerApp(props:  JinglerAppProps) {
   function workspaceNavigationProps() {
     return {
 onNewSession: onCreateSession ? openNewSession : undefined,
-onStartWithPrompt: onCreateSession ? startWithPrompt : undefined,
-loadBranches,
+onStartFrom: onCreateSession ? startFrom : undefined,
 onOpenUsage: onLoadUsage ? openUsage : undefined,
 usage,
 onLoadUsage,
@@ -620,7 +619,6 @@ onOpenMcpSettings: providerConnections ? () => openSettings("connectors") : unde
         allowFor={props.allowFor}
         importCard={props.importCard}
         homeToday={props.renderHomeToday?.()}
-        homeVoiceProvider={props.homeVoiceProvider}
         interruptedSessions={props.interruptedSessions}
         chatActivities={chatActivities}
         prStates={prStates}
@@ -642,11 +640,10 @@ onOpenMcpSettings: providerConnections ? () => openSettings("connectors") : unde
 
 
 
-        homeActive={showEmpty && !pullRequestsOpen && !settingsOpen && !newOpen && inboxView !== "issues"}
+        homeActive={homeActive}
         onOpenHome={() => {
           setPullRequestsOpen(false)
           setSettingsOpen(false)
-          setNewOpen(false)
           setInboxView(null)
           split.goHome()
         }}
@@ -655,17 +652,13 @@ onOpenMcpSettings: providerConnections ? () => openSettings("connectors") : unde
           pullRequestsView
             ? () => {
                 setSettingsOpen(false)
-                setNewOpen(false)
                 setPullRequestsOpen(true)
               }
             : undefined
         }
         pullRequestsView={pullRequestsOpen ? pullRequestsView : undefined}
         {...issuesNavigationProps()}
-        newSessionViewActive={newOpen}
-        newSessionView={
-          renderNewWorkspace()
-        }
+        homeComposer={renderNewWorkspace()}
         settingsView={
           renderSettings()
         }
@@ -826,7 +819,6 @@ function getActiveTabContext(active: Session) {
       onOpenIssues: issuesView
         ? () => {
             setSettingsOpen(false)
-            setNewOpen(false)
             setInboxView("issues")
           }
         : undefined,
@@ -846,11 +838,14 @@ function getActiveTabContext(active: Session) {
   function renderNewWorkspace() {
 
 
-    return ((newOpen || pendingEnvironmentSession !== null) && onCreateSession ? (
+    return (onCreateSession ? (
             <NewWorkspaceView
-              open={newOpen || pendingEnvironmentSession !== null}
+              open
+              // Home coming back into view refocuses, as its remount used to.
+              focusKey={`${composerFocus}:${homeActive}`}
+              startFrom={startFromRequest}
+              onDismissStartup={() => sendEnvironmentStartup({ type: "DISMISS" })}
               onClose={() => {
-                setNewOpen(false)
                 setRequestedNewSession(null)
                 if (pendingEnvironmentSession?.error) sendEnvironmentStartup({ type: "DISMISS" })
               }}
@@ -872,7 +867,8 @@ function getActiveTabContext(active: Session) {
               requestedSource={requestedNewSession?.source}
               requestedBaseBranch={requestedNewSession?.baseBranch}
               requestedIsolation={requestedNewSession?.isolation}
-              voiceProvider={props.homeVoiceProvider}
+              // Hidden Home must not own the global hold-to-talk key.
+              voiceProvider={homeActive ? props.homeVoiceProvider : undefined}
               providerCatalog={providerConnections?.catalog}
               agentEndpointCatalog={agentEndpointCatalog}
               defaultConnectionId={providerConnections?.defaultConnectionId}
@@ -1025,7 +1021,8 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
   )
   const selected = split.activeSessionId
   const setSelected = split.selectSession
-  const [newOpen, setNewOpen] = useState(false)
+  // Bumped by every "New session" so Home's composer takes focus even when already shown.
+  const [composerFocus, setComposerFocus] = useState(0)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [requestedNewSession, setRequestedNewSession] = useState<
     JinglerAppProps["newSessionRequest"]
@@ -1043,7 +1040,6 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
   const selectSession = useCallback(
     (id: string) => {
       setPullRequestsOpen(false)
-      setNewOpen(false)
       setRequestedNewSession(null)
       setSelected(id)
     },
@@ -1069,7 +1065,6 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
   const openSettings = useCallback(
     (section: typeof settingsSection = settingsSection) => {
       setPullRequestsOpen(false)
-      setNewOpen(false)
       setSettingsSection(section)
       if (section === "providers") providerConnections?.onReload?.()
       if (section === "runtime") runtimeInspector?.onRefresh()
@@ -1103,34 +1098,29 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
     },
     [selectSession]
   )
-  const openNewSession = useCallback(() => {
+  const [startFromRequest, setStartFromRequest] = useState<{ source: "blank" | "pr" | "github"; nonce: number } | null>(null)
+  const startFrom = (source: "pr" | "github") => setStartFromRequest({ source, nonce: Date.now() })
+  // Home is New session: every entry point (⌘N, sidebar, palette) lands there with the composer focused.
+  const goHome = split.goHome
+  const openHomeComposer = useCallback((projectId: string | null) => {
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
-    // A plain open defaults to the active workspace's repo, not whichever project was last picked.
-    setSelectedProjectId(null)
-    setNewOpen(true)
-  }, [])
-  const startWithPrompt = useCallback(({ projectId, ...prefill }: HomeStart) => {
-    setPullRequestsOpen(false)
-    setSettingsOpen(false)
-    if (projectId) setSelectedProjectId(projectId)
-    setRequestedNewSession(projectId ? { projectId, ...prefill, nonce: Date.now() } : null)
-    setNewOpen(true)
-  }, [])
-  const openNewSessionForProject = useCallback((projectId: string) => {
-    setPullRequestsOpen(false)
-    setSettingsOpen(false)
-    setRequestedNewSession(null)
-    setSelectedProjectId(projectId)
-    setNewOpen(true)
-  }, [])
+    // A plain open defaults to the active workspace's repo, read before goHome() clears the active session.
+    setSelectedProjectId(projectId ?? workspaceProjectState(sessions.find((s) => s.id === selected) ?? null, projects).activeProjectId ?? null)
+    goHome()
+    // A starter's PR/issue source with nothing picked disables the composer; New session starts from a blank task.
+    setStartFromRequest({ source: "blank", nonce: Date.now() })
+    setComposerFocus((n) => n + 1)
+  }, [goHome, sessions, selected, projects])
+  const openNewSession = useCallback(() => openHomeComposer(null), [openHomeComposer])
+  const openNewSessionForProject = useCallback((projectId: string) => openHomeComposer(projectId), [openHomeComposer])
 
   const openPendingEnvironmentSession = useCallback(() => {
     setPullRequestsOpen(false)
     setSettingsOpen(false)
-    setNewOpen(true)
-  }, [])
+    goHome()
+  }, [goHome])
 
   // A remote create resolves in the child before the parent's XState
   // SESSION_CREATED update has produced a new `sessions` prop. Selecting that
@@ -1159,7 +1149,6 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
     setPullRequestsOpen(false)
     setSelected(requestId)
     if (requestTabId) setTabRequest({ tabId: requestTabId, nonce: requestNonce ?? 0 })
-    setNewOpen(false)
     // Jumping to a session means SHOWING it — a notification that lands the
     // operator behind the Settings dialog has not done its job.
     setSettingsOpen(false)
@@ -1172,7 +1161,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(newSessionRequest)
-    setNewOpen(true)
+    goHome()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce is the trigger
   }, [newSessionRequestNonce])
 
@@ -1265,6 +1254,7 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
   // leaves no group at all, and that is the only thing the first-launch screen
   // should answer to.
   const showEmpty = Boolean(renderConversation) && group === null
+  const homeActive = showEmpty && !pullRequestsOpen && !settingsOpen && inboxView !== "issues"
 
   // ⌘N opens New Session; the rest is Arc's split map. Which chord means what is
   // `matchSplitShortcut`'s job — a pure function, and its own unit test, because
@@ -1580,7 +1570,6 @@ const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, bug
         setCreatedSessionToSelect(session.id)
         sendEnvironmentStartup({ type: "COMPLETED" })
       }
-      setNewOpen(false)
       if (!environment) setSelected(session.id)
     } catch (cause) {
       if (environment) {

@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Project, Session } from "@jingler/core"
+import type { Session } from "@jingler/core"
 import { Button } from "../components/button.js"
-import { EmptyConversation, type HomeVoiceProvider } from "./empty-conversation.js"
+import { Composer } from "../composites/composer.js"
+import { EmptyConversation } from "./empty-conversation.js"
 
 const meta: Meta<typeof EmptyConversation> = {
   title: "Screens/EmptyConversation",
@@ -10,9 +11,8 @@ const meta: Meta<typeof EmptyConversation> = {
   args: {
     now: new Date(2026, 0, 1, 9),
     userName: "Morgan Parry",
-    projects: [{ id: "p1", name: "jingler", path: "/repo" } as Project],
-    loadBranches: async () => ["main", "dev"],
-    onStartWithPrompt: () => {},
+    composer: <Composer onSend={() => {}} inputLabel="What should we build?" placeholder="Message the agent, tag @files, or use /commands and /skills" repo="jingler" branch="main" />,
+    onStartFrom: () => {},
     onOpenSession: () => {},
     liveActivity: {}
   }
@@ -37,12 +37,3 @@ export const FirstRun: Story = { args: { sessions: [] } }
 export const WithImportCard: Story = {
   args: { sessions: [session("s1", "Fix flaky login test")], importCard: <Button variant="outline">Import MCP servers</Button> }
 }
-
-const voiceAt = (status: "idle" | "recording"): HomeVoiceProvider => ({ children }) =>
-  children({ status, level: 0.5, elapsedMs: 4000, onToggle: () => {}, onCancel: () => {}, onDismiss: () => {} })
-
-/** The mic in Home's composer. */
-export const WithVoiceInput: Story = { args: { sessions: [], voiceProvider: voiceAt("idle") } }
-
-/** Dictating: level meter, Cancel and Stop. */
-export const VoiceRecording: Story = { args: { sessions: [], voiceProvider: voiceAt("recording") } }

@@ -70,7 +70,7 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await app.window.getByRole("button", { name: "Close settings" }).click();
   await app.window.getByTestId("new-session").click();
   await expect(
-    app.window.getByRole("heading", { name: "New session" }),
+    app.window.getByTestId("new-session-view"),
   ).toBeVisible();
   await openModelSettings(app.window);
   await app.window
@@ -104,9 +104,6 @@ test("selects the fixed authenticated Cloud execution target", async ({
     startup.getByRole("heading", { name: "Starting your session on Cloud" }),
   ).toBeVisible();
   await expect(
-    app.window.getByRole("button", { name: "Close new session" }),
-  ).toBeDisabled();
-  await expect(
     startup.locator('[data-phase="checking-access"]'),
   ).toHaveAttribute("data-status", /active|complete/);
   await expect(
@@ -115,12 +112,14 @@ test("selects the fixed authenticated Cloud execution target", async ({
   const pendingCloud = app.window.getByTestId("pending-environment-session");
   await expect(pendingCloud).toContainText("Starting on Cloud · widget");
   await app.window
+    .getByTestId("session-row-session_managed_environment_e2e")
     .getByText("Managed environment picker", { exact: true })
     .click();
   await expect(startup).toBeHidden();
   await pendingCloud.click();
   await expect(startup).toBeVisible();
   await app.window
+    .getByTestId("session-row-session_managed_environment_e2e")
     .getByText("Managed environment picker", { exact: true })
     .click();
   await expect(startup).toBeHidden();

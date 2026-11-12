@@ -91,12 +91,13 @@ it("shows send-button submission, ignores duplicate mouse/Enter and retains the 
   expect(screen.queryByTestId("workspace-provisioning")).toBeNull()
 })
 
-it("renders one chip row: project, from <branch>, checkout with explainers, and composer-first heading", async () => {
+it("renders one chip row: project, from <branch>, checkout with explainers, and no heading of its own", async () => {
   render(view("alpha"))
   const row = await screen.findByTestId("new-workspace-chip-row")
   await waitFor(() => expect(row.textContent).toContain("from main"))
-  expect(screen.getByRole("heading", { name: "New session" })).toBeDefined()
-  expect(screen.queryByRole("heading", { name: "New workspace" })).toBeNull()
+  // Home hosts this composer under its greeting, so it brings no header or close button.
+  expect(screen.queryByRole("heading")).toBeNull()
+  expect(screen.queryByRole("button", { name: "Close new session" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Session source" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Start from" }))
@@ -104,4 +105,27 @@ it("renders one chip row: project, from <branch>, checkout with explainers, and 
   fireEvent.click(screen.getByRole("button", { name: "Checkout" }))
   expect(await screen.findByText("Work directly in the project checkout")).toBeDefined()
   expect(screen.getByText("Isolated Git worktree for this session")).toBeDefined()
+})
+
+it("a starter switches the source without reseeding the project or wiping the draft", async () => {
+  const props = {
+    open: true, projects, defaultProjectId: "alpha", requestedProjectId: "beta", requestedDraft: "keep me",
+    prepareProject: async (id: string) => projects.find((project) => project.id === id)!,
+    loadBranches: async () => ["main"], loadPullRequests: async () => [], onCreate: vi.fn(async () => undefined), onClose: () => {}
+  }
+  const rendered = render(<NewWorkspaceView {...props} />)
+  await waitFor(() => expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("Beta"))
+  rendered.rerender(<NewWorkspaceView {...props} startFrom={{ source: "pr", nonce: 1 }} />)
+  const box = () => screen.getByRole("textbox", { name: "What should we build?" }) as HTMLTextAreaElement
+  fireEvent.click(await screen.findByRole("button", { name: "Start from" }))
+  expect(await screen.findByRole("tab", { name: "Pull request", selected: true })).toBeDefined()
+  expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("Beta")
+  expect(box().value).toBe("keep me")
+})
+
+it("prepares the project once on mount", async () => {
+  const prepareProject = vi.fn(async (id: string) => projects.find((project) => project.id === id)!)
+  render(<NewWorkspaceView open projects={projects} defaultProjectId="alpha" prepareProject={prepareProject} loadBranches={async () => ["main"]} onCreate={vi.fn(async () => undefined)} onClose={() => {}} />)
+  await screen.findByText("from main")
+  expect(prepareProject).toHaveBeenCalledTimes(1)
 })

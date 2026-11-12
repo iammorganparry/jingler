@@ -24,7 +24,7 @@ const makeProject = (home: string, name: string): string => {
 
 const addProject = async (window: Page, projectPath: string) => {
   await window.getByTestId("new-session").click()
-  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+  await expect(window.getByTestId("new-session-view")).toBeVisible()
   await window.getByTestId("new-session-view").getByRole("button", { name: "Project", exact: true }).click()
   await window.getByRole("option", { name: "Add project…" }).click()
   await expect(window.getByRole("heading", { name: "Add project" })).toBeVisible()
@@ -58,9 +58,9 @@ const createWorkspace = async (
   if (!(await window.getByTestId("new-session-view").isVisible())) {
     await window.getByTestId("new-session").click()
   }
-  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+  await expect(window.getByTestId("new-session-view")).toBeVisible()
   if (input.baseBranch) {
-    await window.getByRole("button", { name: "Start from" }).click()
+    await window.getByRole("button", { name: "Start from", exact: true }).click()
     await window.getByPlaceholder("Search branches…").fill(input.baseBranch)
     await window.getByRole("option", { name: new RegExp(input.baseBranch) }).click()
   }
@@ -86,7 +86,6 @@ test("adds an existing directory as a project without creating a workspace", asy
   await expect(launched.window.getByRole("dialog")).toHaveCount(0)
   await expect(launched.window.getByRole("button", { name: "Project", exact: true })).toContainText("sample-project")
   await expect(launched.window.getByTestId("composer")).toBeVisible()
-  await launched.window.getByRole("button", { name: "Close new session" }).click()
   const projects = JSON.parse(readFileSync(join(launched.home, "jingler", "projects.json"), "utf8"))
   expect(projects).toHaveLength(1)
   expect(projects[0]).toMatchObject({ name: "sample-project", path: projectPath })
@@ -375,7 +374,6 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
     await selectRow(athena)
     await openNewWorkspace()
     await expect(projectButton).toContainText("Athena")
-    await window.getByRole("button", { name: "Close new session" }).click()
     await selectRow(jingler)
     await openNewWorkspace()
     await expect(projectButton).toContainText("Jingler")
@@ -425,7 +423,7 @@ test("new session hides the environment chip without remote environments and sho
   await expect(appShell(launched.window)).toBeVisible()
   await launched.window.getByTestId("new-session").click()
   const view = launched.window.getByTestId("new-session-view")
-  await expect(view.getByRole("heading", { name: "New session" })).toBeVisible()
+  await expect(view).toBeVisible()
   await expect(view.getByRole("button", { name: "Execution environment", exact: true })).toHaveCount(0)
   await view.getByRole("button", { name: "Start from", exact: true }).click()
   await launched.window.getByRole("tab", { name: "Issue" }).click()
