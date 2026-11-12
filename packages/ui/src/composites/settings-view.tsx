@@ -1467,12 +1467,8 @@ function GeneralSection({
               onChange={(next) => {
                 setTelemetryDraft(next)
                 // A failed save must not leave the switch claiming a state that isn't in effect.
-                const revert = () => setTelemetryDraft(!next)
-                try {
-                  Promise.resolve(onSaveTelemetryEnabled(next)).catch(revert)
-                } catch {
-                  revert()
-                }
+                // The executor runs synchronously, so a throw also lands in catch.
+                new Promise<void>((resolve) => resolve(onSaveTelemetryEnabled(next))).catch(() => setTelemetryDraft(!next))
               }}
             />
           </SettingsCard>

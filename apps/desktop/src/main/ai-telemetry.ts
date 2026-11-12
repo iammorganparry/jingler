@@ -16,9 +16,7 @@ import { Effect, Stream } from "effect"
 const MAX_FIELD = 4000
 // Bound what a turn holds while it runs, not just what gets serialized.
 const MAX_TOOLS = 200
-const cap = (text: string | undefined): string | undefined => text?.slice(0, MAX_FIELD + 1)
-const clip = (text: string | null | undefined): string | null =>
-  text == null ? null : text.length > MAX_FIELD ? `${text.slice(0, MAX_FIELD)}…[truncated]` : text
+const clip = (text: string): string => (text.length > MAX_FIELD ? `${text.slice(0, MAX_FIELD)}…[truncated]` : text)
 
 interface ToolRecord {
   readonly id: string
@@ -49,7 +47,7 @@ export interface Turn {
 }
 
 export const newTurn = (sessionId: string, chatId: string, prompt: string, now = Date.now()): Turn =>
-  ({ traceId: randomUUID(), sessionId, chatId, prompt: prompt.slice(0, MAX_FIELD + 1), startedAt: now, reply: "", tools: new Map() })
+  ({ traceId: randomUUID(), sessionId, chatId, prompt: clip(prompt), startedAt: now, reply: "", tools: new Map() })
 
 /** Fold one stream event into the turn. */
 export function recordEvent(turn: Turn, event: StreamEvent, now = Date.now()): void {
@@ -59,15 +57,15 @@ export function recordEvent(turn: Turn, event: StreamEvent, now = Date.now()): v
       return
     case "Assistant":
       // Sub-agent text has its own transcript; the reply is the main agent's.
-      if (!event.agentId && turn.reply.length <= MAX_FIELD) turn.reply = cap(turn.reply + event.text) ?? ""
+      if (!event.agentId && turn.reply.length <= MAX_FIELD) turn.reply = clip(turn.reply + event.text)
       return
     case "ToolStart":
       if (turn.tools.size >= MAX_TOOLS) return
-      turn.tools.set(event.id, { id: event.id, name: event.name, target: event.target, intent: event.intent, agentId: event.agentId, startedAt: now })
+      turn.tools.set(event.id, { id: event.id, name: event.name, target: event.target && clip(event.target), intent: event.intent, agentId: event.agentId, startedAt: now })
       return
     case "ToolEnd": {
       const tool = turn.tools.get(event.id)
-      if (tool) Object.assign(tool, { endedAt: now, status: event.status, output: cap(event.output), meta: cap(event.meta ?? undefined) ?? null })
+      if (tool) Object.assign(tool, { endedAt: now, status: event.status, output: event.output && clip(event.output), meta: event.meta && clip(event.meta) })
       return
     }
     case "Usage":
@@ -80,8 +78,6 @@ export function recordEvent(turn: Turn, event: StreamEvent, now = Date.now()): v
     case "Failed":
       turn.error = event.message
       turn.endedAt = now
-      return
-    default:
       return
   }
 }
@@ -113,8 +109,8 @@ export function turnEvents(turn: Turn, distinctId: string, now = Date.now()): Po
     properties: {
       ...base,
       $ai_span_name: "turn",
-      $ai_input_state: clip(turn.prompt),
-      $ai_output_state: clip(turn.reply),
+      $ai_input_state: turn.prompt,
+      $ai_output_state: turn.reply,
       $ai_latency: seconds(turn.startedAt, endedAt),
       $ai_is_error: error !== null,
       $ai_error: error
@@ -128,8 +124,8 @@ export function turnEvents(turn: Turn, distinctId: string, now = Date.now()): Po
       $ai_span_id: `${turn.traceId}:generation`,
       $ai_parent_id: turn.traceId,
       $ai_model: turn.model ?? "unknown",
-      $ai_input: [{ role: "user", content: clip(turn.prompt) }],
-      $ai_output_choices: [{ role: "assistant", content: clip(turn.reply) }],
+      $ai_input: [{ role: "user", content: turn.prompt }],
+      $ai_output_choices: [{ role: "assistant", content: turn.reply }],
       // Harnesses report totals, not an input/output split, so no $ai_input_tokens.
       total_tokens: turn.done?.tokens ?? null,
       $ai_total_cost_usd: turn.done?.costUsd ?? null,
@@ -150,8 +146,8 @@ export function turnEvents(turn: Turn, distinctId: string, now = Date.now()): Po
       $ai_span_id: tool.id,
       $ai_span_name: tool.name,
       $ai_parent_id: turn.traceId,
-      $ai_input_state: { target: clip(tool.target), intent: tool.intent ?? null },
-      $ai_output_state: { output: clip(tool.output), meta: clip(tool.meta) },
+      $ai_input_state: { target: tool.target, intent: tool.intent ?? null },
+      $ai_output_state: { output: tool.output ?? null, meta: tool.meta ?? null },
       $ai_latency: seconds(tool.startedAt, tool.endedAt),
       // An unfinished tool was interrupted, which is not a success.
       $ai_is_error: tool.status !== "success",
@@ -170,10 +166,10 @@ export interface SendDeps {
   readonly fetch: typeof fetch
 }
 
-/** Send a turn if a key is built in and the operator opted in. Never throws. */
+/** Send a turn if the operator is still opted in. Never throws. */
 export async function sendTurn(turn: Turn, deps: SendDeps): Promise<void> {
   try {
-    if (!deps.key || !(await deps.enabled())) return
+    if (!(await deps.enabled())) return
     const batch = turnEvents(turn, await deps.distinctId())
     const res = await deps.fetch(new URL("/batch/", deps.host), {
       method: "POST",
@@ -213,10 +209,7 @@ const liveDeps: SendDeps = {
   },
   // A random per-install id: nothing identifying, but stable so traces group by user.
   // One shared load, so concurrent first turns agree on the id.
-  distinctId: () => (installId ??= loadInstallId().catch((cause) => {
-    installId = undefined
-    throw cause
-  })),
+  distinctId: () => (installId ??= loadInstallId()),
   fetch
 }
 
@@ -235,7 +228,7 @@ export const observeTurn = <E, R>(
   deps: SendDeps = liveDeps
 ): Stream.Stream<StreamEvent, E, R> =>
   Stream.unwrap(
-    Effect.promise(async () => Boolean(deps.key) && (await deps.enabled().catch(() => false))).pipe(
+    Effect.promise(async () => Boolean(deps.key) && (await deps.enabled())).pipe(
       Effect.map((active) => {
         if (!active) return stream
         const turn = newTurn(sessionId, chatId, prompt)

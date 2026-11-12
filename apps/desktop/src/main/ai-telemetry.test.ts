@@ -73,7 +73,7 @@ describe("sendTurn", () => {
     const off = deps({ enabled: async () => false })
     await sendTurn(finished(), off.deps)
     const noKey = deps({ key: undefined })
-    await sendTurn(finished(), noKey.deps)
+    await Effect.runPromise(Stream.runDrain(observeTurn("s", "c", "p", Stream.fromIterable(events), noKey.deps)))
     expect(off.fetch).not.toHaveBeenCalled()
     expect(noKey.fetch).not.toHaveBeenCalled()
   })
@@ -106,7 +106,8 @@ describe("collection bounds and status", () => {
   it("caps the reply while recording, not only when serializing", () => {
     const turn = newTurn("s", "c", "p")
     for (let i = 0; i < 100; i++) recordEvent(turn, { _tag: "Assistant", text: "y".repeat(1000) })
-    expect(turn.reply.length).toBeLessThanOrEqual(4001)
+    expect(turn.reply.length).toBeLessThan(4100)
+    expect(turn.reply.endsWith("[truncated]")).toBe(true)
   })
 
   it("marks an interrupted tool as an error", () => {
