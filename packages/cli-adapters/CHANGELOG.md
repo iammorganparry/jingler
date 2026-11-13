@@ -1,5 +1,13 @@
 # @jingler/cli-adapters
 
+## 0.28.1
+
+### Patch Changes
+
+- @jingler/core@0.28.1
+- @jingler/plannotator-ext@0.28.1
+- @jingler/themes@0.28.1
+
 ## 0.28.0
 
 ### Patch Changes

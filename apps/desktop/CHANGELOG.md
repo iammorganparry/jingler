@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.28.1
+
+### Patch Changes
+
+- 7f38ed1: Adversarial review now reviews the pull request you're looking at, instead of always reviewing the session's top PR when it has several.
+  - @jingler/plannotator-ext@0.28.1
+
 ## 0.28.0
 
 ### Minor Changes
