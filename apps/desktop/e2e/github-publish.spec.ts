@@ -363,17 +363,31 @@ test("a behind PR lists its blocker with Update branch and disables Merge with t
 test("a PR the agent opens with gh pr create is linked to the session header", async ({ launchApp }) => {
   test.setTimeout(120_000)
   const bin = mkdtempSync(join(tmpdir(), "jingler-e2e-agent-gh-"))
-  writeFileSync(
-    join(bin, "gh"),
-    "#!/usr/bin/env node\nconst a = process.argv.slice(2)\nif (a[0] === 'pr' && a[1] === 'create') { console.log('https://github.com/Acme/Widget/pull/77'); process.exit(0) }\nprocess.exit(1)\n"
-  )
-  chmodSync(join(bin, "gh"), 0o755)
   const { window, repoPath } = await launchApp({
     configured: true,
     withRepo: true,
     config: { github: { enabled: true, autoCreatePr: false, autoDetectPr: false } },
     e2eEnv: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` }
   })
+  // Linking verifies the PR's author and head branch with `gh api graphql`, so the fake
+  // answers that too: the viewer authored it, from the session worktree's live branch.
+  writeFileSync(
+    join(bin, "gh"),
+    [
+      "#!/usr/bin/env node",
+      "const a = process.argv.slice(2)",
+      "if (a[0] === 'pr' && a[1] === 'create') { console.log('https://github.com/Acme/Widget/pull/77'); process.exit(0) }",
+      "if (a[0] === 'api' && a[1] === 'graphql') {",
+      `  const list = require('node:child_process').execFileSync('git', ['-C', ${JSON.stringify(repoPath)}, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' })`,
+      "  const head = [...list.matchAll(/^branch refs\\/heads\\/(.+)$/gm)].at(-1)?.[1] ?? null",
+      "  console.log(JSON.stringify({ data: { viewer: { login: 'e2e-user' }, repository: { pullRequest: { author: { login: 'e2e-user' }, headRefName: head } } } }))",
+      "  process.exit(0)",
+      "}",
+      "process.exit(1)",
+      ""
+    ].join("\n")
+  )
+  chmodSync(join(bin, "gh"), 0o755)
   git(repoPath, ["remote", "add", "origin", "git@github.com:acme/widget.git"])
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Agent opens PR", "worktree", repoPath)
