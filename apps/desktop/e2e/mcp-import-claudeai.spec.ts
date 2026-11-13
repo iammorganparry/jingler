@@ -92,6 +92,10 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
     const callback = await fetch(authorizationUrl!)
     expect(await callback.text()).toContain("Connected")
     expect(mcp.registrations()).toBe(1)
+    // Reconnect opens the server's drawer so sign-in errors show beside it; it reports the result.
+    const drawer = window.getByRole("dialog", { name: "plugin:eng:notion" })
+    await expect(drawer.getByText("Connected", { exact: true })).toBeVisible()
+    await drawer.getByRole("button", { name: "Close", exact: true }).click()
     await window.getByRole("button", { name: "Close settings" }).click()
 
     // A Claude session reaches the imported connector through Jingler's relay.
