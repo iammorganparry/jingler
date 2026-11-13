@@ -724,11 +724,6 @@ const resolveCheckoutSession = (sessionId: string, checkoutId?: string, prNumber
     ),
   );
 
-type SessionWithPr = Session & { readonly prNumber: number };
-
-const hasActivePr = (session: Session | null): session is SessionWithPr =>
-  session !== null && activeCheckoutOf(session).prNumber !== null;
-
 const resolvePiCreateInput = <Input extends {
   readonly runtimeId?: "pi" | "claude" | "codex" | "opencode"
   readonly endpointId?: AgentEndpointId
@@ -814,13 +809,6 @@ export const explanationSaveToObsidian = (sessionId: string) =>
   );
 
 /** Resolve a session only when it has an active pull request. */
-const sessionWithPr = (sessionId: string) =>
-  resolveSession(sessionId).pipe(
-    Effect.map((session): SessionWithPr | null =>
-      hasActivePr(session) ? session : null,
-    ),
-  );
-
 /**
  * `Sessions.createFromPr` handler. Reads the git "share checked-out branches"
  * lever from config (default on) and passes it through, so a PR whose branch is
@@ -2173,13 +2161,18 @@ const reviewTarget = (session: Session | null, prNumber?: number) => {
   const checkout = checkoutFor(session, undefined, prNumber);
   const number = prNumber ?? checkout.prNumber;
   if (number === null || (prNumber !== undefined && !ownsPr(session, checkout, prNumber))) return null;
-  return { session, checkout, number };
+  // Only the checkout's top PR is what its worktree HEAD has checked out.
+  const isTop = number === checkout.prNumber;
+  const layerBase = checkoutPrsOf(checkout).find((pr) => pr.number === number)?.base;
+  // Never borrow the top layer's base for a lower layer or linked PR: unknown is null.
+  const baseBranch = layerBase ?? (isTop ? checkout.baseBranch ?? null : null);
+  return { session, checkout, number, isTop, baseBranch };
 };
 
 /** `Review.get` handler — the stored review for the requested (default: active) PR, or null. */
 export const reviewGet = (sessionId: string, prNumber?: number) =>
   Effect.gen(function* () {
-    const target = reviewTarget(yield* sessionWithPr(sessionId), prNumber);
+    const target = reviewTarget(yield* resolveSession(sessionId), prNumber);
     if (!target) return null;
     return yield* ReviewStore.get(sessionId, target.number);
   });
@@ -2248,7 +2241,7 @@ export const withoutAttachmentData = (
  */
 export const reviewMarkRouted = (sessionId: string, prNumber?: number) =>
   Effect.gen(function* () {
-    const target = reviewTarget(yield* sessionWithPr(sessionId), prNumber);
+    const target = reviewTarget(yield* resolveSession(sessionId), prNumber);
     if (!target) return null;
     const review = yield* ReviewStore.get(sessionId, target.number);
     if (review === null) return null;
@@ -2276,9 +2269,11 @@ export const reviewMarkRouted = (sessionId: string, prNumber?: number) =>
  */
 export const reviewReconcile = (sessionId: string, prNumber?: number) =>
   Effect.gen(function* () {
-    const target = reviewTarget(yield* sessionWithPr(sessionId), prNumber);
+    const target = reviewTarget(yield* resolveSession(sessionId), prNumber);
     const worktreePath = target?.checkout.worktreePath;
-    if (!target || !worktreePath) return null;
+    // `commitsSince` reads `<head>..HEAD`; for a lower layer HEAD is the top branch,
+    // whose own commits would falsely credit the lower review's findings.
+    if (!target?.isTop || !worktreePath) return null;
     const review = yield* ReviewStore.get(sessionId, target.number);
     if (review === null) return null;
 
@@ -2390,7 +2385,7 @@ const reviewLock = (sessionId: string): Effect.Semaphore => {
 
 const runReview = (sessionId: string, force: boolean, requestedPr?: number) =>
   Effect.gen(function* () {
-    const target = reviewTarget(yield* sessionWithPr(sessionId), requestedPr);
+    const target = reviewTarget(yield* resolveSession(sessionId), requestedPr);
     const worktreePath = target?.checkout.worktreePath;
     if (!target || !worktreePath) {
       return yield* Effect.fail(
@@ -2443,7 +2438,7 @@ const runReview = (sessionId: string, force: boolean, requestedPr?: number) =>
       cwd: locations.cwd,
       repo: checkout.repo,
       branch: checkout.branch,
-      baseBranch: checkout.baseBranch ?? null,
+      baseBranch: target.baseBranch,
       runtimeId: runtime.runtimeId,
       endpointId: runtime.endpointId,
       ...(runtime.connectionId === undefined ? {} : { connectionId: runtime.connectionId }),

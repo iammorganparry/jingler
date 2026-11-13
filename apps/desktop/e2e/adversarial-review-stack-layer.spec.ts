@@ -35,7 +35,10 @@ test("adversarial review on a lower stack layer reviews that PR, not the top one
 
   const reviews = join(home, "jingler", "reviews")
   const lower = join(reviews, "s_stack.pr-481.json")
-  await expect.poll(() => existsSync(lower), { timeout: 60_000 }).toBe(true)
-  expect(JSON.parse(readFileSync(lower, "utf8")).prNumber).toBe(481)
+  // The write isn't atomic, so a half-written file reads as "not yet".
+  const storedPr = () => {
+    try { return JSON.parse(readFileSync(lower, "utf8")).prNumber } catch { return null }
+  }
+  await expect.poll(storedPr, { timeout: 60_000 }).toBe(481)
   expect(existsSync(join(reviews, "s_stack.pr-482.json"))).toBe(false)
 })
