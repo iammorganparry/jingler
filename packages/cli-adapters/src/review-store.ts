@@ -73,12 +73,13 @@ export interface StoredTranscript {
 const StoredTranscriptCompat = Schema.Union(StoredTranscriptSchema, Events)
 
 /**
- * The last adversarial review per session, persisted to
- * `~/jingler/reviews/<sessionId>.json`. Mirrors `TranscriptStore`: reads are
+ * The last adversarial review per session and PR, persisted to
+ * `~/jingler/reviews/<sessionId>.pr-<number>.json` (a stacked session reviews
+ * each layer separately). Mirrors `TranscriptStore`: reads are
  * best-effort, so a missing or malformed file yields `null` rather than failing
  * the Pull Request tab.
  *
- * Only the LAST review is kept — a review is a snapshot of one PR head, and the
+ * Only the LAST review of each PR is kept — a review is a snapshot of one PR head, and the
  * previous head's findings are stale by definition once the branch moves. The
  * stored `headSha` is what makes the auto-review de-dupe work (see the
  * `Review.run` handler): same head → return this, spawn nothing.
@@ -98,20 +99,23 @@ export class ReviewStore extends Effect.Service<ReviewStore>()("@jingler/ReviewS
     // the correct behaviour anyway).
     const memory = yield* Ref.make(new Map<string, AdversarialReview>())
 
-    const fileFor = (sessionId: string): Effect.Effect<string, never, Path.Path | AppPaths> =>
+    const memoryKey = (sessionId: string, prNumber: number) => `${sessionId}:${prNumber}`
+
+    const fileFor = (
+      sessionId: string,
+      prNumber: number | null
+    ): Effect.Effect<string, never, Path.Path | AppPaths> =>
       Effect.gen(function* () {
         const path = yield* Path.Path
         const paths = yield* AppPaths
-        return path.join(paths.reviewsDir, `${sessionId}.json`)
+        // `null` is the pre-stack single file, which held whichever PR was on top.
+        return path.join(paths.reviewsDir, prNumber === null ? `${sessionId}.json` : `${sessionId}.pr-${prNumber}.json`)
       })
 
-    /** The review on disk for `sessionId`, or null when absent/unreadable. */
-    const readFile = (
-      sessionId: string
-    ): Effect.Effect<AdversarialReview | null, never, ReviewEnv> =>
+    /** The review in `file`, or null when absent/unreadable. */
+    const readFile = (file: string): Effect.Effect<AdversarialReview | null, never, FileSystem.FileSystem> =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
-        const file = yield* fileFor(sessionId)
         const exists = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))
         if (!exists) return null
         const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""))
@@ -125,23 +129,27 @@ export class ReviewStore extends Effect.Service<ReviewStore>()("@jingler/ReviewS
       })
 
     /**
-     * The stored review for `sessionId`, or null when there is none.
+     * The stored review of `prNumber` in `sessionId`, or null when there is none.
      *
      * Falls back to the in-memory mirror when the file is missing or unreadable —
      * see the class doc: without this, an unwritable reviews dir turns the
      * auto-trigger into a reviewer-per-minute loop.
      */
     const get = (
-      sessionId: string
+      sessionId: string,
+      prNumber: number
     ): Effect.Effect<AdversarialReview | null, never, ReviewEnv> =>
       Effect.gen(function* () {
-        const onDisk = yield* readFile(sessionId)
+        const onDisk = yield* readFile(yield* fileFor(sessionId, prNumber))
         if (onDisk !== null) return onDisk
-        return (yield* Ref.get(memory)).get(sessionId) ?? null
+        const remembered = (yield* Ref.get(memory)).get(memoryKey(sessionId, prNumber))
+        if (remembered !== undefined) return remembered
+        const legacy = yield* readFile(yield* fileFor(sessionId, null))
+        return legacy?.prNumber === prNumber ? legacy : null
       })
 
     /**
-     * Replace the stored review for `sessionId`. The memory mirror is updated
+     * Replace the stored review of `review.prNumber`. The memory mirror is updated
      * first and unconditionally: it is the de-dupe's backstop, so it must hold
      * even when the disk write fails.
      */
@@ -150,10 +158,10 @@ export class ReviewStore extends Effect.Service<ReviewStore>()("@jingler/ReviewS
       review: AdversarialReview
     ): Effect.Effect<void, never, ReviewEnv> =>
       Effect.gen(function* () {
-        yield* Ref.update(memory, (m) => new Map(m).set(sessionId, review))
+        yield* Ref.update(memory, (m) => new Map(m).set(memoryKey(sessionId, review.prNumber), review))
         const fs = yield* FileSystem.FileSystem
         const paths = yield* AppPaths
-        const file = yield* fileFor(sessionId)
+        const file = yield* fileFor(sessionId, review.prNumber)
         yield* fs.makeDirectory(paths.reviewsDir, { recursive: true }).pipe(Effect.ignore)
         const encoded = yield* Schema.encode(AdversarialReviewSchema)(review).pipe(
           Effect.orElseSucceed(() => review)
@@ -239,14 +247,19 @@ export class ReviewStore extends Effect.Service<ReviewStore>()("@jingler/ReviewS
     /** Drop the stored review AND its transcript (e.g. when a session is deleted). */
     const clear = (sessionId: string): Effect.Effect<void, never, ReviewEnv> =>
       Effect.gen(function* () {
-        yield* Ref.update(memory, (m) => {
-          const next = new Map(m)
-          next.delete(sessionId)
-          return next
-        })
+        yield* Ref.update(
+          memory,
+          (m) => new Map([...m].filter(([key]) => !key.startsWith(`${sessionId}:`)))
+        )
         const fs = yield* FileSystem.FileSystem
-        const file = yield* fileFor(sessionId)
-        yield* fs.remove(file).pipe(Effect.ignore)
+        const path = yield* Path.Path
+        const paths = yield* AppPaths
+        const names = yield* fs.readDirectory(paths.reviewsDir).pipe(Effect.orElseSucceed(() => []))
+        for (const name of names) {
+          if (name === `${sessionId}.json` || (name.startsWith(`${sessionId}.pr-`) && name.endsWith(".json"))) {
+            yield* fs.remove(path.join(paths.reviewsDir, name)).pipe(Effect.ignore)
+          }
+        }
         yield* clearTranscript(sessionId)
       })
 

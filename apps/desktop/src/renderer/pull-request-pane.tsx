@@ -93,7 +93,7 @@ export function PullRequestPane({
     sentFindingIds,
     dismissedFindingIds,
     dismissFinding
-  } = useAdversarialReview(session, { connected })
+  } = useAdversarialReview(session, { connected, prNumber: shownPr })
 
   return (
     <div className="flex h-full min-h-0 flex-col">

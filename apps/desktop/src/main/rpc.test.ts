@@ -1992,6 +1992,30 @@ describe("RPC handlers", () => {
       expect(second.headSha).toBe(first.headSha);
     });
 
+    it("reviews the requested stack layer, not the session's top PR", async () => {
+      withSession({ prNumber: 42, prs: [{ number: 41 }, { number: 42 }] });
+      const { layer, spawns } = countingAdapter();
+      const env = envFor("sha-one", layer);
+      const review = await Effect.runPromise(
+        reviewRun("s1", false, 41).pipe(Effect.provide(env)),
+      );
+      expect(review.prNumber).toBe(41);
+      expect(spawns[0]?.prompt).toContain("Pull request #41");
+      expect((await Effect.runPromise(reviewGet("s1", 41).pipe(Effect.provide(env))))?.prNumber).toBe(41);
+      // The top PR has no review of its own yet.
+      expect(await Effect.runPromise(reviewGet("s1").pipe(Effect.provide(env)))).toBeNull();
+    });
+
+    it("refuses to review a PR the session does not own", async () => {
+      withSession({ prNumber: 42, prs: [{ number: 42 }] });
+      const { layer, spawns } = countingAdapter();
+      const exit = await Effect.runPromiseExit(
+        reviewRun("s1", false, 99).pipe(Effect.provide(envFor("sha-one", layer))),
+      );
+      expect(exit._tag).toBe("Failure");
+      expect(spawns).toHaveLength(0);
+    });
+
     it("does not expose or stamp a stored review after the active PR changes", async () => {
       withSession({ prNumber: 42 });
       const { layer } = countingAdapter();

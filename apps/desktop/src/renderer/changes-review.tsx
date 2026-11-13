@@ -42,7 +42,8 @@ export function useChangesReview(session: Session, connected: boolean, checkoutI
   const review = useReview(session, checkoutId)
   // Read-only: the adversarial review is *run* from the Pull Request tab; its
   // findings anchor to the PR diff wherever that diff renders.
-  const adversarial = useAdversarialReview(session, { connected })
+  const { prLayer } = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
+  const adversarial = useAdversarialReview(session, { connected, prNumber: reviewPrNumber(session, checkoutId, prLayer) })
   const worktree = workspaceModeOf(checkoutById(session, checkoutId)) === "worktree"
 
   const deslopFile = useCallback(

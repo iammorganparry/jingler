@@ -391,6 +391,7 @@
       "chat-checkout-pr.spec.ts",
       "pr-conflict-resolve.spec.ts",
       "pr-review-session-switch.spec.ts",
+      "adversarial-review-stack-layer.spec.ts",
       "github-cli-pr.spec.ts",
       "github-publish.spec.ts",
       "github-realtime.spec.ts",
