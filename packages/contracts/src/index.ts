@@ -1902,7 +1902,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     Rpc.make("Review.run", {
     success: AdversarialReview,
     error: Schema.Union(ReviewError, GitHubApiError),
-    payload: { sessionId: Schema.String, force: Schema.Boolean }
+    /** `prNumber` picks a stack layer or linked PR; omitted, the active top PR. */
+    payload: { sessionId: Schema.String, force: Schema.Boolean, prNumber: Schema.optional(Schema.Number) }
   }),
 
   /**
@@ -1954,7 +1955,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** The last stored adversarial review for a session, or null. Never errors. */
   Rpc.make("Review.get", {
     success: Schema.NullOr(AdversarialReview),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number) }
   }),
 
   /**
@@ -1973,7 +1974,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Review.markRouted", {
     success: Schema.NullOr(Schema.String),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number) }
   }),
 
   /**
@@ -1989,7 +1990,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Review.reconcile", {
     success: Schema.NullOr(AdversarialReview),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number) }
   }),
 
   /**

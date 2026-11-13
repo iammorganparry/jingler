@@ -148,7 +148,7 @@ export const routeReviewToAgent = async (
     // review — leaving it unstamped would make this re-evaluate it on every
     // poll tick forever, and (worse) a later re-render could route findings
     // the user has already seen resolved.
-    const routedAt = await rpc.reviewMarkRouted(session.id)
+    const routedAt = await rpc.reviewMarkRouted(session.id, review.prNumber)
     if (routedAt !== null) {
       qc.setQueryData(reviewQueryKey(session.id, review.prNumber), { ...review, routedAt })
     }

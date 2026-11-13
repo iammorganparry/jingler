@@ -146,6 +146,7 @@
     ],
     "specs": [
       "chat.spec.ts",
+      "adversarial-review-stack-layer.spec.ts",
       "native-claude-tools.spec.ts",
       "native-codex.spec.ts",
       "native-opencode.spec.ts",
@@ -339,6 +340,7 @@
     ],
     "specs": [
       "diffs-file-tree.spec.ts",
+      "adversarial-review-stack-layer.spec.ts",
       "enormous-review-diff.spec.ts",
       "canonical-file-changes.spec.ts",
       "changes-per-chat.spec.ts",
@@ -391,6 +393,7 @@
       "chat-checkout-pr.spec.ts",
       "pr-conflict-resolve.spec.ts",
       "pr-review-session-switch.spec.ts",
+      "adversarial-review-stack-layer.spec.ts",
       "github-cli-pr.spec.ts",
       "github-publish.spec.ts",
       "github-realtime.spec.ts",

@@ -724,11 +724,6 @@ const resolveCheckoutSession = (sessionId: string, checkoutId?: string, prNumber
     ),
   );
 
-type SessionWithPr = Session & { readonly prNumber: number };
-
-const hasActivePr = (session: Session | null): session is SessionWithPr =>
-  session !== null && activeCheckoutOf(session).prNumber !== null;
-
 const resolvePiCreateInput = <Input extends {
   readonly runtimeId?: "pi" | "claude" | "codex" | "opencode"
   readonly endpointId?: AgentEndpointId
@@ -814,13 +809,6 @@ export const explanationSaveToObsidian = (sessionId: string) =>
   );
 
 /** Resolve a session only when it has an active pull request. */
-const sessionWithPr = (sessionId: string) =>
-  resolveSession(sessionId).pipe(
-    Effect.map((session): SessionWithPr | null =>
-      hasActivePr(session) ? session : null,
-    ),
-  );
-
 /**
  * `Sessions.createFromPr` handler. Reads the git "share checked-out branches"
  * lever from config (default on) and passes it through, so a PR whose branch is
@@ -2167,13 +2155,26 @@ export const githubDiff = (sessionId: string, prNumber?: number, checkoutId?: st
     return yield* GitHubApi.prDiff(checkout.worktreePath, number);
   });
 
-/** `Review.get` handler — the stored review for the active PR, or null. */
-export const reviewGet = (sessionId: string) =>
+/** The PR a review acts on: `prNumber` when the session owns it, else the active top PR. */
+const reviewTarget = (session: Session | null, prNumber?: number) => {
+  if (session === null) return null;
+  const checkout = checkoutFor(session, undefined, prNumber);
+  const number = prNumber ?? checkout.prNumber;
+  if (number === null || (prNumber !== undefined && !ownsPr(session, checkout, prNumber))) return null;
+  // Only the checkout's top PR is what its worktree HEAD has checked out.
+  const isTop = number === checkout.prNumber;
+  const layerBase = checkoutPrsOf(checkout).find((pr) => pr.number === number)?.base;
+  // Never borrow the top layer's base for a lower layer or linked PR: unknown is null.
+  const baseBranch = layerBase ?? (isTop ? checkout.baseBranch ?? null : null);
+  return { session, checkout, number, isTop, baseBranch };
+};
+
+/** `Review.get` handler — the stored review for the requested (default: active) PR, or null. */
+export const reviewGet = (sessionId: string, prNumber?: number) =>
   Effect.gen(function* () {
-    const session = yield* sessionWithPr(sessionId);
-    if (session === null) return null;
-    const review = yield* ReviewStore.get(sessionId);
-    return review?.prNumber === activeCheckoutOf(session).prNumber ? review : null;
+    const target = reviewTarget(yield* resolveSession(sessionId), prNumber);
+    if (!target) return null;
+    return yield* ReviewStore.get(sessionId, target.number);
   });
 
 /**
@@ -2238,12 +2239,12 @@ export const withoutAttachmentData = (
  * as "don't claim it's routed", which is the safe direction: the alternative is a
  * review that reads as sent while the agent never heard about it.
  */
-export const reviewMarkRouted = (sessionId: string) =>
+export const reviewMarkRouted = (sessionId: string, prNumber?: number) =>
   Effect.gen(function* () {
-    const session = yield* sessionWithPr(sessionId);
-    if (session === null) return null;
-    const review = yield* ReviewStore.get(sessionId);
-    if (review === null || review.prNumber !== activeCheckoutOf(session).prNumber) return null;
+    const target = reviewTarget(yield* resolveSession(sessionId), prNumber);
+    if (!target) return null;
+    const review = yield* ReviewStore.get(sessionId, target.number);
+    if (review === null) return null;
     if (review.routedAt !== null) return review.routedAt;
     const now = yield* Effect.sync(() => new Date().toISOString());
     yield* ReviewStore.set(sessionId, { ...review, routedAt: now }).pipe(
@@ -2266,17 +2267,18 @@ export const reviewMarkRouted = (sessionId: string) =>
  *
  * Exported for tests.
  */
-export const reviewReconcile = (sessionId: string) =>
+export const reviewReconcile = (sessionId: string, prNumber?: number) =>
   Effect.gen(function* () {
-    const session = yield* sessionWithPr(sessionId);
-    if (!session) return null;
-    const checkout = activeCheckoutOf(session);
-    if (!checkout.worktreePath) return null;
-    const review = yield* ReviewStore.get(sessionId);
-    if (review === null || review.prNumber !== activeCheckoutOf(session).prNumber) return null;
+    const target = reviewTarget(yield* resolveSession(sessionId), prNumber);
+    const worktreePath = target?.checkout.worktreePath;
+    // `commitsSince` reads `<head>..HEAD`; for a lower layer HEAD is the top branch,
+    // whose own commits would falsely credit the lower review's findings.
+    if (!target?.isTop || !worktreePath) return null;
+    const review = yield* ReviewStore.get(sessionId, target.number);
+    if (review === null) return null;
 
     const commits = yield* GitService.commitsSince(
-      checkout.worktreePath,
+      worktreePath,
       review.headSha,
     );
     const now = yield* Effect.sync(() => new Date().toISOString());
@@ -2334,10 +2336,10 @@ const reviewRuntimeSelection = (
 
 const reviewLocations = (
   session: Session,
+  checkout: SessionCheckout,
   worktreePath: string,
   configured: AgentModelSelection | undefined,
 ) => Effect.gen(function* () {
-  const checkout = activeCheckoutOf(session);
   if (session.environmentId === undefined) {
     return { githubTarget: worktreePath, cwd: worktreePath };
   }
@@ -2367,8 +2369,8 @@ const reviewLocations = (
  *
  * Exported for tests.
  */
-export const reviewRun = (sessionId: string, force: boolean) =>
-  reviewLock(sessionId).withPermits(1)(runReview(sessionId, force));
+export const reviewRun = (sessionId: string, force: boolean, prNumber?: number) =>
+  reviewLock(sessionId).withPermits(1)(runReview(sessionId, force, prNumber));
 
 // One review per session at a time: the head-SHA de-dupe below only holds if a
 // second run can't pass it while the first is still reviewing the same head.
@@ -2381,11 +2383,11 @@ const reviewLock = (sessionId: string): Effect.Semaphore => {
   return lock;
 };
 
-const runReview = (sessionId: string, force: boolean) =>
+const runReview = (sessionId: string, force: boolean, requestedPr?: number) =>
   Effect.gen(function* () {
-    const session = yield* sessionWithPr(sessionId);
-    const checkout = activeCheckoutOrNull(session);
-    if (!session || !checkout?.worktreePath) {
+    const target = reviewTarget(yield* resolveSession(sessionId), requestedPr);
+    const worktreePath = target?.checkout.worktreePath;
+    if (!target || !worktreePath) {
       return yield* Effect.fail(
         new ReviewError({
           message: "This session has no linked pull request to review.",
@@ -2395,10 +2397,11 @@ const runReview = (sessionId: string, force: boolean) =>
 
     const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null));
     const configured = config?.github?.adversarialReviewModel;
-    const locations = yield* reviewLocations(session, checkout.worktreePath, configured);
+    const { session, checkout, number: prNumber } = target;
+    const locations = yield* reviewLocations(session, checkout, worktreePath, configured);
     const headSha = yield* GitHubApi.prHeadSha(
       locations.githubTarget,
-      activeCheckoutOf(session).prNumber!,
+      prNumber,
     );
     if (headSha === null) {
       return yield* Effect.fail(
@@ -2410,13 +2413,8 @@ const runReview = (sessionId: string, force: boolean) =>
 
     // The de-dupe. Note it runs BEFORE the diff read and the agent spawn — the
     // whole point is that an unchanged head is nearly free.
-    const prior = yield* ReviewStore.get(sessionId);
-    if (
-      !force &&
-      prior !== null &&
-      prior.prNumber === activeCheckoutOf(session).prNumber &&
-      prior.headSha === headSha
-    ) {
+    const prior = yield* ReviewStore.get(sessionId, prNumber);
+    if (!force && prior !== null && prior.headSha === headSha) {
       return prior;
     }
 
@@ -2430,17 +2428,17 @@ const runReview = (sessionId: string, force: boolean) =>
     }
     const diff = yield* GitHubApi.prDiff(
       locations.githubTarget,
-      activeCheckoutOf(session).prNumber!,
+      prNumber,
     );
 
     const review = yield* ReviewService.run({
       sessionId,
-      prNumber: activeCheckoutOf(session).prNumber!,
+      prNumber: prNumber,
       headSha,
       cwd: locations.cwd,
       repo: checkout.repo,
       branch: checkout.branch,
-      baseBranch: checkout.baseBranch ?? null,
+      baseBranch: target.baseBranch,
       runtimeId: runtime.runtimeId,
       endpointId: runtime.endpointId,
       ...(runtime.connectionId === undefined ? {} : { connectionId: runtime.connectionId }),
@@ -2465,7 +2463,7 @@ const runReview = (sessionId: string, force: boolean) =>
     const posted = postToPr
       ? yield* postReviewToPr(
           locations.githubTarget,
-          activeCheckoutOf(session).prNumber!,
+          prNumber,
           routedReview,
           diff,
         )
@@ -6346,7 +6344,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     explanationSaveToObsidian(sessionId),
   "Explanation.watch": ({ sessionId }) =>
     interruptOnPageGone(explanationWatch(sessionId)),
-  "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),
+  "Review.run": ({ sessionId, force, prNumber }) => reviewRun(sessionId, force, prNumber),
   // Unwrapped from the service like `Terminal.attach` — the reviewer outlives any
   // one watcher, so the stream attaches to it rather than starting it.
   "Agent.watchSubagentFleet": ({ sessionId, chatId }) =>
@@ -6357,9 +6355,9 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
         Effect.map(ReviewService, (r) => r.watch(sessionId, chatId)),
       ),
     ),
-  "Review.get": ({ sessionId }) => reviewGet(sessionId),
-  "Review.markRouted": ({ sessionId }) => reviewMarkRouted(sessionId),
-  "Review.reconcile": ({ sessionId }) => reviewReconcile(sessionId),
+  "Review.get": ({ sessionId, prNumber }) => reviewGet(sessionId, prNumber),
+  "Review.markRouted": ({ sessionId, prNumber }) => reviewMarkRouted(sessionId, prNumber),
+  "Review.reconcile": ({ sessionId, prNumber }) => reviewReconcile(sessionId, prNumber),
   "Github.createPr": ({ sessionId, base }) => githubPublishRouted(sessionId, base),
   "Github.comment": (input) => githubComment(input),
   "Github.commentBySlug": (input) => githubCommentBySlug(input),

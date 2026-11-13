@@ -66,15 +66,19 @@ export interface AdversarialReviewState {
 
 export function useAdversarialReview(
   session: Session,
-  opts: { connected: boolean }
+  opts: { connected: boolean; prNumber?: number | null }
 ): AdversarialReviewState {
   const qc = useQueryClient()
   const { connected } = opts
-  const hasPr = activeCheckoutOf(session).prNumber != null
+  const ownPr = activeCheckoutOf(session).prNumber
+  // The PR on screen (a lower stack layer or a linked PR); defaults to the session's top PR.
+  const prNumber = opts.prNumber ?? ownPr
+  const requestedPr = prNumber ?? undefined
+  const hasPr = prNumber != null
 
   const query = useQuery({
-    queryKey: reviewQueryKey(session.id, activeCheckoutOf(session).prNumber),
-    queryFn: () => rpc.reviewGet(session.id),
+    queryKey: reviewQueryKey(session.id, prNumber),
+    queryFn: () => rpc.reviewGet(session.id, requestedPr),
     // Nothing to read until there's a PR to have reviewed.
     enabled: hasPr && connected,
     // The auto-trigger publishes into this key via setQueryData. Without a
@@ -87,7 +91,7 @@ export function useAdversarialReview(
   // A manual run always forces: the user clicked the button *because* they want a
   // fresh opinion, and silently handing back a cached review would read as a bug.
   const runMutation = useMutation({
-    mutationFn: () => rpc.reviewRun(session.id, true),
+    mutationFn: () => rpc.reviewRun(session.id, true, requestedPr),
     onSuccess: async (review) => {
       qc.setQueryData(reviewQueryKey(review.sessionId, review.prNumber), review)
       // Route here as well as from the auto-review poll: a manual run reaches
@@ -148,7 +152,7 @@ export function useAdversarialReview(
     if (!hasPr || !connected || agentBusy) return
     let cancelled = false
     void rpc
-      .reviewReconcile(session.id)
+      .reviewReconcile(session.id, requestedPr)
       .then((next) => {
         if (!cancelled && next !== null) {
           qc.setQueryData(reviewQueryKey(next.sessionId, next.prNumber), next)
@@ -160,9 +164,9 @@ export function useAdversarialReview(
     return () => {
       cancelled = true
     }
-  }, [agentBusy, hasPr, connected, session.id, activeCheckoutOf(session).prNumber, qc])
+  }, [agentBusy, hasPr, connected, session.id, requestedPr, qc])
 
-  const routedKeys = useRoutedEntries(session.id, activeCheckoutOf(session).prNumber)
+  const routedKeys = useRoutedEntries(session.id, prNumber)
 
   // Resolve the namespaced keys down to plain ids for THIS review, so the UI
   // never has to reconstruct a key format it doesn't own.
@@ -185,7 +189,7 @@ export function useAdversarialReview(
     [review, session]
   )
 
-  const { dismissedFindings } = useSessionReviewState(session.id, activeCheckoutOf(session).prNumber)
+  const { dismissedFindings } = useSessionReviewState(session.id, prNumber)
   const dismissedFindingIds = useMemo(
     () =>
       new Set(
@@ -200,14 +204,14 @@ export function useAdversarialReview(
       const finding = review?.findings.find((f) => f.id === findingId)
       if (!finding) return
       const fingerprint = findingFingerprint(finding)
-      setFindingDismissed(session.id, activeCheckoutOf(session).prNumber, fingerprint, dismissed)
+      setFindingDismissed(session.id, prNumber, fingerprint, dismissed)
       if (dismissed) {
         emitFindingDismissed(finding.title, () =>
-          setFindingDismissed(session.id, activeCheckoutOf(session).prNumber, fingerprint, false)
+          setFindingDismissed(session.id, prNumber, fingerprint, false)
         )
       }
     },
-    [review, session.id, activeCheckoutOf(session).prNumber]
+    [review, session.id, prNumber]
   )
 
   return {

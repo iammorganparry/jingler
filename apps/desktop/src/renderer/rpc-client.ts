@@ -1130,26 +1130,26 @@ export const rpc = {
    * speculatively: the main process short-circuits on an unchanged PR head, so
    * only `force` guarantees a fresh agent run.
    */
-  reviewRun: (sessionId: string, force = false): Promise<AdversarialReview> =>
-    run((c) => c.Review.run({ sessionId, force })),
+  reviewRun: (sessionId: string, force = false, prNumber?: number): Promise<AdversarialReview> =>
+    run((c) => c.Review.run({ sessionId, force, prNumber })),
   /** Read-only review of an inbox PR (no session); the findings are drafts, nothing is posted. */
   reviewDraftPr: (repository: string, number: number): Promise<AdversarialReview> =>
     runAssetList((c) => c.Review.draftPr({ repository, number })),
-  reviewGet: (sessionId: string): Promise<AdversarialReview | null> =>
-    run((c) => c.Review.get({ sessionId })),
+  reviewGet: (sessionId: string, prNumber?: number): Promise<AdversarialReview | null> =>
+    run((c) => c.Review.get({ sessionId, prNumber })),
   /**
    * Record that the stored review's critical/major findings reached the agent.
    * Returns the stamp, or null when there was no stored review to stamp.
    */
-  reviewMarkRouted: (sessionId: string): Promise<string | null> =>
-    run((c) => c.Review.markRouted({ sessionId })),
+  reviewMarkRouted: (sessionId: string, prNumber?: number): Promise<string | null> =>
+    run((c) => c.Review.markRouted({ sessionId, prNumber })),
   /**
    * Credit the commits that fixed outstanding findings. Resolves with the updated
    * review, or null when nothing changed — see the contract: null means "leave the
    * query cache alone", which is the common answer.
    */
-  reviewReconcile: (sessionId: string): Promise<AdversarialReview | null> =>
-    run((c) => c.Review.reconcile({ sessionId })),
+  reviewReconcile: (sessionId: string, prNumber?: number): Promise<AdversarialReview | null> =>
+    run((c) => c.Review.reconcile({ sessionId, prNumber })),
   githubPublish: (
     sessionId: string,
     onCheckpoint: (checkpoint: PublishCheckpoint) => void,

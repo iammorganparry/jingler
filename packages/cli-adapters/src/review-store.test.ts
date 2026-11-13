@@ -57,7 +57,7 @@ const review = (over: Partial<AdversarialReview> = {}): AdversarialReview => ({
 
 describe("ReviewStore", () => {
   it("returns null for a session that has never been reviewed", async () => {
-    expect(await run(ReviewStore.get("nope"))).toBeNull()
+    expect(await run(ReviewStore.get("nope", 42))).toBeNull()
   })
 
   it("persists a review across a fresh read", async () => {
@@ -65,7 +65,7 @@ describe("ReviewStore", () => {
     const read = await run(
       Effect.gen(function* () {
         yield* ReviewStore.set("s1", stored)
-        return yield* ReviewStore.get("s1")
+        return yield* ReviewStore.get("s1", 42)
       })
     )
     expect(read).toStrictEqual(stored)
@@ -86,7 +86,7 @@ describe("ReviewStore", () => {
       })
     )
 
-    const stored = await run(ReviewStore.get("s1"))
+    const stored = await run(ReviewStore.get("s1", 42))
     expect(stored).toMatchObject({
       connectionId: null,
       providerId: null,
@@ -104,7 +104,7 @@ describe("ReviewStore", () => {
       Effect.gen(function* () {
         yield* ReviewStore.set("s1", review({ headSha: "old", findings: [] }))
         yield* ReviewStore.set("s1", review({ headSha: "new" }))
-        return yield* ReviewStore.get("s1")
+        return yield* ReviewStore.get("s1", 42)
       })
     )
     expect(read?.headSha).toBe("new")
@@ -116,10 +116,50 @@ describe("ReviewStore", () => {
       Effect.gen(function* () {
         yield* ReviewStore.set("s1", review({ sessionId: "s1", headSha: "one" }))
         yield* ReviewStore.set("s2", review({ sessionId: "s2", headSha: "two" }))
-        return yield* ReviewStore.get("s1")
+        return yield* ReviewStore.get("s1", 42)
       })
     )
     expect(read?.headSha).toBe("one")
+  })
+
+  it("keeps reviews separate per PR in one session", async () => {
+    const [lower, top] = await run(
+      Effect.gen(function* () {
+        yield* ReviewStore.set("s1", review({ prNumber: 41, headSha: "lower" }))
+        yield* ReviewStore.set("s1", review({ prNumber: 42, headSha: "top" }))
+        return [yield* ReviewStore.get("s1", 41), yield* ReviewStore.get("s1", 42)] as const
+      })
+    )
+    expect(lower?.headSha).toBe("lower")
+    expect(top?.headSha).toBe("top")
+  })
+
+  it("reads a pre-stack review file only for the PR it recorded", async () => {
+    mkdirSync(join(temp.root, "reviews"), { recursive: true })
+    writeFileSync(join(temp.root, "reviews", "s1.json"), JSON.stringify(review({ prNumber: 42 })))
+    expect((await run(ReviewStore.get("s1", 42)))?.prNumber).toBe(42)
+    expect(await run(ReviewStore.get("s1", 41))).toBeNull()
+  })
+
+  it("clear removes every PR's review and the pre-stack file", async () => {
+    mkdirSync(join(temp.root, "reviews"), { recursive: true })
+    writeFileSync(join(temp.root, "reviews", "s1.json"), JSON.stringify(review({ prNumber: 40 })))
+    const reads = await run(
+      Effect.gen(function* () {
+        yield* ReviewStore.set("s1", review({ prNumber: 41 }))
+        yield* ReviewStore.set("s1", review({ prNumber: 42 }))
+        yield* ReviewStore.set("s10", review({ sessionId: "s10", prNumber: 42 }))
+        yield* ReviewStore.clear("s1")
+        return [
+          yield* ReviewStore.get("s1", 40),
+          yield* ReviewStore.get("s1", 41),
+          yield* ReviewStore.get("s1", 42),
+          yield* ReviewStore.get("s10", 42)
+        ] as const
+      })
+    )
+    expect(reads.slice(0, 3)).toStrictEqual([null, null, null])
+    expect(reads[3]?.sessionId).toBe("s10")
   })
 
   it("round-trips a review with no findings and a note", async () => {
@@ -127,7 +167,7 @@ describe("ReviewStore", () => {
     const read = await run(
       Effect.gen(function* () {
         yield* ReviewStore.set("s1", noted)
-        return yield* ReviewStore.get("s1")
+        return yield* ReviewStore.get("s1", 42)
       })
     )
     expect(read).toStrictEqual(noted)
@@ -138,13 +178,13 @@ describe("ReviewStore", () => {
   it("degrades a corrupt review file to null", async () => {
     mkdirSync(join(temp.root, "reviews"), { recursive: true })
     writeFileSync(join(temp.root, "reviews", "s1.json"), "{ not json")
-    expect(await run(ReviewStore.get("s1"))).toBeNull()
+    expect(await run(ReviewStore.get("s1", 42))).toBeNull()
   })
 
   it("degrades a review file with the wrong shape to null", async () => {
     mkdirSync(join(temp.root, "reviews"), { recursive: true })
     writeFileSync(join(temp.root, "reviews", "s1.json"), JSON.stringify({ sessionId: "s1" }))
-    expect(await run(ReviewStore.get("s1"))).toBeNull()
+    expect(await run(ReviewStore.get("s1", 42))).toBeNull()
   })
 
   it("clear removes the stored review", async () => {
@@ -152,7 +192,7 @@ describe("ReviewStore", () => {
       Effect.gen(function* () {
         yield* ReviewStore.set("s1", review())
         yield* ReviewStore.clear("s1")
-        return yield* ReviewStore.get("s1")
+        return yield* ReviewStore.get("s1", 42)
       })
     )
     expect(read).toBeNull()
@@ -185,7 +225,7 @@ describe("ReviewStore", () => {
       const read = await run(
         Effect.gen(function* () {
           yield* ReviewStore.set("s1", stored)
-          return yield* ReviewStore.get("s1")
+          return yield* ReviewStore.get("s1", 42)
         })
       )
       expect(read).toStrictEqual(stored)
@@ -196,7 +236,7 @@ describe("ReviewStore", () => {
       const read = await run(
         Effect.gen(function* () {
           yield* ReviewStore.set("s1", review({ headSha: "sha-one" }))
-          return yield* ReviewStore.get("s1")
+          return yield* ReviewStore.get("s1", 42)
         })
       )
       expect(read?.headSha).toBe("sha-one")
@@ -214,13 +254,13 @@ describe("ReviewStore", () => {
     const read = await run(
       Effect.gen(function* () {
         yield* ReviewStore.set("s1", review({ headSha: "from-memory" }))
-        return yield* ReviewStore.get("s1")
+        return yield* ReviewStore.get("s1", 42)
       })
     )
     // Both agree here; the point is the file path is taken when it exists.
     expect(read?.headSha).toBe("from-memory")
     const onDisk = JSON.parse(
-      readFileSync(join(temp.root, "reviews", "s1.json"), "utf-8")
+      readFileSync(join(temp.root, "reviews", "s1.pr-42.json"), "utf-8")
     ) as { headSha: string }
     expect(onDisk.headSha).toBe("from-memory")
   })
@@ -230,7 +270,7 @@ describe("ReviewStore", () => {
       Effect.gen(function* () {
         yield* ReviewStore.set("s1", review())
         yield* ReviewStore.clear("s1")
-        return yield* ReviewStore.get("s1")
+        return yield* ReviewStore.get("s1", 42)
       })
     )
     expect(read).toBeNull()

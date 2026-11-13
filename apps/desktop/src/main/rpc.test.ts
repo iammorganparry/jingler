@@ -1992,6 +1992,58 @@ describe("RPC handlers", () => {
       expect(second.headSha).toBe(first.headSha);
     });
 
+    it("reviews the requested stack layer, not the session's top PR", async () => {
+      withSession({ prNumber: 42, prs: [{ number: 41 }, { number: 42 }] });
+      const { layer, spawns } = countingAdapter();
+      const env = envFor("sha-one", layer);
+      const review = await Effect.runPromise(
+        reviewRun("s1", false, 41).pipe(Effect.provide(env)),
+      );
+      expect(review.prNumber).toBe(41);
+      expect(spawns[0]?.prompt).toContain("Pull request #41");
+      expect((await Effect.runPromise(reviewGet("s1", 41).pipe(Effect.provide(env))))?.prNumber).toBe(41);
+      // The top PR has no review of its own yet.
+      expect(await Effect.runPromise(reviewGet("s1").pipe(Effect.provide(env)))).toBeNull();
+    });
+
+    it("prompts a lower layer with its own base, never the top layer's", async () => {
+      withSession({ prNumber: 42, baseBranch: "stack/api", prs: [{ number: 40 }, { number: 41, base: "trunk" }, { number: 42, base: "stack/api" }] });
+      const { layer, spawns } = countingAdapter();
+      const env = envFor("sha-one", layer);
+      await Effect.runPromise(reviewRun("s1", false, 41).pipe(Effect.provide(env)));
+      await Effect.runPromise(reviewRun("s1", false, 40).pipe(Effect.provide(env)));
+      expect(spawns[0]?.prompt).toContain("Pull request #41, targeting `trunk`.");
+      // Unknown base: say nothing rather than borrow `stack/api`.
+      expect(spawns[1]?.prompt).toContain("Pull request #40.");
+      expect(spawns[1]?.prompt).not.toContain("targeting");
+    });
+
+    it("reads a PR on another checkout while the active checkout has none", async () => {
+      withSession({
+        prNumber: null,
+        checkouts: [
+          { id: "api", repo: "api", branch: "feat/x", baseBranch: "main", worktreePath: join(root, "api"), workspaceMode: "worktree", prNumber: null, prs: [] },
+          { id: "web", repo: "web", branch: "feat/x", baseBranch: "main", worktreePath: join(root, "web"), workspaceMode: "worktree", prNumber: 7, prs: [{ number: 7 }] },
+        ],
+        activeCheckoutId: "api",
+      });
+      const { layer } = countingAdapter();
+      const env = envFor("sha-one", layer);
+      const review = await Effect.runPromise(reviewRun("s1", false, 7).pipe(Effect.provide(env)));
+      expect(review.prNumber).toBe(7);
+      expect((await Effect.runPromise(reviewGet("s1", 7).pipe(Effect.provide(env))))?.prNumber).toBe(7);
+    });
+
+    it("refuses to review a PR the session does not own", async () => {
+      withSession({ prNumber: 42, prs: [{ number: 42 }] });
+      const { layer, spawns } = countingAdapter();
+      const exit = await Effect.runPromiseExit(
+        reviewRun("s1", false, 99).pipe(Effect.provide(envFor("sha-one", layer))),
+      );
+      expect(exit._tag).toBe("Failure");
+      expect(spawns).toHaveLength(0);
+    });
+
     it("does not expose or stamp a stored review after the active PR changes", async () => {
       withSession({ prNumber: 42 });
       const { layer } = countingAdapter();
@@ -2095,6 +2147,20 @@ describe("RPC handlers", () => {
         expect(reread?.findings[0]?.resolvedBy?.sha).toBe(
           "9f2c1ab4e7d8905361bb2f0c4a7e13d5c8a6b204",
         );
+      });
+
+      it("skips a lower layer, whose worktree HEAD is the top branch", async () => {
+        withSession({ prNumber: 42, prs: [{ number: 41 }, { number: 42 }] });
+        const { layer } = countingAdapter();
+        const seed = gitEnv("sha-one", "", layer);
+        const stored = await Effect.runPromise(reviewRun("s1", false, 41).pipe(Effect.provide(seed)));
+        await Effect.runPromise(
+          ReviewStore.set("s1", { ...stored, findings: [{ ...stored.findings[0]!, path: "src/auth.ts" }] }).pipe(Effect.provide(seed)),
+        );
+        // An upper-layer commit touching the lower finding's file must not credit it.
+        const env = gitEnv("sha-one", gitLog("bbb", "feat(ui): upper layer", ["src/auth.ts"]), layer);
+        expect(await Effect.runPromise(reviewReconcile("s1", 41).pipe(Effect.provide(env)))).toBeNull();
+        expect((await Effect.runPromise(reviewGet("s1", 41).pipe(Effect.provide(env))))?.findings[0]?.resolvedBy).toBeNull();
       });
 
       it("returns null when no commit touched a finding's file", async () => {
